@@ -176,8 +176,5 @@ test("displays 99 percent when rounded progress is 100 but work remains", async 
         },
     });
 
-    assert.match(
-        html,
-        /Artist Metadata[\s\S]*?style="width:99%"[\s\S]*?99%/,
-    );
+    assert.match(html, /Artist Metadata[\s\S]*?style="width:99%"[\s\S]*?99%/);
 });

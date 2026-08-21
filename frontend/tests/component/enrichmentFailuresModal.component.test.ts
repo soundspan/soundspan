@@ -195,11 +195,11 @@ test("renders sanitized summaries and accurate missing-detail fallbacks", async 
     const harness = await mountModal();
     t.after(harness.unmount);
 
-    assert.match(document.body.textContent ?? "", /Decoder rejected the stream/);
-    assert.match(document.body.textContent ?? "", /VIBE_EMBEDDING_FAILED/);
     assert.match(
         document.body.textContent ?? "",
-        /No error details recorded/,
+        /Decoder rejected the stream/,
     );
+    assert.match(document.body.textContent ?? "", /VIBE_EMBEDDING_FAILED/);
+    assert.match(document.body.textContent ?? "", /No error details recorded/);
     assert.doesNotMatch(document.body.textContent ?? "", /Unknown error/);
 });
