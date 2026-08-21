@@ -97,7 +97,7 @@ jest.mock("../../../services/federationClient", () => ({
     FederationHttpError: MockFederationHttpError,
 }));
 jest.mock("../../../config", () => ({
-    config: { federation: { allowPrivatePeers: false } },
+    config: { federation: { allowPrivatePeers: false, allowProxy: false } },
 }));
 jest.mock("../../../services/trackMappingService", () => ({
     trackMappingService: { createMapping },

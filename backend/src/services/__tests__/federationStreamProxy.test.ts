@@ -65,7 +65,7 @@ jest.mock("../../config", () => ({
             transcodeCachePath: "/cache",
             transcodeCacheMaxGb: 2,
         },
-        federation: { allowPrivatePeers: false },
+        federation: { allowPrivatePeers: false, allowProxy: false },
     },
 }));
 

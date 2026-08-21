@@ -503,6 +503,7 @@ const envSchema = z
             federationTombstoneRetentionEnvSchema,
         FEDERATION_SYNC_INTERVAL_MINUTES: positiveIntegerEnvSchema,
         FEDERATION_ALLOW_PRIVATE_PEERS: booleanEnvSchema,
+        FEDERATION_ALLOW_PROXY: booleanEnvSchema,
         LOCAL_LOGIN_ENABLED: z.string().optional(),
         OIDC_ENABLED: z.string().optional(),
         OIDC_ISSUER_URL: z.string().optional(),
@@ -861,6 +862,7 @@ export const config = {
             process.env.FEDERATION_ALLOW_PRIVATE_PEERS,
             false,
         ),
+        allowProxy: parseEnvBool(process.env.FEDERATION_ALLOW_PROXY, false),
     },
 
     // Keep analyzer queues short enough that waiting work is not mistaken for

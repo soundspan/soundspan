@@ -80,6 +80,7 @@ export async function processFederationHealth(): Promise<HealthCounts> {
         try {
             const manifest = await createFederationClient(peer, {
                 allowPrivatePeers: config.federation.allowPrivatePeers,
+                allowProxy: config.federation.allowProxy,
             }).getManifest();
             await markPeerActive(peer, manifest.capabilities);
             counts.online += 1;

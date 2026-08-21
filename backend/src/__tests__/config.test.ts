@@ -138,6 +138,7 @@ describe("config module", () => {
             AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
             AUDIOBOOKSHELF_API_KEY: "abs-token",
             ALLOWED_ORIGINS: "https://app.example, http://localhost:5173 ",
+            FEDERATION_ALLOW_PROXY: undefined,
         });
 
         expect(mockDotenvConfig).toHaveBeenCalledTimes(1);
@@ -179,6 +180,7 @@ describe("config module", () => {
         ]);
         expect(config.features.federation).toBe(false);
         expect(config.federation.allowPrivatePeers).toBe(false);
+        expect(config.federation.allowProxy).toBe(false);
         expect(config.workers.federationTombstoneRetentionDays).toBe(90);
         expect(config.workers.federationSyncIntervalMinutes).toBe(15);
     });
@@ -1026,6 +1028,7 @@ describe("config module", () => {
             PROVIDER_TRACK_RETENTION_DAYS: "45",
             FEDERATION_ENABLED: "true",
             FEDERATION_ALLOW_PRIVATE_PEERS: "true",
+            FEDERATION_ALLOW_PROXY: "true",
             FEDERATION_TOMBSTONE_RETENTION_DAYS: "30",
             FEDERATION_SYNC_INTERVAL_MINUTES: "7",
         });
@@ -1053,6 +1056,7 @@ describe("config module", () => {
         });
         expect(config.features.federation).toBe(true);
         expect(config.federation.allowPrivatePeers).toBe(true);
+        expect(config.federation.allowProxy).toBe(true);
     });
 
     it("rejects an ambiguous private-federation boolean", async () => {

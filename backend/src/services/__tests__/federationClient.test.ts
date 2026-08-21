@@ -149,6 +149,43 @@ describe("federation HTTP client", () => {
         });
     });
 
+    it("uses Axios proxy handling without a pinned lookup when explicitly enabled", async () => {
+        axiosRequest.mockResolvedValueOnce({ status: 200, data: manifest });
+
+        await expect(
+            createFederationClient(peer, { allowProxy: true }).getManifest(),
+        ).resolves.toEqual(manifest);
+
+        const requestConfig = axiosRequest.mock.calls[0]?.[0] as Record<
+            string,
+            unknown
+        >;
+        expect(requestConfig).not.toHaveProperty("proxy");
+        expect(requestConfig).not.toHaveProperty("httpsAgent");
+        expect(dnsLookup).toHaveBeenCalledWith("peer.example", {
+            all: true,
+            verbatim: true,
+        });
+    });
+
+    it("still rejects private DNS answers before proxy-mode requests", async () => {
+        dnsLookup.mockResolvedValueOnce([
+            { address: "192.168.1.8", family: 4 },
+        ]);
+
+        await expect(
+            createFederationClient(peer, {
+                allowProxy: true,
+                attempts: 1,
+            }).getManifest(),
+        ).rejects.toMatchObject({
+            name: "FederationHttpError",
+            status: null,
+            transient: false,
+        });
+        expect(axiosRequest).not.toHaveBeenCalled();
+    });
+
     it.each([
         "10.0.0.1",
         "10.255.255.255",

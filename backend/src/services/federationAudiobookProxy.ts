@@ -90,6 +90,7 @@ export async function proxyFederatedAudiobookStream(input: {
         const range = input.req.headers.range;
         const response = await createFederationClient(input.peer, {
             allowPrivatePeers: config.federation.allowPrivatePeers,
+            allowProxy: config.federation.allowProxy,
         }).getAudiobookStream({
             remoteId: input.remoteId,
             range: typeof range === "string" ? range : undefined,
@@ -134,6 +135,7 @@ export async function proxyFederatedAudiobookCover(input: {
     try {
         const response = await createFederationClient(input.peer, {
             allowPrivatePeers: config.federation.allowPrivatePeers,
+            allowProxy: config.federation.allowProxy,
         }).getAudiobookCover(input.remoteId, controller.signal);
         if (response.status === 404) {
             if (response.data instanceof Readable) response.data.destroy();

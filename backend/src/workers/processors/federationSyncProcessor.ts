@@ -1441,6 +1441,7 @@ export async function processFederationSync(
     const startedAt = new Date();
     const client = createFederationClient(peer, {
         allowPrivatePeers: config.federation.allowPrivatePeers,
+        allowProxy: config.federation.allowProxy,
     });
     const manifest = await client.getManifest();
     const localEmbeddingSpace = await resolveLocalEmbeddingSpace(peer.id);

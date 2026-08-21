@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `FEDERATION_ALLOW_PROXY` administrator opt-in restores `HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` handling on federation egress for deployments behind a mandatory proxy, which the 2.4.0 DNS-pinning hardening had disabled unconditionally (federation egress is HTTPS-only, so `HTTP_PROXY` never applies). Per-attempt peer address resolution and private-range validation still run and fail closed; only connection pinning is relinquished — proxied requests are connected by the proxy, and `NO_PROXY`-exempt requests connect directly without a pin. Default behavior is unchanged (#673).
+
 ### Changed
 
 ### Fixed

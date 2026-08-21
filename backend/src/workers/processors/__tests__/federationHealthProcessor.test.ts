@@ -21,7 +21,7 @@ jest.mock("../../../services/federationClient", () => ({
     createFederationClient,
 }));
 jest.mock("../../../config", () => ({
-    config: { federation: { allowPrivatePeers: false } },
+    config: { federation: { allowPrivatePeers: false, allowProxy: false } },
 }));
 
 import { processFederationHealth } from "../federationHealthProcessor";

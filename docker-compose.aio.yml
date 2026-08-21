@@ -67,6 +67,18 @@ services:
       - AUTO_PLAYLISTS_ENABLED=${AUTO_PLAYLISTS_ENABLED:-true}
       - FEDERATION_ENABLED=${FEDERATION_ENABLED:-false}
       - FEDERATION_ALLOW_PRIVATE_PEERS=${FEDERATION_ALLOW_PRIVATE_PEERS:-false}
+      - FEDERATION_ALLOW_PROXY=${FEDERATION_ALLOW_PROXY:-false}
+      # Host passthrough (null-form: absent in the container unless set on the
+      # host) so FEDERATION_ALLOW_PROXY=true has a proxy to use. Federation
+      # honors these only with that opt-in; axios-based outbound HTTPS clients
+      # honor them per standard env-proxy semantics when set (Node-native fetch
+      # clients do not).
+      - HTTPS_PROXY
+      - https_proxy
+      - ALL_PROXY
+      - all_proxy
+      - NO_PROXY
+      - no_proxy
       - FEDERATION_TOMBSTONE_RETENTION_DAYS=${FEDERATION_TOMBSTONE_RETENTION_DAYS:-90}
       - PROVIDER_TRACK_RETENTION_DAYS=${PROVIDER_TRACK_RETENTION_DAYS:-30}
       - FEDERATION_SYNC_INTERVAL_MINUTES=${FEDERATION_SYNC_INTERVAL_MINUTES:-15}

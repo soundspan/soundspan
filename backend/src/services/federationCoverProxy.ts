@@ -48,6 +48,7 @@ export async function proxyFederatedCover(input: {
     try {
         const response = await createFederationClient(input.peer, {
             allowPrivatePeers: config.federation.allowPrivatePeers,
+            allowProxy: config.federation.allowProxy,
         }).getCover(input.remoteId, controller.signal);
         if (response.status === 404) {
             const body = response.data as { destroy?: () => void };

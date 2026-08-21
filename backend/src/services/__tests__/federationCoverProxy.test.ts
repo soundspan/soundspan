@@ -6,7 +6,7 @@ jest.mock("../federationClient", () => ({
     createFederationClient: jest.fn(() => ({ getCover })),
 }));
 jest.mock("../../config", () => ({
-    config: { federation: { allowPrivatePeers: false } },
+    config: { federation: { allowPrivatePeers: false, allowProxy: false } },
 }));
 
 import { proxyFederatedCover } from "../federationCoverProxy";

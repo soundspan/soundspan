@@ -401,6 +401,7 @@ interface FederationClientOptions {
     attempts?: number;
     retryDelayMs?: number;
     allowPrivatePeers?: boolean;
+    allowProxy?: boolean;
 }
 
 /** Pure hostname policy for literal private addresses and localhost. */
@@ -529,11 +530,17 @@ function createPinnedLookup(
 async function pinnedTransport(
     destination: URL,
     allowPrivatePeers: boolean,
-): Promise<{ httpsAgent: HttpsAgent; proxy: false }> {
+    allowProxy: boolean,
+): Promise<{ httpsAgent?: HttpsAgent; proxy?: false }> {
     const addresses = await resolvePeerAddresses(
         destination,
         allowPrivatePeers,
     );
+    if (allowProxy) {
+        // A proxy makes the outbound connection, so pinning cannot prevent
+        // rebinding on the proxy side; pre-connect validation still runs.
+        return {};
+    }
     return {
         httpsAgent: new HttpsAgent({
             keepAlive: false,
@@ -648,6 +655,7 @@ class FederationClient {
     private readonly attempts: number;
     private readonly retryDelayMs: number;
     private readonly allowPrivatePeers: boolean;
+    private readonly allowProxy: boolean;
 
     constructor(peer: FederationClientPeer, options: FederationClientOptions) {
         this.peerId = peer.id;
@@ -663,25 +671,29 @@ class FederationClient {
         this.attempts = options.attempts ?? DEFAULT_ATTEMPTS;
         this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
         this.allowPrivatePeers = options.allowPrivatePeers ?? false;
+        this.allowProxy = options.allowProxy ?? false;
     }
 
     private async request(config: AxiosRequestConfig): Promise<AxiosResponse> {
         for (let attempt = 0; attempt < this.attempts; attempt += 1) {
             try {
                 const response = await requestLimit(() =>
-                    pinnedTransport(this.baseUrl, this.allowPrivatePeers).then(
-                        (transport) =>
-                            axios.request({
-                                ...config,
-                                ...transport,
-                                timeout: this.timeoutMs,
-                                maxRedirects: 0,
-                                validateStatus: () => true,
-                                headers: {
-                                    ...config.headers,
-                                    Authorization: `Bearer ${this.token}`,
-                                },
-                            }),
+                    pinnedTransport(
+                        this.baseUrl,
+                        this.allowPrivatePeers,
+                        this.allowProxy,
+                    ).then((transport) =>
+                        axios.request({
+                            ...config,
+                            ...transport,
+                            timeout: this.timeoutMs,
+                            maxRedirects: 0,
+                            validateStatus: () => true,
+                            headers: {
+                                ...config.headers,
+                                Authorization: `Bearer ${this.token}`,
+                            },
+                        }),
                     ),
                 );
                 if (response.status < 500 || attempt + 1 === this.attempts) {
@@ -950,6 +962,7 @@ async function requestPairWithRetry(
                 pinnedTransport(
                     baseUrl,
                     options.allowPrivatePeers ?? false,
+                    options.allowProxy ?? false,
                 ).then((transport) =>
                     axios.request({
                         ...config,

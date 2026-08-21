@@ -14,6 +14,7 @@ const mockConfig = {
     federation: {
         instanceName: "Local Library",
         allowPrivatePeers: false,
+        allowProxy: false,
     },
 };
 const mockRemoveReplacementCacheFiles = jest.fn();
@@ -106,6 +107,7 @@ describe("federation peer credentials", () => {
         jest.clearAllMocks();
         mockConfig.soundspanCallbackUrl = "http://backend:3006";
         mockConfig.federation.allowPrivatePeers = false;
+        mockConfig.federation.allowProxy = false;
         prisma.systemSettings.upsert.mockResolvedValue({});
         prisma.systemSettings.updateMany.mockResolvedValue({ count: 1 });
         prisma.systemSettings.findUnique.mockResolvedValue({
@@ -323,7 +325,7 @@ describe("federation consumer peers", () => {
                 baseUrl: "https://peer.example",
                 outboundToken: "v2:raw-token",
             },
-            { allowPrivatePeers: false },
+            { allowPrivatePeers: false, allowProxy: false },
         );
         expect(prisma.federationPeer.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
@@ -372,7 +374,7 @@ describe("federation consumer peers", () => {
         );
         expect(mockCreateFederationClient).toHaveBeenCalledWith(
             expect.objectContaining({ baseUrl: "https://10.0.0.8" }),
-            { allowPrivatePeers: true },
+            { allowPrivatePeers: true, allowProxy: false },
         );
     });
 
@@ -410,11 +412,11 @@ describe("federation consumer peers", () => {
             baseUrl: "https://peer.example",
             code: "ABCDEFGH",
             name: "Consumer Name",
-            options: { allowPrivatePeers: false },
+            options: { allowPrivatePeers: false, allowProxy: false },
         });
         expect(mockCreateFederationClient).toHaveBeenCalledWith(
             expect.objectContaining({ outboundToken: "v2:paired-token" }),
-            { allowPrivatePeers: false },
+            { allowPrivatePeers: false, allowProxy: false },
         );
         expect(mockEncrypt).toHaveBeenCalledWith("paired-token");
     });
@@ -433,7 +435,7 @@ describe("federation consumer peers", () => {
             baseUrl: "https://host.example",
             code: "ABCDEFGH",
             name: "Consumer Name",
-            options: { allowPrivatePeers: false },
+            options: { allowPrivatePeers: false, allowProxy: false },
         });
         expect(prisma.federationPairingCode.create).not.toHaveBeenCalled();
         expect(result.peer).toEqual(
@@ -461,7 +463,7 @@ describe("federation consumer peers", () => {
                 reciprocalPairingCode:
                     expect.stringMatching(/^[A-HJ-NP-Z2-9]{8}$/),
                 reciprocalScopes: ["library:read", "stream:read"],
-                options: { allowPrivatePeers: false },
+                options: { allowPrivatePeers: false, allowProxy: false },
             }),
         );
     });
@@ -623,6 +625,7 @@ describe("federation pairing codes", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockConfig.federation.allowPrivatePeers = false;
+        mockConfig.federation.allowProxy = false;
         mockConfig.soundspanCallbackUrl = "http://backend:3006";
         prisma.federationPairingCode.deleteMany.mockResolvedValue({ count: 0 });
         prisma.federationPairingCode.findUnique.mockResolvedValue(null);
