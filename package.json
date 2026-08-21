@@ -31,7 +31,7 @@
         "check:file-size:test": "node --test scripts/ci/__tests__/check-file-size.test.mjs",
         "check:override-staleness": "node scripts/ci/check-override-staleness.mjs",
         "check:override-staleness:test": "node --test scripts/ci/__tests__/check-override-staleness.test.mjs",
-        "check:infra-release:test": "node --test scripts/ci/__tests__/helm-service-selector-check.test.mjs scripts/ci/__tests__/release-version-validator.test.mjs scripts/release/__tests__/generate-notes.test.mjs",
+        "check:infra-release:test": "node --test scripts/ci/__tests__/helm-service-selector-check.test.mjs scripts/ci/__tests__/release-version-validator.test.mjs scripts/release/__tests__/generate-notes.test.mjs scripts/release/__tests__/helm-image-sections.test.mjs",
         "test:backend": "npm --prefix backend test --",
         "test:frontend": "npm --prefix frontend run test:unit"
     }

@@ -30,6 +30,7 @@ const RELEASE_CATEGORY_ALIASES = {
     fixed: ["Fixed", "Fixes"],
     added: ["Added", "New"],
     changed: ["Changed", "Updated"],
+    deprecated: ["Deprecated"],
     removed: ["Removed"],
     accessibility: ["Accessibility"],
     admin: ["Admin/Operations", "Admin", "Operations", "Database Migrations"],
@@ -304,6 +305,10 @@ function loadReleaseItemsFromChangelog(version) {
         bulletsByHeading,
         RELEASE_CATEGORY_ALIASES.changed,
     );
+    const deprecated = pickBulletsByHeadingAliases(
+        bulletsByHeading,
+        RELEASE_CATEGORY_ALIASES.deprecated,
+    );
     const removed = pickBulletsByHeadingAliases(
         bulletsByHeading,
         RELEASE_CATEGORY_ALIASES.removed,
@@ -327,6 +332,7 @@ function loadReleaseItemsFromChangelog(version) {
         security,
         added,
         changed,
+        deprecated,
         removed,
         accessibility,
         admin,
@@ -376,6 +382,10 @@ function buildCategoryReplacements(categorized) {
         "{{CHANGED_ITEMS}}": formatBulletBlock(
             categorized.changed,
             "No behavior changes documented in this release.",
+        ),
+        "{{DEPRECATED_ITEMS}}": formatBulletBlock(
+            categorized.deprecated,
+            "None documented in this release.",
         ),
         "{{REMOVED_ITEMS}}": formatBulletBlock(
             categorized.removed,

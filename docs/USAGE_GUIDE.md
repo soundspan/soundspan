@@ -15,7 +15,10 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 
 - Home surfaces continue listening, recently added artists, Made For You mixes, recommendations, popular artists, community playlists, podcasts, and audiobooks
 - Search includes tabs for library, peers, discovery, Soulseek, and podcasts; peer and Soulseek tabs appear when their integrations are enabled
+- Search results also surface external artists and songs to discover from Last.fm matches, linking into artist pages for preview and download
 - Discovery search supports preview/download/subscription actions
+- Explore and `/radio` station tiles (Quick Start, genres, decades) open a generated station playlist you can inspect before playing; Shuffle All still starts playback immediately
+- The Vibe Map in the main navigation plots your analyzed library as an explorable similarity map
 
 ## Artist Playback Order
 
@@ -70,6 +73,8 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 - Download source/fallback settings
 - Enrichment controls
 - Activity panel events and active jobs
+- Library Insights panels: metadata gaps, analysis coverage, duplicate clusters, storage breakdown, and low-bitrate albums
+- Federation health panel with per-peer sync, stream, and error diagnostics
 - API keys and Swagger docs
 - Bull Board dashboard (`/api/admin/queues`)
 

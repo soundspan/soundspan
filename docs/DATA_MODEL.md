@@ -180,7 +180,7 @@ remains temporarily for rollback compatibility but is no longer refreshed.
 
 | Entity                           | Purpose                                                                                                                              |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `User`                           | Account with role, 2FA, profile                                                                                                      |
+| `User`                           | Account with role, 2FA, profile; `pendingDeletionAt` reserves the account during administrative deletion cleanup                     |
 | `ExternalIdentity`               | OIDC link with `userId`, `provider`, and `providerSubject` keys; unique `(provider, providerSubject)` and `(userId, provider)` pairs |
 | `AppPassword`                    | Revocable OpenSubsonic credential with AES-GCM `encryptedSecret`, `revokedAt`, and `lastUsedAt`                                      |
 | `UserSettings`                   | Per-user preferences, OAuth tokens (encrypted) for YT Music and TIDAL                                                                |
@@ -201,6 +201,7 @@ password and no other linked identity.
 | `SyncGroup` / `SyncGroupMember` | Listen Together sessions; `membershipFence` rejects commits from expired distributed lease holders |
 | `ListeningState`                | Resume position for audiobooks/podcasts                                                           |
 | `LikedTrack`                    | Local track likes                                                                                 |
+| `TrackRating`                   | Per-user 1–5 star ratings keyed `(userId, trackId)`; served through the OpenSubsonic surfaces      |
 | `LikedRemoteTrack`              | Remote track likes (Tidal/YT Music)                                                               |
 | `DislikedEntity`                | Generic dislike tracking                                                                          |
 | `Bookmark`                      | Per-user track bookmark with resume position and optional comment                                 |

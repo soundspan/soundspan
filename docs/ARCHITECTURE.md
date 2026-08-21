@@ -107,8 +107,10 @@ TIDAL has **two separate auth identities**: the per-user OAuth above (streaming 
 ```
 Browser → GET /api/ytmusic/proxy/:videoId
   → backend → ytmusic-streamer:8586/proxy
-    → ytmusic-streamer uses yt-dlp to extract stream URL → YouTube CDN
-  → audio stream proxied back to browser
+    → ytmusic-streamer downloads the full track via yt-dlp (HLS)
+      into a bounded LRU disk spool (256 MiB default), sharing one
+      download per track and quality across concurrent requests
+  → Range requests served from the spooled file back to the browser
 ```
 
 YouTube `videoId` is permanent; stream URLs from yt-dlp expire in hours. Only `videoId` is stored in `TrackYtMusic`, stream URL is extracted at playback time.

@@ -23,12 +23,6 @@ Individual mode — each service runs in its own pod:
 {{- else }}
   • Redis:      External
 {{- end }}
-{{- if .Values.tidalSidecar.enabled }}
-  • TIDAL:      {{ $fullName }}-tidal
-{{- end }}
-{{- if .Values.ytmusicStreamer.enabled }}
-  • YT Music:   {{ $fullName }}-ytmusic
-{{- end }}
 {{- if .Values.audioAnalyzer.enabled }}
   • Analyzer:   {{ $fullName }}-audio-analyzer
 {{- end }}
@@ -37,6 +31,12 @@ Individual mode — each service runs in its own pod:
 {{- else }}
   • Vibe similarity: Inactive — set vibeProviderDclap.enabled=true to deploy the embedding provider.
 {{- end }}
+{{- end }}
+{{- if .Values.tidalSidecar.enabled }}
+  • TIDAL:      {{ $fullName }}-tidal
+{{- end }}
+{{- if .Values.ytmusicStreamer.enabled }}
+  • YT Music:   {{ $fullName }}-ytmusic
 {{- end }}
 
 {{- if or .Values.ingress.enabled .Values.gateway.enabled }}

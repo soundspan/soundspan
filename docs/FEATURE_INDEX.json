@@ -1,7 +1,7 @@
 {
     "metadata": {
         "id": "soundspan-feature-index",
-        "version": "2026-08-18.01",
+        "version": "2026-08-21.01",
         "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
         "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
     },
@@ -150,7 +150,9 @@
                     "qualityOutliers.test.ts",
                     "storageAnalytics.test.ts"
                 ],
-                "frontend_component": ["libraryInsightsSection.component.test.ts"],
+                "frontend_component": [
+                    "libraryInsightsSection.component.test.ts"
+                ],
                 "frontend_unit": ["libraryHealthFormat.test.ts"]
             }
         },
@@ -196,17 +198,21 @@
         {
             "id": "explore-browse",
             "name": "Explore & Browse",
-            "description": "YT Music shelves/charts/moods/genres, TIDAL spotlight, homepage sections",
+            "description": "YT Music shelves/charts/moods/genres, TIDAL spotlight, homepage sections, and Explore and /radio station tiles that open generated station playlists",
             "frontend": {
                 "feature_dirs": ["explore", "home"],
-                "routes": ["/explore", "/", "/browse/playlists"]
+                "routes": ["/explore", "/", "/browse/playlists", "/radio"]
             },
             "backend": {
                 "routes": ["browse.ts", "homepage.ts"],
                 "services": [
                     "browseImageCache.ts",
                     "youtubeMusic.ts",
-                    "tidal.ts"
+                    "tidal.ts",
+                    "radioPlaylistService.ts",
+                    "radioPlaylistIdentity.ts",
+                    "libraryRadioBuilder.ts",
+                    "libraryRadioStationSelection.ts"
                 ]
             },
             "tests": {
@@ -309,7 +315,7 @@
         {
             "id": "listen-together",
             "name": "Listen Together",
-            "description": "Real-time synchronized playback sessions via Socket.IO and Redis",
+            "description": "Real-time synchronized playback sessions via Socket.IO and Redis with fenced mutation leases, a durable membership fence, cross-replica cluster sync, and fenced user-deletion cleanup",
             "frontend": {
                 "feature_dirs": [],
                 "routes": []
@@ -318,11 +324,40 @@
                 "routes": ["listenTogether.ts", "social.ts"],
                 "services": [
                     "listenTogether.ts",
-                    "listenTogetherManager.ts",
-                    "listenTogetherSocket.ts",
+                    "listenTogetherAvailability.ts",
+                    "listenTogetherAvailabilityPublication.ts",
+                    "listenTogetherCallbacks.ts",
                     "listenTogetherClusterSync.ts",
+                    "listenTogetherDeadline.ts",
+                    "listenTogetherExternalSnapshot.ts",
+                    "listenTogetherGroupDeparture.ts",
+                    "listenTogetherGroupEnding.ts",
+                    "listenTogetherGroupError.ts",
+                    "listenTogetherInternalCompletion.ts",
+                    "listenTogetherLeaseFencing.ts",
+                    "listenTogetherManager.ts",
+                    "listenTogetherMembershipFence.ts",
+                    "listenTogetherMembershipPublication.ts",
+                    "listenTogetherMutationAdmission.ts",
+                    "listenTogetherMutationLock.ts",
+                    "listenTogetherPersistenceState.ts",
+                    "listenTogetherPlaybackPosition.ts",
+                    "listenTogetherQueueItem.ts",
+                    "listenTogetherReadyGate.ts",
+                    "listenTogetherRedisScripts.ts",
                     "listenTogetherResolution.ts",
+                    "listenTogetherShutdownDrain.ts",
+                    "listenTogetherSnapshot.ts",
+                    "listenTogetherSocket.ts",
+                    "listenTogetherSocketMutationAuthority.ts",
+                    "listenTogetherSocketMutationEligibility.ts",
+                    "listenTogetherSocketPlayback.ts",
+                    "listenTogetherSocketReconciliation.ts",
+                    "listenTogetherSocketRevocation.ts",
                     "listenTogetherStateStore.ts",
+                    "listenTogetherUserCleanup.ts",
+                    "listenTogetherUserEligibility.ts",
+                    "listenTogetherUserQuiescence.ts",
                     "socialPresenceEvents.ts"
                 ]
             },
@@ -655,7 +690,7 @@
         {
             "id": "audio-analysis",
             "name": "Audio Analysis",
-            "description": "BPM/key/mood analysis (Essentia/MusiCNN) and CLAP embeddings for vibe similarity",
+            "description": "BPM/key/mood analysis (Essentia/MusiCNN), EBU R128 loudness measurement with album rollups and background backfill, and CLAP embeddings for vibe similarity",
             "frontend": {
                 "feature_dirs": [],
                 "routes": []
@@ -673,9 +708,14 @@
                     "vibeProvider.ts",
                     "vibeVocabulary.ts",
                     "vibeAnalysisCleanup.ts",
-                    "audioAnalysisCleanup.ts"
+                    "audioAnalysisCleanup.ts",
+                    "albumLoudness.ts"
                 ],
-                "workers": ["vibeEmbedWorker.ts"]
+                "workers": [
+                    "vibeEmbedWorker.ts",
+                    "loudnessBackfillSchedule.ts",
+                    "processors/loudnessBackfillProcessor.ts"
+                ]
             },
             "tests": {
                 "backend_route": [

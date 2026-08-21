@@ -24,6 +24,10 @@ to {{VERSION}}. Complete the 2.0.0 breaking changes first. See
 
 {{CHANGED_ITEMS}}
 
+## Deprecated
+
+{{DEPRECATED_ITEMS}}
+
 ## Removed
 
 {{REMOVED_ITEMS}}

@@ -286,6 +286,23 @@ test("generates Accessibility bullets after the Changed section", () => {
     );
 });
 
+test("generates Deprecated bullets after the Changed section", () => {
+    const result = runGenerator(`# Changelog
+
+## [9.9.9] - 2026-08-13
+
+### Deprecated
+
+- Deprecated the legacy release control surface.
+`);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(
+        result.stdout,
+        /## Changed\n\n- No behavior changes documented in this release\.\n\n## Deprecated\n\n- Deprecated the legacy release control surface\.\n\n## Removed/,
+    );
+});
+
 test("rejects a heading that is not supported", () => {
     const result = runGenerator(`# Changelog
 
@@ -316,6 +333,6 @@ test("generates Removed bullets after the Changed section", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.match(
         result.stdout,
-        /## Changed\n\n- No behavior changes documented in this release\.\n\n## Removed\n\n- Retired the legacy release control surface\.\n\n## Accessibility/,
+        /## Changed\n\n- No behavior changes documented in this release\.\n\n## Deprecated\n\n- None documented in this release\.\n\n## Removed\n\n- Retired the legacy release control surface\.\n\n## Accessibility/,
     );
 });
