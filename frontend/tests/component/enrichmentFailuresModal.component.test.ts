@@ -17,11 +17,27 @@ const retryVibeEmbeddings = mock.fn(async () => ({
     message: "reset",
     reset: 1204,
 }));
+const reconcileFailures = mock.fn(async () => ({ resolved: 0, checked: 0 }));
+let failureRows: Array<Record<string, unknown>> = [];
+
+mock.module("@/lib/logger", {
+    namedExports: {
+        createFrontendLogger: () => ({
+            error: () => undefined,
+            warn: () => undefined,
+            info: () => undefined,
+            debug: () => undefined,
+        }),
+    },
+});
 
 mock.module("@/lib/enrichmentApi", {
     namedExports: {
         enrichmentApi: {
-            getFailures: async () => ({ failures: [], total: 0 }),
+            getFailures: async () => ({
+                failures: failureRows,
+                total: failureRows.length,
+            }),
             getFailureCounts: async () => ({
                 artist: 0,
                 track: 0,
@@ -35,6 +51,7 @@ mock.module("@/lib/enrichmentApi", {
             clearAllFailures: async () => ({ message: "", count: 0 }),
             retryFailedAudioAnalysis,
             retryVibeEmbeddings,
+            reconcileFailures,
         },
     },
 });
@@ -50,6 +67,8 @@ after(() => {
 beforeEach(() => {
     retryFailedAudioAnalysis.mock.resetCalls();
     retryVibeEmbeddings.mock.resetCalls();
+    reconcileFailures.mock.resetCalls();
+    failureRows = [];
     document.body.replaceChildren();
 });
 
@@ -66,6 +85,10 @@ async function mountModal() {
         audio: 7226,
         vibe: 1204,
         total: 8430,
+    });
+    queryClient.setQueryData(["enrichment-failures", "all", 1], {
+        failures: failureRows,
+        total: failureRows.length,
     });
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -111,12 +134,14 @@ async function click(button: HTMLButtonElement): Promise<void> {
         button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         await Promise.resolve();
         await Promise.resolve();
+        await new Promise<void>((resolve) => setImmediate(resolve));
     });
 }
 
 test("retries every audio failure instead of only the visible page", async (t) => {
     const harness = await mountModal();
     t.after(harness.unmount);
+    assert.equal(reconcileFailures.mock.callCount(), 1);
     await click(buttonWithText("Audio Analysis (7226)"));
     await click(buttonWithText("Retry all 7226"));
     assert.match(document.body.textContent ?? "", /bounded background queue/i);
@@ -127,4 +152,54 @@ test("retries every audio failure instead of only the visible page", async (t) =
     await click(buttonWithText("Retry all 1204"));
     await click(buttonWithText("Retry all"));
     assert.equal(retryVibeEmbeddings.mock.callCount(), 1);
+    assert.equal(reconcileFailures.mock.callCount(), 3);
+});
+
+test("renders sanitized summaries and accurate missing-detail fallbacks", async (t) => {
+    failureRows = [
+        {
+            id: "summary",
+            entityType: "audio",
+            entityId: "track-summary",
+            entityName: "Summary Track",
+            errorSummary: "Decoder rejected the stream",
+            errorCode: "AUDIO_DECODE_FAILED",
+            retryCount: 1,
+            maxRetries: 3,
+            lastFailedAt: "2026-08-20T12:00:00.000Z",
+        },
+        {
+            id: "code",
+            entityType: "vibe",
+            entityId: "track-code",
+            entityName: "Code Track",
+            errorSummary: null,
+            errorCode: "VIBE_EMBEDDING_FAILED",
+            retryCount: 1,
+            maxRetries: 3,
+            lastFailedAt: "2026-08-20T12:00:00.000Z",
+        },
+        {
+            id: "empty",
+            entityType: "track",
+            entityId: "track-empty",
+            entityName: "Empty Track",
+            errorSummary: null,
+            errorCode: null,
+            retryCount: 1,
+            maxRetries: 3,
+            lastFailedAt: "2026-08-20T12:00:00.000Z",
+        },
+    ];
+
+    const harness = await mountModal();
+    t.after(harness.unmount);
+
+    assert.match(document.body.textContent ?? "", /Decoder rejected the stream/);
+    assert.match(document.body.textContent ?? "", /VIBE_EMBEDDING_FAILED/);
+    assert.match(
+        document.body.textContent ?? "",
+        /No error details recorded/,
+    );
+    assert.doesNotMatch(document.body.textContent ?? "", /Unknown error/);
 });

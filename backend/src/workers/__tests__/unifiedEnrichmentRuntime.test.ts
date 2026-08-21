@@ -146,6 +146,10 @@ describe("unified enrichment runtime behavior", () => {
         const enrichmentFailureService = {
             clearAllFailures: jest.fn(async () => undefined),
             recordFailure: jest.fn(async () => undefined),
+            reconcileWithLiveState: jest.fn(async () => ({
+                resolved: 0,
+                checked: 0,
+            })),
         };
         const audioAnalysisCleanupService = {
             cleanupStaleProcessing: jest.fn(async () => ({
@@ -472,6 +476,9 @@ describe("unified enrichment runtime behavior", () => {
         });
 
         expect(enrichmentStateService.initializeState).toHaveBeenCalledTimes(1);
+        expect(
+            enrichmentFailureService.reconcileWithLiveState,
+        ).toHaveBeenCalledTimes(1);
         expect(enrichmentStateService.updateState).toHaveBeenCalledWith(
             expect.objectContaining({
                 pendingMoodBucketBackfill: true,

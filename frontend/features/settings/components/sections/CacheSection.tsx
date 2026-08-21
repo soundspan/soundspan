@@ -62,6 +62,11 @@ function ProgressBar({
     );
 }
 
+/** Keep unfinished stages from presenting rounded completion as final. */
+export function displayProgress(progress: number, isSettled: boolean): number {
+    return !isSettled && progress === 100 ? 99 : progress;
+}
+
 /** Name the analysis still outstanding so the pill matches reality. */
 function backgroundAnalysisLabel(progress: {
     audioAnalysis: { pending: number; processing: number };
@@ -107,6 +112,7 @@ function EnrichmentStage({
     const isSettled = unresolved === 0 && processing === 0;
     const isComplete = isSettled && failed === 0;
     const settledWithFailures = isSettled && failed > 0;
+    const visibleProgress = displayProgress(progress, isSettled);
 
     return (
         <div className="flex items-start gap-3 py-2">
@@ -143,7 +149,7 @@ function EnrichmentStage({
                 <p className="text-xs text-white/40 mt-0.5">{description}</p>
                 <div className="flex items-center gap-2 mt-2">
                     <ProgressBar
-                        progress={progress}
+                        progress={visibleProgress}
                         color={
                             isComplete
                                 ? "bg-success"

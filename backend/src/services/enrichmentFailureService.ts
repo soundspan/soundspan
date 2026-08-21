@@ -8,6 +8,8 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 
+const DEFAULT_RECONCILIATION_BATCH_SIZE = 500;
+
 export interface EnrichmentFailure {
     id: string;
     entityType: "artist" | "track" | "audio" | "vibe";
@@ -43,7 +45,196 @@ export interface GetFailuresOptions {
     offset?: number;
 }
 
+type FailureReference = Pick<
+    EnrichmentFailure,
+    "id" | "entityType" | "entityId"
+>;
+
+/** Counts returned after comparing unresolved failures with live entity state. */
+export interface ReconciliationResult {
+    resolved: number;
+    checked: number;
+}
+
+function chunkValues<T>(values: T[], batchSize: number): T[][] {
+    const chunks: T[][] = [];
+    for (let offset = 0; offset < values.length; offset += batchSize) {
+        chunks.push(values.slice(offset, offset + batchSize));
+    }
+    return chunks;
+}
+
+function failuresOfType(
+    failures: FailureReference[],
+    entityType: EnrichmentFailure["entityType"],
+): FailureReference[] {
+    return failures.filter((failure) => failure.entityType === entityType);
+}
+
+async function findVibeFailuresToResolve(
+    failures: FailureReference[],
+    batchSize: number,
+): Promise<string[]> {
+    const liveFailures = new Set<string>();
+    for (const batch of chunkValues(failures, batchSize)) {
+        const tracks = await prisma.track.findMany({
+            where: { id: { in: batch.map((failure) => failure.entityId) } },
+            select: { id: true, vibeAnalysisStatus: true, removedAt: true },
+        });
+        for (const track of tracks) {
+            // Soft-removed tracks are non-enrichable, so their rows resolve.
+            if (
+                track.removedAt === null &&
+                track.vibeAnalysisStatus === "failed"
+            ) {
+                liveFailures.add(track.id);
+            }
+        }
+    }
+    return failures
+        .filter((failure) => !liveFailures.has(failure.entityId))
+        .map((failure) => failure.id);
+}
+
+async function findAudioFailuresToResolve(
+    failures: FailureReference[],
+    batchSize: number,
+): Promise<string[]> {
+    const liveFailures = new Set<string>();
+    for (const batch of chunkValues(failures, batchSize)) {
+        const tracks = await prisma.track.findMany({
+            where: { id: { in: batch.map((failure) => failure.entityId) } },
+            select: { id: true, analysisStatus: true, removedAt: true },
+        });
+        for (const track of tracks) {
+            // Soft-removed tracks are non-enrichable, so their rows resolve.
+            if (track.removedAt === null && track.analysisStatus === "failed") {
+                liveFailures.add(track.id);
+            }
+        }
+    }
+    return failures
+        .filter((failure) => !liveFailures.has(failure.entityId))
+        .map((failure) => failure.id);
+}
+
+async function findTrackFailuresToResolve(
+    failures: FailureReference[],
+    batchSize: number,
+): Promise<string[]> {
+    const unfinishedIds = new Set<string>();
+    for (const batch of chunkValues(failures, batchSize)) {
+        const tracks = await prisma.track.findMany({
+            where: { id: { in: batch.map((failure) => failure.entityId) } },
+            select: { id: true, lastfmTags: true, removedAt: true },
+        });
+        for (const track of tracks) {
+            // Soft-removed tracks are non-enrichable, so their rows resolve.
+            if (
+                track.removedAt === null &&
+                (!Array.isArray(track.lastfmTags) ||
+                    track.lastfmTags.length === 0)
+            ) {
+                unfinishedIds.add(track.id);
+            }
+        }
+    }
+    return failures
+        .filter((failure) => !unfinishedIds.has(failure.entityId))
+        .map((failure) => failure.id);
+}
+
+async function findArtistFailuresToResolve(
+    failures: FailureReference[],
+    batchSize: number,
+): Promise<string[]> {
+    const reconcilableFailures = failures.filter(
+        (failure) => failure.entityId !== "system",
+    );
+    const unfinishedIds = new Set<string>();
+    for (const batch of chunkValues(reconcilableFailures, batchSize)) {
+        const artists = await prisma.artist.findMany({
+            where: { id: { in: batch.map((failure) => failure.entityId) } },
+            select: { id: true, enrichmentStatus: true },
+        });
+        for (const artist of artists) {
+            if (artist.enrichmentStatus !== "completed") {
+                unfinishedIds.add(artist.id);
+            }
+        }
+    }
+    return reconcilableFailures
+        .filter((failure) => !unfinishedIds.has(failure.entityId))
+        .map((failure) => failure.id);
+}
+
+async function findReconciliationPage(
+    batchSize: number,
+    startedAt: Date,
+    cursor?: string,
+): Promise<FailureReference[]> {
+    const failures = await prisma.enrichmentFailure.findMany({
+        where: {
+            resolved: false,
+            skipped: false,
+            // Fence the scan to the snapshot moment so sustained failure
+            // recording cannot keep feeding pages and stall the pass.
+            lastFailedAt: { lt: startedAt },
+        },
+        select: { id: true, entityType: true, entityId: true },
+        orderBy: { id: "asc" },
+        take: batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    return failures as FailureReference[];
+}
+
+async function findFailureIdsToResolve(
+    failures: FailureReference[],
+    batchSize: number,
+): Promise<string[]> {
+    const resolutionGroups = await Promise.all([
+        findVibeFailuresToResolve(failuresOfType(failures, "vibe"), batchSize),
+        findAudioFailuresToResolve(
+            failuresOfType(failures, "audio"),
+            batchSize,
+        ),
+        findTrackFailuresToResolve(
+            failuresOfType(failures, "track"),
+            batchSize,
+        ),
+        findArtistFailuresToResolve(
+            failuresOfType(failures, "artist"),
+            batchSize,
+        ),
+    ]);
+    return resolutionGroups.flat();
+}
+
+async function resolveFailureIds(
+    ids: string[],
+    batchSize: number,
+    startedAt: Date,
+): Promise<number> {
+    let resolved = 0;
+    for (const batch of chunkValues(ids, batchSize)) {
+        const result = await prisma.enrichmentFailure.updateMany({
+            where: {
+                id: { in: batch },
+                resolved: false,
+                skipped: false,
+                // Same-millisecond failures are kept for the next pass.
+                lastFailedAt: { lt: startedAt },
+            },
+            data: { resolved: true, resolvedAt: new Date() },
+        });
+        resolved += result.count;
+    }
+    return resolved;
+}
+
 class EnrichmentFailureService {
+    private reconciliationInFlight: Promise<ReconciliationResult> | null = null;
     /**
      * Record a failure (or increment retry count if already exists)
      */
@@ -81,6 +272,8 @@ class EnrichmentFailureService {
                     errorCode,
                     retryCount: newRetryCount,
                     lastFailedAt: new Date(),
+                    resolved: false,
+                    resolvedAt: null,
                     metadata: metadata
                         ? JSON.parse(JSON.stringify(metadata))
                         : existing.metadata,
@@ -340,55 +533,49 @@ class EnrichmentFailureService {
         });
     }
 
-    /**
-     * Clean up failures for entities that no longer exist in the database.
-     * This resolves orphaned failure records where the track/artist was deleted.
-     */
-    async cleanupOrphanedFailures(): Promise<{
-        cleaned: number;
-        checked: number;
-    }> {
-        // Get all unresolved failures
-        const failures = await prisma.enrichmentFailure.findMany({
-            where: { resolved: false, skipped: false },
-            select: { id: true, entityType: true, entityId: true },
-        });
+    private async reconcileOnce(
+        batchSize: number,
+    ): Promise<ReconciliationResult> {
+        const startedAt = new Date();
+        let failures = await findReconciliationPage(batchSize, startedAt);
+        let checked = 0;
+        let resolved = 0;
+        while (failures.length > 0) {
+            checked += failures.length;
+            const cursor = failures[failures.length - 1]?.id;
+            if (!cursor) throw new Error("Reconciliation page lacks a cursor");
+            const nextPage =
+                failures.length === batchSize
+                    ? await findReconciliationPage(batchSize, startedAt, cursor)
+                    : [];
+            const ids = await findFailureIdsToResolve(failures, batchSize);
+            resolved += await resolveFailureIds(ids, batchSize, startedAt);
+            failures = nextPage;
+        }
+        logger.debug(
+            `Reconciled ${resolved} of ${checked} unresolved enrichment failures`,
+        );
+        return { resolved, checked };
+    }
 
-        const toResolve: string[] = [];
-
-        for (const failure of failures) {
-            let exists = false;
-
-            if (failure.entityType === "artist") {
-                const artist = await prisma.artist.findUnique({
-                    where: { id: failure.entityId },
-                    select: { id: true },
-                });
-                exists = !!artist;
-            } else if (
-                failure.entityType === "track" ||
-                failure.entityType === "audio"
-            ) {
-                const track = await prisma.track.findUnique({
-                    where: { id: failure.entityId },
-                    select: { id: true },
-                });
-                exists = !!track;
-            }
-
-            if (!exists) {
-                toResolve.push(failure.id);
+    /** Resolve stale failure rows against the authoritative live entity state. */
+    async reconcileWithLiveState(
+        requestedBatchSize: number = DEFAULT_RECONCILIATION_BATCH_SIZE,
+    ): Promise<ReconciliationResult> {
+        if (this.reconciliationInFlight) return this.reconciliationInFlight;
+        const batchSize = Math.max(
+            1,
+            Math.min(DEFAULT_RECONCILIATION_BATCH_SIZE, requestedBatchSize),
+        );
+        const operation = this.reconcileOnce(batchSize);
+        this.reconciliationInFlight = operation;
+        try {
+            return await operation;
+        } finally {
+            if (this.reconciliationInFlight === operation) {
+                this.reconciliationInFlight = null;
             }
         }
-
-        if (toResolve.length > 0) {
-            await this.resolveFailures(toResolve);
-            logger.debug(
-                `[Enrichment Failures] Cleaned up ${toResolve.length} orphaned failures`,
-            );
-        }
-
-        return { cleaned: toResolve.length, checked: failures.length };
     }
 
     /**

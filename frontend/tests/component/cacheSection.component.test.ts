@@ -93,12 +93,24 @@ const settings: SystemSettings = {
     showVersion: false,
 };
 
-async function renderCacheSection(): Promise<string> {
+async function renderCacheSection(options?: {
+    artistProgress?: {
+        completed: number;
+        total: number;
+        progress: number;
+        failed: number;
+    };
+}): Promise<string> {
     const { CacheSection } =
         await import("../../features/settings/components/sections/CacheSection");
     const queryClient = new QueryClient();
     queryClient.setQueryData(["enrichment-progress"], {
-        artists: { completed: 2, total: 2, progress: 100, failed: 0 },
+        artists: options?.artistProgress ?? {
+            completed: 2,
+            total: 2,
+            progress: 100,
+            failed: 0,
+        },
         trackTags: { completed: 2, total: 2, progress: 100, failed: 0 },
         audioAnalysis: {
             completed: 2,
@@ -152,4 +164,20 @@ test("hides migration progress when no migration is active", async () => {
 
     assert.doesNotMatch(html, /Embedding migration/);
     assert.doesNotMatch(html, /Target space family:/);
+});
+
+test("displays 99 percent when rounded progress is 100 but work remains", async () => {
+    const html = await renderCacheSection({
+        artistProgress: {
+            completed: 999,
+            total: 1000,
+            progress: 100,
+            failed: 0,
+        },
+    });
+
+    assert.match(
+        html,
+        /Artist Metadata[\s\S]*?style="width:99%"[\s\S]*?99%/,
+    );
 });

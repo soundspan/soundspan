@@ -183,7 +183,7 @@ describe("GET /api/enrichment/failures bounded query parameters", () => {
         });
     });
 
-    it("returns a client-safe DTO without worker errors or filesystem metadata", async () => {
+    it("returns sanitized failure details without filesystem metadata", async () => {
         mockGetFailures.mockResolvedValueOnce({
             failures: [
                 {
@@ -191,8 +191,9 @@ describe("GET /api/enrichment/failures bounded query parameters", () => {
                     entityType: "audio",
                     entityId: "track-1",
                     entityName: "Example Track",
-                    errorMessage: "SECRET_LEAK_MARKER: decoder crashed",
-                    errorCode: "WORKER_SECRET_CODE",
+                    errorMessage:
+                        "decoder crashed at /srv/music/private/track.flac using https://worker:secret@example.test/jobs/1",
+                    errorCode: "AUDIO_DECODER_FAILED",
                     retryCount: 2,
                     maxRetries: 3,
                     firstFailedAt: new Date("2026-08-10T12:00:00.000Z"),
@@ -219,6 +220,9 @@ describe("GET /api/enrichment/failures bounded query parameters", () => {
                     entityType: "audio",
                     entityId: "track-1",
                     entityName: "Example Track",
+                    errorSummary:
+                        "decoder crashed at [path] using https://example.test/[...]",
+                    errorCode: "AUDIO_DECODER_FAILED",
                     retryCount: 2,
                     maxRetries: 3,
                     firstFailedAt: "2026-08-10T12:00:00.000Z",
@@ -231,9 +235,7 @@ describe("GET /api/enrichment/failures bounded query parameters", () => {
             ],
             total: 1,
         });
-        expect(JSON.stringify(response.body)).not.toContain(
-            "SECRET_LEAK_MARKER",
-        );
+        expect(JSON.stringify(response.body)).not.toContain("worker:secret");
         expect(JSON.stringify(response.body)).not.toContain("/srv/music");
     });
 });

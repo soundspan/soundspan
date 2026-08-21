@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { enrichmentApi } from "@/lib/enrichmentApi";
+import { createFrontendLogger } from "@/lib/logger";
 import { X, RefreshCw, SkipForward, Trash2, AlertCircle } from "lucide-react";
+
+const logger = createFrontendLogger("EnrichmentFailuresModal");
 
 interface EnrichmentFailuresModalProps {
     isOpen: boolean;
@@ -85,7 +88,7 @@ function RetryAllFailuresAction({
 
     return (
         <>
-            <div className="flex items-center justify-between gap-3 px-6 py-3 bg-white/5 border-b border-white/10">
+            <div className="shrink-0 flex items-center justify-between gap-3 px-6 py-3 bg-white/5 border-b border-white/10">
                 <div>
                     <p className="text-sm text-white/60">
                         Retry every failure in this tab. Work enters the
@@ -139,6 +142,28 @@ export function EnrichmentFailuresModal({
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const pageSize = 20;
     const queryClient = useQueryClient();
+    const wasOpenRef = useRef(false);
+
+    const invalidateFailureQueries = () => {
+        queryClient.invalidateQueries({
+            queryKey: ["enrichment-failures"],
+        });
+        queryClient.invalidateQueries({
+            queryKey: ["enrichment-failure-counts"],
+        });
+    };
+
+    const { mutate: reconcileFailures } = useMutation({
+        mutationFn: () => enrichmentApi.reconcileFailures(),
+        onSettled: invalidateFailureQueries,
+    });
+
+    useEffect(() => {
+        if (isOpen && !wasOpenRef.current) {
+            reconcileFailures();
+        }
+        wasOpenRef.current = isOpen;
+    }, [isOpen, reconcileFailures]);
 
     // Fetch failures
     const { data: failures, isLoading } = useQuery({
@@ -231,17 +256,19 @@ export function EnrichmentFailuresModal({
             entityType === "audio"
                 ? enrichmentApi.retryFailedAudioAnalysis()
                 : enrichmentApi.retryVibeEmbeddings(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({
-                queryKey: ["enrichment-failures"],
-            });
-            queryClient.invalidateQueries({
-                queryKey: ["enrichment-failure-counts"],
-            });
+        onSuccess: async () => {
+            invalidateFailureQueries();
             queryClient.invalidateQueries({
                 queryKey: ["enrichment-progress"],
             });
             setSelectedFailures(new Set());
+            try {
+                await enrichmentApi.reconcileFailures();
+            } catch (error) {
+                logger.error("Failed to reconcile retried failures", error);
+            } finally {
+                invalidateFailureQueries();
+            }
         },
     });
 
@@ -286,7 +313,7 @@ export function EnrichmentFailuresModal({
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
             <div className="bg-surface-hover rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col border border-white/10">
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-white/10">
+                <div className="shrink-0 flex items-center justify-between p-6 border-b border-white/10">
                     <div>
                         <h2 className="text-xl font-bold text-white">
                             Enrichment Failures
@@ -330,7 +357,7 @@ export function EnrichmentFailuresModal({
                 )}
 
                 {/* Filter Tabs */}
-                <div className="flex gap-3 px-6 py-4 border-b border-white/10 overflow-x-auto">
+                <div className="shrink-0 flex gap-3 px-6 py-4 border-b border-white/10 overflow-x-auto">
                     {[
                         {
                             key: "all" as const,
@@ -379,7 +406,7 @@ export function EnrichmentFailuresModal({
 
                 {/* Action Bar */}
                 {selectedFailures.size > 0 && (
-                    <div className="flex items-center gap-2 p-4 bg-white/5 border-b border-white/10">
+                    <div className="shrink-0 flex items-center gap-2 p-4 bg-white/5 border-b border-white/10">
                         <span className="text-sm text-white/70">
                             {selectedFailures.size} selected
                         </span>
@@ -470,8 +497,9 @@ export function EnrichmentFailuresModal({
                                             </span>
                                         </div>
                                         <p className="text-xs text-red-400 mt-1">
-                                            {failure.errorMessage ||
-                                                "Unknown error"}
+                                            {failure.errorSummary ||
+                                                failure.errorCode ||
+                                                "No error details recorded"}
                                         </p>
                                         <div className="flex items-center gap-3 mt-2 text-[10px] text-white/30">
                                             <span>
@@ -485,14 +513,6 @@ export function EnrichmentFailuresModal({
                                                     failure.lastFailedAt,
                                                 ).toLocaleString()}
                                             </span>
-                                            {failure.errorCode && (
-                                                <>
-                                                    <span>•</span>
-                                                    <span>
-                                                        {failure.errorCode}
-                                                    </span>
-                                                </>
-                                            )}
                                         </div>
                                     </div>
                                     <button
@@ -513,7 +533,7 @@ export function EnrichmentFailuresModal({
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                    <div className="flex items-center justify-between p-4 border-t border-white/10">
+                    <div className="shrink-0 flex items-center justify-between p-4 border-t border-white/10">
                         <button
                             onClick={() =>
                                 setCurrentPage((p) => Math.max(1, p - 1))

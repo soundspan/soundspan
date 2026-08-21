@@ -43,7 +43,7 @@ export interface EnrichmentFailure {
     entityType: "artist" | "track" | "audio" | "vibe";
     entityId: string;
     entityName: string | null;
-    errorMessage: string | null;
+    errorSummary: string | null;
     errorCode: string | null;
     retryCount: number;
     maxRetries: number;
@@ -53,7 +53,6 @@ export interface EnrichmentFailure {
     skippedAt: string | null;
     resolved: boolean;
     resolvedAt: string | null;
-    metadata: Record<string, unknown> | null;
 }
 
 export interface FailureCounts {
@@ -135,6 +134,14 @@ export const enrichmentApi = {
      */
     getFailureCounts: async (): Promise<FailureCounts> => {
         return api.get("/enrichment/failures/counts");
+    },
+
+    /** Reconcile stale failure-log rows with current entity state. */
+    reconcileFailures: async (): Promise<{
+        resolved: number;
+        checked: number;
+    }> => {
+        return api.post("/enrichment/failures/reconcile", {});
     },
 
     /**

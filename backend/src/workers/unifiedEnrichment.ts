@@ -449,6 +449,19 @@ export async function runFullEnrichment(options?: {
 }> {
     log.debug("\n=== FULL ENRICHMENT: Re-enriching everything ===\n");
 
+    try {
+        const reconciliation =
+            await enrichmentFailureService.reconcileWithLiveState();
+        log.debug(
+            `Reconciled ${reconciliation.resolved} of ${reconciliation.checked} enrichment failures before full run`,
+        );
+    } catch (error) {
+        log.error(
+            "Failed to reconcile enrichment failures before full run:",
+            error,
+        );
+    }
+
     const forceVibeRebuild = options?.forceVibeRebuild === true;
     const forceMoodBucketBackfill = options?.forceMoodBucketBackfill === true;
 

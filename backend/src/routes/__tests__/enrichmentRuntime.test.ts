@@ -48,6 +48,7 @@ jest.mock("../../services/enrichmentFailureService", () => ({
     enrichmentFailureService: {
         getFailures: jest.fn(),
         getFailureCounts: jest.fn(),
+        reconcileWithLiveState: jest.fn(),
         resetRetryCount: jest.fn(),
         getFailure: jest.fn(),
         resolveFailures: jest.fn(),
@@ -185,6 +186,8 @@ const mockApplyAlbumEnrichment =
 const mockGetFailures = enrichmentFailureService.getFailures as jest.Mock;
 const mockGetFailureCounts =
     enrichmentFailureService.getFailureCounts as jest.Mock;
+const mockReconcileWithLiveState =
+    enrichmentFailureService.reconcileWithLiveState as jest.Mock;
 const mockResetRetryCount =
     enrichmentFailureService.resetRetryCount as jest.Mock;
 const mockGetFailure = enrichmentFailureService.getFailure as jest.Mock;
@@ -271,6 +274,10 @@ describe("enrichment route runtime behavior", () => {
     const startHandler = getRouteHandler("/start", "post");
     const failuresGetHandler = getRouteHandler("/failures", "get");
     const failureCountsHandler = getRouteHandler("/failures/counts", "get");
+    const reconcileFailuresHandler = getRouteHandler(
+        "/failures/reconcile",
+        "post",
+    );
     const retryHandler = getRouteHandler("/retry", "post");
     const skipHandler = getRouteHandler("/skip", "post");
     const searchArtistsHandler = getRouteHandler(
@@ -358,6 +365,10 @@ describe("enrichment route runtime behavior", () => {
             artist: 1,
             track: 2,
             audio: 3,
+        });
+        mockReconcileWithLiveState.mockResolvedValue({
+            resolved: 4,
+            checked: 9,
         });
         mockResetRetryCount.mockResolvedValue(undefined);
         mockGetFailure.mockResolvedValue(null);
@@ -1062,6 +1073,30 @@ describe("enrichment route runtime behavior", () => {
         expect(errorRes.body).toEqual({
             error: "Failed to get failure counts",
         });
+    });
+
+    it("reconciles failure rows and returns a safe error on failure", async () => {
+        const res = createRes();
+        await reconcileFailuresHandler(
+            { user: { id: "admin-1" } } as any,
+            res,
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({ resolved: 4, checked: 9 });
+
+        mockReconcileWithLiveState.mockRejectedValueOnce(
+            new Error("database secret"),
+        );
+        const errorRes = createRes();
+        await reconcileFailuresHandler(
+            { user: { id: "admin-1" } } as any,
+            errorRes,
+        );
+        expect(errorRes.statusCode).toBe(500);
+        expect(errorRes.body).toEqual({
+            error: "Failed to reconcile failures",
+        });
+        expect(JSON.stringify(errorRes.body)).not.toContain("database secret");
     });
 
     it("validates retry ids and requeues existing artist/audio items", async () => {

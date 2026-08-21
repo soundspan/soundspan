@@ -19,6 +19,7 @@ import {
     enrichmentFailureService,
     type EnrichmentFailure,
 } from "../services/enrichmentFailureService";
+import { sanitizeEnrichmentErrorSummary } from "../utils/enrichmentErrorSummary";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
 import {
@@ -32,7 +33,7 @@ import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
 import { parseBoundedInt } from "../utils/queryParams";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
 import { updateAlbumMetadataWithOwnership } from "../services/albumMetadataPersistence";
 
@@ -50,8 +51,8 @@ function isValidMusicBrainzId(value: string): boolean {
 
 type ClientSafeEnrichmentFailure = Omit<
     EnrichmentFailure,
-    "errorMessage" | "errorCode" | "metadata"
->;
+    "errorMessage" | "metadata"
+> & { errorSummary: string | null };
 
 function toClientSafeEnrichmentFailure(
     failure: EnrichmentFailure,
@@ -61,6 +62,8 @@ function toClientSafeEnrichmentFailure(
         entityType: failure.entityType,
         entityId: failure.entityId,
         entityName: failure.entityName,
+        errorSummary: sanitizeEnrichmentErrorSummary(failure.errorMessage),
+        errorCode: failure.errorCode,
         retryCount: failure.retryCount,
         maxRetries: failure.maxRetries,
         firstFailedAt: failure.firstFailedAt,
@@ -1054,6 +1057,36 @@ router.get("/failures/counts", requireAdmin, async (req, res) => {
     } catch (error) {
         logger.error("Get failure counts error:", error);
         res.status(500).json({ error: "Failed to get failure counts" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/enrichment/failures/reconcile:
+ *   post:
+ *     summary: Reconcile unresolved enrichment failures with live entity state
+ *     tags: [Enrichment]
+ *     security:
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Number of failure rows checked and resolved
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
+ * POST /enrichment/failures/reconcile
+ * Reconcile stale failure records with authoritative live state (admin only)
+ */
+router.post("/failures/reconcile", requireAdmin, async (_req, res) => {
+    try {
+        const result = await enrichmentFailureService.reconcileWithLiveState();
+        res.json(result);
+    } catch (error) {
+        logger.error("Reconcile enrichment failures error:", error);
+        sendInternalRouteError(res, "Failed to reconcile failures");
     }
 });
 

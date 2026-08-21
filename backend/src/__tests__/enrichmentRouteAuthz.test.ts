@@ -33,6 +33,10 @@ const mockGetFailureCounts = jest.fn(async () => ({
     vibe: 0,
     total: 0,
 }));
+const mockReconcileFailures = jest.fn(async () => ({
+    resolved: 12,
+    checked: 20,
+}));
 const mockSystemSettingsFindUnique = jest.fn(async () => ({
     autoEnrichMetadata: true,
 }));
@@ -83,6 +87,7 @@ jest.mock("../services/enrichmentFailureService", () => ({
     enrichmentFailureService: {
         getFailures: mockGetFailures,
         getFailureCounts: mockGetFailureCounts,
+        reconcileWithLiveState: mockReconcileFailures,
     },
 }));
 
@@ -280,5 +285,25 @@ describe("enrichment router authorization", () => {
             total: 0,
         });
         expect(mockGetFailureCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects non-admin users on POST /failures/reconcile", async () => {
+        const response = await request(buildApp())
+            .post("/api/enrichment/failures/reconcile")
+            .set("x-test-role", "user");
+
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual({ error: "Admin access required" });
+        expect(mockReconcileFailures).not.toHaveBeenCalled();
+    });
+
+    it("allows admins on POST /failures/reconcile", async () => {
+        const response = await request(buildApp())
+            .post("/api/enrichment/failures/reconcile")
+            .set("x-test-role", "admin");
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ resolved: 12, checked: 20 });
+        expect(mockReconcileFailures).toHaveBeenCalledTimes(1);
     });
 });
