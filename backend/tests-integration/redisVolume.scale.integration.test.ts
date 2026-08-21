@@ -217,9 +217,19 @@ describeWithRedis("Redis production-volume keyspace behavior", () => {
             readVibeWorkerStatus(statusRedisAdapter(redis), REFERENCE_NOW),
         );
 
-        expect(await redis.dbsize()).toBe(SEEDED_KEY_COUNT + 1);
+        // Seeded value keys + the registry zset + the one-time v2-registry
+        // cleanup marker written by the first status read.
+        expect(await redis.dbsize()).toBe(SEEDED_KEY_COUNT + 2);
+        expect(
+            await redis.get(
+                "soundspan:vibe-worker-status:v2-registry-cleanup:v1",
+            ),
+        ).toBe("done");
         expect(status?.coverage?.embedded).toBe(STATUS_KEY_COUNT - 1);
         expect(status?.providerReachability.reachable).toBe(true);
+
+        await readVibeWorkerStatus(statusRedisAdapter(redis), REFERENCE_NOW);
+        expect(await redis.dbsize()).toBe(SEEDED_KEY_COUNT + 2);
     });
 
     it("increments and expires a shared rate-limit counter", async () => {
