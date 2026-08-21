@@ -2,8 +2,33 @@ apiVersion: v1
 entries:
   soundspan:
   - apiVersion: v2
+    appVersion: 2.4.0
+    created: "2026-08-21T13:58:05.134635159Z"
+    description: A self-hosted music server with TIDAL and YouTube Music streaming
+      integration
+    digest: d1f6fed8c712c82a7f7764f11973215778b77c3e6de6e1051a5f5ea0f76d41d9
+    home: https://github.com/soundspan/soundspan
+    icon: https://raw.githubusercontent.com/soundspan/soundspan/main/frontend/public/logo.png
+    keywords:
+    - music
+    - streaming
+    - self-hosted
+    - tidal
+    - youtube-music
+    - media
+    maintainers:
+    - name: soundspan
+      url: https://github.com/soundspan
+    name: soundspan
+    sources:
+    - https://github.com/soundspan/soundspan
+    type: application
+    urls:
+    - https://soundspan.github.io/soundspan/soundspan-2.4.0.tgz
+    version: 2.4.0
+  - apiVersion: v2
     appVersion: 2.3.3
-    created: "2026-08-18T23:42:39.551689654Z"
+    created: "2026-08-21T13:58:05.132919072Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 7af694bdae7e4595a65a6d29c850f1eb38f8e36cc41c4c499770643051240f51
@@ -28,7 +53,7 @@ entries:
     version: 2.3.3
   - apiVersion: v2
     appVersion: 2.3.2
-    created: "2026-08-18T23:42:39.549454555Z"
+    created: "2026-08-21T13:58:05.130486588Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 179db49104ac0adcff88128c3caa481fade77a41d7f6c9d85be00be894e7cdef
@@ -53,7 +78,7 @@ entries:
     version: 2.3.2
   - apiVersion: v2
     appVersion: 2.3.1
-    created: "2026-08-18T23:42:39.546303657Z"
+    created: "2026-08-21T13:58:05.128841016Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 2ede163d471cdf76ffea307b97ce0909019b98137ac509002db8769da7c80db5
@@ -78,7 +103,7 @@ entries:
     version: 2.3.1
   - apiVersion: v2
     appVersion: 2.3.0
-    created: "2026-08-18T23:42:39.544200223Z"
+    created: "2026-08-21T13:58:05.127157257Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: dc471e53bae8ddc81855bbd161675103b6bf0f88d46b3d2317fca71e498952fb
@@ -103,7 +128,7 @@ entries:
     version: 2.3.0
   - apiVersion: v2
     appVersion: 2.2.0
-    created: "2026-08-18T23:42:39.542077815Z"
+    created: "2026-08-21T13:58:05.124782731Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: a933d5dc04c573e8d4123cd61a864ace2d2959cd84ec3f9f78a8df7e3049e9dd
@@ -128,7 +153,7 @@ entries:
     version: 2.2.0
   - apiVersion: v2
     appVersion: 2.1.0
-    created: "2026-08-18T23:42:39.538894775Z"
+    created: "2026-08-21T13:58:05.12314409Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 2188308279d58162c091538246e0e4f4e0b860bc3cec86a125ef4a2e9a176394
@@ -153,7 +178,7 @@ entries:
     version: 2.1.0
   - apiVersion: v2
     appVersion: 2.0.2
-    created: "2026-08-18T23:42:39.536818203Z"
+    created: "2026-08-21T13:58:05.121397106Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: e78a5ffff696cbd8a81b204a62d1b8e8c641a6c386370c71357c81ab18462153
@@ -178,7 +203,7 @@ entries:
     version: 2.0.2
   - apiVersion: v2
     appVersion: 2.0.1
-    created: "2026-08-18T23:42:39.534820607Z"
+    created: "2026-08-21T13:58:05.119072885Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: ce4322e88b3b3e80e2827b611b3ea3ec0b24071910f8e2d06b033205214c37da
@@ -203,7 +228,7 @@ entries:
     version: 2.0.1
   - apiVersion: v2
     appVersion: 2.0.0
-    created: "2026-08-18T23:42:39.531590343Z"
+    created: "2026-08-21T13:58:05.117519822Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 45f1d7e24f96b129272947dac19d23af74eb0354f873a665406e66da73b13e8b
@@ -228,7 +253,7 @@ entries:
     version: 2.0.0
   - apiVersion: v2
     appVersion: 1.9.0
-    created: "2026-08-18T23:42:39.529597307Z"
+    created: "2026-08-21T13:58:05.11596693Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: bc1d3ff914872b3ae2717a2eff995098f6b5be4665ce96687a1be7f06c72100a
@@ -253,7 +278,7 @@ entries:
     version: 1.9.0
   - apiVersion: v2
     appVersion: 1.8.0
-    created: "2026-08-18T23:42:39.527757977Z"
+    created: "2026-08-21T13:58:05.1137902Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: a716788a8610dbf7a27b87a3b9a59e8cb3f3fdc4f12969afd4a1b54e23cbc462
@@ -278,7 +303,7 @@ entries:
     version: 1.8.0
   - apiVersion: v2
     appVersion: 1.7.0
-    created: "2026-08-18T23:42:39.52476163Z"
+    created: "2026-08-21T13:58:05.112393322Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: d38743b33a2a64e610fea92f35256749d5f011bc07de29418694aa9f3dedba62
@@ -303,7 +328,7 @@ entries:
     version: 1.7.0
   - apiVersion: v2
     appVersion: 1.6.1
-    created: "2026-08-18T23:42:39.522936867Z"
+    created: "2026-08-21T13:58:05.11092019Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 032b2da32921e8485619499a2df854a0ad777fd6ae8b7338634f1f11ef88f08c
@@ -328,7 +353,7 @@ entries:
     version: 1.6.1
   - apiVersion: v2
     appVersion: 1.6.0
-    created: "2026-08-18T23:42:39.521088721Z"
+    created: "2026-08-21T13:58:05.108769509Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 956952c9a1aa0a736db7bffab0167f3ecc1763be8247584cf4ded855cd370782
@@ -353,7 +378,7 @@ entries:
     version: 1.6.0
   - apiVersion: v2
     appVersion: 1.5.0
-    created: "2026-08-18T23:42:39.518043467Z"
+    created: "2026-08-21T13:58:05.10737834Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 6e6981d80b14030d66dd8c9ea688ae473cdf3a9e6b6cbe216adac008afcfa857
@@ -378,7 +403,7 @@ entries:
     version: 1.5.0
   - apiVersion: v2
     appVersion: 1.4.0
-    created: "2026-08-18T23:42:39.516319984Z"
+    created: "2026-08-21T13:58:05.106056795Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 7a52fc744afa02d75a34e4f849513829373d85b9393debc51534aa2d6db1a509
@@ -403,7 +428,7 @@ entries:
     version: 1.4.0
   - apiVersion: v2
     appVersion: 1.3.5
-    created: "2026-08-18T23:42:39.514495673Z"
+    created: "2026-08-21T13:58:05.104043701Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 61c76130faeebaa649d22d283f4208dd0045efe521e347d0a6ddd1e220b8a65d
@@ -428,7 +453,7 @@ entries:
     version: 1.3.5
   - apiVersion: v2
     appVersion: 1.3.4
-    created: "2026-08-18T23:42:39.510613587Z"
+    created: "2026-08-21T13:58:05.102666423Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: b1df1f6e8eea3b9bb7ef55d056d70c376f62425c15ec45f57776450c48422f50
@@ -453,7 +478,7 @@ entries:
     version: 1.3.4
   - apiVersion: v2
     appVersion: 1.3.3
-    created: "2026-08-18T23:42:39.507226393Z"
+    created: "2026-08-21T13:58:05.101278858Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 76ff3be6977897d787ec63833df09c897ed5dcc7f382b5d4346470f2668dc19c
@@ -478,7 +503,7 @@ entries:
     version: 1.3.3
   - apiVersion: v2
     appVersion: 1.3.2
-    created: "2026-08-18T23:42:39.503937473Z"
+    created: "2026-08-21T13:58:05.099045363Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 8a652875a48bd1fcee73b8dd63c357acc6020436ff55836f8157af3e2f2e0c77
@@ -503,7 +528,7 @@ entries:
     version: 1.3.2
   - apiVersion: v2
     appVersion: 1.3.1
-    created: "2026-08-18T23:42:39.499810048Z"
+    created: "2026-08-21T13:58:05.097717269Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: e4c2557dd5b029f222427878f051a24a5969b6390356ccb42db4079794c35c5b
@@ -528,7 +553,7 @@ entries:
     version: 1.3.1
   - apiVersion: v2
     appVersion: 1.3.0
-    created: "2026-08-18T23:42:39.497984234Z"
+    created: "2026-08-21T13:58:05.096338007Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: bc24f8e1e23223dbb7a79bc2c09872878d099c8377a421e1dfa6e823c1ae16c0
@@ -553,7 +578,7 @@ entries:
     version: 1.3.0
   - apiVersion: v2
     appVersion: 1.2.1
-    created: "2026-08-18T23:42:39.496177185Z"
+    created: "2026-08-21T13:58:05.094214558Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: fe4a6f1adfc236b4e110c311f96a484b22b47a36770540665e0302f24b555c0d
@@ -578,7 +603,7 @@ entries:
     version: 1.2.1
   - apiVersion: v2
     appVersion: 1.2.0
-    created: "2026-08-18T23:42:39.493313018Z"
+    created: "2026-08-21T13:58:05.092890369Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 36109361425b974268f1b853f62d95b9b93e5bc4fb0d3ebe4f024e2f6b335ed9
@@ -603,7 +628,7 @@ entries:
     version: 1.2.0
   - apiVersion: v2
     appVersion: 1.1.2
-    created: "2026-08-18T23:42:39.491553919Z"
+    created: "2026-08-21T13:58:05.091489375Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 1d5701ba1563c4abce81264f60b5c44e62281574c00745004fa6483ebb75dfc1
@@ -628,7 +653,7 @@ entries:
     version: 1.1.2
   - apiVersion: v2
     appVersion: 1.1.1
-    created: "2026-08-18T23:42:39.489903312Z"
+    created: "2026-08-21T13:58:05.089550713Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: d2d8fd41959022a99371b27b47868316d6d0f3655b07999849dc5cc4d3a7e974
@@ -653,7 +678,7 @@ entries:
     version: 1.1.1
   - apiVersion: v2
     appVersion: 1.1.0
-    created: "2026-08-18T23:42:39.487478338Z"
+    created: "2026-08-21T13:58:05.088231101Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 531edcc845b9a19b09c6fa87c6c5f45a02b2faa6a4e6b57a7322d601a86570d8
@@ -678,7 +703,7 @@ entries:
     version: 1.1.0
   - apiVersion: v2
     appVersion: 1.0.1
-    created: "2026-08-18T23:42:39.485466857Z"
+    created: "2026-08-21T13:58:05.08697885Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 11c759cc75214be2ae3f14551baf6c1f6f22eedb0428fcd2f98aaedc950e39c6
@@ -703,7 +728,7 @@ entries:
     version: 1.0.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-18T23:42:39.483863488Z"
+    created: "2026-08-21T13:58:05.085681361Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 7c203c6b66852dc32d7f1013e6d4d97be453514a6bf617e9b43cd8e23d9ed4c1
@@ -726,4 +751,4 @@ entries:
     urls:
     - https://soundspan.github.io/soundspan/soundspan-1.0.0.tgz
     version: 1.0.0
-generated: "2026-08-18T23:42:39.482053904Z"
+generated: "2026-08-21T13:58:05.084006486Z"
