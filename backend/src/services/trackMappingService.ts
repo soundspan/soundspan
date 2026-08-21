@@ -2,7 +2,10 @@ import { prisma } from "../utils/db";
 import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { resolveArtistForRemoteTrack } from "./artistResolutionService";
-import { resolveAlbumForRemoteTrack } from "./albumResolutionService";
+import {
+    applyRemoteAlbumCoverIfMissing,
+    resolveAlbumForRemoteTrack,
+} from "./albumResolutionService";
 import { updateArtistCounts } from "./artistCountsService";
 
 const log =
@@ -40,6 +43,7 @@ export interface UpsertTrackTidalData {
     isrc?: string;
     quality?: string;
     explicit?: boolean;
+    thumbnailUrl?: string;
 }
 
 export interface UpsertTrackYtMusicData {
@@ -324,7 +328,9 @@ class TrackMappingService {
 
             // Resolve artist/album entity linkage if not yet populated
             if (
-                (result.artistId === null || result.albumId === null) &&
+                (result.artistId === null ||
+                    result.albumId === null ||
+                    Boolean(data.thumbnailUrl)) &&
                 data.artist
             ) {
                 try {
@@ -335,6 +341,14 @@ class TrackMappingService {
                               created: false,
                           }
                         : await resolveArtistForRemoteTrack(data.artist);
+
+                    if (result.albumId && data.thumbnailUrl) {
+                        await applyRemoteAlbumCoverIfMissing(
+                            result.albumId,
+                            data.thumbnailUrl,
+                        );
+                    }
+
                     const albumResult = result.albumId
                         ? null
                         : await resolveAlbumForRemoteTrack(
@@ -344,6 +358,7 @@ class TrackMappingService {
                               {
                                   artistName: result.artist,
                                   trackTitle: result.title,
+                                  coverUrl: data.thumbnailUrl,
                               },
                           );
 
@@ -439,7 +454,9 @@ class TrackMappingService {
 
             // Resolve artist/album entity linkage if not yet populated
             if (
-                (result.artistId === null || result.albumId === null) &&
+                (result.artistId === null ||
+                    result.albumId === null ||
+                    Boolean(data.thumbnailUrl)) &&
                 data.artist
             ) {
                 try {
@@ -450,6 +467,14 @@ class TrackMappingService {
                               created: false,
                           }
                         : await resolveArtistForRemoteTrack(data.artist);
+
+                    if (result.albumId && data.thumbnailUrl) {
+                        await applyRemoteAlbumCoverIfMissing(
+                            result.albumId,
+                            data.thumbnailUrl,
+                        );
+                    }
+
                     const albumResult = result.albumId
                         ? null
                         : await resolveAlbumForRemoteTrack(
@@ -459,6 +484,7 @@ class TrackMappingService {
                               {
                                   artistName: result.artist,
                                   trackTitle: result.title,
+                                  coverUrl: data.thumbnailUrl,
                               },
                           );
 
@@ -535,6 +561,7 @@ class TrackMappingService {
                 artist,
                 album,
                 duration,
+                thumbnailUrl: this.normalizeOptionalString(data.thumbnailUrl),
                 isrc: this.normalizeOptionalString(data.isrc),
                 quality: this.normalizeOptionalString(data.quality),
                 explicit:

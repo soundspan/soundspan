@@ -149,7 +149,10 @@ export async function resolveRemoteTrackMetadataForRequest(
 ): Promise<ResolvedRemoteTrackMetadata> {
     const resolved = normalizeResolvedMetadata(lookup.metadata);
 
-    if (!hasPlaceholderRemoteTrackMetadata(lookup.metadata)) {
+    if (
+        !hasPlaceholderRemoteTrackMetadata(lookup.metadata) &&
+        resolved.thumbnailUrl
+    ) {
         return resolved;
     }
 
@@ -187,6 +190,13 @@ export async function resolveRemoteTrackMetadataForRequest(
             if (normalizeDuration(detail.duration)) {
                 resolved.duration = Math.trunc(detail.duration);
             }
+            const normalizedThumbnailUrl = normalizeOptionalString(
+                detail.thumbnailUrl,
+            );
+            if (normalizedThumbnailUrl) {
+                resolved.thumbnailUrl = normalizedThumbnailUrl;
+            }
+
             const normalizedIsrc = normalizeOptionalString(detail.isrc);
             if (normalizedIsrc) {
                 resolved.isrc = normalizedIsrc;

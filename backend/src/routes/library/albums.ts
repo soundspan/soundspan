@@ -306,20 +306,42 @@ export async function handleGetAlbum(
     res: Response,
 ) {
     const idParam = req.params.id;
+    const userId = req.user?.id;
     const includeTracks = parseBooleanQueryParam(req.query.includeTracks, true);
+
     const browseTrackWhere = {
         ...TRACK_VISIBLE_WHERE,
         ...trackBrowseWhere("all"),
     };
 
-    // Find album by ID or rgMbid (for discovery albums) in single query.
-    // Tracks can be excluded for lightweight progressive hydration.
+    // Remote library rows are user-scoped: only remote tracks liked by
+    // the current user count as belonging to their library.
+    const tidalTrackWhere: Prisma.TrackTidalWhereInput = userId
+        ? { likedBy: { some: { userId } } }
+        : { id: { in: [] } };
+
+    const ytTrackWhere: Prisma.TrackYtMusicWhereInput = userId
+        ? { likedBy: { some: { userId } } }
+        : { id: { in: [] } };
+
+    const albumWhere: Prisma.AlbumWhereInput = {
+        AND: [
+            {
+                OR: [{ id: idParam }, { rgMbid: idParam }],
+            },
+            {
+                OR: [
+                    { tracks: { some: browseTrackWhere } },
+                    { tracksTidal: { some: tidalTrackWhere } },
+                    { tracksYtMusic: { some: ytTrackWhere } },
+                ],
+            },
+        ],
+    };
+
     const albumWithTracks = includeTracks
         ? await prisma.album.findFirst({
-              where: {
-                  OR: [{ id: idParam }, { rgMbid: idParam }],
-                  tracks: { some: browseTrackWhere },
-              },
+              where: albumWhere,
               include: {
                   artist: {
                       select: { id: true, mbid: true, name: true },
@@ -343,16 +365,22 @@ export async function handleGetAlbum(
                           { trackNo: Prisma.SortOrder.asc },
                       ],
                   },
+                  tracksTidal: {
+                      where: tidalTrackWhere,
+                      orderBy: { title: Prisma.SortOrder.asc },
+                  },
+                  tracksYtMusic: {
+                      where: ytTrackWhere,
+                      orderBy: { title: Prisma.SortOrder.asc },
+                  },
               },
           })
         : null;
+
     const albumWithoutTracks = includeTracks
         ? null
         : await prisma.album.findFirst({
-              where: {
-                  OR: [{ id: idParam }, { rgMbid: idParam }],
-                  tracks: { some: browseTrackWhere },
-              },
+              where: albumWhere,
               include: {
                   artist: {
                       select: { id: true, mbid: true, name: true },
@@ -362,13 +390,13 @@ export async function handleGetAlbum(
                   },
               },
           });
+
     const album = albumWithTracks ?? albumWithoutTracks;
 
     if (!album) {
         return sendRouteError(res, 404, "Album not found");
     }
 
-    // Check ownership with O(1) indexed lookup (separate query is faster than fetching all ownedAlbums)
     const owned = await prisma.ownedAlbum.findUnique({
         where: {
             artistId_rgMbid: {
@@ -377,11 +405,15 @@ export async function handleGetAlbum(
             },
         },
     });
-    const isOwned = !!owned;
+
+    // A REMOTE album returned by albumWhere is already proven to contain
+    // a remote track liked by this user, so treat it as part of Library.
+    const isOwned = !!owned || album.location === "REMOTE";
 
     const artistData = album.artist;
+
     const persistedTracks = albumWithTracks?.tracks ?? [];
-    const tracks = persistedTracks.map(({ federationPeer, ...track }) => ({
+    const localTracks = persistedTracks.map(({ federationPeer, ...track }) => ({
         ...track,
         ...(track.origin === "FEDERATED" && federationPeer
             ? {
@@ -394,11 +426,68 @@ export async function handleGetAlbum(
               }
             : {}),
     }));
+
+    const tidalTracks = (albumWithTracks?.tracksTidal ?? []).map((track) => ({
+        id: `tidal:${track.tidalId}`,
+        title: track.title,
+        duration: track.duration,
+        trackNo: null,
+        artist: {
+            id: track.artistId ?? artistData.id,
+            name: track.artist || artistData.name,
+        },
+        album: {
+            id: album.id,
+            title: track.album || album.title,
+            coverArt: album.coverUrl,
+            artist: artistData,
+        },
+        source: "tidal" as const,
+        streamSource: "tidal" as const,
+        tidalTrackId: track.tidalId,
+        provider: {
+            tidalTrackId: track.tidalId,
+            youtubeVideoId: null,
+        },
+    }));
+
+    const ytTracks = (albumWithTracks?.tracksYtMusic ?? []).map((track) => ({
+        id: `yt:${track.videoId}`,
+        title: track.title,
+        duration: track.duration,
+        trackNo: null,
+        artist: {
+            id: track.artistId ?? artistData.id,
+            name: track.artist || artistData.name,
+        },
+        album: {
+            id: album.id,
+            title: track.album || album.title,
+            coverArt: track.thumbnailUrl ?? album.coverUrl,
+            artist: artistData,
+        },
+        source: "youtube" as const,
+        streamSource: "youtube" as const,
+        youtubeVideoId: track.videoId,
+        thumbnailUrl: track.thumbnailUrl,
+        provider: {
+            tidalTrackId: null,
+            youtubeVideoId: track.videoId,
+        },
+    }));
+
+    const tracks = [...localTracks, ...tidalTracks, ...ytTracks];
+
     const { federationPeer, ...albumFields } = album;
 
     res.json({
         ...albumFields,
-        source: album.location === "FEDERATED" ? "federated" : "local",
+        source:
+            album.location === "FEDERATED"
+                ? "federated"
+                : album.location === "REMOTE"
+                  ? "remote"
+                  : "local",
         peer: federationPeer
             ? {
                   id: federationPeer.id,

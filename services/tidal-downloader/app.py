@@ -1964,10 +1964,8 @@ async def user_get_track(
             "duration": track.duration,
             "isrc": track.isrc,
             "explicit": track.explicit,
-            "album": {
-                "id": track.album.id,
-                "title": track.album.title,
-            },
+            "thumbnailUrl": _serialize_track(track).get("thumbnailUrl"),
+            "album": {"id": track.album.id, "title": track.album.title},
         }
     except ApiError as e:
         raise _sanitized_http_error(

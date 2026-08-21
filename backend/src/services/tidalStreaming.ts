@@ -66,6 +66,7 @@ export interface TidalTrackDetail {
         id: number;
         title: string;
     };
+    thumbnailUrl: string | null;
 }
 
 // ── Browse types ──────────────────────────────────────────────────

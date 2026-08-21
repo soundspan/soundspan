@@ -274,6 +274,7 @@ export async function handleSetRemoteTrackPreference(
                       artist: resolvedMetadata.artist,
                       album: resolvedMetadata.album,
                       duration: resolvedMetadata.duration,
+                      thumbnailUrl: resolvedMetadata.thumbnailUrl,
                       isrc: resolvedMetadata.isrc,
                       explicit: resolvedMetadata.explicit,
                   })

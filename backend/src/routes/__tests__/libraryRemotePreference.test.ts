@@ -712,3 +712,58 @@ describe("library remote track preference endpoints", () => {
         });
     });
 });
+
+describe("remote-only album loading regression", () => {
+    it("loads a liked TIDAL-only remote album instead of returning 404", async () => {
+        mockPrisma.album.findFirst.mockResolvedValueOnce({
+            id: "album-remote-1",
+            rgMbid: "remote:test-album",
+            title: "Remote Album",
+            artistId: "artist-remote-1",
+            location: "REMOTE",
+            primaryType: "Album",
+            coverUrl: "https://example.test/cover.jpg",
+            artist: {
+                id: "artist-remote-1",
+                mbid: null,
+                name: "Remote Artist",
+            },
+            federationPeer: null,
+            tracks: [],
+            tracksTidal: [
+                {
+                    id: "tidal-row-1",
+                    tidalId: 123456,
+                    title: "Remote Song",
+                    artist: "Remote Artist",
+                    artistId: "artist-remote-1",
+                    album: "Remote Album",
+                    albumId: "album-remote-1",
+                    duration: 240,
+                    isrc: null,
+                    quality: null,
+                    explicit: false,
+                },
+            ],
+            tracksYtMusic: [],
+        });
+        mockPrisma.ownedAlbum.findUnique.mockResolvedValueOnce(null);
+
+        const res = await request(app)
+            .get("/api/library/albums/album-remote-1")
+            .set(AUTH_HEADER, AUTH_VALUE);
+
+        expect(res.status).toBe(200);
+        expect(res.body.id).toBe("album-remote-1");
+        expect(res.body.source).toBe("remote");
+        expect(res.body.tracks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "tidal:123456",
+                    source: "tidal",
+                    streamSource: "tidal",
+                }),
+            ]),
+        );
+    });
+});

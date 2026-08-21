@@ -26,6 +26,24 @@ export interface AlbumResolutionResult {
 export interface RemoteTrackAlbumContext {
     artistName: string;
     trackTitle: string;
+    coverUrl?: string;
+}
+
+export async function applyRemoteAlbumCoverIfMissing(
+    albumId: string,
+    coverUrl?: string,
+): Promise<void> {
+    const normalizedCoverUrl = coverUrl?.trim();
+    if (!normalizedCoverUrl) return;
+
+    await prisma.album.updateMany({
+        where: {
+            id: albumId,
+            location: "REMOTE",
+            coverUrl: null,
+        },
+        data: { coverUrl: normalizedCoverUrl },
+    });
 }
 
 /**
@@ -47,13 +65,25 @@ export async function resolveAlbumForRemoteTrack(
     track?: RemoteTrackAlbumContext,
 ): Promise<AlbumResolutionResult | null> {
     if (isGenericAlbumTitle(rawAlbumTitle)) {
-        return resolveGenericAlbum(rawAlbumTitle, artistId, provider, track);
+        const resolved = await resolveGenericAlbum(
+            rawAlbumTitle,
+            artistId,
+            provider,
+            track,
+        );
+        if (resolved) {
+            await applyRemoteAlbumCoverIfMissing(resolved.id, track?.coverUrl);
+        }
+        return resolved;
     }
 
     const trimmedTitle = rawAlbumTitle?.trim();
     if (!trimmedTitle) return null;
     const existing = await findExistingAlbum(trimmedTitle, artistId);
-    return existing ?? createRemoteAlbum(trimmedTitle, artistId, provider);
+    const resolved =
+        existing ?? (await createRemoteAlbum(trimmedTitle, artistId, provider));
+    await applyRemoteAlbumCoverIfMissing(resolved.id, track?.coverUrl);
+    return resolved;
 }
 
 async function findExistingAlbum(
