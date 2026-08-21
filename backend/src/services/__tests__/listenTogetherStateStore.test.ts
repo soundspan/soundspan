@@ -1,287 +1,277 @@
-describe("listenTogetherStateStore", () => {
-    const originalEnv = process.env;
+import { DeterministicRedisServer } from "./support/deterministicRedis";
 
+describe("listenTogetherStateStore", () => {
     afterEach(() => {
-        process.env = originalEnv;
         jest.resetModules();
-        jest.clearAllMocks();
+        jest.restoreAllMocks();
     });
 
     function loadStateStore(options?: {
         enabled?: boolean;
         keyPrefix?: string;
-        ttlSeconds?: string;
-        getValue?: string | null;
-        getError?: string;
-        evalError?: string;
-        delError?: string;
+        ttlSeconds?: number;
+        server?: DeterministicRedisServer;
     }) {
-        process.env = { ...originalEnv };
-
-        if (options?.enabled === false) {
-            process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED = "false";
-        } else {
-            delete process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED;
-        }
-
-        if (options?.keyPrefix) {
-            process.env.LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX =
-                options.keyPrefix;
-        } else {
-            delete process.env.LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX;
-        }
-
-        if (options?.ttlSeconds) {
-            process.env.LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS =
-                options.ttlSeconds;
-        } else {
-            delete process.env.LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS;
-        }
-
-        const redisClient = {
-            get: jest.fn().mockImplementation(async () => {
-                if (options?.getError) {
-                    throw new Error(options.getError);
-                }
-                return options?.getValue ?? null;
-            }),
-            eval: jest.fn().mockImplementation(async () => {
-                if (options?.evalError) {
-                    throw new Error(options.evalError);
-                }
-                return 1;
-            }),
-            del: jest.fn().mockImplementation(async () => {
-                if (options?.delError) {
-                    throw new Error(options.delError);
-                }
-                return 1;
-            }),
-            disconnect: jest.fn(),
-        };
-
+        jest.resetModules();
+        const server = options?.server ?? new DeterministicRedisServer();
+        const redisClient = server.createClient();
         const createIORedisClient = jest.fn(() => redisClient);
-        const logger = {
-            warn: jest.fn(),
-        };
-
-        jest.doMock("../../utils/ioredis", () => ({
-            createIORedisClient,
-        }));
-        jest.doMock("../../utils/logger", () => ({
-            logger,
-        }));
-        const parsedTtlSeconds = Number.parseInt(
-            process.env.LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS || "21600",
-            10,
-        );
+        const logger = { warn: jest.fn() };
+        jest.doMock("../../utils/ioredis", () => ({ createIORedisClient }));
+        jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../../config", () => ({
             config: {
                 listenTogether: {
-                    stateStoreEnabled:
-                        process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED !==
-                        "false",
+                    stateStoreEnabled: options?.enabled !== false,
                     stateStoreKeyPrefix:
-                        process.env.LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX ||
-                        "listen-together:state",
-                    stateStoreTtlSeconds:
-                        Number.isFinite(parsedTtlSeconds) &&
-                        parsedTtlSeconds > 0
-                            ? parsedTtlSeconds
-                            : 21_600,
+                        options?.keyPrefix ?? "listen-together:state",
+                    stateStoreTtlSeconds: options?.ttlSeconds ?? 21_600,
+                    publicationDeadlineMs: 1_000,
+                    mutationLockPrefix: "listen-together:mutation-lock",
                 },
             },
         }));
-
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const {
-            listenTogetherStateStore,
-        } = require("../listenTogetherStateStore");
-
+        const module =
+            require("../listenTogetherStateStore") as typeof import("../listenTogetherStateStore");
         return {
-            listenTogetherStateStore,
+            ...module,
             createIORedisClient,
-            redisClient,
             logger,
+            redisClient,
+            server,
         };
     }
 
-    it("does not access redis when state store is disabled", async () => {
-        const { listenTogetherStateStore, createIORedisClient } =
-            loadStateStore({
-                enabled: false,
-            });
+    const snapshot = (
+        groupId: string = "group-1",
+        stateVersion: number = 12,
+        serverTime: number = 34_567,
+    ) => ({
+        id: groupId,
+        playback: { stateVersion, serverTime },
+        members: [],
+    });
 
-        expect(listenTogetherStateStore.isEnabled()).toBe(false);
+    it("does not access Redis when the state store is disabled", async () => {
+        const { listenTogetherStateStore, createIORedisClient } =
+            loadStateStore({ enabled: false });
+
         await expect(
             listenTogetherStateStore.getSnapshot("group-1"),
         ).resolves.toBeNull();
         await expect(
-            listenTogetherStateStore.setSnapshot("group-1", {
-                id: "group-1",
-                playback: {},
-                members: [],
-            }),
-        ).resolves.toBeUndefined();
+            listenTogetherStateStore.setSnapshot("group-1", snapshot() as any),
+        ).resolves.toBe("accepted");
         await expect(
             listenTogetherStateStore.deleteSnapshot("group-1"),
-        ).resolves.toBeUndefined();
+        ).resolves.toBe("accepted");
+        await expect(
+            listenTogetherStateStore.claimFence("group-1"),
+        ).resolves.toBe("accepted");
         expect(createIORedisClient).not.toHaveBeenCalled();
     });
 
-    it("returns a valid snapshot and uses configured key prefix + ttl", async () => {
-        const snapshot = {
-            id: "group-1",
-            playback: { playing: true, stateVersion: 12, serverTime: 34_567 },
-            members: [{ id: "u1" }],
-        };
-        const { listenTogetherStateStore, redisClient } = loadStateStore({
+    it("reads and writes through the configured keys and TTL script", async () => {
+        const loaded = loadStateStore({
             keyPrefix: "test-prefix",
-            ttlSeconds: "123",
-            getValue: JSON.stringify(snapshot),
+            ttlSeconds: 123,
         });
+        loaded.server.write("test-prefix:group-1", JSON.stringify(snapshot()));
+        loaded.server.write(
+            "listen-together:mutation-lock:fencing-token:group-1",
+            "17",
+        );
 
         await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toEqual(snapshot);
-        await listenTogetherStateStore.setSnapshot("group-1", snapshot);
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).resolves.toEqual(snapshot());
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot() as any,
+                17,
+            ),
+        ).resolves.toBe("accepted");
 
-        expect(redisClient.get).toHaveBeenCalledWith("test-prefix:group-1");
-        expect(redisClient.eval).toHaveBeenCalledWith(
-            expect.any(String),
-            1,
+        const write = loaded.server.commandLog.find(
+            (command) =>
+                command.name === "EVAL" &&
+                String(command.args[0]).includes(
+                    "listen-together:set-snapshot-if-current",
+                ),
+        );
+        expect(write?.args.slice(1)).toEqual([
+            3,
             "test-prefix:group-1",
-            JSON.stringify(snapshot),
+            "test-prefix:fence:group-1",
+            "listen-together:mutation-lock:fencing-token:group-1",
+            JSON.stringify(snapshot()),
             "123",
             "12",
             "34567",
-        );
+            "17",
+        ]);
     });
 
-    it("ignores malformed or mismatched snapshots and logs warnings", async () => {
-        const { listenTogetherStateStore, logger, redisClient } =
-            loadStateStore({
-                getValue: JSON.stringify({
-                    id: "other-group",
-                    playback: {},
-                    members: [],
-                }),
-            });
-
-        await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toBeNull();
-        expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("mismatched id"),
+    it("ignores malformed shapes and mismatched group identities", async () => {
+        const loaded = loadStateStore();
+        loaded.server.write(
+            "listen-together:state:group-1",
+            JSON.stringify(snapshot("other-group")),
         );
-
-        redisClient.get.mockResolvedValueOnce(JSON.stringify({ foo: "bar" }));
         await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toBeNull();
-        expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("malformed snapshot"),
-        );
-    });
-
-    it("swallows redis errors for get/set/delete and logs warnings", async () => {
-        const { listenTogetherStateStore, logger } = loadStateStore({
-            getError: "redis-get-down",
-            evalError: "redis-set-down",
-            delError: "redis-del-down",
-        });
-        const snapshot = { id: "group-1", playback: {}, members: [] };
-
-        await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toBeNull();
-        await expect(
-            listenTogetherStateStore.setSnapshot("group-1", snapshot),
-        ).resolves.toBeUndefined();
-        await expect(
-            listenTogetherStateStore.deleteSnapshot("group-1"),
-        ).resolves.toBeUndefined();
-
-        expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("Failed to fetch snapshot"),
-            expect.any(Error),
-        );
-        expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("Failed to persist snapshot"),
-            expect.any(Error),
-        );
-        expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("Failed to delete snapshot"),
-            expect.any(Error),
-        );
-    });
-
-    it("passes stateVersion/serverTime ordering values to compare-and-set writes", async () => {
-        const { listenTogetherStateStore, redisClient } = loadStateStore({
-            keyPrefix: "ordering-prefix",
-            ttlSeconds: "42",
-        });
-        const snapshot = {
-            id: "group-1",
-            playback: {
-                stateVersion: 99,
-                serverTime: 123_456_789,
-            },
-            members: [],
-        };
-
-        await listenTogetherStateStore.setSnapshot("group-1", snapshot);
-
-        expect(redisClient.eval).toHaveBeenCalledWith(
-            expect.any(String),
-            1,
-            "ordering-prefix:group-1",
-            JSON.stringify(snapshot),
-            "42",
-            "99",
-            "123456789",
-        );
-    });
-
-    it("disconnects redis client on stop", async () => {
-        const { listenTogetherStateStore, redisClient } = loadStateStore({
-            getValue: null,
-        });
-
-        await listenTogetherStateStore.getSnapshot("group-1");
-        listenTogetherStateStore.stop();
-
-        expect(redisClient.disconnect).toHaveBeenCalledTimes(1);
-    });
-
-    it("rejects non-object snapshots missing playback/members shape", async () => {
-        const { listenTogetherStateStore, redisClient } = loadStateStore({
-            getValue: "null",
-        });
-
-        await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
         ).resolves.toBeNull();
 
-        redisClient.get.mockResolvedValueOnce(
-            JSON.stringify({ id: "group-1" }),
-        );
-        await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toBeNull();
-
-        redisClient.get.mockResolvedValueOnce(
+        loaded.server.write(
+            "listen-together:state:group-1",
             JSON.stringify({ id: "group-1", playback: {}, members: {} }),
         );
         await expect(
-            listenTogetherStateStore.getSnapshot("group-1"),
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
         ).resolves.toBeNull();
+        expect(loaded.logger.warn).toHaveBeenCalledTimes(2);
     });
 
-    it("no-ops stop when redis client has not been initialized", async () => {
-        const { listenTogetherStateStore, redisClient } = loadStateStore();
+    it("propagates authoritative Redis read and write failures", async () => {
+        const loaded = loadStateStore();
+        loaded.server.beforeCommand = (command) => {
+            if (command.name === "GET") throw new Error("redis-get-down");
+            if (command.name === "EVAL") throw new Error("redis-eval-down");
+        };
 
-        listenTogetherStateStore.stop();
-        expect(redisClient.disconnect).not.toHaveBeenCalled();
+        await expect(
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).rejects.toThrow("redis-get-down");
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot() as any,
+            ),
+        ).rejects.toThrow("redis-eval-down");
+        expect(loaded.logger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it("executes token, version, and producer-time rejection semantics", async () => {
+        const loaded = loadStateStore();
+        await loaded.redisClient.incr(
+            "listen-together:mutation-lock:fencing-token:group-1",
+        );
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot("group-1", 20, 2_000) as any,
+                1,
+            ),
+        ).resolves.toBe("accepted");
+        await loaded.redisClient.incr(
+            "listen-together:mutation-lock:fencing-token:group-1",
+        );
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot("group-1", 19, 3_000) as any,
+                2,
+            ),
+        ).resolves.toBe("stale");
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot("group-1", 21, 4_000) as any,
+                1,
+            ),
+        ).resolves.toBe("stale");
+    });
+
+    it("guards deletion and fence claims with the allocation counter", async () => {
+        const loaded = loadStateStore();
+        await loaded.redisClient.incr(
+            "listen-together:mutation-lock:fencing-token:group-1",
+        );
+        await loaded.redisClient.incr(
+            "listen-together:mutation-lock:fencing-token:group-1",
+        );
+
+        await expect(
+            loaded.listenTogetherStateStore.claimFence("group-1", 1),
+        ).resolves.toBe("stale");
+        await expect(
+            loaded.listenTogetherStateStore.deleteSnapshot("group-1", 1),
+        ).resolves.toBe("stale");
+        await expect(
+            loaded.listenTogetherStateStore.claimFence("group-1", 2),
+        ).resolves.toBe("accepted");
+    });
+
+    it("rejects future tokens and permits only token zero before allocation", async () => {
+        const loaded = loadStateStore();
+
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot() as any,
+                9,
+            ),
+        ).resolves.toBe("stale");
+        await expect(
+            loaded.listenTogetherStateStore.setSnapshot(
+                "group-1",
+                snapshot() as any,
+                0,
+            ),
+        ).resolves.toBe("accepted");
+        await loaded.redisClient.incr(
+            "listen-together:mutation-lock:fencing-token:group-1",
+        );
+        await expect(
+            loaded.listenTogetherStateStore.claimFence("group-1", 2),
+        ).resolves.toBe("stale");
+        await expect(
+            loaded.listenTogetherStateStore.claimFence("group-1", 1),
+        ).resolves.toBe("accepted");
+    });
+
+    it("validates cluster events against the current counter and exact snapshot order", async () => {
+        const loaded = loadStateStore();
+        const counterKey =
+            "listen-together:mutation-lock:fencing-token:group-1";
+        await loaded.redisClient.incr(counterKey);
+        await loaded.listenTogetherStateStore.setSnapshot(
+            "group-1",
+            snapshot("group-1", 12, 34_567) as any,
+            1,
+        );
+
+        await expect(
+            loaded.listenTogetherStateStore.validatePublication(
+                "group-1",
+                "group-snapshot",
+                1,
+                snapshot() as any,
+            ),
+        ).resolves.toBe(true);
+        await loaded.redisClient.incr(counterKey);
+        await expect(
+            loaded.listenTogetherStateStore.validatePublication(
+                "group-1",
+                "group-snapshot",
+                1,
+                snapshot() as any,
+            ),
+        ).resolves.toBe(false);
+    });
+
+    it("disconnects an initialized client and tolerates an unused stop", async () => {
+        const unused = loadStateStore();
+        const unusedDisconnect = jest.spyOn(unused.redisClient, "disconnect");
+        unused.listenTogetherStateStore.stop();
+        expect(unusedDisconnect).not.toHaveBeenCalled();
+
+        const loaded = loadStateStore();
+        const disconnect = jest.spyOn(loaded.redisClient, "disconnect");
+        await loaded.listenTogetherStateStore.getSnapshot("group-1");
+        loaded.listenTogetherStateStore.stop();
+        expect(disconnect).toHaveBeenCalledTimes(1);
     });
 });

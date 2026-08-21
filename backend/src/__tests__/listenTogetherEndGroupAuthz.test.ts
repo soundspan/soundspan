@@ -13,14 +13,17 @@ export {};
 const mockSyncGroupFindUnique = jest.fn();
 const mockSyncGroupUpdate = jest.fn(async () => undefined);
 const mockSyncGroupMemberUpdateMany = jest.fn(async () => undefined);
-const mockTransaction = jest.fn(async (ops: unknown[]) =>
-    Promise.all(ops as Promise<unknown>[]),
-);
+const mockTransaction = jest.fn();
 
 // The mutation-lock module evaluates config at import; disable the Redis
 // lock so this suite needs no environment.
 jest.mock("../config", () => ({
-    config: { listenTogether: { mutationLockEnabled: false } },
+    config: {
+        listenTogether: {
+            mutationLockEnabled: false,
+            publicationDeadlineMs: 750,
+        },
+    },
 }));
 
 jest.mock("../utils/db", () => ({
@@ -65,7 +68,7 @@ jest.mock("../services/listenTogetherStateStore", () => ({
 }));
 
 import { endGroup } from "../services/listenTogether";
-import { groupManager, GroupError } from "../services/listenTogetherManager";
+import { groupManager } from "../services/listenTogetherManager";
 
 const GROUP_ID = "group-authz-test";
 const HOST_ID = "host-user";
@@ -74,6 +77,17 @@ const OTHER_ID = "not-the-host";
 describe("endGroup host authorization", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockTransaction.mockImplementation(async (operation: any) =>
+            operation({
+                syncGroup: {
+                    findUnique: mockSyncGroupFindUnique,
+                    update: mockSyncGroupUpdate,
+                },
+                syncGroupMember: {
+                    updateMany: mockSyncGroupMemberUpdateMany,
+                },
+            }),
+        );
         // Guarantee the group is not in local memory for the DB-path tests.
         groupManager.remove(GROUP_ID);
     });
@@ -84,15 +98,12 @@ describe("endGroup host authorization", () => {
             isActive: true,
         });
 
-        await expect(endGroup(OTHER_ID, GROUP_ID)).rejects.toBeInstanceOf(
-            GroupError,
-        );
         await expect(endGroup(OTHER_ID, GROUP_ID)).rejects.toMatchObject({
             code: "NOT_ALLOWED",
         });
 
         // The group must not be ended in the DB nor its snapshot dropped.
-        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
         expect(mockSyncGroupUpdate).not.toHaveBeenCalled();
         expect(mockDeleteSnapshot).not.toHaveBeenCalled();
     });
@@ -103,7 +114,7 @@ describe("endGroup host authorization", () => {
         await expect(endGroup(HOST_ID, GROUP_ID)).rejects.toMatchObject({
             code: "NOT_FOUND",
         });
-        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
     });
 
     it("rejects with NOT_FOUND when the group is already inactive", async () => {
@@ -115,7 +126,7 @@ describe("endGroup host authorization", () => {
         await expect(endGroup(HOST_ID, GROUP_ID)).rejects.toMatchObject({
             code: "NOT_FOUND",
         });
-        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
     });
 
     it("lets the host end a group that is not in local memory", async () => {
@@ -127,7 +138,10 @@ describe("endGroup host authorization", () => {
         await expect(endGroup(HOST_ID, GROUP_ID)).resolves.toBeUndefined();
 
         expect(mockTransaction).toHaveBeenCalledTimes(1);
-        expect(mockDeleteSnapshot).toHaveBeenCalledWith(GROUP_ID);
+        expect(mockDeleteSnapshot).toHaveBeenCalledWith(
+            GROUP_ID,
+            expect.any(Number),
+        );
     });
 
     it("still rejects a non-host caller when the group IS in local memory", async () => {
@@ -163,7 +177,7 @@ describe("endGroup host authorization", () => {
             await expect(endGroup(OTHER_ID, GROUP_ID)).rejects.toMatchObject({
                 code: "NOT_ALLOWED",
             });
-            expect(mockTransaction).not.toHaveBeenCalled();
+            expect(mockTransaction).toHaveBeenCalledTimes(1);
         } finally {
             groupManager.remove(GROUP_ID);
         }

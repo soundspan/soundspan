@@ -116,7 +116,7 @@ const LEAK_BASELINE = Object.freeze({
     // lastfm.ts +1: the same logger-only detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/lastfm.ts": 2,
     // listenTogetherSocket.ts +4: GroupError ternary-consequent messages forwarded through socket acknowledgements; frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/listenTogetherSocket.ts": 4,
+    "backend/src/services/listenTogetherSocket.ts": 0,
     // lidarr.ts remaining 3: { success, message } Lidarr client results (~L1651, ~L1732, ~L2152) consumed by admin Lidarr management flows; frozen under the slice-E scope guard.
     "backend/src/services/lidarr.ts": 3,
     // moodBucketService.ts remaining 1: error-classification const (~L185), never a response body; frozen under the slice-E scope guard.

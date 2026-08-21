@@ -46,6 +46,10 @@ interface ListenTogetherAckLikeError extends Error {
     retryAfterMs?: number;
 }
 
+interface ListenTogetherMembershipError extends Error {
+    code?: string;
+}
+
 const HOST_TRACK_OPERATION_CONFLICT_RECOVERY_MAX_RETRIES = 12;
 const log = frontendLogger.child("ListenTogetherSession");
 const LISTEN_TOGETHER_OPTIMISTIC_TRACK_SELECTION_POLICY: ListenTogetherOptimisticTrackSelectionPolicy =
@@ -228,6 +232,15 @@ export async function requestListenTogetherGroupResync(
     }
 
     await listenTogetherSocket.joinGroup(targetGroupId);
+}
+
+/** Return whether a resync rejection proves that group membership is gone. */
+export function isTerminalListenTogetherMembershipError(
+    error: unknown,
+): boolean {
+    if (!(error instanceof Error)) return false;
+    const code = (error as ListenTogetherMembershipError).code;
+    return code === "NOT_MEMBER" || code === "NOT_FOUND";
 }
 
 /** Starts a bounded group resync and reports any terminal failure. */

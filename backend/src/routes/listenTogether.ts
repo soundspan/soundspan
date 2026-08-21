@@ -83,9 +83,10 @@ function handleError(label: string, error: unknown, res: Response) {
             NOT_ALLOWED: 403,
             INVALID: 400,
             CONFLICT: 409,
+            UNAVAILABLE: 503,
         };
         const status = statusMap[error.code] ?? 500;
-        if (status >= 500) {
+        if (status === 500) {
             logger.error(`[ListenTogether] ${label}:`, error.message);
             return res.status(status).json({ error: "Internal server error" });
         }

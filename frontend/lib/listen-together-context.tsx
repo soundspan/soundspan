@@ -31,8 +31,8 @@ import {
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { useAudioState, type Track } from "@/lib/audio-state-context";
-import { isEpisodeQueueItem, type QueueItem } from "@/lib/queue-item";
+import { useAudioState } from "@/lib/audio-state-context";
+import { isEpisodeQueueItem } from "@/lib/queue-item";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import {
@@ -48,7 +48,6 @@ import {
     type GroupAvailabilityEvent,
     type WaitingEvent,
     type PlayAtEvent,
-    type SyncQueueItem,
 } from "@/lib/listen-together-socket";
 import {
     canIssueListenTogetherHostPlaybackCommand,
@@ -61,16 +60,27 @@ import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherOptimisticTrackSelectionPolicy,
     getListenTogetherSessionSnapshot,
-    scheduleListenTogetherGroupResync,
+    isTerminalListenTogetherMembershipError,
+    requestListenTogetherGroupResync,
     setListenTogetherMembershipPending,
     setListenTogetherSessionSnapshot,
 } from "@/lib/listen-together-session";
 import { resolveListenTogetherNavigationIndex } from "@/lib/listen-together-navigation";
 import {
-    normalizeCanonicalMediaProviderIdentity,
-    toLegacyStreamFields,
-} from "@soundspan/media-metadata-contract";
-import { toAddToPlaylistRef } from "@/lib/trackRef";
+    extractQueueTrackInputs,
+    ListenTogetherMembershipOrdering,
+    ListenTogetherResyncOwnership,
+    resolveListenTogetherMembershipPendingState,
+    resolveListenTogetherReadyReportRecoveryAction,
+    scheduleGenerationScopedListenTogetherResync,
+    toLocalTrack,
+} from "@/lib/listenTogetherContextState";
+export {
+    resolveListenTogetherMembershipPendingState,
+    resolveListenTogetherReadyReportRecoveryAction,
+    type ListenTogetherMembershipPendingOperation,
+    type ListenTogetherReadyReportRecoveryAction,
+} from "@/lib/listenTogetherContextState";
 import {
     isPlaybackAutoRestartSuppressed,
     markRemoteTrackChange as markTrackChange,
@@ -81,6 +91,7 @@ import {
     resumeListenTogetherPlayback,
 } from "@/lib/audio-engine/listenTogetherPlaybackResume";
 const playbackEngine = createRuntimeAudioEngine();
+const log = sharedFrontendLogger.child("ListenTogetherContext");
 const LT_READY_REPORT_POLL_INTERVAL_MS = 100;
 const LT_READY_REPORT_DELAY_MS = 150;
 const LT_READY_REPORT_RETRY_DELAY_MS = 180;
@@ -153,118 +164,6 @@ const ListenTogetherContext = createContext<
 >(undefined);
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Convert a SyncQueueItem to a local Track for the audio player. */
-function toLocalTrack(
-    item: SyncQueueItem,
-    availability?: AvailabilityItem,
-): Track {
-    const resolvedSource = availability?.source;
-    const effectiveSource = resolvedSource ?? item.originSource;
-    const effectiveLocalTrackId =
-        availability?.localTrackId ?? item.localTrackId;
-    const effectiveTidalTrackId =
-        availability?.tidalTrackId ??
-        item.provider?.tidalTrackId ??
-        item.tidalTrackId;
-    const effectiveYoutubeVideoId =
-        availability?.youtubeVideoId ??
-        item.provider?.youtubeVideoId ??
-        item.youtubeVideoId;
-    const effectiveTrackId =
-        effectiveSource === "local"
-            ? (effectiveLocalTrackId ?? item.id)
-            : item.id;
-    const provider = normalizeCanonicalMediaProviderIdentity({
-        mediaSource: effectiveSource === "local" ? "local" : item.mediaSource,
-        providerTrackId: item.provider?.providerTrackId,
-        tidalTrackId:
-            effectiveSource === "youtube" ? undefined : effectiveTidalTrackId,
-        youtubeVideoId:
-            effectiveSource === "tidal" ? undefined : effectiveYoutubeVideoId,
-        youtubeAudioFormat:
-            item.provider?.youtubeAudioFormat ?? item.youtubeAudioFormat,
-        streamSource:
-            effectiveSource === "local"
-                ? undefined
-                : (effectiveSource ?? item.streamSource),
-    });
-    const legacyStreamFields = toLegacyStreamFields(provider);
-
-    return {
-        id: effectiveTrackId,
-        title: item.title,
-        duration: item.duration,
-        artist: { id: item.artist.id, name: item.artist.name },
-        album: {
-            id: item.album.id,
-            title: item.album.title,
-            coverArt: item.album.coverArt ?? undefined,
-        },
-        mediaSource: provider.source,
-        provider,
-        ...legacyStreamFields,
-    };
-}
-
-function extractQueueTrackInputs(
-    queue: readonly QueueItem[],
-    currentTrack: Track | null,
-): {
-    queueTracks: QueueTrackInput[];
-    currentTrackId?: string;
-} {
-    const source: readonly QueueItem[] =
-        queue.length > 0 ? queue : currentTrack ? [currentTrack] : [];
-    const queueTracks: QueueTrackInput[] = [];
-    for (const track of source) {
-        // Listen Together queues are music-only; skip podcast episodes.
-        if (isEpisodeQueueItem(track)) continue;
-        try {
-            queueTracks.push(toAddToPlaylistRef(track));
-        } catch {
-            continue;
-        }
-    }
-
-    const currentTrackId =
-        currentTrack && queueTracks.length > 0 ? currentTrack.id : undefined;
-    return { queueTracks, currentTrackId };
-}
-
-export type ListenTogetherMembershipPendingOperation = "create" | "join" | null;
-
-/**
- * Executes resolveListenTogetherMembershipPendingState.
- */
-export function resolveListenTogetherMembershipPendingState(
-    operation: ListenTogetherMembershipPendingOperation,
-): boolean {
-    return operation === "create" || operation === "join";
-}
-
-export type ListenTogetherReadyReportRecoveryAction =
-    | "retry"
-    | "terminal-retry"
-    | "recover";
-
-/**
- * Executes resolveListenTogetherReadyReportRecoveryAction.
- */
-export function resolveListenTogetherReadyReportRecoveryAction(input: {
-    elapsedMs: number;
-    maxWaitMs: number;
-    terminalRetryAttempted: boolean;
-}): ListenTogetherReadyReportRecoveryAction {
-    if (input.elapsedMs < input.maxWaitMs) {
-        return "retry";
-    }
-    return input.terminalRetryAttempted ? "recover" : "terminal-retry";
-}
-
-// ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
@@ -306,6 +205,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     // Refs to avoid stale closures in socket callbacks
     const activeGroupRef = useRef<GroupSnapshot | null>(null);
     const lastAppliedVersionRef = useRef(0);
+    const membershipOrderingRef = useRef(
+        new ListenTogetherMembershipOrdering(),
+    );
+    const resyncOwnershipRef = useRef(new ListenTogetherResyncOwnership());
     const isApplyingRemoteRef = useRef(false);
     const pendingHostTrackIndexRef = useRef<number | null>(null);
     const hostMustAdoptGroupPositionRef = useRef(false);
@@ -385,8 +288,27 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         }
     }, [clearAvailabilitySwapLoadListener, clearReadyReportLoadListener]);
 
+    const advanceMembershipSessionGeneration = useCallback(() => {
+        resyncOwnershipRef.current.advance();
+    }, []);
+
+    const adoptActiveMembership = useCallback(
+        (group: GroupSnapshot) => {
+            advanceMembershipSessionGeneration();
+            lastAppliedVersionRef.current = group.playback?.stateVersion ?? 0;
+            membershipOrderingRef.current.adopt(
+                group.id,
+                group.membershipVersion,
+            );
+            activeGroupRef.current = group;
+            setActiveGroup(group);
+        },
+        [advanceMembershipSessionGeneration],
+    );
+
     const clearActiveMembership = useCallback(() => {
         clearActiveSessionTimers();
+        advanceMembershipSessionGeneration();
         activeGroupRef.current = null;
         setActiveGroup(null);
         setTrackAvailability(new Map());
@@ -399,6 +321,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         setIsConnected(false);
         setReconnectAttempt(0);
         lastAppliedVersionRef.current = 0;
+        membershipOrderingRef.current.clear();
         pendingHostTrackIndexRef.current = null;
         hostMustAdoptGroupPositionRef.current = false;
         awaitingInitialStateRef.current = true;
@@ -406,7 +329,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         isApplyingRemoteRef.current = false;
         lastLoadedTrackIdRef.current = null;
         listenTogetherSocket.disconnect();
-    }, [clearActiveSessionTimers]);
+    }, [advanceMembershipSessionGeneration, clearActiveSessionTimers]);
 
     const handleMembershipRevoked = useCallback(
         (revokedGroupId: string) => {
@@ -415,6 +338,22 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             toast.info("You left the Listen Together group");
         },
         [clearActiveMembership],
+    );
+
+    const scheduleGroupResync = useCallback(
+        (requestedGroupId?: string | null) => {
+            scheduleGenerationScopedListenTogetherResync({
+                groupId: requestedGroupId ?? activeGroupRef.current?.id ?? null,
+                ownership: resyncOwnershipRef.current,
+                request: requestListenTogetherGroupResync,
+                isTerminalError: isTerminalListenTogetherMembershipError,
+                onTerminalError: handleMembershipRevoked,
+                onTransientError: (resyncError) => {
+                    log.warn("Group resync failed", { error: resyncError });
+                },
+            });
+        },
+        [handleMembershipRevoked],
     );
 
     // Keep refs in sync
@@ -807,7 +746,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             const shouldApplyPlayback = forceApply
                 ? incomingVersion >= lastAppliedVersionRef.current
                 : incomingVersion > lastAppliedVersionRef.current;
-
+            const shouldApplyMembership = membershipOrderingRef.current.accepts(
+                snapshot.id,
+                snapshot.membershipVersion,
+            );
             setActiveGroup((prev) => {
                 let next: GroupSnapshot;
                 if (!prev || shouldApplyPlayback) {
@@ -821,6 +763,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         playback: prev.playback,
                     };
                 }
+                next = membershipOrderingRef.current.preserveNewerMembership(
+                    next,
+                    prev,
+                    shouldApplyMembership,
+                );
                 // Sync ref immediately so socket handlers that read activeGroupRef
                 // (e.g. onAvailability) see the latest state without waiting for
                 // the useEffect render cycle.
@@ -956,11 +903,30 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     /** Connect to Socket.IO and wire up event handlers. */
     const connectSocket = useCallback(
         (groupId: string, options?: { adoptGroupPosition?: boolean }) => {
+            membershipOrderingRef.current.accepts(
+                groupId,
+                activeGroupRef.current?.id === groupId
+                    ? activeGroupRef.current.membershipVersion
+                    : undefined,
+            );
             awaitingInitialStateRef.current = true;
             // One-shot adoption: only a session's first-ever connection
             // hydrates; reading the ref here avoids stale-closure decisions.
             hostMustAdoptGroupPositionRef.current =
                 options?.adoptGroupPosition ?? !hasEverConnectedRef.current;
+
+            const shouldApplyMembershipEvent = (
+                membershipVersion?: number,
+            ): boolean => {
+                const decision = membershipOrderingRef.current.decideEvent(
+                    groupId,
+                    membershipVersion,
+                );
+                if (decision === "resync") {
+                    scheduleGroupResync(groupId);
+                }
+                return decision === "apply";
+            };
 
             listenTogetherSocket.connect({
                 onGroupState: (snapshot) => {
@@ -1078,9 +1044,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         if (recoveryTriggered) return;
                         recoveryTriggered = true;
                         sharedFrontendLogger.warn(reason, details);
-                        scheduleListenTogetherGroupResync(
-                            activeGroupRef.current?.id,
-                        );
+                        scheduleGroupResync(activeGroupRef.current?.id);
                     };
 
                     const tryReportReady = () => {
@@ -1328,6 +1292,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 },
                 onMemberJoined: (data) => {
                     if (isStaleGroupEvent(data, groupId)) return;
+                    if (!shouldApplyMembershipEvent(data.membershipVersion))
+                        return;
                     if (data.userId !== user?.id)
                         toast.info(`${data.username} joined`);
                     setActiveGroup((prev) => {
@@ -1338,6 +1304,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         if (exists) return prev;
                         const next = {
                             ...prev,
+                            membershipVersion:
+                                data.membershipVersion ??
+                                prev.membershipVersion,
                             members: [
                                 ...prev.members,
                                 {
@@ -1355,12 +1324,25 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 },
                 onMemberPresence: (data) => {
                     if (isStaleGroupEvent(data, groupId)) return;
-                    setActiveGroup((prev) =>
-                        applyGroupMemberPresence(prev, data),
-                    );
+                    if (!shouldApplyMembershipEvent(data.membershipVersion))
+                        return;
+                    setActiveGroup((prev) => {
+                        const updated = applyGroupMemberPresence(prev, data);
+                        if (!updated) return updated;
+                        const next = {
+                            ...updated,
+                            membershipVersion:
+                                data.membershipVersion ??
+                                updated.membershipVersion,
+                        };
+                        activeGroupRef.current = next;
+                        return next;
+                    });
                 },
                 onMemberLeft: (data) => {
                     if (isStaleGroupEvent(data, groupId)) return;
+                    if (!shouldApplyMembershipEvent(data.membershipVersion))
+                        return;
                     if (data.userId === user?.id) {
                         handleMembershipRevoked(data.groupId ?? groupId);
                         return;
@@ -1370,6 +1352,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         if (!prev) return prev;
                         const updated = {
                             ...prev,
+                            membershipVersion:
+                                data.membershipVersion ??
+                                prev.membershipVersion,
                             members: prev.members.filter(
                                 (m) => m.userId !== data.userId,
                             ),
@@ -1389,7 +1374,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     });
                 },
                 onMembershipRevoked: (data) => {
+                    if (!shouldApplyMembershipEvent(data.membershipVersion))
+                        return false;
                     handleMembershipRevoked(data.groupId);
+                    return true;
                 },
                 onGroupEnded: (_data) => {
                     clearActiveMembership();
@@ -1451,9 +1439,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     void validateSocketRoute(true);
                 },
                 onRejoinFailed: () => {
-                    scheduleListenTogetherGroupResync(
-                        activeGroupRef.current?.id,
-                    );
+                    scheduleGroupResync(activeGroupRef.current?.id);
                 },
                 onDisconnect: (_reason) => {
                     // Defer the visual disconnect; if Socket.IO reconnects within
@@ -1497,6 +1483,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             clearReadyReportLoadListener,
             handleMembershipRevoked,
             recoverAudioAfterReconnect,
+            scheduleGroupResync,
             scheduleRouteRecheck,
             user?.id,
             validateSocketRoute,
@@ -1511,10 +1498,12 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (!isAuthenticated) {
             setListenTogetherMembershipPending(false);
             queueMicrotask(() => {
+                advanceMembershipSessionGeneration();
                 activeGroupRef.current = null;
                 setActiveGroup(null);
                 setIsLoading(false);
                 lastAppliedVersionRef.current = 0;
+                membershipOrderingRef.current.clear();
                 setSocketRouteStatus("ok");
                 setSocketRouteError(null);
             });
@@ -1545,9 +1534,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 if (!mounted) return;
 
                 if (!groupSnapshot || !groupSnapshot.id) {
+                    advanceMembershipSessionGeneration();
                     activeGroupRef.current = null;
                     setActiveGroup(null);
                     lastAppliedVersionRef.current = 0;
+                    membershipOrderingRef.current.clear();
                     setIsLoading(false);
                     return;
                 }
@@ -1560,18 +1551,17 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     sharedFrontendLogger.warn(
                         "[ListenTogether] Received malformed group snapshot, ignoring",
                     );
+                    advanceMembershipSessionGeneration();
                     activeGroupRef.current = null;
                     setActiveGroup(null);
                     lastAppliedVersionRef.current = 0;
+                    membershipOrderingRef.current.clear();
                     setIsLoading(false);
                     return;
                 }
 
                 // We have an active group — connect socket
-                lastAppliedVersionRef.current =
-                    groupSnapshot.playback?.stateVersion ?? 0;
-                activeGroupRef.current = groupSnapshot;
-                setActiveGroup(groupSnapshot);
+                adoptActiveMembership(groupSnapshot);
                 setIsLoading(false);
                 if (routeOk) {
                     connectSocket(groupSnapshot.id);
@@ -1589,7 +1579,12 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         return () => {
             mounted = false;
         };
-    }, [isAuthenticated, connectSocket]);
+    }, [
+        adoptActiveMembership,
+        advanceMembershipSessionGeneration,
+        isAuthenticated,
+        connectSocket,
+    ]);
 
     // Disconnect socket when group goes away
     useEffect(() => {
@@ -1786,10 +1781,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     );
                 }
 
-                lastAppliedVersionRef.current =
-                    group.playback?.stateVersion ?? 0;
-                activeGroupRef.current = group;
-                setActiveGroup(group);
+                adoptActiveMembership(group);
 
                 // The creator has no server position to adopt.
                 connectSocket(group.id, { adoptGroupPosition: false });
@@ -1814,6 +1806,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             audioState.queue,
             audioState.currentTrack,
             audioState.playbackType,
+            adoptActiveMembership,
             connectSocket,
             validateSocketRoute,
         ],
@@ -1838,10 +1831,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 }
                 const group = await api.joinListenGroup(joinCode);
 
-                lastAppliedVersionRef.current =
-                    group.playback?.stateVersion ?? 0;
-                activeGroupRef.current = group;
-                setActiveGroup(group);
+                adoptActiveMembership(group);
 
                 // Connect socket — applyGroupState will run on first group:state event
                 connectSocket(group.id);
@@ -1860,7 +1850,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 );
             }
         },
-        [connectSocket, validateSocketRoute],
+        [adoptActiveMembership, connectSocket, validateSocketRoute],
     );
 
     const leaveGroupAction = useCallback(async () => {

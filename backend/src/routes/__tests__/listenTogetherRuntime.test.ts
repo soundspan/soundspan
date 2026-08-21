@@ -280,7 +280,8 @@ describe("listenTogether routes runtime", () => {
                 | "NOT_MEMBER"
                 | "NOT_ALLOWED"
                 | "INVALID"
-                | "CONFLICT";
+                | "CONFLICT"
+                | "UNAVAILABLE";
             status: number;
         }> = [
             { code: "NOT_FOUND", status: 404 },
@@ -288,6 +289,7 @@ describe("listenTogether routes runtime", () => {
             { code: "NOT_ALLOWED", status: 403 },
             { code: "INVALID", status: 400 },
             { code: "CONFLICT", status: 409 },
+            { code: "UNAVAILABLE", status: 503 },
         ];
 
         for (const testCase of cases) {

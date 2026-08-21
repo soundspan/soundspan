@@ -2,6 +2,14 @@ import { logger } from "../utils/logger";
 import { createIORedisClient } from "../utils/ioredis";
 import type { GroupSnapshot } from "./listenTogetherManager";
 import { config } from "../config";
+import { withListenTogetherDeadline } from "./listenTogetherDeadline";
+import type { FencedStateWriteResult } from "./listenTogetherLeaseFencing";
+import {
+    LISTEN_TOGETHER_CLAIM_FENCE_SCRIPT,
+    LISTEN_TOGETHER_DELETE_SNAPSHOT_SCRIPT,
+    LISTEN_TOGETHER_SET_SNAPSHOT_SCRIPT,
+    LISTEN_TOGETHER_VALIDATE_PUBLICATION_SCRIPT,
+} from "./listenTogetherRedisScripts";
 
 const LISTEN_TOGETHER_STATE_STORE_ENABLED =
     config.listenTogether.stateStoreEnabled;
@@ -9,6 +17,10 @@ const LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX =
     config.listenTogether.stateStoreKeyPrefix;
 const LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS =
     config.listenTogether.stateStoreTtlSeconds;
+const LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS =
+    config.listenTogether.publicationDeadlineMs;
+const LISTEN_TOGETHER_MUTATION_LOCK_PREFIX =
+    config.listenTogether.mutationLockPrefix ?? "listen-together:mutation-lock";
 
 function isLikelyGroupSnapshot(value: unknown): value is GroupSnapshot {
     if (!value || typeof value !== "object") return false;
@@ -39,32 +51,6 @@ function snapshotOrdering(snapshot: GroupSnapshot): {
     };
 }
 
-const SET_IF_FRESHER_SCRIPT = `
-local key = KEYS[1]
-local incomingRaw = ARGV[1]
-local ttlSeconds = tonumber(ARGV[2])
-local incomingStateVersion = tonumber(ARGV[3]) or 0
-local incomingServerTime = tonumber(ARGV[4]) or 0
-
-local existingRaw = redis.call('get', key)
-if existingRaw then
-  local ok, existing = pcall(cjson.decode, existingRaw)
-  if ok and existing and existing.playback then
-    local existingStateVersion = tonumber(existing.playback.stateVersion) or 0
-    local existingServerTime = tonumber(existing.playback.serverTime) or 0
-    if incomingStateVersion < existingStateVersion then
-      return 0
-    end
-    if incomingStateVersion == existingStateVersion and incomingServerTime < existingServerTime then
-      return 0
-    end
-  end
-end
-
-redis.call('set', key, incomingRaw, 'EX', ttlSeconds)
-return 1
-`;
-
 class ListenTogetherStateStore {
     private client: ReturnType<typeof createIORedisClient> | null = null;
 
@@ -83,13 +69,25 @@ class ListenTogetherStateStore {
         return `${LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX}:${groupId}`;
     }
 
+    private fenceKey(groupId: string): string {
+        return `${LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX}:fence:${groupId}`;
+    }
+
+    private fencingCounterKey(groupId: string): string {
+        return `${LISTEN_TOGETHER_MUTATION_LOCK_PREFIX}:fencing-token:${groupId}`;
+    }
+
     async getSnapshot(groupId: string): Promise<GroupSnapshot | null> {
         if (!LISTEN_TOGETHER_STATE_STORE_ENABLED) {
             return null;
         }
 
         try {
-            const raw = await this.ensureClient().get(this.key(groupId));
+            const raw = await withListenTogetherDeadline(
+                this.ensureClient().get(this.key(groupId)),
+                "listen together snapshot read",
+                LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
+            );
             if (!raw) return null;
             const parsed = JSON.parse(raw) as unknown;
             if (!isLikelyGroupSnapshot(parsed)) {
@@ -110,47 +108,111 @@ class ListenTogetherStateStore {
                 `[ListenTogether/StateStore] Failed to fetch snapshot for group ${groupId}`,
                 err,
             );
-            return null;
+            throw err;
         }
     }
 
-    async setSnapshot(groupId: string, snapshot: GroupSnapshot): Promise<void> {
+    async setSnapshot(
+        groupId: string,
+        snapshot: GroupSnapshot,
+        fencingToken: number = 0,
+    ): Promise<FencedStateWriteResult> {
         if (!LISTEN_TOGETHER_STATE_STORE_ENABLED) {
-            return;
+            return "accepted";
         }
 
-        try {
-            const ordering = snapshotOrdering(snapshot);
-            await this.ensureClient().eval(
-                SET_IF_FRESHER_SCRIPT,
-                1,
+        const ordering = snapshotOrdering(snapshot);
+        const result = await withListenTogetherDeadline(
+            this.ensureClient().eval(
+                LISTEN_TOGETHER_SET_SNAPSHOT_SCRIPT,
+                3,
                 this.key(groupId),
+                this.fenceKey(groupId),
+                this.fencingCounterKey(groupId),
                 JSON.stringify(snapshot),
                 `${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS}`,
                 `${ordering.stateVersion}`,
                 `${ordering.serverTime}`,
-            );
-        } catch (err) {
-            logger.warn(
-                `[ListenTogether/StateStore] Failed to persist snapshot for group ${groupId}`,
-                err,
-            );
-        }
+                `${fencingToken}`,
+            ),
+            "listen together snapshot persistence",
+            LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
+        );
+        return result === 1 ? "accepted" : "stale";
     }
 
-    async deleteSnapshot(groupId: string): Promise<void> {
+    async deleteSnapshot(
+        groupId: string,
+        fencingToken: number = 0,
+    ): Promise<FencedStateWriteResult> {
         if (!LISTEN_TOGETHER_STATE_STORE_ENABLED) {
-            return;
+            return "accepted";
         }
 
-        try {
-            await this.ensureClient().del(this.key(groupId));
-        } catch (err) {
-            logger.warn(
-                `[ListenTogether/StateStore] Failed to delete snapshot for group ${groupId}`,
-                err,
-            );
-        }
+        const result = await withListenTogetherDeadline(
+            this.ensureClient().eval(
+                LISTEN_TOGETHER_DELETE_SNAPSHOT_SCRIPT,
+                3,
+                this.key(groupId),
+                this.fenceKey(groupId),
+                this.fencingCounterKey(groupId),
+                `${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS}`,
+                `${fencingToken}`,
+            ),
+            "listen together snapshot deletion",
+            LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
+        );
+        return result === 1 ? "accepted" : "stale";
+    }
+
+    async claimFence(
+        groupId: string,
+        fencingToken: number = 0,
+    ): Promise<FencedStateWriteResult> {
+        if (!LISTEN_TOGETHER_STATE_STORE_ENABLED) return "accepted";
+
+        const result = await withListenTogetherDeadline(
+            this.ensureClient().eval(
+                LISTEN_TOGETHER_CLAIM_FENCE_SCRIPT,
+                2,
+                this.fenceKey(groupId),
+                this.fencingCounterKey(groupId),
+                `${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS}`,
+                `${fencingToken}`,
+            ),
+            "listen together publication fence",
+            LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
+        );
+        return result === 1 ? "accepted" : "stale";
+    }
+
+    /** Check a received cluster event against the durable Redis authority. */
+    async validatePublication(
+        groupId: string,
+        eventType: "group-snapshot" | "group-membership" | "group-ended",
+        fencingToken: number,
+        snapshot?: GroupSnapshot,
+    ): Promise<boolean> {
+        if (!LISTEN_TOGETHER_STATE_STORE_ENABLED) return false;
+        const ordering = snapshot
+            ? snapshotOrdering(snapshot)
+            : { stateVersion: 0, serverTime: 0 };
+        const result = await withListenTogetherDeadline(
+            this.ensureClient().eval(
+                LISTEN_TOGETHER_VALIDATE_PUBLICATION_SCRIPT,
+                3,
+                this.key(groupId),
+                this.fenceKey(groupId),
+                this.fencingCounterKey(groupId),
+                `${fencingToken}`,
+                eventType,
+                `${ordering.stateVersion}`,
+                `${ordering.serverTime}`,
+            ),
+            "listen together cluster publication validation",
+            LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
+        );
+        return result === 1;
     }
 
     stop(): void {

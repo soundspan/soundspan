@@ -3,6 +3,10 @@ import type {
     GroupSnapshot,
     GroupState,
 } from "./listenTogetherManager";
+import {
+    computePosition,
+    currentTrackId,
+} from "./listenTogetherPlaybackPosition";
 
 /** Authoritative active membership loaded from the database. */
 export interface PersistedGroupMember {
@@ -121,6 +125,42 @@ export function advanceSnapshotWatermark(
     incoming: number,
 ): number {
     return Math.max(current, incoming);
+}
+
+/** Serialize one in-memory group and advance its producer-time watermark. */
+export function createGroupSnapshot(
+    group: GroupState,
+    serverTime: number,
+): GroupSnapshot {
+    const playback = group.playback;
+    playback.lastAppliedSnapshotServerTime = advanceSnapshotWatermark(
+        playback.lastAppliedSnapshotServerTime,
+        serverTime,
+    );
+    return {
+        id: group.id,
+        name: group.name,
+        joinCode: group.joinCode,
+        groupType: group.groupType,
+        visibility: group.visibility,
+        isActive: true,
+        hostUserId: group.hostUserId,
+        membershipVersion: group.membershipVersion,
+        syncState: group.syncState,
+        readyDeadlineMs:
+            group.syncState === "waiting" ? group.readyDeadlineMs : null,
+        readyUserIds: Array.from(group.readyUserIds),
+        playback: {
+            queue: playback.queue,
+            currentIndex: playback.currentIndex,
+            isPlaying: playback.isPlaying,
+            positionMs: computePosition(playback),
+            serverTime,
+            stateVersion: playback.stateVersion,
+            trackId: currentTrackId(playback),
+        },
+        members: snapshotMembers(group.members),
+    };
 }
 
 /** Merge snapshot membership while retaining members connected to this pod. */

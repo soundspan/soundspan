@@ -198,7 +198,7 @@ password and no other linked identity.
 | ------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `Play`                          | Play history — links to `Track?`, `TrackTidal?`, `TrackYtMusic?`, `ListenSource` enum             |
 | `PlaybackState`                 | Per-user per-device queue/position state                                                          |
-| `SyncGroup` / `SyncGroupMember` | Listen Together sessions                                                                          |
+| `SyncGroup` / `SyncGroupMember` | Listen Together sessions; `membershipFence` rejects commits from expired distributed lease holders |
 | `ListeningState`                | Resume position for audiobooks/podcasts                                                           |
 | `LikedTrack`                    | Local track likes                                                                                 |
 | `LikedRemoteTrack`              | Remote track likes (Tidal/YT Music)                                                               |

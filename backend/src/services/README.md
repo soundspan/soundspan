@@ -92,12 +92,27 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/libraryTrackPreferences.ts` | Core |
 | `backend/src/services/lidarr.ts` | Core |
 | `backend/src/services/listenTogether.ts` | Core |
-| `backend/src/services/listenTogetherCallbacks.ts` | Socket-facing manager callback contracts |
-| `backend/src/services/listenTogetherClusterSync.ts` | Core |
-| `backend/src/services/listenTogetherManager.ts` | Core |
+| `backend/src/services/listenTogetherAvailability.ts` | Queue identity checks for late availability resolution |
+| `backend/src/services/listenTogetherAvailabilityPublication.ts` | Resolve, revalidate, and publish per-user queue availability |
+| `backend/src/services/listenTogetherCallbacks.ts` | Per-stage fenced snapshot, membership, and socket publication queue |
+| `backend/src/services/listenTogetherClusterSync.ts` | Post-authority-check deferred cluster effects and replay watermarks |
+| `backend/src/services/listenTogetherDeadline.ts` | Bounded Listen Together Redis and publication operations |
+| `backend/src/services/listenTogetherExternalSnapshot.ts` | Bounded adoption of externally produced group snapshots |
+| `backend/src/services/listenTogetherGroupError.ts` | Stable Listen Together domain error |
+| `backend/src/services/listenTogetherLeaseFencing.ts` | Mutation fencing contracts |
+| `backend/src/services/listenTogetherInternalCompletion.ts` | Bounded ready-gate completion retry policy |
+| `backend/src/services/listenTogetherManager.ts` | In-memory group state and shared normal/shutdown playback transitions |
+| `backend/src/services/listenTogetherMembershipFence.ts` | Pre-write and pre-commit lease validation around PostgreSQL membership fencing |
+| `backend/src/services/listenTogetherMembershipPublication.ts` | Committed membership overlay and publication |
+| `backend/src/services/listenTogetherMutationAdmission.ts` | Command-owned HTTP/socket admission, shutdown-owned work, and fixed-deadline drain |
+| `backend/src/services/listenTogetherMutationLock.ts` | Renewable per-group mutation leases and fencing tokens |
+| `backend/src/services/listenTogetherPlaybackPosition.ts` | Playback position calculations |
+| `backend/src/services/listenTogetherPersistenceState.ts` | Publication eligibility for periodic persistence |
+| `backend/src/services/listenTogetherReadyGate.ts` | Ready-gate state transitions |
 | `backend/src/services/listenTogetherResolution.ts` | Core |
-| `backend/src/services/listenTogetherSnapshot.ts` | Snapshot membership and playback adoption helpers |
-| `backend/src/services/listenTogetherSocket.ts` | Core |
+| `backend/src/services/listenTogetherSnapshot.ts` | Version-aware snapshot membership and playback adoption helpers |
+| `backend/src/services/listenTogetherShutdownDrain.ts` | Shared shutdown drain deadline and outcome |
+| `backend/src/services/listenTogetherSocket.ts` | Socket command admission, fenced mutation orchestration, and ordered fanout |
 | `backend/src/services/listenTogetherStateStore.ts` | Core |
 | `backend/src/services/lyrics.ts` | Core |
 | `backend/src/services/m3uParser.ts` | Core |

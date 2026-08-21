@@ -181,6 +181,7 @@ model SyncGroup {
   isPlaying      Boolean  @default(false)
   currentTime    Float    @default(0)
   stateVersion   Int      @default(0) // Monotonic counter
+  membershipFence BigInt  @default(0) // Last distributed membership fencing token
   stateUpdatedAt DateTime @default(now())
 
   endedAt   DateTime?

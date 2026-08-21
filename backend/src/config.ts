@@ -54,6 +54,19 @@ const boundedPositiveIntEnvOr = (
         : fallback;
 };
 
+const listenTogetherMutationLockTtlMs = positiveIntEnvOr(
+    process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS,
+    3000,
+);
+const listenTogetherMutationLockRenewIntervalMs = positiveIntEnvOr(
+    process.env.LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS,
+    Math.max(1, Math.floor(listenTogetherMutationLockTtlMs / 3)),
+);
+const listenTogetherPublicationDeadlineMs = positiveIntEnvOr(
+    process.env.LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
+    Math.max(1, Math.min(750, listenTogetherMutationLockTtlMs - 1)),
+);
+
 // Playback trace logging accepts a wider truthy set than isEnvFlagEnabled.
 const TRACE_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const isTraceTruthy = (value: string | undefined): boolean => {
@@ -102,6 +115,70 @@ const positiveIntegerEnvSchema = z
     })
     .optional();
 const booleanEnvSchema = z.enum(["true", "false"]).optional();
+const listenTogetherLockTtlEnvSchema = z
+    .string()
+    .regex(/^\d+$/, {
+        message:
+            "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS must be an integer greater than or equal to 500",
+    })
+    .refine((value) => Number.isSafeInteger(Number(value)), {
+        message:
+            "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS must be an integer greater than or equal to 500",
+    })
+    .refine((value) => Number(value) >= 500, {
+        message:
+            "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS must be an integer greater than or equal to 500",
+    })
+    .optional();
+
+type ListenTogetherEnvInput = {
+    LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS?: string;
+    LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS?: string;
+    LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS?: string;
+    LISTEN_TOGETHER_STATE_SYNC_ENABLED?: string;
+    LISTEN_TOGETHER_STATE_STORE_ENABLED?: string;
+};
+
+function addListenTogetherConfigIssues(
+    env: ListenTogetherEnvInput,
+    context: z.RefinementCtx,
+): void {
+    const ttlMs = Number(env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS ?? 3000);
+    const renewMs = Number(
+        env.LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS ??
+            Math.floor(ttlMs / 3),
+    );
+    const publicationMs = Number(
+        env.LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS ?? Math.min(750, ttlMs - 1),
+    );
+    if (renewMs > Math.floor(ttlMs / 3)) {
+        context.addIssue({
+            code: "custom",
+            path: ["LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS"],
+            message:
+                "LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS must be at most one third of LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS",
+        });
+    }
+    if (publicationMs >= ttlMs) {
+        context.addIssue({
+            code: "custom",
+            path: ["LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS"],
+            message:
+                "LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS must be less than LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS",
+        });
+    }
+    const stateSyncEnabled = env.LISTEN_TOGETHER_STATE_SYNC_ENABLED !== "false";
+    const stateStoreEnabled =
+        env.LISTEN_TOGETHER_STATE_STORE_ENABLED !== "false";
+    if (stateSyncEnabled && !stateStoreEnabled) {
+        context.addIssue({
+            code: "custom",
+            path: ["LISTEN_TOGETHER_STATE_SYNC_ENABLED"],
+            message:
+                "LISTEN_TOGETHER_STATE_SYNC_ENABLED=true requires LISTEN_TOGETHER_STATE_STORE_ENABLED=true; valid combinations are sync=true/store=true, sync=false/store=true, or sync=false/store=false",
+        });
+    }
+}
 const providerTrackRetentionEnvSchema = z
     .string()
     .regex(/^[1-9]\d*$/, "must be an integer from 1 through 3650")
@@ -441,6 +518,12 @@ const envSchema = z
         OIDC_EMAIL_CLAIM: z.string().optional(),
         OIDC_NAME_CLAIM: z.string().optional(),
         OIDC_PROVIDER_NAME: z.string().optional(),
+        LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: listenTogetherLockTtlEnvSchema,
+        LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS:
+            positiveIntegerEnvSchema,
+        LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS: positiveIntegerEnvSchema,
+        LISTEN_TOGETHER_STATE_SYNC_ENABLED: booleanEnvSchema,
+        LISTEN_TOGETHER_STATE_STORE_ENABLED: booleanEnvSchema,
     })
     .superRefine((env, context) => {
         const encryptionKey = resolveSettingsEncryptionKey(env);
@@ -457,6 +540,7 @@ const envSchema = z
             INSECURE_INTERNAL_API_SECRET,
         );
         addOidcConfigIssues(env, context);
+        addListenTogetherConfigIssues(env, context);
     });
 
 try {
@@ -810,10 +894,10 @@ export const config = {
             process.env.LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED !== "false",
         mutationLockEnabled:
             process.env.LISTEN_TOGETHER_MUTATION_LOCK_ENABLED !== "false",
-        mutationLockTtlMs: positiveIntEnvOr(
-            process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS,
-            3000,
-        ),
+        mutationLockTtlMs: listenTogetherMutationLockTtlMs,
+        mutationLockRenewIntervalMs: listenTogetherMutationLockRenewIntervalMs,
+        publicationDeadlineMs: listenTogetherPublicationDeadlineMs,
+        mutationDrainDeadlineMs: 10_000,
         mutationLockPrefix:
             process.env.LISTEN_TOGETHER_MUTATION_LOCK_PREFIX ||
             "listen-together:mutation-lock",

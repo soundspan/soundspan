@@ -22,6 +22,7 @@ const callbacks: ManagerCallbacks = {
     onMemberPresence: jest.fn(),
     onMemberLeft: jest.fn(),
     onGroupEnded: jest.fn(),
+    onReadyGateCompletion: jest.fn(),
 };
 
 describe("listen together state sync contract", () => {

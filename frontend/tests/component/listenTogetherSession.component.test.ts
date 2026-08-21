@@ -610,6 +610,7 @@ type MockGroupSnapshot = {
     isActive: boolean;
     hostUserId: string;
     syncState: "playing" | "waiting";
+    membershipVersion?: number;
     playback: {
         queue: MockTrack[];
         currentIndex: number;
@@ -637,6 +638,9 @@ const providerApiState: { group: MockGroupSnapshot | null } = {
 const providerSocketState = {
     callbacks: null as ListenTogetherSocketCallbacks | null,
     joinGroupCalls: [] as string[],
+    joinGroupImplementation: null as
+        | ((groupId: string) => Promise<void>)
+        | null,
     seekCalls: [] as number[],
     seekStateVersions: [] as Array<number | undefined>,
     reportReadyCalls: 0,
@@ -748,6 +752,7 @@ const providerSocket: ProviderSocketStub = {
     },
     joinGroup: async (groupId: string) => {
         providerSocketState.joinGroupCalls.push(groupId);
+        await providerSocketState.joinGroupImplementation?.(groupId);
     },
     reportReady: async () => {
         providerSocketState.reportReadyCalls += 1;
@@ -792,6 +797,11 @@ mock.module("@/lib/audio-engine", {
 mock.module("@/lib/logger", {
     namedExports: {
         frontendLogger: {
+            child: () => ({
+                error: () => undefined,
+                info: () => undefined,
+                warn: () => undefined,
+            }),
             error: () => undefined,
             info: () => undefined,
             warn: () => undefined,
@@ -819,8 +829,10 @@ const originalProviderSocketConnectedDescriptor =
     Object.getOwnPropertyDescriptor(listenTogetherSocket, "isConnected");
 const providerApi = api as unknown as {
     getMyListenGroup: () => Promise<MockGroupSnapshot | null>;
+    joinListenGroup: (joinCode: string) => Promise<MockGroupSnapshot>;
 };
 const originalGetMyListenGroup = providerApi.getMyListenGroup;
+const originalJoinListenGroup = providerApi.joinListenGroup;
 let providerBoundaryStubsInstalled = false;
 
 function installProviderBoundaryStubs(): void {
@@ -849,6 +861,10 @@ function installProviderBoundaryStubs(): void {
         get: () => providerSocket.isConnected,
     });
     providerApi.getMyListenGroup = async () => providerApiState.group;
+    providerApi.joinListenGroup = async () => {
+        assert.ok(providerApiState.group, "provider group fixture is missing");
+        return providerApiState.group;
+    };
 }
 
 after(() => {
@@ -892,6 +908,7 @@ after(() => {
             .isConnected;
     }
     providerApi.getMyListenGroup = originalGetMyListenGroup;
+    providerApi.joinListenGroup = originalJoinListenGroup;
 });
 mock.module("sonner", {
     namedExports: {
@@ -963,6 +980,7 @@ function resetProviderHarness(isHost: boolean, currentIndex: number): void {
     providerSocket.probeRoute = async () => ({ ok: true });
     providerSocketState.callbacks = null;
     providerSocketState.joinGroupCalls = [];
+    providerSocketState.joinGroupImplementation = null;
     providerSocketState.seekCalls = [];
     providerSocketState.seekStateVersions = [];
     providerSocketState.reportReadyCalls = 0;
@@ -1102,7 +1120,9 @@ test("membership revocation fully clears the active client session", async (t) =
     const onMembershipRevoked = guest.callbacks().onMembershipRevoked;
     assert.ok(onMembershipRevoked);
 
-    await guest.act(() => onMembershipRevoked({ groupId: "group-provider" }));
+    await guest.act(() => {
+        onMembershipRevoked({ groupId: "group-provider" });
+    });
 
     assert.equal(guest.latest().activeGroup, null);
     assert.equal(guest.latest().isInGroup, false);
@@ -1178,6 +1198,369 @@ test("member events from a previous group on the same socket are discarded", asy
     );
     assert.equal(guest.latest().activeGroup, null);
     assert.equal(providerSocketState.disconnectCalls, 1);
+});
+
+test("versionless membership events apply before versioned authority is observed", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+
+    await guest.act(() =>
+        guest.callbacks().onMemberJoined({
+            userId: "returning-id",
+            username: "Returning",
+            groupId: "group-provider",
+        }),
+    );
+
+    assert.equal(
+        guest
+            .latest()
+            .activeGroup?.members.some(
+                (member) => member.userId === "returning-id",
+            ),
+        true,
+    );
+    assert.deepEqual(providerSocketState.joinGroupCalls, ["group-provider"]);
+});
+
+test("versionless membership events resync after versioned authority is observed", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+
+    await guest.act(() =>
+        guest.callbacks().onMemberJoined({
+            userId: "returning-id",
+            username: "Returning",
+            groupId: "group-provider",
+            membershipVersion: 11,
+        }),
+    );
+    providerSocketState.joinGroupCalls = [];
+
+    await guest.act(() =>
+        guest.callbacks().onMemberLeft({
+            userId: "returning-id",
+            username: "Returning",
+            groupId: "group-provider",
+            membershipVersion: 10,
+        }),
+    );
+    assert.equal(
+        guest
+            .latest()
+            .activeGroup?.members.some(
+                (member) => member.userId === "returning-id",
+            ),
+        true,
+    );
+
+    let staleRevocationAccepted: boolean | void = true;
+    await guest.act(() => {
+        staleRevocationAccepted = guest.callbacks().onMembershipRevoked?.({
+            groupId: "group-provider",
+            membershipVersion: 10,
+        });
+    });
+    assert.equal(staleRevocationAccepted, false);
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+    assert.deepEqual(providerSocketState.joinGroupCalls, []);
+
+    await guest.act(async () => {
+        guest.callbacks().onMemberLeft({
+            userId: "returning-id",
+            username: "Returning",
+            groupId: "group-provider",
+        });
+        await flushMicrotasks();
+    });
+    assert.equal(
+        guest
+            .latest()
+            .activeGroup?.members.some(
+                (member) => member.userId === "returning-id",
+            ),
+        true,
+    );
+    assert.deepEqual(providerSocketState.joinGroupCalls, ["group-provider"]);
+});
+
+test("terminal versionless self-departure resync clears the session", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    await guest.act(() =>
+        guest.callbacks().onGroupState({
+            ...getProviderGroup(),
+            membershipVersion: 11,
+        }),
+    );
+    providerSocketState.joinGroupCalls = [];
+    providerSocketState.joinGroupImplementation = async () => {
+        throw Object.assign(new Error("Not a member of this group"), {
+            code: "NOT_MEMBER",
+        });
+    };
+
+    await guest.act(async () => {
+        guest.callbacks().onMemberLeft({
+            userId: "guest-id",
+            username: "Guest",
+            groupId: "group-provider",
+        });
+        await flushMicrotasks();
+    });
+
+    assert.deepEqual(providerSocketState.joinGroupCalls, ["group-provider"]);
+    assert.equal(guest.latest().activeGroup, null);
+    assert.equal(guest.latest().isInGroup, false);
+    assert.equal(getListenTogetherSessionSnapshot(), null);
+    assert.equal(providerSocketState.disconnectCalls, 1);
+});
+
+test("delayed terminal resync from an earlier membership does not clear a rejoin", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    await guest.act(() =>
+        guest.callbacks().onGroupState({
+            ...getProviderGroup(),
+            membershipVersion: 11,
+        }),
+    );
+    providerSocketState.joinGroupCalls = [];
+    let rejectEarlierResync: ((error: Error) => void) | null = null;
+    providerSocketState.joinGroupImplementation = () =>
+        new Promise<void>((_resolve, reject) => {
+            rejectEarlierResync = reject;
+        });
+
+    await guest.act(() => {
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+    });
+    assert.ok(rejectEarlierResync);
+
+    await guest.act(() => guest.callbacks().onGroupEnded({ reason: "ended" }));
+    providerSocketState.joinGroupImplementation = null;
+    await guest.act(async () => {
+        await guest.latest().joinGroup("ABC123");
+    });
+
+    await guest.act(async () => {
+        rejectEarlierResync?.(
+            Object.assign(new Error("Not a member of this group"), {
+                code: "NOT_MEMBER",
+            }),
+        );
+        await flushMicrotasks();
+    });
+
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+    assert.equal(guest.latest().isInGroup, true);
+    assert.equal(getListenTogetherSessionSnapshot()?.groupId, "group-provider");
+});
+
+test("resync single-flight ownership is isolated across membership generations", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    await guest.act(() =>
+        guest.callbacks().onGroupState({
+            ...getProviderGroup(),
+            membershipVersion: 11,
+        }),
+    );
+    providerSocketState.joinGroupCalls = [];
+    const pendingResyncs: Array<{
+        resolve: () => void;
+        reject: (error: Error) => void;
+    }> = [];
+    providerSocketState.joinGroupImplementation = () =>
+        new Promise<void>((resolve, reject) => {
+            pendingResyncs.push({ resolve, reject });
+        });
+
+    await guest.act(() => {
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+    });
+    assert.equal(pendingResyncs.length, 1);
+
+    await guest.act(() => guest.callbacks().onGroupEnded({ reason: "ended" }));
+    providerSocketState.joinGroupImplementation = null;
+    await guest.act(async () => {
+        await guest.latest().joinGroup("ABC123");
+        guest.callbacks().onGroupState({
+            ...getProviderGroup(),
+            membershipVersion: 12,
+        });
+    });
+    providerSocketState.joinGroupImplementation = () =>
+        new Promise<void>((resolve, reject) => {
+            pendingResyncs.push({ resolve, reject });
+        });
+
+    await guest.act(() => {
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+    });
+    assert.equal(pendingResyncs.length, 2);
+
+    await guest.act(async () => {
+        pendingResyncs[0]?.resolve();
+        await flushMicrotasks();
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+    });
+    assert.equal(pendingResyncs.length, 2);
+
+    await guest.act(async () => {
+        pendingResyncs[1]?.resolve();
+        await flushMicrotasks();
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+    });
+    assert.equal(pendingResyncs.length, 3);
+    pendingResyncs[2]?.resolve();
+});
+
+test("transient versionless membership resync failures retain the session and allow retry", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    await guest.act(() =>
+        guest.callbacks().onGroupState({
+            ...getProviderGroup(),
+            membershipVersion: 11,
+        }),
+    );
+    providerSocketState.joinGroupCalls = [];
+    providerSocketState.joinGroupImplementation = async () => {
+        throw Object.assign(new Error("lock conflict"), {
+            code: "CONFLICT",
+            transient: true,
+            retryable: true,
+        });
+    };
+
+    await guest.act(async () => {
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+        await flushMicrotasks();
+    });
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+    assert.equal(getListenTogetherSessionSnapshot()?.groupId, "group-provider");
+
+    await guest.act(async () => {
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+        await flushMicrotasks();
+    });
+
+    assert.deepEqual(providerSocketState.joinGroupCalls, [
+        "group-provider",
+        "group-provider",
+    ]);
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+    assert.equal(providerSocketState.disconnectCalls, 0);
+});
+
+test("concurrent versionless membership resync triggers share one request", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    await guest.act(() =>
+        guest.callbacks().onGroupState({
+            ...getProviderGroup(),
+            membershipVersion: 11,
+        }),
+    );
+    providerSocketState.joinGroupCalls = [];
+    let resolveResync: (() => void) | null = null;
+    providerSocketState.joinGroupImplementation = () =>
+        new Promise<void>((resolve) => {
+            resolveResync = resolve;
+        });
+
+    await guest.act(() => {
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+            groupId: "group-provider",
+        });
+        guest.callbacks().onMembershipRevoked?.({
+            groupId: "group-provider",
+        });
+    });
+
+    assert.deepEqual(providerSocketState.joinGroupCalls, ["group-provider"]);
+    assert.ok(resolveResync);
+    await guest.act(async () => {
+        resolveResync?.();
+        await flushMicrotasks();
+    });
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+});
+
+test("an older membership snapshot keeps playback fields without regressing members", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    const current = {
+        ...makeGroup(false, 0),
+        membershipVersion: 11,
+        playback: {
+            ...makeGroup(false, 0).playback,
+            stateVersion: 2,
+        },
+        members: [
+            ...makeGroup(false, 0).members,
+            {
+                userId: "returning-id",
+                username: "Returning",
+                isHost: false,
+                joinedAt: "2026-01-02T00:00:00.000Z",
+                isConnected: true,
+            },
+        ],
+    };
+    await guest.act(() => guest.callbacks().onGroupState(current));
+    const delayed = {
+        ...makeGroup(false, 1),
+        membershipVersion: 10,
+        playback: {
+            ...makeGroup(false, 1).playback,
+            stateVersion: 3,
+        },
+    };
+
+    await guest.act(() => guest.callbacks().onGroupState(delayed));
+
+    assert.equal(guest.latest().activeGroup?.playback.currentIndex, 1);
+    assert.equal(
+        guest
+            .latest()
+            .activeGroup?.members.some(
+                (member) => member.userId === "returning-id",
+            ),
+        true,
+    );
+    assert.equal(guest.latest().activeGroup?.membershipVersion, 11);
 });
 
 test("ready-gated play-at resumes hosts without seeking and followers with a compensated seek", async (t) => {

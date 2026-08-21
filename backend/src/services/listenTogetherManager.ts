@@ -15,15 +15,35 @@ import type {
     StatePublicationOptions,
 } from "./listenTogetherCallbacks";
 import { logger } from "../utils/logger";
+import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
+import { GroupError } from "./listenTogetherGroupError";
+import { buildExternalGroup } from "./listenTogetherExternalSnapshot";
 import {
-    compensateSnapshotPosition,
+    computePosition,
+    computeUnclampedPosition,
+    currentTrackDurationMs,
+    currentTrackId,
+} from "./listenTogetherPlaybackPosition";
+import {
+    applyReadyGatePlayback,
+    armReadyGateTimer,
+    clearReadyGateState,
+    clearReadyGateTimer,
+    connectedMemberCount as countConnectedMembers,
+    isExpectedReadyGate,
+    readyConnectedMemberCount,
+    resetReadyGateVotes,
+} from "./listenTogetherReadyGate";
+import {
+    confirmGroupPublication,
+    invalidateGroupPersistence,
+    isGroupPersistenceEligible,
+} from "./listenTogetherPersistenceState";
+import {
     applyExactCommittedMembership,
-    advanceSnapshotWatermark,
-    mergeSnapshotMembers,
+    createGroupSnapshot,
     reconcileHostFlags,
     selectHostSuccessor,
-    shouldApplyIncomingPlayback,
-    snapshotMembers,
     type PersistedGroupMember,
 } from "./listenTogetherSnapshot";
 
@@ -38,6 +58,7 @@ export type {
     ManagerCallbacks,
     StatePublicationOptions,
 } from "./listenTogetherCallbacks";
+export { GroupError } from "./listenTogetherGroupError";
 
 export interface GroupMember {
     userId: string;
@@ -74,6 +95,8 @@ export interface GroupState {
     groupType: "host-follower" | "collaborative";
     visibility: "public" | "private";
     hostUserId: string;
+    /** Highest membership authority applied to this in-memory group. */
+    membershipVersion: number;
     syncState: GroupSyncState;
     playback: GroupPlayback;
     members: Map<string, GroupMember>;
@@ -91,6 +114,42 @@ export interface GroupState {
     dirty: boolean;
     /** True when playback came from a live or shared authoritative snapshot. */
     playbackAuthoritative: boolean;
+    /** False after fencing invalidates this object for periodic persistence. */
+    persistenceValid: boolean;
+    /** DB hydration converted a persisted playing row into a safe local pause. */
+    normalizedFromPlaying: boolean;
+    /** Highest state version whose complete publication pipeline succeeded. */
+    lastPublishedStateVersion: number;
+}
+
+interface HydratedGroupOptions {
+    name: string;
+    joinCode: string;
+    groupType: "host-follower" | "collaborative";
+    visibility: "public" | "private";
+    hostUserId: string;
+    membershipVersion?: number;
+    queue: SyncQueueItem[];
+    currentIndex: number;
+    isPlaying: boolean;
+    currentTimeMs: number;
+    stateVersion: number;
+    createdAt: Date;
+    members: PersistedGroupMember[];
+}
+
+interface CreatedGroupOptions {
+    name: string;
+    joinCode: string;
+    groupType: "host-follower" | "collaborative";
+    visibility: "public" | "private";
+    hostUserId: string;
+    hostUsername: string;
+    queue: SyncQueueItem[];
+    currentIndex?: number;
+    currentTimeMs?: number;
+    isPlaying?: boolean;
+    createdAt: Date;
 }
 
 /** Serialisable snapshot broadcast to clients. */
@@ -102,6 +161,8 @@ export interface GroupSnapshot {
     visibility: "public" | "private";
     isActive: boolean;
     hostUserId: string;
+    /** Optional for snapshots produced before membership fencing was deployed. */
+    membershipVersion?: number;
     syncState: GroupSyncState;
     readyDeadlineMs?: number | null;
     /** Ready votes are optional when reading snapshots written by older versions. */
@@ -141,34 +202,19 @@ export interface QueueDelta {
     stateVersion: number;
 }
 
+/** Captured result of applying the normal pause transition for shutdown. */
+export interface ShutdownPauseResult {
+    group: GroupState;
+    snapshot: GroupSnapshot;
+    paused: boolean;
+}
+
 export type QueueAction =
     | { action: "add"; items: SyncQueueItem[] }
     | { action: "insert-next"; items: SyncQueueItem[] }
     | { action: "remove"; index: number }
     | { action: "reorder"; fromIndex: number; toIndex: number }
     | { action: "clear" };
-
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
-/**
- * Represents the GroupError class.
- */
-export class GroupError extends Error {
-    constructor(
-        public readonly code:
-            | "NOT_FOUND"
-            | "NOT_MEMBER"
-            | "NOT_ALLOWED"
-            | "INVALID"
-            | "CONFLICT",
-        message: string,
-    ) {
-        super(message);
-        this.name = "GroupError";
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -191,34 +237,199 @@ function truncateQueueItemsToAvailableCapacity(
     return remainingCapacity > 0 ? items.slice(0, remainingCapacity) : [];
 }
 
-function currentTrackDurationMs(pb: GroupPlayback): number | null {
-    const durationSeconds = pb.queue[pb.currentIndex]?.duration;
-    if (
-        typeof durationSeconds !== "number" ||
-        !Number.isFinite(durationSeconds) ||
-        durationSeconds < 0
-    ) {
-        return null;
+function addQueueItems(
+    group: GroupState,
+    items: SyncQueueItem[],
+    insertNext: boolean,
+): boolean {
+    const playback = group.playback;
+    const acceptedItems = truncateQueueItemsToAvailableCapacity(
+        playback.queue.length,
+        items,
+    );
+    if (acceptedItems.length === 0) return false;
+    if (insertNext) {
+        playback.queue.splice(playback.currentIndex + 1, 0, ...acceptedItems);
+    } else {
+        playback.queue.push(...acceptedItems);
     }
-    const durationMs = durationSeconds * 1000;
-    return Number.isFinite(durationMs) ? durationMs : null;
+    if (playback.queue.length === acceptedItems.length) {
+        playback.currentIndex = 0;
+        group.syncState = "paused";
+    }
+    return true;
 }
 
-function computeUnclampedPosition(pb: GroupPlayback): number {
-    if (!pb.isPlaying) return pb.positionMs;
-    const elapsed = Date.now() - pb.lastPositionUpdate;
-    return pb.positionMs + Math.max(elapsed, 0);
+function removeQueueItem(group: GroupState, index: number): void {
+    const playback = group.playback;
+    if (index < 0 || index >= playback.queue.length) {
+        throw new GroupError("INVALID", "Invalid queue index");
+    }
+    playback.queue.splice(index, 1);
+    if (playback.queue.length === 0) {
+        playback.currentIndex = 0;
+        playback.isPlaying = false;
+        playback.positionMs = 0;
+        playback.lastPositionUpdate = Date.now();
+        group.syncState = "idle";
+        return;
+    }
+    if (index < playback.currentIndex) {
+        playback.currentIndex -= 1;
+        return;
+    }
+    if (index !== playback.currentIndex) return;
+    playback.currentIndex = clampIndex(
+        playback.currentIndex,
+        playback.queue.length,
+    );
+    playback.positionMs = 0;
+    playback.lastPositionUpdate = Date.now();
 }
 
-/** Compute the "live" position in ms without running past the current track. */
-function computePosition(pb: GroupPlayback): number {
-    const positionMs = Math.max(0, computeUnclampedPosition(pb));
-    const durationMs = currentTrackDurationMs(pb);
-    return durationMs === null ? positionMs : clamp(positionMs, 0, durationMs);
+function clearQueue(group: GroupState): void {
+    group.playback.queue = [];
+    group.playback.currentIndex = 0;
+    group.playback.isPlaying = false;
+    group.playback.positionMs = 0;
+    group.playback.lastPositionUpdate = Date.now();
+    group.syncState = "idle";
 }
 
-function currentTrackId(pb: GroupPlayback): string | null {
-    return pb.queue[pb.currentIndex]?.id ?? null;
+function applyQueueAction(group: GroupState, action: QueueAction): boolean {
+    switch (action.action) {
+        case "add":
+            return addQueueItems(group, action.items, false);
+        case "insert-next":
+            return addQueueItems(group, action.items, true);
+        case "remove":
+            removeQueueItem(group, action.index);
+            return true;
+        case "reorder":
+            throw new GroupError(
+                "NOT_ALLOWED",
+                "Queue reordering is disabled in Listen Together",
+            );
+        case "clear":
+            clearQueue(group);
+            return true;
+    }
+}
+
+function restoreMembers(
+    members: PersistedGroupMember[],
+    now: number,
+): Map<string, GroupMember> {
+    return new Map(
+        members.map((member) => [
+            member.userId,
+            {
+                userId: member.userId,
+                username: member.username,
+                isHost: member.isHost,
+                joinedAt: member.joinedAt,
+                socketIds: new Set<string>(),
+                isReady: false,
+                unavailableIndices: new Set<number>(),
+                lastSeen: now,
+            },
+        ]),
+    );
+}
+
+function buildHydratedGroup(
+    id: string,
+    opts: HydratedGroupOptions,
+    queue: SyncQueueItem[],
+    now: number,
+): GroupState {
+    return {
+        id,
+        name: opts.name,
+        joinCode: opts.joinCode,
+        groupType: opts.groupType,
+        visibility: opts.visibility,
+        hostUserId: opts.hostUserId,
+        membershipVersion: Math.max(0, opts.membershipVersion ?? 0),
+        syncState: opts.isPlaying
+            ? "playing"
+            : queue.length > 0
+              ? "paused"
+              : "idle",
+        playback: {
+            queue,
+            currentIndex: clampIndex(opts.currentIndex, queue.length),
+            isPlaying: false,
+            positionMs: opts.currentTimeMs,
+            lastPositionUpdate: now,
+            lastAppliedSnapshotServerTime: 0,
+            stateVersion: opts.stateVersion,
+        },
+        members: restoreMembers(opts.members, now),
+        readyUserIds: new Set(),
+        readyTimeout: null,
+        readyDeadlineMs: null,
+        boundaryTimeout: null,
+        lastActivity: now,
+        createdAt: opts.createdAt,
+        dirty: false,
+        playbackAuthoritative: false,
+        persistenceValid: true,
+        normalizedFromPlaying: opts.isPlaying,
+        lastPublishedStateVersion: opts.stateVersion,
+    };
+}
+
+function buildCreatedGroup(
+    id: string,
+    opts: CreatedGroupOptions,
+    now: number,
+): GroupState {
+    const currentIndex = clampIndex(opts.currentIndex ?? 0, opts.queue.length);
+    const maxTrackMs = (opts.queue[currentIndex]?.duration ?? 0) * 1000;
+    const isPlaying = Boolean(opts.isPlaying && opts.queue.length > 0);
+    const host: GroupMember = {
+        userId: opts.hostUserId,
+        username: opts.hostUsername,
+        isHost: true,
+        joinedAt: opts.createdAt,
+        socketIds: new Set(),
+        isReady: false,
+        unavailableIndices: new Set(),
+        lastSeen: now,
+    };
+    return {
+        id,
+        name: opts.name,
+        joinCode: opts.joinCode,
+        groupType: opts.groupType,
+        visibility: opts.visibility,
+        hostUserId: opts.hostUserId,
+        membershipVersion: 0,
+        syncState:
+            opts.queue.length === 0 ? "idle" : isPlaying ? "playing" : "paused",
+        playback: {
+            queue: opts.queue,
+            currentIndex,
+            isPlaying,
+            positionMs: clamp(opts.currentTimeMs ?? 0, 0, maxTrackMs),
+            lastPositionUpdate: now,
+            lastAppliedSnapshotServerTime: 0,
+            stateVersion: 0,
+        },
+        members: new Map([[opts.hostUserId, host]]),
+        readyUserIds: new Set(),
+        readyTimeout: null,
+        readyDeadlineMs: null,
+        boundaryTimeout: null,
+        lastActivity: now,
+        createdAt: opts.createdAt,
+        dirty: false,
+        playbackAuthoritative: true,
+        persistenceValid: true,
+        normalizedFromPlaying: false,
+        lastPublishedStateVersion: 0,
+    };
 }
 
 /** Hard cap on queue size to keep Socket.IO snapshots within 1 MB. */
@@ -250,76 +461,13 @@ class GroupManager {
     }
 
     /** Restore a group from DB row into in-memory state. */
-    hydrate(
-        id: string,
-        opts: {
-            name: string;
-            joinCode: string;
-            groupType: "host-follower" | "collaborative";
-            visibility: "public" | "private";
-            hostUserId: string;
-            queue: SyncQueueItem[];
-            currentIndex: number;
-            isPlaying: boolean;
-            currentTimeMs: number;
-            stateVersion: number;
-            createdAt: Date;
-            members: PersistedGroupMember[];
-        },
-    ): GroupState {
+    hydrate(id: string, opts: HydratedGroupOptions): GroupState {
         const queue =
             opts.queue.length > MAX_QUEUE_SIZE
                 ? opts.queue.slice(0, MAX_QUEUE_SIZE)
                 : opts.queue;
-        const safeIndex = clampIndex(opts.currentIndex, queue.length);
         const now = Date.now();
-
-        const members = new Map<string, GroupMember>();
-        for (const m of opts.members) {
-            members.set(m.userId, {
-                userId: m.userId,
-                username: m.username,
-                isHost: m.isHost,
-                joinedAt: m.joinedAt,
-                socketIds: new Set(),
-                isReady: false,
-                unavailableIndices: new Set(),
-                lastSeen: now,
-            });
-        }
-
-        const group: GroupState = {
-            id,
-            name: opts.name,
-            joinCode: opts.joinCode,
-            groupType: opts.groupType,
-            visibility: opts.visibility,
-            hostUserId: opts.hostUserId,
-            syncState: opts.isPlaying
-                ? "playing"
-                : queue.length > 0
-                  ? "paused"
-                  : "idle",
-            playback: {
-                queue,
-                currentIndex: safeIndex,
-                isPlaying: false, // Always start paused after hydration (no one is connected yet)
-                positionMs: opts.currentTimeMs,
-                lastPositionUpdate: now,
-                lastAppliedSnapshotServerTime: 0,
-                stateVersion: opts.stateVersion,
-            },
-            members,
-            readyUserIds: new Set(),
-            readyTimeout: null,
-            readyDeadlineMs: null,
-            boundaryTimeout: null,
-            lastActivity: now,
-            createdAt: opts.createdAt,
-            dirty: false,
-            playbackAuthoritative: false,
-        };
-
+        const group = buildHydratedGroup(id, opts, queue, now);
         this.groups.set(id, group);
         log.debug(
             `Hydrated group ${id} with ${opts.members.length} members, queue=${queue.length}`,
@@ -328,76 +476,9 @@ class GroupManager {
     }
 
     /** Create a brand-new group (after DB row is created). */
-    create(
-        id: string,
-        opts: {
-            name: string;
-            joinCode: string;
-            groupType: "host-follower" | "collaborative";
-            visibility: "public" | "private";
-            hostUserId: string;
-            hostUsername: string;
-            queue: SyncQueueItem[];
-            currentIndex?: number;
-            currentTimeMs?: number;
-            isPlaying?: boolean;
-            createdAt: Date;
-        },
-    ): GroupState {
+    create(id: string, opts: CreatedGroupOptions): GroupState {
         const now = Date.now();
-        const safeIndex = clampIndex(opts.currentIndex ?? 0, opts.queue.length);
-        const activeTrack = opts.queue[safeIndex];
-        const maxTrackMs = activeTrack ? activeTrack.duration * 1000 : 0;
-        const initialPositionMs = clamp(opts.currentTimeMs ?? 0, 0, maxTrackMs);
-        const initialIsPlaying = Boolean(
-            opts.isPlaying && opts.queue.length > 0,
-        );
-
-        const members = new Map<string, GroupMember>();
-        members.set(opts.hostUserId, {
-            userId: opts.hostUserId,
-            username: opts.hostUsername,
-            isHost: true,
-            joinedAt: opts.createdAt,
-            socketIds: new Set(),
-            isReady: false,
-            unavailableIndices: new Set(),
-            lastSeen: now,
-        });
-
-        const group: GroupState = {
-            id,
-            name: opts.name,
-            joinCode: opts.joinCode,
-            groupType: opts.groupType,
-            visibility: opts.visibility,
-            hostUserId: opts.hostUserId,
-            syncState:
-                opts.queue.length === 0
-                    ? "idle"
-                    : initialIsPlaying
-                      ? "playing"
-                      : "paused",
-            playback: {
-                queue: opts.queue,
-                currentIndex: safeIndex,
-                isPlaying: initialIsPlaying,
-                positionMs: initialPositionMs,
-                lastPositionUpdate: now,
-                lastAppliedSnapshotServerTime: 0,
-                stateVersion: 0,
-            },
-            members,
-            readyUserIds: new Set(),
-            readyTimeout: null,
-            readyDeadlineMs: null,
-            boundaryTimeout: null,
-            lastActivity: now,
-            createdAt: opts.createdAt,
-            dirty: false,
-            playbackAuthoritative: true,
-        };
-
+        const group = buildCreatedGroup(id, opts, now);
         this.groups.set(id, group);
         this.syncBoundaryWatchdog(group);
         log.info(
@@ -418,11 +499,19 @@ class GroupManager {
     remove(groupId: string): void {
         const group = this.groups.get(groupId);
         if (group) {
-            this.clearReadyGateTimer(group);
+            clearReadyGateTimer(group);
             this.clearBoundaryWatchdogTimer(group);
         }
         this.groups.delete(groupId);
         log.debug(`Removed group ${groupId} from memory`);
+    }
+
+    /** Evict one poisoned local copy and make captured references unpersistable. */
+    invalidate(groupId: string): void {
+        const group = this.groups.get(groupId);
+        if (!group) return;
+        invalidateGroupPersistence(group);
+        this.remove(groupId);
     }
 
     /** Get all in-memory group IDs (for persist loop). */
@@ -432,24 +521,46 @@ class GroupManager {
 
     /** Get groups that need DB persistence. */
     dirtyGroups(): GroupState[] {
-        return Array.from(this.groups.values()).filter((g) => g.dirty);
+        return Array.from(this.groups.values()).filter(
+            isGroupPersistenceEligible,
+        );
     }
 
-    /** Mark a group as persisted. */
-    markClean(groupId: string): void {
+    /** Mark the current version safe for periodic PostgreSQL persistence. */
+    markPublicationConfirmed(groupId: string): void {
         const group = this.groups.get(groupId);
-        if (group) group.dirty = false;
+        if (group) confirmGroupPublication(group);
+    }
+
+    /** Mark only the still-current captured object/version as persisted. */
+    markClean(
+        groupId: string,
+        capturedGroup: GroupState,
+        persistedStateVersion: number,
+    ): void {
+        const group = this.groups.get(groupId);
+        if (
+            group === capturedGroup &&
+            group.persistenceValid &&
+            group.playback.stateVersion === persistedStateVersion
+        ) {
+            group.dirty = false;
+        }
     }
 
     // -----------------------------------------------------------------------
     // Socket connection tracking
     // -----------------------------------------------------------------------
 
-    addSocket(groupId: string, userId: string, socketId: string): void {
+    hasMember(groupId: string, userId: string): boolean {
+        return this.groups.get(groupId)?.members.has(userId) ?? false;
+    }
+
+    addSocket(groupId: string, userId: string, socketId: string): boolean {
         const group = this.groups.get(groupId);
-        if (!group) return;
+        if (!group) return false;
         const member = group.members.get(userId);
-        if (!member) return;
+        if (!member) return false;
         const wasConnected = member.socketIds.size > 0;
         member.socketIds.add(socketId);
         member.lastSeen = Date.now();
@@ -459,6 +570,7 @@ class GroupManager {
         if (!wasConnected && member.socketIds.size > 0) {
             this.publishPresence(group, userId, true);
         }
+        return true;
     }
 
     removeSocket(groupId: string, userId: string, socketId: string): void {
@@ -490,12 +602,7 @@ class GroupManager {
     /** Total connected sockets in a group. */
     connectedMemberCount(groupId: string): number {
         const group = this.groups.get(groupId);
-        if (!group) return 0;
-        let count = 0;
-        for (const m of group.members.values()) {
-            if (m.socketIds.size > 0) count++;
-        }
-        return count;
+        return group ? countConnectedMembers(group) : 0;
     }
 
     // -----------------------------------------------------------------------
@@ -548,14 +655,28 @@ class GroupManager {
         groupId: string,
         members: GroupSnapshot["members"],
         hostUserId: string,
+        membershipVersion?: number,
     ): string[] {
         const group = this.requireGroup(groupId);
-        return applyExactCommittedMembership(
+        if (
+            membershipVersion !== undefined &&
+            membershipVersion < group.membershipVersion
+        ) {
+            return [];
+        }
+        const revokedSocketIds = applyExactCommittedMembership(
             group,
             members,
             hostUserId,
             Date.now(),
         );
+        if (membershipVersion !== undefined) {
+            group.membershipVersion = Math.max(
+                group.membershipVersion,
+                membershipVersion,
+            );
+        }
+        return revokedSocketIds;
     }
 
     removeMember(
@@ -620,7 +741,11 @@ class GroupManager {
     // Playback control
     // -----------------------------------------------------------------------
 
-    play(groupId: string, userId: string): PlaybackDelta {
+    play(
+        groupId: string,
+        userId: string,
+        fence?: GroupMutationFence,
+    ): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
         const waitingDelta = this.playbackDeltaIfWaiting(group);
@@ -639,29 +764,24 @@ class GroupManager {
         this.syncBoundaryWatchdog(group);
 
         const delta = this.playbackDelta(group);
-        this.callbacks?.onPlaybackDelta(groupId, delta);
+        this.callbacks?.onPlaybackDelta(groupId, delta, fence);
         return delta;
     }
 
-    pause(groupId: string, userId: string): PlaybackDelta {
+    pause(
+        groupId: string,
+        userId: string,
+        fence?: GroupMutationFence,
+    ): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
         const waitingDelta = this.playbackDeltaIfWaiting(group);
         if (waitingDelta) return waitingDelta;
 
-        const pb = group.playback;
-        this.clearBoundaryWatchdogTimer(group);
-        // Freeze position
-        pb.positionMs = computePosition(pb);
-        pb.isPlaying = false;
-        pb.lastPositionUpdate = Date.now();
-        pb.stateVersion++;
-        group.syncState = "paused";
-        group.lastActivity = Date.now();
-        group.dirty = true;
+        this.applyPauseTransition(group);
 
         const delta = this.playbackDelta(group);
-        this.callbacks?.onPlaybackDelta(groupId, delta);
+        this.callbacks?.onPlaybackDelta(groupId, delta, fence);
         return delta;
     }
 
@@ -670,6 +790,7 @@ class GroupManager {
         userId: string,
         positionMs: number,
         expectedStateVersion?: number,
+        fence?: GroupMutationFence,
     ): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
@@ -699,7 +820,7 @@ class GroupManager {
         this.syncBoundaryWatchdog(group);
 
         const delta = this.playbackDelta(group);
-        this.callbacks?.onPlaybackDelta(groupId, delta);
+        this.callbacks?.onPlaybackDelta(groupId, delta, fence);
         return delta;
     }
 
@@ -713,6 +834,7 @@ class GroupManager {
         userId: string,
         index: number,
         autoPlay: boolean = true,
+        fence?: GroupMutationFence,
     ): { snapshot: GroupSnapshot; waiting: boolean } {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
@@ -738,7 +860,7 @@ class GroupManager {
 
         // If only one person is connected or track didn't change, skip the gate
         if (connectedCount <= 1 || !trackChanged) {
-            this.clearReadyGateState(group);
+            clearReadyGateState(group);
             if (autoPlay) {
                 pb.isPlaying = true;
                 pb.lastPositionUpdate = Date.now();
@@ -747,37 +869,43 @@ class GroupManager {
                 group.syncState = "paused";
             }
             this.syncBoundaryWatchdog(group);
-            this.broadcastState(group);
+            this.broadcastState(group, undefined, fence);
             return { snapshot: this.snapshot(group), waiting: false };
         }
 
         // Enter ready gate
         this.enterReadyGate(group);
 
-        this.callbacks?.onWaiting(groupId, {
-            trackId: currentTrackId(pb),
-            currentIndex: pb.currentIndex,
-        });
+        this.callbacks?.onWaiting(
+            groupId,
+            {
+                trackId: currentTrackId(pb),
+                currentIndex: pb.currentIndex,
+            },
+            fence,
+        );
 
         // Also broadcast full state so clients know the new track info
-        this.broadcastState(group);
+        this.broadcastState(group, undefined, fence);
         return { snapshot: this.snapshot(group), waiting: true };
     }
 
     next(
         groupId: string,
         userId: string,
+        fence?: GroupMutationFence,
     ): { snapshot: GroupSnapshot; waiting: boolean } {
         const group = this.requireGroup(groupId);
         const pb = group.playback;
         const nextIndex =
             pb.currentIndex + 1 < pb.queue.length ? pb.currentIndex + 1 : 0;
-        return this.setTrack(groupId, userId, nextIndex, true);
+        return this.setTrack(groupId, userId, nextIndex, true, fence);
     }
 
     previous(
         groupId: string,
         userId: string,
+        fence?: GroupMutationFence,
     ): { snapshot: GroupSnapshot; waiting: boolean } {
         const group = this.requireGroup(groupId);
         const pb = group.playback;
@@ -785,12 +913,12 @@ class GroupManager {
         // If past 3 seconds, restart current track instead
         const currentPos = computePosition(pb);
         if (currentPos > 3000 && pb.queue.length > 0) {
-            return this.setTrack(groupId, userId, pb.currentIndex, true);
+            return this.setTrack(groupId, userId, pb.currentIndex, true, fence);
         }
 
         const prevIndex =
             pb.currentIndex > 0 ? pb.currentIndex - 1 : pb.queue.length - 1;
-        return this.setTrack(groupId, userId, prevIndex, true);
+        return this.setTrack(groupId, userId, prevIndex, true, fence);
     }
 
     /**
@@ -833,106 +961,29 @@ class GroupManager {
         groupId: string,
         userId: string,
         action: QueueAction,
+        fence?: GroupMutationFence,
     ): QueueDelta {
         const group = this.requireGroup(groupId);
         this.requireQueueEdit(group, userId);
 
-        const pb = group.playback;
-        let queueChanged = false;
-
-        switch (action.action) {
-            case "add": {
-                const acceptedItems = truncateQueueItemsToAvailableCapacity(
-                    pb.queue.length,
-                    action.items,
-                );
-                if (acceptedItems.length === 0) {
-                    return this.queueDelta(group);
-                }
-                pb.queue.push(...acceptedItems);
-                // If queue was empty and we just added tracks, set up the first track
-                if (pb.queue.length === acceptedItems.length) {
-                    pb.currentIndex = 0;
-                    group.syncState = "paused";
-                }
-                queueChanged = true;
-                break;
-            }
-            case "insert-next": {
-                const acceptedItems = truncateQueueItemsToAvailableCapacity(
-                    pb.queue.length,
-                    action.items,
-                );
-                if (acceptedItems.length === 0) {
-                    return this.queueDelta(group);
-                }
-                const insertAt = pb.currentIndex + 1;
-                pb.queue.splice(insertAt, 0, ...acceptedItems);
-                // If queue was empty before, set up the first track
-                if (pb.queue.length === acceptedItems.length) {
-                    pb.currentIndex = 0;
-                    group.syncState = "paused";
-                }
-                queueChanged = true;
-                break;
-            }
-            case "remove": {
-                if (action.index < 0 || action.index >= pb.queue.length) {
-                    throw new GroupError("INVALID", "Invalid queue index");
-                }
-
-                pb.queue.splice(action.index, 1);
-
-                if (pb.queue.length === 0) {
-                    pb.currentIndex = 0;
-                    pb.isPlaying = false;
-                    pb.positionMs = 0;
-                    pb.lastPositionUpdate = Date.now();
-                    group.syncState = "idle";
-                } else if (action.index < pb.currentIndex) {
-                    pb.currentIndex--;
-                } else if (action.index === pb.currentIndex) {
-                    // Current track was removed — clamp and reset position
-                    pb.currentIndex = clampIndex(
-                        pb.currentIndex,
-                        pb.queue.length,
-                    );
-                    pb.positionMs = 0;
-                    pb.lastPositionUpdate = Date.now();
-                }
-                queueChanged = true;
-                break;
-            }
-            case "reorder": {
-                throw new GroupError(
-                    "NOT_ALLOWED",
-                    "Queue reordering is disabled in Listen Together",
-                );
-            }
-            case "clear": {
-                pb.queue = [];
-                pb.currentIndex = 0;
-                pb.isPlaying = false;
-                pb.positionMs = 0;
-                pb.lastPositionUpdate = Date.now();
-                group.syncState = "idle";
-                queueChanged = true;
-                break;
-            }
-        }
-
-        if (!queueChanged) {
-            return this.queueDelta(group);
-        }
-
-        pb.stateVersion++;
+        if (!applyQueueAction(group, action)) return this.queueDelta(group);
+        group.playback.stateVersion += 1;
         group.lastActivity = Date.now();
         group.dirty = true;
         this.syncBoundaryWatchdog(group);
 
         const delta = this.queueDelta(group);
-        this.callbacks?.onQueueDelta(groupId, delta);
+        this.callbacks?.onQueueDelta(groupId, delta, fence);
         return delta;
+    }
+
+    /** Apply the normal pause state transition without manager fanout. */
+    pauseForShutdown(groupId: string): ShutdownPauseResult | undefined {
+        const group = this.groups.get(groupId);
+        if (!group) return undefined;
+        const paused = group.playback.isPlaying || group.normalizedFromPlaying;
+        if (paused) this.applyPauseTransition(group);
+        return { group, snapshot: this.snapshot(group), paused };
     }
 
     // -----------------------------------------------------------------------
@@ -963,35 +1014,7 @@ class GroupManager {
     // -----------------------------------------------------------------------
 
     snapshot(group: GroupState): GroupSnapshot {
-        const pb = group.playback;
-        const serverTime = Date.now();
-        pb.lastAppliedSnapshotServerTime = advanceSnapshotWatermark(
-            pb.lastAppliedSnapshotServerTime,
-            serverTime,
-        );
-        return {
-            id: group.id,
-            name: group.name,
-            joinCode: group.joinCode,
-            groupType: group.groupType,
-            visibility: group.visibility,
-            isActive: true,
-            hostUserId: group.hostUserId,
-            syncState: group.syncState,
-            readyDeadlineMs:
-                group.syncState === "waiting" ? group.readyDeadlineMs : null,
-            readyUserIds: Array.from(group.readyUserIds),
-            playback: {
-                queue: pb.queue,
-                currentIndex: pb.currentIndex,
-                isPlaying: pb.isPlaying,
-                positionMs: computePosition(pb),
-                serverTime,
-                stateVersion: pb.stateVersion,
-                trackId: currentTrackId(pb),
-            },
-            members: snapshotMembers(group.members),
-        };
+        return createGroupSnapshot(group, Date.now());
     }
 
     snapshotById(groupId: string): GroupSnapshot | undefined {
@@ -1014,139 +1037,26 @@ class GroupManager {
     applyExternalSnapshot(snapshot: GroupSnapshot): void {
         const existing = this.groups.get(snapshot.id);
         const now = Date.now();
-        const existingReadyDeadlineMs = existing?.readyDeadlineMs ?? null;
         if (existing) {
-            // Timers close over old group objects; drop and re-arm on replacement.
-            this.clearReadyGateTimer(existing);
+            clearReadyGateTimer(existing);
             this.clearBoundaryWatchdogTimer(existing);
         }
-
-        const rawQueue = Array.isArray(snapshot.playback?.queue)
-            ? snapshot.playback.queue
-            : [];
-        const incomingQueue =
-            rawQueue.length > MAX_QUEUE_SIZE
-                ? rawQueue.slice(0, MAX_QUEUE_SIZE)
-                : rawQueue;
-        const incomingIndex = clampIndex(
-            snapshot.playback?.currentIndex ?? 0,
-            incomingQueue.length,
-        );
-        const incomingPositionMs = Math.max(
-            0,
-            snapshot.playback?.positionMs ?? 0,
-        );
-        const incomingServerTime = Math.max(
-            0,
-            snapshot.playback?.serverTime ?? now,
-        );
-        const incomingStateVersion = Math.max(
-            0,
-            snapshot.playback?.stateVersion ?? 0,
-        );
-        const incomingIsPlaying = Boolean(snapshot.playback?.isPlaying);
-        const incomingReadyDeadlineMs =
-            typeof snapshot.readyDeadlineMs === "number" &&
-            Number.isFinite(snapshot.readyDeadlineMs)
-                ? Math.max(0, snapshot.readyDeadlineMs)
-                : null;
-        const applyIncomingPlayback = shouldApplyIncomingPlayback(
+        const group = buildExternalGroup(
+            snapshot,
             existing,
-            incomingStateVersion,
-            incomingServerTime,
-        );
-        const readyUserIds = new Set<string>(
-            Array.isArray(snapshot.readyUserIds)
-                ? snapshot.readyUserIds.filter(
-                      (userId): userId is string => typeof userId === "string",
-                  )
-                : [],
-        );
-        if (
-            existing &&
-            incomingStateVersion <= existing.playback.stateVersion
-        ) {
-            for (const userId of existing.readyUserIds) {
-                readyUserIds.add(userId);
-            }
-        }
-
-        const members = mergeSnapshotMembers(
-            snapshot.members ?? [],
-            existing?.members,
-            readyUserIds,
             now,
+            MAX_QUEUE_SIZE,
+            READY_GATE_TIMEOUT_MS,
         );
-        reconcileHostFlags(members, snapshot.hostUserId);
-
-        const existingPlayback = existing?.playback;
-        const lastAppliedSnapshotServerTime = advanceSnapshotWatermark(
-            existingPlayback?.lastAppliedSnapshotServerTime ?? 0,
-            incomingServerTime,
-        );
-        const playback: GroupPlayback =
-            applyIncomingPlayback || !existingPlayback
-                ? {
-                      queue: incomingQueue,
-                      currentIndex: incomingIndex,
-                      isPlaying: incomingIsPlaying,
-                      positionMs: compensateSnapshotPosition(
-                          incomingPositionMs,
-                          incomingServerTime,
-                          now,
-                          incomingIsPlaying,
-                      ),
-                      lastPositionUpdate: now,
-                      lastAppliedSnapshotServerTime,
-                      stateVersion: incomingStateVersion,
-                  }
-                : {
-                      queue: existingPlayback.queue,
-                      currentIndex: existingPlayback.currentIndex,
-                      isPlaying: existingPlayback.isPlaying,
-                      positionMs: existingPlayback.positionMs,
-                      lastPositionUpdate: existingPlayback.lastPositionUpdate,
-                      lastAppliedSnapshotServerTime,
-                      stateVersion: existingPlayback.stateVersion,
-                  };
-
-        const syncState: GroupSyncState =
-            applyIncomingPlayback || !existing
-                ? snapshot.syncState
-                : existing.syncState;
-        const readyDeadlineMs =
-            syncState === "waiting"
-                ? applyIncomingPlayback || !existing
-                    ? (incomingReadyDeadlineMs ?? now + READY_GATE_TIMEOUT_MS)
-                    : (existingReadyDeadlineMs ?? now + READY_GATE_TIMEOUT_MS)
-                : null;
-
-        const group: GroupState = {
-            id: snapshot.id,
-            name: snapshot.name,
-            joinCode: snapshot.joinCode,
-            groupType: snapshot.groupType,
-            visibility: snapshot.visibility,
-            hostUserId: snapshot.hostUserId,
-            syncState,
-            playback,
-            members,
-            readyUserIds,
-            readyTimeout: null,
-            readyDeadlineMs,
-            boundaryTimeout: null,
-            lastActivity: now,
-            createdAt: existing?.createdAt ?? new Date(),
-            dirty: false,
-            playbackAuthoritative: true,
-        };
-
         this.groups.set(snapshot.id, group);
         /* istanbul ignore next -- branch mapping can attribute non-waiting path to the same source line */
         if (group.syncState === "waiting") {
-            this.rearmReadyGateFromDeadline(group, readyDeadlineMs ?? now);
+            this.rearmReadyGateFromDeadline(
+                group,
+                group.readyDeadlineMs ?? now,
+            );
         } else {
-            this.clearReadyGateState(group);
+            clearReadyGateState(group);
             this.syncBoundaryWatchdog(group);
         }
     }
@@ -1156,6 +1066,7 @@ class GroupManager {
         groupId: string,
         expectedIndex: number,
         expectedStateVersion: number,
+        fence?: GroupMutationFence,
     ): boolean {
         const group = this.groups.get(groupId);
         if (!group) return false;
@@ -1181,11 +1092,45 @@ class GroupManager {
 
         this.clearBoundaryWatchdogTimer(group);
         if (pb.currentIndex + 1 < pb.queue.length) {
-            this.setTrack(groupId, group.hostUserId, pb.currentIndex + 1, true);
+            this.setTrack(
+                groupId,
+                group.hostUserId,
+                pb.currentIndex + 1,
+                true,
+                fence,
+            );
             return true;
         }
 
-        this.pauseAtBoundary(group, durationMs);
+        this.pauseAtBoundary(group, durationMs, fence);
+        return true;
+    }
+
+    /** Complete one still-current ready gate after the socket layer locks it. */
+    handleReadyGateCompletion(
+        groupId: string,
+        expectedIndex: number,
+        expectedStateVersion: number,
+        fence?: GroupMutationFence,
+    ): boolean {
+        const group = this.groups.get(groupId);
+        if (!isExpectedReadyGate(group, expectedIndex, expectedStateVersion))
+            return false;
+        this.forcePlay(group, fence);
+        return true;
+    }
+
+    /** Re-arm one still-current ready gate after bounded lock contention. */
+    rearmReadyGateCompletion(
+        groupId: string,
+        expectedIndex: number,
+        expectedStateVersion: number,
+        delayMs: number,
+    ): boolean {
+        const group = this.groups.get(groupId);
+        if (!isExpectedReadyGate(group, expectedIndex, expectedStateVersion))
+            return false;
+        this.armReadyGateTimer(group, Date.now() + Math.max(1, delayMs));
         return true;
     }
 
@@ -1242,10 +1187,24 @@ class GroupManager {
     private broadcastState(
         group: GroupState,
         options?: StatePublicationOptions,
+        fence?: GroupMutationFence,
     ): void {
         const snapshot = this.snapshot(group);
         if (options) {
+            if (fence) {
+                this.callbacks?.onGroupState(
+                    group.id,
+                    snapshot,
+                    options,
+                    fence,
+                );
+                return;
+            }
             this.callbacks?.onGroupState(group.id, snapshot, options);
+            return;
+        }
+        if (fence) {
+            this.callbacks?.onGroupState(group.id, snapshot, undefined, fence);
             return;
         }
         this.callbacks?.onGroupState(group.id, snapshot);
@@ -1265,47 +1224,29 @@ class GroupManager {
 
     private checkReadyGate(group: GroupState): boolean {
         if (group.syncState !== "waiting") return false;
-
-        // Count connected members (with at least one socket)
-        const connectedUserIds = new Set<string>();
-        for (const m of group.members.values()) {
-            if (m.socketIds.size > 0) connectedUserIds.add(m.userId);
-        }
-
-        // Check if all connected members are ready
-        for (const uid of connectedUserIds) {
-            const member = group.members.get(uid);
-            const currentIndex = group.playback.currentIndex;
-            if (member?.unavailableIndices?.has(currentIndex)) {
-                group.readyUserIds.add(uid);
-                member.isReady = true;
-                continue;
-            }
-            if (!group.readyUserIds.has(uid)) return false;
-        }
-
-        // All ready — start playback!
+        const connectedCount = readyConnectedMemberCount(group);
+        if (connectedCount === null) return false;
         log.debug(
-            `Ready gate passed for group ${group.id}: all ${connectedUserIds.size} members ready`,
+            `Ready gate passed for group ${group.id}: all ${connectedCount} members ready`,
         );
-        this.forcePlay(group);
+        this.requestReadyGateCompletion(group);
         return true;
     }
 
-    private clearReadyGateTimer(group: GroupState): void {
-        if (group.readyTimeout) {
-            clearTimeout(group.readyTimeout);
+    private requestReadyGateCompletion(group: GroupState): void {
+        const data = {
+            currentIndex: group.playback.currentIndex,
+            stateVersion: group.playback.stateVersion,
+        };
+        if (this.callbacks) {
+            this.callbacks.onReadyGateCompletion(group.id, data);
+            return;
         }
-        group.readyTimeout = null;
-        group.readyDeadlineMs = null;
-    }
-
-    private clearReadyGateState(group: GroupState): void {
-        this.clearReadyGateTimer(group);
-        group.readyUserIds.clear();
-        for (const member of group.members.values()) {
-            member.isReady = false;
-        }
+        this.handleReadyGateCompletion(
+            group.id,
+            data.currentIndex,
+            data.stateVersion,
+        );
     }
 
     private clearBoundaryWatchdogTimer(group: GroupState): void {
@@ -1315,7 +1256,11 @@ class GroupManager {
         group.boundaryTimeout = null;
     }
 
-    private pauseAtBoundary(group: GroupState, durationMs: number): void {
+    private pauseAtBoundary(
+        group: GroupState,
+        durationMs: number,
+        fence?: GroupMutationFence,
+    ): void {
         const now = Date.now();
         group.playback.positionMs = durationMs;
         group.playback.isPlaying = false;
@@ -1324,7 +1269,7 @@ class GroupManager {
         group.syncState = "paused";
         group.lastActivity = now;
         group.dirty = true;
-        this.broadcastState(group);
+        this.broadcastState(group, undefined, fence);
     }
 
     private syncBoundaryWatchdog(group: GroupState): void {
@@ -1374,34 +1319,30 @@ class GroupManager {
         return this.playbackDelta(group);
     }
 
-    private armReadyGateTimer(group: GroupState, deadlineMs: number): void {
-        this.clearReadyGateTimer(group);
-
+    private applyPauseTransition(group: GroupState): void {
         const now = Date.now();
-        const safeDeadlineMs = Math.max(now, deadlineMs);
-        const waitMs = Math.max(0, safeDeadlineMs - now);
-        group.readyDeadlineMs = safeDeadlineMs;
-        const readyTimeout = setTimeout(() => {
-            group.readyTimeout = null;
-            group.readyDeadlineMs = null;
-            if (group.syncState === "waiting") {
-                this.forcePlay(group);
-            }
-        }, waitMs);
-        group.readyTimeout = readyTimeout;
-        // Keep the gate timer referenced so process liveness cannot skip waiting-state resolution.
-        if (typeof readyTimeout.ref === "function") {
-            readyTimeout.ref();
-        }
+        this.clearBoundaryWatchdogTimer(group);
+        group.playback.positionMs = computePosition(group.playback);
+        group.playback.isPlaying = false;
+        group.playback.lastPositionUpdate = now;
+        group.playback.stateVersion += 1;
+        group.normalizedFromPlaying = false;
+        group.syncState = group.playback.queue.length > 0 ? "paused" : "idle";
+        group.lastActivity = now;
+        group.dirty = true;
+    }
+
+    private armReadyGateTimer(group: GroupState, deadlineMs: number): void {
+        armReadyGateTimer(group, deadlineMs, () => {
+            if (group.syncState === "waiting")
+                this.requestReadyGateCompletion(group);
+        });
     }
 
     private enterReadyGate(group: GroupState): void {
         this.clearBoundaryWatchdogTimer(group);
         group.syncState = "waiting";
-        group.readyUserIds.clear();
-        for (const member of group.members.values()) {
-            member.isReady = false;
-        }
+        resetReadyGateVotes(group);
         this.armReadyGateTimer(group, Date.now() + READY_GATE_TIMEOUT_MS);
     }
 
@@ -1410,36 +1351,33 @@ class GroupManager {
         deadlineMs: number,
     ): void {
         if (deadlineMs <= Date.now()) {
-            this.forcePlay(group);
+            this.requestReadyGateCompletion(group);
             return;
         }
         this.armReadyGateTimer(group, deadlineMs);
     }
 
-    private forcePlay(group: GroupState): void {
-        this.clearReadyGateState(group);
-
+    private forcePlay(group: GroupState, fence?: GroupMutationFence): void {
+        applyReadyGatePlayback(group, Date.now());
         const pb = group.playback;
-        pb.isPlaying = true;
-        pb.positionMs = 0;
-        pb.lastPositionUpdate = Date.now();
-        pb.stateVersion++;
-        group.syncState = "playing";
-        group.dirty = true;
         this.syncBoundaryWatchdog(group);
 
-        this.callbacks?.onPlayAt(group.id, {
-            positionMs: 0,
-            serverTime: Date.now(),
-            stateVersion: pb.stateVersion,
-        });
+        this.callbacks?.onPlayAt(
+            group.id,
+            {
+                positionMs: 0,
+                serverTime: Date.now(),
+                stateVersion: pb.stateVersion,
+            },
+            fence,
+        );
 
         // Also broadcast full state
-        this.broadcastState(group);
+        this.broadcastState(group, undefined, fence);
     }
 
     private endGroupInternal(group: GroupState, reason: string): void {
-        this.clearReadyGateState(group);
+        clearReadyGateState(group);
         this.clearBoundaryWatchdogTimer(group);
 
         group.playback.isPlaying = false;

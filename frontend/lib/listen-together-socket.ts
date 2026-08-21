@@ -49,6 +49,8 @@ export interface GroupSnapshot {
     visibility: "public" | "private";
     isActive: boolean;
     hostUserId: string;
+    /** Membership ordering token; absent on older servers. */
+    membershipVersion?: number;
     syncState: "idle" | "waiting" | "playing" | "paused";
     playback: {
         queue: SyncQueueItem[];
@@ -132,6 +134,8 @@ export interface MemberEvent {
     username: string;
     /** Originating group; absent on older servers. */
     groupId?: string;
+    /** Membership ordering token; absent on older servers. */
+    membershipVersion?: number;
 }
 
 /** Presence-only update that does not carry playback state. */
@@ -140,6 +144,8 @@ export interface MemberPresenceEvent {
     isConnected: boolean;
     /** Originating group; absent on older servers. */
     groupId?: string;
+    /** Membership ordering token; absent on older servers. */
+    membershipVersion?: number;
 }
 
 /** Apply a presence-only event to an existing client snapshot. */
@@ -166,6 +172,8 @@ export interface MemberLeftEvent extends MemberEvent {
 /** Direct signal that this socket's authoritative membership was revoked. */
 export interface MembershipRevokedEvent {
     groupId: string;
+    /** Membership ordering token; absent on older servers. */
+    membershipVersion?: number;
 }
 
 export interface GroupEndedEvent {
@@ -213,7 +221,7 @@ export interface ListenTogetherSocketCallbacks {
     onMemberJoined: (data: MemberEvent) => void;
     onMemberPresence?: (data: MemberPresenceEvent) => void;
     onMemberLeft: (data: MemberLeftEvent) => void;
-    onMembershipRevoked?: (data: MembershipRevokedEvent) => void;
+    onMembershipRevoked?: (data: MembershipRevokedEvent) => boolean | void;
     onGroupEnded: (data: GroupEndedEvent) => void;
     onConnect: () => void;
     onReconnect?: (attempt: number) => void;
@@ -507,8 +515,10 @@ export class ListenTogetherSocket {
             "group:membership-revoked",
             (data: MembershipRevokedEvent) => {
                 if (data.groupId !== this.currentGroupId) return;
+                const revokedGroupId = this.currentGroupId;
                 this.currentGroupId = null;
-                this.callbacks?.onMembershipRevoked?.(data);
+                const accepted = this.callbacks?.onMembershipRevoked?.(data);
+                if (accepted === false) this.currentGroupId = revokedGroupId;
             },
         );
 

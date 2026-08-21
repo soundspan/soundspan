@@ -172,6 +172,11 @@ describe("api entrypoint runtime behavior", () => {
         );
 
         const setupListenTogetherSocket = jest.fn();
+        const stopListenTogetherSocketIntake = jest.fn(async () => ({
+            drained: true,
+            deadlineAtMs: Date.now() + 10_000,
+            remainingMs: 10_000,
+        }));
         const shutdownListenTogetherSocket = jest.fn();
         const startPersistLoop = jest.fn();
         const stopPersistLoop = jest.fn();
@@ -288,6 +293,7 @@ describe("api entrypoint runtime behavior", () => {
         }));
         jest.doMock("../services/listenTogetherSocket", () => ({
             setupListenTogetherSocket,
+            stopListenTogetherSocketIntake,
             shutdownListenTogetherSocket,
         }));
         jest.doMock("../services/listenTogether", () => ({
@@ -362,6 +368,7 @@ describe("api entrypoint runtime behavior", () => {
             createDependencyReadinessTracker,
             dependencyReadiness,
             setupListenTogetherSocket,
+            stopListenTogetherSocketIntake,
             shutdownListenTogetherSocket,
             startPersistLoop,
             stopPersistLoop,
@@ -1122,6 +1129,12 @@ describe("api entrypoint runtime behavior", () => {
         process.exit = jest.fn() as any;
 
         const mocks = setupApiEntrypointMocks();
+        const drainDeadlineAtMs = Date.now() + 5_000;
+        mocks.stopListenTogetherSocketIntake.mockResolvedValueOnce({
+            drained: false,
+            deadlineAtMs: drainDeadlineAtMs,
+            remainingMs: 0,
+        });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         require("../index");
@@ -1134,8 +1147,22 @@ describe("api entrypoint runtime behavior", () => {
         await flushPromises();
 
         expect(mocks.stopPersistLoop).toHaveBeenCalledTimes(1);
+        expect(mocks.stopListenTogetherSocketIntake).toHaveBeenCalledTimes(1);
         expect(mocks.persistAllGroups).toHaveBeenCalledTimes(1);
+        expect(mocks.persistAllGroups).toHaveBeenCalledWith({
+            deadlineAtMs: drainDeadlineAtMs,
+        });
+        expect(mocks.logger.error).toHaveBeenCalledWith(
+            "Listen Together mutation drain failed; final persistence may skip locked groups",
+            { remainingMs: 0 },
+        );
         expect(mocks.shutdownListenTogetherSocket).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.stopListenTogetherSocketIntake.mock.invocationCallOrder[0],
+        ).toBeLessThan(mocks.persistAllGroups.mock.invocationCallOrder[0]);
+        expect(mocks.persistAllGroups.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.shutdownListenTogetherSocket.mock.invocationCallOrder[0],
+        );
         expect(mocks.server.close).toHaveBeenCalledTimes(1);
         expect(mocks.server.closeIdleConnections).toHaveBeenCalledTimes(1);
         expect(mocks.shutdownUmapProjection).toHaveBeenCalledTimes(1);

@@ -28,7 +28,20 @@ describe("listenTogetherManager runtime behavior", () => {
         onMemberPresence: jest.fn(),
         onMemberLeft: jest.fn(),
         onGroupEnded: jest.fn(),
+        onReadyGateCompletion: jest.fn(),
     });
+
+    const completeRequestedReadyGate = (
+        callbacks: jest.Mocked<ManagerCallbacks>,
+    ): boolean => {
+        const [groupId, data] =
+            callbacks.onReadyGateCompletion.mock.calls.at(-1)!;
+        return groupManager.handleReadyGateCompletion(
+            groupId,
+            data.currentIndex,
+            data.stateVersion,
+        );
+    };
 
     const resetManager = (): void => {
         for (const groupId of groupManager.allGroupIds()) {
@@ -99,6 +112,62 @@ describe("listenTogetherManager runtime behavior", () => {
         ]);
     });
 
+    it("allocates a monotonic version for an active shutdown pause", () => {
+        jest.useFakeTimers().setSystemTime(10_000);
+        groupManager.setCallbacks(createCallbacks());
+        const group = groupManager.create("g-shutdown", {
+            name: "Shutdown",
+            joinCode: "STOP01",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            isPlaying: true,
+            createdAt: new Date(),
+        });
+        group.playback.stateVersion = 7;
+        group.playback.positionMs = 1_000;
+        group.playback.lastPositionUpdate = 9_000;
+
+        const prepared = groupManager.pauseForShutdown("g-shutdown");
+
+        expect(prepared?.group.playback).toEqual(
+            expect.objectContaining({
+                isPlaying: false,
+                positionMs: 2_000,
+                stateVersion: 8,
+            }),
+        );
+        expect(prepared?.paused).toBe(true);
+        expect(prepared?.snapshot.playback.stateVersion).toBe(8);
+    });
+
+    it("allocates a paused version after DB hydration normalized playing state", () => {
+        const group = groupManager.hydrate("g-normalized-shutdown", {
+            name: "Normalized shutdown",
+            joinCode: "NORM01",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            queue: [track("1")],
+            currentIndex: 0,
+            isPlaying: true,
+            currentTimeMs: 1_000,
+            stateVersion: 7,
+            createdAt: new Date(),
+            members: [],
+        });
+
+        expect(group.playback.isPlaying).toBe(false);
+        const prepared = groupManager.pauseForShutdown("g-normalized-shutdown");
+
+        expect(prepared?.paused).toBe(true);
+        expect(prepared?.snapshot.playback).toEqual(
+            expect.objectContaining({ isPlaying: false, stateVersion: 8 }),
+        );
+    });
+
     it("tracks dirty groups and supports markClean/remove", () => {
         groupManager.setCallbacks(createCallbacks());
         groupManager.create("g-dirty", {
@@ -117,13 +186,80 @@ describe("listenTogetherManager runtime behavior", () => {
             "g-dirty",
         );
 
-        groupManager.markClean("g-dirty");
+        const dirtyGroup = groupManager.get("g-dirty")!;
+        groupManager.markClean(
+            "g-dirty",
+            dirtyGroup,
+            dirtyGroup.playback.stateVersion,
+        );
         expect(groupManager.dirtyGroups().map((g) => g.id)).not.toContain(
             "g-dirty",
         );
 
         groupManager.remove("g-dirty");
         expect(groupManager.has("g-dirty")).toBe(false);
+    });
+
+    it("does not clean a newer version or a replacement group object", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const captured = groupManager.create("g-clean-race", {
+            name: "Clean Race",
+            joinCode: "RACE01",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date(),
+        });
+        const capturedVersion = captured.playback.stateVersion;
+        groupManager.play("g-clean-race", "host");
+
+        groupManager.markClean("g-clean-race", captured, capturedVersion);
+        expect(captured.dirty).toBe(true);
+        groupManager.remove("g-clean-race");
+        const replacement = groupManager.create("g-clean-race", {
+            name: "Replacement",
+            joinCode: "RACE02",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("2")],
+            createdAt: new Date(),
+        });
+        replacement.dirty = true;
+
+        groupManager.markClean(
+            "g-clean-race",
+            captured,
+            replacement.playback.stateVersion,
+        );
+        expect(replacement.dirty).toBe(true);
+    });
+
+    it("invalidates fenced local state so persistence cannot observe it", () => {
+        groupManager.create("g-fenced", {
+            name: "Fenced",
+            joinCode: "FENCE1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("fenced")],
+            createdAt: new Date(),
+        });
+        groupManager.play("g-fenced", "host");
+
+        const poisoned = groupManager.get("g-fenced")!;
+        expect(poisoned.dirty).toBe(true);
+        expect(groupManager.dirtyGroups()).not.toContain(poisoned);
+        groupManager.invalidate("g-fenced");
+
+        expect(poisoned.dirty).toBe(false);
+        expect(poisoned.persistenceValid).toBe(false);
+        expect(groupManager.has("g-fenced")).toBe(false);
+        expect(groupManager.dirtyGroups()).not.toContain(poisoned);
     });
 
     it("treats removing unknown groups as a no-op", () => {
@@ -222,7 +358,10 @@ describe("listenTogetherManager runtime behavior", () => {
         );
 
         expect(groupManager.connectedMemberCount("g-socket")).toBe(1);
-        expect(callbacks.onPlayAt).toHaveBeenCalled();
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
+        expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
     });
 
     it("emits presence only when a DB-fallback hydrated member connects", () => {
@@ -390,6 +529,9 @@ describe("listenTogetherManager runtime behavior", () => {
 
         expect(groupManager.reportReady("g-ready", "host")).toBe(false);
         expect(groupManager.reportReady("g-ready", "guest")).toBe(true);
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
         expect(
             groupManager.snapshotById("g-ready")?.readyDeadlineMs,
@@ -397,8 +539,12 @@ describe("listenTogetherManager runtime behavior", () => {
 
         // Trigger timeout path on a new waiting gate.
         callbacks.onPlayAt.mockClear();
+        callbacks.onReadyGateCompletion.mockClear();
         groupManager.setTrack("g-ready", "host", 0, true);
         await jest.advanceTimersByTimeAsync(8_000);
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
     });
 
@@ -432,6 +578,9 @@ describe("listenTogetherManager runtime behavior", () => {
         );
         groupManager.setUnavailableIndices("g-unavailable-ready", "guest", [1]);
 
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
         expect(
             groupManager.snapshotById("g-unavailable-ready")?.syncState,
@@ -512,6 +661,9 @@ describe("listenTogetherManager runtime behavior", () => {
 
         await jest.advanceTimersByTimeAsync(8_000);
 
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
         expect(groupManager.snapshotById("g-ready-rearm")?.syncState).toBe(
             "playing",
@@ -523,10 +675,6 @@ describe("listenTogetherManager runtime behavior", () => {
 
     it("hydrates external snapshots for unknown groups and clears ready-gate state for non-waiting sync", () => {
         groupManager.setCallbacks(createCallbacks());
-        const clearReadyGateStateSpy = jest.spyOn(
-            groupManager as any,
-            "clearReadyGateState",
-        );
         groupManager.create("g-external-new", {
             name: "External New",
             joinCode: "EXT",
@@ -552,11 +700,9 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(hydrated).toBeDefined();
         expect(hydrated?.syncState).toBe("playing");
         expect(hydrated?.readyDeadlineMs).toBeNull();
-        expect(clearReadyGateStateSpy).toHaveBeenCalled();
-        clearReadyGateStateSpy.mockRestore();
     });
 
-    it("force-plays immediately when an external waiting snapshot has an expired deadline", () => {
+    it("requests locked completion when an external waiting snapshot has an expired deadline", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);
         groupManager.create("g-ready-expired", {
@@ -589,6 +735,9 @@ describe("listenTogetherManager runtime behavior", () => {
             },
         });
 
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
         expect(groupManager.snapshotById("g-ready-expired")?.syncState).toBe(
             "playing",
@@ -633,8 +782,8 @@ describe("listenTogetherManager runtime behavior", () => {
         const waiting = groupManager.setTrack("g-ref-timer", "host", 1, true);
 
         expect(waiting.waiting).toBe(true);
-        expect(refSpy).toHaveBeenCalledTimes(1);
-        expect(unrefSpy).not.toHaveBeenCalled();
+        expect(unrefSpy).toHaveBeenCalledTimes(1);
+        expect(refSpy).not.toHaveBeenCalled();
 
         setTimeoutSpy.mockRestore();
         clearTimeoutSpy.mockRestore();
@@ -780,7 +929,12 @@ describe("listenTogetherManager runtime behavior", () => {
 
         const after = groupManager.snapshotById("g-ready-preserve-deadline");
         expect(after?.syncState).toBe("waiting");
-        expect(after?.readyDeadlineMs).toBe(existingDeadline);
+        expect(after?.readyDeadlineMs).toBeGreaterThanOrEqual(
+            existingDeadline!,
+        );
+        expect(after?.readyDeadlineMs).toBeLessThanOrEqual(
+            existingDeadline! + 2,
+        );
     });
 
     it("recomputes waiting deadline when stale external snapshots keep waiting state but local deadline is missing", () => {
@@ -1067,6 +1221,52 @@ describe("listenTogetherManager runtime behavior", () => {
         );
     });
 
+    it("keeps newer membership while applying playback from an older membership snapshot", () => {
+        groupManager.setCallbacks(createCallbacks());
+        groupManager.create("g-membership-fence", {
+            name: "Membership Fence",
+            joinCode: "MEMBR1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date("2026-02-16T00:00:00.000Z"),
+        });
+        const current = groupManager.snapshotById("g-membership-fence")!;
+        current.membershipVersion = 11;
+        current.members.push({
+            userId: "returning",
+            username: "Returning",
+            isHost: false,
+            joinedAt: "2026-02-16T00:01:00.000Z",
+            isConnected: false,
+        });
+        groupManager.applyExternalSnapshot(current);
+        const delayed = {
+            ...current,
+            membershipVersion: 10,
+            playback: {
+                ...current.playback,
+                stateVersion: current.playback.stateVersion + 1,
+            },
+            members: current.members.filter(
+                (member) => member.userId !== "returning",
+            ),
+        };
+
+        groupManager.applyExternalSnapshot(delayed);
+
+        const applied = groupManager.snapshotById("g-membership-fence")!;
+        expect(applied.playback.stateVersion).toBe(
+            delayed.playback.stateVersion,
+        );
+        expect(applied.membershipVersion).toBe(11);
+        expect(
+            applied.members.some((member) => member.userId === "returning"),
+        ).toBe(true);
+    });
+
     it("reconciles external membership to exactly one authoritative host", () => {
         groupManager.setCallbacks(createCallbacks());
         groupManager.create("g-host-merge", {
@@ -1344,6 +1544,9 @@ describe("listenTogetherManager runtime behavior", () => {
         const removed = groupManager.removeMember("g-host-transfer", "host");
         expect(removed.ended).toBe(false);
         expect(removed.newHostUserId).toBe("user-a");
+        expect(callbacks.onReadyGateCompletion).toHaveBeenCalledTimes(1);
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+        expect(completeRequestedReadyGate(callbacks)).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalled();
     });
 

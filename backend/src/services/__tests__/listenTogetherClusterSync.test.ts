@@ -26,6 +26,7 @@ describe("listenTogetherClusterSync", () => {
         onMemberPresence: jest.fn(),
         onMemberLeft: jest.fn(),
         onGroupEnded: jest.fn(),
+        onReadyGateCompletion: jest.fn(),
     });
 
     function resetGroupManager(): void {
@@ -99,6 +100,30 @@ describe("listenTogetherClusterSync", () => {
             info: jest.fn(),
             warn: jest.fn(),
         };
+        const stateStore: any = {
+            validatePublication: jest.fn(async () => true),
+            getSnapshot: jest.fn(async () => null),
+        };
+        const localTails = new Map<string, Promise<void>>();
+        const withLocalGroupMutationBoundary = jest.fn(
+            async <T>(groupId: string, operation: () => Promise<T>) => {
+                const previous = localTails.get(groupId) ?? Promise.resolve();
+                let release: () => void = () => undefined;
+                const current = new Promise<void>((resolve) => {
+                    release = resolve;
+                });
+                localTails.set(
+                    groupId,
+                    previous.then(() => current),
+                );
+                await previous;
+                try {
+                    return await operation();
+                } finally {
+                    release();
+                }
+            },
+        );
 
         jest.doMock("crypto", () => ({
             randomUUID: () => "node-1",
@@ -121,6 +146,12 @@ describe("listenTogetherClusterSync", () => {
                 },
             },
         }));
+        jest.doMock("../listenTogetherStateStore", () => ({
+            listenTogetherStateStore: stateStore,
+        }));
+        jest.doMock("../listenTogetherMutationLock", () => ({
+            withLocalGroupMutationBoundary,
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const {
@@ -133,10 +164,13 @@ describe("listenTogetherClusterSync", () => {
             pubClient,
             subClient,
             logger,
-            emitMessage(channel: string, message: string) {
+            stateStore,
+            withLocalGroupMutationBoundary,
+            async emitMessage(channel: string, message: string) {
                 if (messageHandler) {
                     messageHandler(channel, message);
                 }
+                await new Promise((resolve) => setImmediate(resolve));
             },
         };
     }
@@ -213,8 +247,8 @@ describe("listenTogetherClusterSync", () => {
 
         await listenTogetherClusterSync.start(handler);
 
-        emitMessage("listen-together:state-sync", "{not-json");
-        emitMessage(
+        await emitMessage("listen-together:state-sync", "{not-json");
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "group-snapshot",
@@ -224,7 +258,7 @@ describe("listenTogetherClusterSync", () => {
                 ts: Date.now(),
             }),
         );
-        emitMessage(
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "not-a-snapshot",
@@ -234,7 +268,7 @@ describe("listenTogetherClusterSync", () => {
                 ts: Date.now(),
             }),
         );
-        emitMessage(
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "group-snapshot",
@@ -245,7 +279,7 @@ describe("listenTogetherClusterSync", () => {
             }),
         );
         const validSnapshot = { id: "g2", playback: { t: 1 }, members: [] };
-        emitMessage(
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "group-snapshot",
@@ -269,7 +303,7 @@ describe("listenTogetherClusterSync", () => {
         const endedHandler = jest.fn();
         await listenTogetherClusterSync.start(snapshotHandler, endedHandler);
 
-        emitMessage(
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "group-ended",
@@ -281,6 +315,93 @@ describe("listenTogetherClusterSync", () => {
 
         expect(endedHandler).toHaveBeenCalledWith("g-ended");
         expect(snapshotHandler).not.toHaveBeenCalled();
+    });
+
+    it("serializes same-group consumption through the local mutation tail", async () => {
+        const { listenTogetherClusterSync, emitMessage } = loadClusterSync();
+        const events: string[] = [];
+        let releaseFirst: () => void = () => undefined;
+        let markFirstStarted: () => void = () => undefined;
+        const firstStarted = new Promise<void>((resolve) => {
+            markFirstStarted = resolve;
+        });
+        const handler = jest.fn(async (incoming: GroupSnapshot) => {
+            events.push(`${incoming.playback.stateVersion}:start`);
+            if (incoming.playback.stateVersion === 1) {
+                markFirstStarted();
+                await new Promise<void>((resolve) => {
+                    releaseFirst = resolve;
+                });
+            }
+            events.push(`${incoming.playback.stateVersion}:end`);
+        });
+        await listenTogetherClusterSync.start(handler);
+        const event = (stateVersion: number) =>
+            JSON.stringify({
+                type: "group-snapshot",
+                groupId: "g-serialized",
+                originNodeId: "node-2",
+                fencingToken: stateVersion,
+                publicationId: `publication-${stateVersion}`,
+                snapshot: {
+                    id: "g-serialized",
+                    playback: { stateVersion, serverTime: stateVersion },
+                    members: [],
+                },
+                ts: Date.now(),
+            });
+
+        const first = emitMessage("listen-together:state-sync", event(1));
+        await firstStarted;
+        const second = emitMessage("listen-together:state-sync", event(2));
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(events).toEqual(["1:start"]);
+
+        releaseFirst();
+        await Promise.all([first, second]);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(events).toEqual(["1:start", "1:end", "2:start", "2:end"]);
+    });
+
+    it("applies only reloaded authority when an event is fenced after compute", async () => {
+        const { listenTogetherClusterSync, emitMessage, stateStore } =
+            loadClusterSync();
+        const stale = {
+            id: "g-race",
+            playback: { stateVersion: 1, serverTime: 1 },
+            members: [],
+        } as unknown as GroupSnapshot;
+        const current = {
+            ...stale,
+            playback: { stateVersion: 2, serverTime: 2 },
+        } as unknown as GroupSnapshot;
+        stateStore.validatePublication
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false);
+        stateStore.getSnapshot.mockResolvedValueOnce(current);
+        const appliedVersions: number[] = [];
+        const handler = jest.fn((snapshot: GroupSnapshot) => () => {
+            appliedVersions.push(snapshot.playback.stateVersion);
+        });
+        await listenTogetherClusterSync.start(handler);
+
+        await emitMessage(
+            "listen-together:state-sync",
+            JSON.stringify({
+                type: "group-snapshot",
+                groupId: "g-race",
+                originNodeId: "node-2",
+                fencingToken: 1,
+                publicationId: "publication-1",
+                snapshot: stale,
+                ts: Date.now(),
+            }),
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(handler).toHaveBeenNthCalledWith(1, stale);
+        expect(handler).toHaveBeenNthCalledWith(2, current);
+        expect(appliedVersions).toEqual([2]);
     });
 
     it("applies a peer membership transfer without replacing playback", async () => {
@@ -314,7 +435,7 @@ describe("listenTogetherClusterSync", () => {
             membershipHandler,
         );
 
-        emitMessage(
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "group-membership",
@@ -391,7 +512,7 @@ describe("listenTogetherClusterSync", () => {
         await listenTogetherClusterSync.start(handler);
         await listenTogetherClusterSync.stop();
 
-        emitMessage(
+        await emitMessage(
             "listen-together:state-sync",
             JSON.stringify({
                 type: "group-snapshot",
@@ -413,7 +534,7 @@ describe("listenTogetherClusterSync", () => {
         const handler = jest.fn();
         await listenTogetherClusterSync.start(handler);
 
-        emitMessage(
+        await emitMessage(
             "different-channel",
             JSON.stringify({
                 type: "group-snapshot",
@@ -456,6 +577,14 @@ describe("listenTogetherClusterSync", () => {
         groupManager.applyExternalSnapshot(storedSnapshot as GroupSnapshot);
         expect(groupManager.reportReady("g-ready-round-trip", "guest")).toBe(
             true,
+        );
+
+        const [groupId, completion] =
+            callbacks.onReadyGateCompletion.mock.calls[0];
+        groupManager.handleReadyGateCompletion(
+            groupId,
+            completion.currentIndex,
+            completion.stateVersion,
         );
 
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);

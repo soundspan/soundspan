@@ -905,7 +905,11 @@ describe("config module", () => {
             LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: undefined,
             LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: undefined,
             LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: undefined,
+            LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS: undefined,
+            LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS: undefined,
             LISTEN_TOGETHER_MUTATION_LOCK_PREFIX: undefined,
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: undefined,
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: undefined,
         });
 
         expect(config.listenTogether).toEqual({
@@ -914,6 +918,9 @@ describe("config module", () => {
             redisAdapterEnabled: true,
             mutationLockEnabled: true,
             mutationLockTtlMs: 3000,
+            mutationLockRenewIntervalMs: 1000,
+            publicationDeadlineMs: 750,
+            mutationDrainDeadlineMs: 10_000,
             mutationLockPrefix: "listen-together:mutation-lock",
             stateSyncEnabled: true,
             stateSyncChannel: "listen-together:state-sync",
@@ -923,13 +930,15 @@ describe("config module", () => {
         });
     });
 
-    it("honors Listen Together overrides and rejects invalid positive integers", async () => {
+    it("honors safe Listen Together overrides", async () => {
         const overridden = await loadConfigModule({
             LISTEN_TOGETHER_RECONNECT_SLO_MS: "7500",
             LISTEN_TOGETHER_ALLOW_POLLING: "true",
             LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: "false",
             LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "false",
             LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "4500",
+            LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS: "1200",
+            LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS: "900",
             LISTEN_TOGETHER_MUTATION_LOCK_PREFIX: "custom-lock",
             LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
             LISTEN_TOGETHER_STATE_SYNC_CHANNEL: "custom-sync",
@@ -943,6 +952,9 @@ describe("config module", () => {
             redisAdapterEnabled: false,
             mutationLockEnabled: false,
             mutationLockTtlMs: 4500,
+            mutationLockRenewIntervalMs: 1200,
+            publicationDeadlineMs: 900,
+            mutationDrainDeadlineMs: 10_000,
             mutationLockPrefix: "custom-lock",
             stateSyncEnabled: false,
             stateSyncChannel: "custom-sync",
@@ -950,15 +962,50 @@ describe("config module", () => {
             stateStoreKeyPrefix: "custom-state",
             stateStoreTtlSeconds: 10_800,
         });
+    });
 
-        const invalid = await loadConfigModule({
-            LISTEN_TOGETHER_RECONNECT_SLO_MS: "0",
-            LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "malformed",
-            LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS: "0",
-        });
-        expect(invalid.config.listenTogether.reconnectSloMs).toBe(5000);
-        expect(invalid.config.listenTogether.mutationLockTtlMs).toBe(3000);
-        expect(invalid.config.listenTogether.stateStoreTtlSeconds).toBe(21_600);
+    it.each([
+        [
+            { LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "499" },
+            "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS must be an integer greater than or equal to 500",
+        ],
+        [
+            { LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "malformed" },
+            "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS must be an integer greater than or equal to 500",
+        ],
+        [
+            {
+                LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "3000",
+                LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS: "1001",
+            },
+            "LISTEN_TOGETHER_MUTATION_LOCK_RENEW_INTERVAL_MS must be at most one third of LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS",
+        ],
+        [
+            {
+                LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "500",
+                LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS: "500",
+            },
+            "LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS must be less than LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS",
+        ],
+        [
+            { LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS: "0" },
+            "LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS",
+        ],
+    ])(
+        "rejects unsafe Listen Together timing %#",
+        async (overrides, message) => {
+            await expectStartupValidationFailure(overrides, message);
+        },
+    );
+
+    it("rejects state sync without the authoritative Redis state store", async () => {
+        await expectStartupValidationFailure(
+            {
+                LISTEN_TOGETHER_STATE_SYNC_ENABLED: "true",
+                LISTEN_TOGETHER_STATE_STORE_ENABLED: "false",
+            },
+            "LISTEN_TOGETHER_STATE_SYNC_ENABLED=true requires LISTEN_TOGETHER_STATE_STORE_ENABLED=true; valid combinations are sync=true/store=true, sync=false/store=true, or sync=false/store=false",
+        );
     });
 
     it("exposes migrated route, integration, logging, and worker values", async () => {

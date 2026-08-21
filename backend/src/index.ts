@@ -59,6 +59,7 @@ import listenTogetherRoutes from "./routes/listenTogether";
 import subsonicRoutes from "./routes/subsonic";
 import {
     setupListenTogetherSocket,
+    stopListenTogetherSocketIntake,
     shutdownListenTogetherSocket,
 } from "./services/listenTogetherSocket";
 import {
@@ -748,7 +749,16 @@ async function gracefulShutdown(signal: string) {
         // Shutdown Listen Together
         if (runApiRole) {
             stopPersistLoop();
-            await persistAllGroups();
+            const mutationDrain = await stopListenTogetherSocketIntake();
+            if (!mutationDrain.drained) {
+                logger.error(
+                    "Listen Together mutation drain failed; final persistence may skip locked groups",
+                    { remainingMs: mutationDrain.remainingMs },
+                );
+            }
+            await persistAllGroups({
+                deadlineAtMs: mutationDrain.deadlineAtMs,
+            });
             shutdownListenTogetherSocket();
 
             logger.debug("Closing HTTP server...");
