@@ -15,7 +15,7 @@ ENV TZ=UTC
 # ffmpeg: required by yt-dlp for stream extraction
 # curl: healthcheck probe
 # tini: PID 1 signal handling (K8s SIGTERM)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     tini \

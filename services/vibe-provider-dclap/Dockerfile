@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DCLAP_MODEL_PATH=/app/models \
     DCLAP_TOKENIZER_PATH=/app/tokenizer
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
     libgomp1 \

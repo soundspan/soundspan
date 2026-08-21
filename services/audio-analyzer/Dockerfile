@@ -21,7 +21,7 @@ ENV TF_NUM_INTRAOP_THREADS=1 \
     THREADS_PER_WORKER=1
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     procps \

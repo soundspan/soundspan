@@ -50,7 +50,7 @@ WORKDIR /app
 
 # ffmpeg is required by durable track identity (#457): scanner and audio-hash
 # backfill stream hashing run in the worker process.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     tini \
     openssl \
     ffmpeg \
@@ -92,7 +92,7 @@ FROM node:24-bookworm-slim@sha256:65932751ed4073ed02f5c04e494e4b2572a891b7dbea05
 WORKDIR /app
 
 # ffmpeg is required by API runtime (transcoding/audio paths).
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     tini \
     openssl \
     ffmpeg \
