@@ -3,10 +3,15 @@ import path from "path";
 
 describe("worker startup maintenance queue contract", () => {
     const workersPath = path.resolve(__dirname, "../workers/index.ts");
+    const registryPath = path.resolve(
+        __dirname,
+        "../workers/schedulerJobRegistry.ts",
+    );
     const indexPath = path.resolve(__dirname, "../index.ts");
     const workerPath = path.resolve(__dirname, "../worker.ts");
 
     const workersSource = fs.readFileSync(workersPath, "utf8");
+    const registrySource = fs.readFileSync(registryPath, "utf8");
     const indexSource = fs.readFileSync(indexPath, "utf8");
     const workerSource = fs.readFileSync(workerPath, "utf8");
 
@@ -17,7 +22,8 @@ describe("worker startup maintenance queue contract", () => {
         expect(workersSource).toContain("downloadQueueReconcile");
         expect(workersSource).toContain("artistCountsBackfill");
         expect(workersSource).toContain("imageBackfill");
-        expect(workersSource).toContain("repeat: { every: 24 * ONE_HOUR_MS }");
+        expect(workersSource).toContain("buildSchedulerJobs()");
+        expect(registrySource).toContain("repeat: { every: 24 * ONE_HOUR_MS }");
     });
 
     it("removes direct startup side-effects from api and worker entrypoints", () => {
