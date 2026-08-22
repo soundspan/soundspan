@@ -1,5 +1,9 @@
 import { prisma } from "../../utils/db";
 
+// PostgreSQL's signed-int16 protocol count caps bind parameters at 32,767 in
+// practice; 25,000 leaves room for userId and future filters.
+const GROUP_BY_ID_CHUNK_SIZE = 25_000;
+
 /** Authenticated-user fields added to a Subsonic song response. */
 export type SongEnrichment = {
     playedAt?: Date;
@@ -27,7 +31,34 @@ function mergeEnrichment(
     target.set(trackId, { ...target.get(trackId), ...value });
 }
 
-/** Load every authenticated-user song field in one bounded query per store. */
+/** Split track IDs into bounded database query batches. */
+function chunkIds(ids: string[], size: number): string[][] {
+    if (!Number.isInteger(size) || size <= 0) {
+        throw new RangeError("Chunk size must be a positive integer");
+    }
+    const chunks: string[][] = [];
+    for (let offset = 0; offset < ids.length; offset += size) {
+        chunks.push(ids.slice(offset, offset + size));
+    }
+    return chunks;
+}
+
+/** Load grouped play enrichment without exceeding database parameter limits. */
+async function loadGroupedPlays(userId: string, ids: string[]) {
+    const groupedChunks = await Promise.all(
+        chunkIds(ids, GROUP_BY_ID_CHUNK_SIZE).map((chunk) =>
+            prisma.play.groupBy({
+                by: ["trackId"],
+                where: { userId, trackId: { in: chunk } },
+                _count: { _all: true },
+                _max: { playedAt: true },
+            }),
+        ),
+    );
+    return groupedChunks.flat();
+}
+
+/** Load every authenticated-user song field with bounded queries per store. */
 export async function loadSongEnrichmentByTrackId(
     userId: string,
     trackIds: Array<string | null | undefined>,
@@ -39,12 +70,7 @@ export async function loadSongEnrichmentByTrackId(
     const [plays, likedTracks, ratings] = await Promise.all([
         preloadedPlayByTrackId
             ? Promise.resolve([])
-            : prisma.play.groupBy({
-                  by: ["trackId"],
-                  where: { userId, trackId: { in: ids } },
-                  _count: { _all: true },
-                  _max: { playedAt: true },
-              }),
+            : loadGroupedPlays(userId, ids),
         preloadedStarredAtByTrackId
             ? Promise.resolve(
                   Array.from(
