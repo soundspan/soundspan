@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- User-owned TIDAL and YouTube Music tracks now appear in the default Library Artists and Songs views and in normal Library track search, with provider ownership scoped to the authenticated user's likes (#699).
+
 ### Security
 
 ## [2.4.1] - 2026-08-22
