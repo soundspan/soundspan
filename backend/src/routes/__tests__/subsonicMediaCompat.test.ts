@@ -111,6 +111,33 @@ describe("subsonic media compatibility handlers", () => {
         jest.restoreAllMocks();
     });
 
+    it("returns not found instead of a local file when a federated download's peer is unavailable", async () => {
+        mockTrackFindFirst.mockResolvedValue({
+            id: "track-2",
+            origin: "FEDERATED",
+            remoteId: "remote-2",
+            filePath: null,
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "v2:tok",
+                outboundStatus: "OFFLINE",
+            },
+        });
+        const res = buildRes();
+
+        await handleDownload(buildReq({ id: "tr-track-2" }), res);
+
+        expect(res.download).not.toHaveBeenCalled();
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            70,
+            "Song not found",
+            expect.anything(),
+            undefined,
+        );
+    });
+
     it("returns not found when download track lookup fails", async () => {
         mockTrackFindFirst.mockResolvedValue(null);
 

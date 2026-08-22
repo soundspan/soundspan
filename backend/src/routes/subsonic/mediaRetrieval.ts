@@ -798,16 +798,25 @@ export async function handleDownload(
             return;
         }
 
-        if (
-            await proxySubsonicFederatedStream({
-                req,
+        const peerResult = await proxySubsonicFederatedStream({
+            req,
+            res,
+            track,
+            quality: "original",
+            format,
+            callback,
+        });
+        if (peerResult === "served") {
+            return;
+        }
+        if (peerResult === "failed") {
+            sendSubsonicError(
                 res,
-                track,
-                quality: "original",
+                SubsonicErrorCode.NOT_FOUND,
+                "Song not found",
                 format,
                 callback,
-            })
-        ) {
+            );
             return;
         }
 
