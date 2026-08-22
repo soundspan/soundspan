@@ -224,6 +224,29 @@ describe("audiobook cache service behavior", () => {
         );
     });
 
+    it("records the error message when a missing audiobook fails to sync", async () => {
+        const service = new AudiobookCacheService();
+
+        mockGetAllAudiobooks.mockResolvedValue([
+            buildBook({
+                id: "book-broken",
+                media: {
+                    metadata: { title: "Broken Book" },
+                },
+            }),
+        ]);
+        prisma.audiobook.upsert.mockRejectedValueOnce(
+            new Error("db write failed"),
+        );
+
+        const result = await service.syncMissing();
+
+        expect(result.failed).toBe(1);
+        expect(result.errors[0]).toBe(
+            "Failed to sync Broken Book: db write failed",
+        );
+    });
+
     it("preserves stored sections on minified updates and creates them as unknown", async () => {
         const service = new AudiobookCacheService();
         mockGetAllAudiobooks.mockResolvedValue([
