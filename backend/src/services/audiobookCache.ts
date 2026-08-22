@@ -132,6 +132,70 @@ export class AudiobookCacheService {
     }
 
     /**
+     * Sync audiobooks that exist in Audiobookshelf but are not cached locally.
+     * Intended for lightweight periodic discovery of newly-added books.
+     */
+    async syncMissing(): Promise<SyncResult> {
+        const result: SyncResult = {
+            synced: 0,
+            failed: 0,
+            skipped: 0,
+            errors: [],
+        };
+
+        try {
+            const audiobooks = await audiobookshelfService.getAllAudiobooks();
+
+            if (audiobooks.length === 0) {
+                return result;
+            }
+
+            const cachedAudiobooks = await prisma.audiobook.findMany({
+                where: { peerId: null },
+                select: { id: true },
+            });
+            const cachedIds = new Set(
+                cachedAudiobooks.map((audiobook) => audiobook.id),
+            );
+            const missingAudiobooks = audiobooks.filter(
+                (audiobook) => !cachedIds.has(audiobook.id),
+            );
+
+            result.skipped = audiobooks.length - missingAudiobooks.length;
+
+            if (missingAudiobooks.length === 0) {
+                return result;
+            }
+
+            await this.ensureCoverCacheDir();
+
+            for (const book of missingAudiobooks) {
+                try {
+                    await this.syncAudiobook(book);
+                    result.synced++;
+                } catch (error: any) {
+                    result.failed++;
+                    const metadata = book.media?.metadata || book;
+                    const title =
+                        metadata.title || book.title || "Unknown Title";
+                    const errorMsg = `Failed to sync ${title}`;
+                    result.errors.push(errorMsg);
+                    logger.error(` ${errorMsg}`, error);
+                }
+            }
+
+            logger.debug(
+                `[AUDIOBOOK] Incremental sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
+            );
+
+            return result;
+        } catch (error: any) {
+            logger.error(" Audiobook incremental sync failed:", error);
+            throw error;
+        }
+    }
+
+    /**
      * Sync a single audiobook
      */
     private async syncAudiobook(book: any): Promise<void> {

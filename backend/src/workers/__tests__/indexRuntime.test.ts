@@ -88,6 +88,12 @@ describe("workers runtime behavior", () => {
         }));
         const audiobookCacheService = {
             syncAll: jest.fn(async () => ({ synced: 0 })),
+            syncMissing: jest.fn(async () => ({
+                synced: 0,
+                failed: 0,
+                skipped: 0,
+                errors: [] as string[],
+            })),
         };
         const isBackfillNeeded = jest.fn(async () => false);
         const backfillAllArtistCounts = jest.fn(async () => ({
@@ -379,6 +385,16 @@ describe("workers runtime behavior", () => {
         expect(mocks.schedulerQueue.isReady).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.add).toHaveBeenCalled();
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "audiobook-auto-sync-startup",
+            { mode: "repeat" },
+            {
+                jobId: "scheduler:audiobook-auto-sync:repeat",
+                repeat: { every: 5 * 60 * 1000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "track-audio-hash-backfill",
             {
                 mode: "startup",
@@ -447,6 +463,34 @@ describe("workers runtime behavior", () => {
 
         expect(mocks.registerFederationProcessors).toHaveBeenCalledTimes(1);
         expect(mocks.registerFederationSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs incremental audiobook sync for scheduled repeat jobs", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        (mocks.getSystemSettings as jest.Mock).mockResolvedValue({
+            audiobookshelfEnabled: true,
+            audiobookshelfUrl: "http://abs.local",
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+
+        await schedulerHandler({
+            id: "audiobook-sync-1",
+            name: "audiobook-auto-sync-startup",
+            data: { mode: "repeat" },
+        });
+
+        expect(mocks.audiobookCacheService.syncMissing).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(mocks.audiobookCacheService.syncAll).not.toHaveBeenCalled();
     });
 
     it("dispatches track-removal purge jobs through the scheduler", async () => {
@@ -789,9 +833,12 @@ describe("workers runtime behavior", () => {
             audiobookshelfEnabled: true,
             audiobookshelfUrl: "http://audiobookshelf",
         });
-        const prisma = require("../../utils/db").prisma;
-        prisma.audiobook.count.mockResolvedValue(0);
-        mocks.audiobookCacheService.syncAll.mockResolvedValue({ synced: 4 });
+        mocks.audiobookCacheService.syncMissing.mockResolvedValue({
+            synced: 4,
+            failed: 0,
+            skipped: 0,
+            errors: [],
+        });
         mocks.isBackfillNeeded.mockResolvedValue(true);
         mocks.backfillAllArtistCounts.mockResolvedValue({
             processed: 10,
@@ -856,7 +903,7 @@ describe("workers runtime behavior", () => {
         });
 
         expect(mocks.cleanupExpiredCache).toHaveBeenCalled();
-        expect(mocks.audiobookCacheService.syncAll).toHaveBeenCalled();
+        expect(mocks.audiobookCacheService.syncMissing).toHaveBeenCalled();
         expect(
             mocks.downloadQueueManager.reconcileOnStartup,
         ).toHaveBeenCalled();
@@ -1006,25 +1053,29 @@ describe("workers runtime behavior", () => {
         await schedulerHandler({
             id: "audiobook-skip-disabled",
             name: "audiobook-auto-sync-startup",
-            data: {},
+            data: { mode: "startup" },
         });
 
         expect(mocks.logger.debug).toHaveBeenCalledWith(
             "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
         );
-        expect(mocks.audiobookCacheService.syncAll).not.toHaveBeenCalled();
+        expect(mocks.audiobookCacheService.syncMissing).not.toHaveBeenCalled();
     });
 
-    it("skips audiobook startup sync when cache is already populated", async () => {
+    it("checks for missing audiobooks even when the cache is already populated", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
-        const prisma = require("../../utils/db").prisma;
 
         (mocks.getSystemSettings as jest.Mock).mockResolvedValue({
             audiobookshelfEnabled: true,
             audiobookshelfUrl: "http://audiobookshelf",
         });
-        prisma.audiobook.count.mockResolvedValueOnce(3);
+        mocks.audiobookCacheService.syncMissing.mockResolvedValueOnce({
+            synced: 1,
+            failed: 0,
+            skipped: 3,
+            errors: [],
+        });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         require("../index");
@@ -1036,15 +1087,17 @@ describe("workers runtime behavior", () => {
         expect(schedulerHandler).toBeTruthy();
 
         await schedulerHandler({
-            id: "audiobook-skip-cached",
+            id: "audiobook-check-cached",
             name: "audiobook-auto-sync-startup",
-            data: {},
+            data: { mode: "startup" },
         });
 
-        expect(mocks.logger.debug).toHaveBeenCalledWith(
-            "Audiobook cache has 3 entries - skipping auto-sync",
+        expect(mocks.audiobookCacheService.syncMissing).toHaveBeenCalledTimes(
+            1,
         );
-        expect(mocks.audiobookCacheService.syncAll).not.toHaveBeenCalled();
+        expect(mocks.logger.debug).toHaveBeenCalledWith(
+            "Audiobook auto-sync complete: 1 new, 3 already cached, 0 failed",
+        );
     });
 
     it("skips startup backfills when artist counts and local images are already complete", async () => {
@@ -1601,9 +1654,13 @@ describe("workers runtime behavior", () => {
     it("times out startup maintenance tasks and skips completion logs when timed out", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
-        const prisma = require("../../utils/db").prisma;
-        const neverSyncAll = () =>
-            new Promise<{ synced: number }>(() => undefined);
+        const neverSyncMissing = () =>
+            new Promise<{
+                synced: number;
+                failed: number;
+                skipped: number;
+                errors: string[];
+            }>(() => undefined);
         const neverReconcileOnStartup = () =>
             new Promise<{ loaded: number; failed: number }>(() => undefined);
         const neverBackfillArtistCounts = () =>
@@ -1621,9 +1678,8 @@ describe("workers runtime behavior", () => {
             audiobookshelfEnabled: true,
             audiobookshelfUrl: "http://audiobookshelf",
         });
-        prisma.audiobook.count.mockResolvedValueOnce(0);
-        mocks.audiobookCacheService.syncAll.mockImplementationOnce(
-            neverSyncAll,
+        mocks.audiobookCacheService.syncMissing.mockImplementationOnce(
+            neverSyncMissing,
         );
         mocks.downloadQueueManager.reconcileOnStartup.mockImplementationOnce(
             neverReconcileOnStartup,

@@ -316,6 +316,7 @@ const SCHEDULER_JOB_IDS = {
     podcastCleanupStartup: "scheduler:podcast-cleanup:startup",
     podcastCleanupRepeat: "scheduler:podcast-cleanup:repeat",
     audiobookAutoSyncStartup: "scheduler:audiobook-auto-sync:startup",
+    audiobookAutoSyncRepeat: "scheduler:audiobook-auto-sync:repeat",
     downloadQueueReconcileStartup: "scheduler:download-queue-reconcile:startup",
     artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
     imageBackfillStartup: "scheduler:image-backfill:startup",
@@ -594,49 +595,41 @@ async function processPodcastCleanupJob(
     );
 }
 
-async function processAudiobookAutoSyncJob(): Promise<void> {
+async function processAudiobookAutoSyncJob(
+    mode: "startup" | "repeat",
+): Promise<void> {
     await runWithSchedulerClaim(
-        "scheduler-claim:audiobook-auto-sync-startup",
+        "scheduler-claim:audiobook-auto-sync",
         2 * ONE_HOUR_MS,
-        "startup audiobook auto-sync",
+        `${mode} audiobook auto-sync`,
         async () => {
             const { getSystemSettings } =
                 await import("../utils/systemSettings");
             const settings = await getSystemSettings();
-
             if (
                 !settings?.audiobookshelfEnabled ||
                 !settings?.audiobookshelfUrl
             ) {
-                startupLog.debug(
-                    "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
-                );
+                if (mode === "startup") {
+                    startupLog.debug(
+                        "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
+                    );
+                }
                 return;
             }
-
-            const cachedCount = await prisma.audiobook.count();
-            if (cachedCount > 0) {
-                startupLog.debug(
-                    `Audiobook cache has ${cachedCount} entries - skipping auto-sync`,
-                );
-                return;
-            }
-
-            startupLog.debug(
-                "Audiobook cache is empty - auto-syncing from Audiobookshelf...",
-            );
-
             const { audiobookCacheService } =
                 await import("../services/audiobookCache");
             const result = await withTimeout(
-                () => audiobookCacheService.syncAll(),
+                () => audiobookCacheService.syncMissing(),
                 2 * ONE_HOUR_MS,
-                "audiobookCacheService.syncAll",
+                "audiobookCacheService.syncMissing",
             );
-
-            if (result) {
+            if (
+                result &&
+                (mode === "startup" || result.synced || result.failed)
+            ) {
                 startupLog.debug(
-                    `Audiobook auto-sync complete: ${result.synced} audiobooks cached`,
+                    `Audiobook auto-sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
                 );
             }
         },
@@ -927,6 +920,16 @@ async function registerSchedulerJobs(): Promise<void> {
             },
         },
         {
+            type: SCHEDULER_JOB_TYPES.audiobookAutoSync,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.audiobookAutoSyncRepeat,
+                repeat: { every: 5 * ONE_MINUTE_MS },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
             type: SCHEDULER_JOB_TYPES.downloadQueueReconcile,
             data: { mode: "startup" },
             opts: {
@@ -1089,7 +1092,7 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
             break;
         case SCHEDULER_JOB_TYPES.audiobookAutoSync:
         case "audiobook-auto-sync":
-            await processAudiobookAutoSyncJob();
+            await processAudiobookAutoSyncJob(mode);
             break;
         case SCHEDULER_JOB_TYPES.downloadQueueReconcile:
         case "download-queue-reconcile":

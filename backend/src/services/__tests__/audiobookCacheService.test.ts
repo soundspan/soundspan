@@ -195,6 +195,35 @@ describe("audiobook cache service behavior", () => {
         );
     });
 
+    it("syncs only audiobooks missing from the local ABS cache", async () => {
+        const service = new AudiobookCacheService();
+
+        mockGetAllAudiobooks.mockResolvedValue([
+            buildBook({ id: "book-1" }),
+            buildBook({ id: "book-2" }),
+        ]);
+        prisma.audiobook.findMany.mockResolvedValueOnce([{ id: "book-1" }]);
+
+        const result = await service.syncMissing();
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+            where: { peerId: null },
+            select: { id: true },
+        });
+        expect(result).toEqual({
+            synced: 1,
+            failed: 0,
+            skipped: 1,
+            errors: [],
+        });
+        expect(prisma.audiobook.upsert).toHaveBeenCalledTimes(1);
+        expect(prisma.audiobook.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "book-2" },
+            }),
+        );
+    });
+
     it("preserves stored sections on minified updates and creates them as unknown", async () => {
         const service = new AudiobookCacheService();
         mockGetAllAudiobooks.mockResolvedValue([
