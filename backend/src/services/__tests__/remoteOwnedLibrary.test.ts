@@ -13,6 +13,7 @@ jest.mock("../../utils/db", () => ({
 
 import { prisma } from "../../utils/db";
 import {
+    addRemoteOwnedArtists,
     buildRemoteOwnedArtistFilters,
     countRemoteOwnedTracksForUser,
     loadRemoteOwnedTracksForUser,
@@ -53,6 +54,19 @@ describe("remote owned library", () => {
                     },
                 },
             },
+        ]);
+    });
+
+    it("adds remote ownership to the owned all-origin artist filter", () => {
+        const where: any = {
+            OR: [{ libraryAlbumCount: { gt: 0 } }],
+        };
+
+        addRemoteOwnedArtists(where, "user-1", "all", "owned");
+
+        expect(where.OR).toEqual([
+            { libraryAlbumCount: { gt: 0 } },
+            ...buildRemoteOwnedArtistFilters("user-1"),
         ]);
     });
 

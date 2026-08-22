@@ -46,7 +46,7 @@ import {
 } from "../../utils/libraryDeletion";
 import { findRouteNameMatch } from "../artistRouteName";
 import { deleteArtistCatalogEntry } from "../../services/artistCatalogDeletion";
-import { buildRemoteOwnedArtistFilters } from "../../services/remoteOwnedLibrary";
+import { addRemoteOwnedArtists } from "../../services/remoteOwnedLibrary";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -150,12 +150,6 @@ export async function handleGetArtists(req: Request, res: Response) {
         if (!origin) {
             return sendRouteError(res, 400, "Invalid library origin filter");
         }
-        const userId = req.user?.id;
-        const remoteOwnedArtistFilters =
-            origin === "all" && userId
-                ? buildRemoteOwnedArtistFilters(userId)
-                : [];
-
         const browseTrackWhere = {
             ...TRACK_VISIBLE_WHERE,
             ...trackBrowseWhere(origin),
@@ -181,7 +175,6 @@ export async function handleGetArtists(req: Request, res: Response) {
                 where: { countsLastUpdated: { not: null } },
             })) > 0;
 
-        // Build WHERE clause
         const where: Prisma.ArtistWhereInput = {};
 
         if (origin === "peers") {
@@ -194,7 +187,6 @@ export async function handleGetArtists(req: Request, res: Response) {
                 where.OR = [
                     { libraryAlbumCount: { gt: 0 } },
                     { ownedAlbums: { some: {} } },
-                    ...remoteOwnedArtistFilters,
                     ...(origin === "all" ? [{ peerId: { not: null } }] : []),
                 ];
             } else if (filter === "discovery") {
@@ -226,7 +218,6 @@ export async function handleGetArtists(req: Request, res: Response) {
                         },
                     },
                     { ownedAlbums: { some: {} } },
-                    ...remoteOwnedArtistFilters,
                 ];
                 if (origin === "all") {
                     where.OR.push({
@@ -277,7 +268,8 @@ export async function handleGetArtists(req: Request, res: Response) {
             }
         }
 
-        // Add search query if provided
+        addRemoteOwnedArtists(where, req.user?.id, origin, filter);
+
         if (query) {
             where.name = { contains: query as string, mode: "insensitive" };
         }

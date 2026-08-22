@@ -105,6 +105,25 @@ export function buildRemoteOwnedArtistFilters(
     ];
 }
 
+export function addRemoteOwnedArtists(
+    where: Prisma.ArtistWhereInput,
+    userId: string | undefined,
+    origin: "all" | "local" | "peers",
+    filter: unknown,
+): void {
+    if (filter !== "owned" || origin !== "all" || !userId) {
+        return;
+    }
+
+    const existing = Array.isArray(where.OR)
+        ? where.OR
+        : where.OR
+          ? [where.OR]
+          : [];
+
+    where.OR = [...existing, ...buildRemoteOwnedArtistFilters(userId)];
+}
+
 /**
  * Load the authenticated user's liked provider tracks and normalize them
  * through the same canonical identities used by playback and My Liked.
