@@ -46,6 +46,7 @@ import {
 } from "../../utils/libraryDeletion";
 import { findRouteNameMatch } from "../artistRouteName";
 import { deleteArtistCatalogEntry } from "../../services/artistCatalogDeletion";
+import { withFederatedTrackPlayback } from "../../services/federatedTrackPayload";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -344,6 +345,7 @@ export async function handleGetArtists(req: Request, res: Response) {
                 ...(artist.peerId && artist.federationPeer
                     ? {
                           source: "federated" as const,
+                          streamSource: "peer" as const,
                           peer: {
                               id: artist.federationPeer.id,
                               name: artist.federationPeer.name,
@@ -580,20 +582,9 @@ export async function handleGetArtist(
         .filter((album) => album.location !== "REMOTE")
         .map((album) => ({
             ...album,
-            tracks: album.tracks.map(({ federationPeer, ...track }) => ({
-                ...track,
-                ...(track.origin === "FEDERATED" && federationPeer
-                    ? {
-                          source: "federated" as const,
-                          peer: {
-                              id: federationPeer.id,
-                              name: federationPeer.name,
-                              online:
-                                  federationPeer.outboundStatus === "ACTIVE",
-                          },
-                      }
-                    : {}),
-            })),
+            tracks: album.tracks.map(({ federationPeer, ...track }) =>
+                withFederatedTrackPlayback(track, federationPeer),
+            ),
             owned:
                 album.location === "LIBRARY" || ownedRgMbids.has(album.rgMbid),
             coverArt: album.coverUrl,
@@ -812,20 +803,9 @@ export async function handleGetArtist(
     if (includeTopTracks) {
         // Extract top tracks from library first
         const allTracks = artist.albums.flatMap((album) =>
-            album.tracks.map(({ federationPeer, ...track }) => ({
-                ...track,
-                ...(track.origin === "FEDERATED" && federationPeer
-                    ? {
-                          source: "federated" as const,
-                          peer: {
-                              id: federationPeer.id,
-                              name: federationPeer.name,
-                              online:
-                                  federationPeer.outboundStatus === "ACTIVE",
-                          },
-                      }
-                    : {}),
-            })),
+            album.tracks.map(({ federationPeer, ...track }) =>
+                withFederatedTrackPlayback(track, federationPeer),
+            ),
         );
         topTracks = allTracks.slice(0, 10);
 

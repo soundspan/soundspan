@@ -411,7 +411,7 @@ async function requireUserOAuth(
  * stream-info, stream) so the admin toggle alone unlocks all core YT Music
  * functionality.
  */
-async function getUserIdOrPublic(userId: string): Promise<string> {
+export async function getUserIdOrPublic(userId: string): Promise<string> {
     const hasOAuth = await ensureUserOAuth(userId);
     return hasOAuth ? userId : "__public__";
 }

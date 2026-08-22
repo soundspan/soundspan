@@ -155,7 +155,7 @@ export interface PlaylistDetailTrack {
     id: string;
     title: string;
     duration: number;
-    streamSource?: "tidal" | "youtube";
+    streamSource?: "peer" | "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
     source?: "local" | "tidal" | "youtube" | "federated";

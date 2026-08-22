@@ -34,5 +34,8 @@ export function toAlbumPlaybackTrack(track: Track, album: Album) {
             streamSource: "youtube" as const,
             youtubeVideoId: track.youtubeVideoId,
         }),
+        ...(track.streamSource === "peer" && {
+            streamSource: "peer" as const,
+        }),
     };
 }

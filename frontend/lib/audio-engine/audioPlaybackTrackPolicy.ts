@@ -1,6 +1,7 @@
 import {
     normalizeCanonicalMediaProviderIdentity,
     toAudioEngineSourceType,
+    type AudioEngineSourceType,
     type CanonicalMediaProviderIdentity,
     type CanonicalMediaSource,
 } from "@soundspan/media-metadata-contract";
@@ -9,7 +10,7 @@ import {
 export interface RuntimeProviderTrack {
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
+    streamSource?: "local" | "peer" | "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
     youtubeAudioFormat?: "mp4" | "webm";
@@ -23,7 +24,12 @@ export function getNextTrackInfo(
         filePath?: string;
         mediaSource?: CanonicalMediaSource;
         provider?: CanonicalMediaProviderIdentity;
-        streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
+        streamSource?:
+            | "local"
+            | "peer"
+            | "tidal"
+            | "youtube"
+            | "youtube-direct";
         tidalTrackId?: number;
         youtubeVideoId?: string;
         youtubeAudioFormat?: "mp4" | "webm";
@@ -38,7 +44,7 @@ export function getNextTrackInfo(
     filePath?: string;
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
+    streamSource?: "local" | "peer" | "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
     youtubeAudioFormat?: "mp4" | "webm";
@@ -74,7 +80,7 @@ export function getNextTrackInfo(
 /** Resolves the direct engine source type from canonical provider metadata. */
 export function resolveDirectTrackSourceType(
     track: RuntimeProviderTrack,
-): "local" | "tidal" | "ytmusic" {
+): AudioEngineSourceType {
     const provider = normalizeCanonicalMediaProviderIdentity({
         mediaSource: track.mediaSource,
         providerTrackId: track.provider?.providerTrackId,

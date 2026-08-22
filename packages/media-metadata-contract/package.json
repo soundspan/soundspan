@@ -12,6 +12,7 @@
     ],
     "scripts": {
         "build": "tsc -p tsconfig.json",
+        "test": "node --test test/*.test.js",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "typecheck": "tsc -p tsconfig.json --noEmit"

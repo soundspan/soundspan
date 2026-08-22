@@ -38,4 +38,6 @@ export interface SyncQueueItem {
     trackYtMusicId?: string;
     trackMappingId?: string;
     originSource?: ResolvedMediaSource;
+    /** Current owning-peer reachability captured when the queue item was built. */
+    peerOnline?: boolean;
 }

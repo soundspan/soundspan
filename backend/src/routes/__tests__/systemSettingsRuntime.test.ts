@@ -68,6 +68,10 @@ jest.mock("../../utils/systemSettings", () => ({
     invalidateSystemSettingsCache: jest.fn(),
 }));
 
+jest.mock("../../services/listenTogetherResolution", () => ({
+    invalidateUserProviderProfileCache: jest.fn(),
+}));
+
 const mockSchedulerJobGetState = jest.fn();
 const mockSchedulerJobRemove = jest.fn();
 const mockSchedulerJob = {
@@ -154,6 +158,7 @@ import router from "../systemSettings";
 import { prisma } from "../../utils/db";
 import { writeEnvFile, EnvFileSyncSkippedError } from "../../utils/envWriter";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateUserProviderProfileCache } from "../../services/listenTogetherResolution";
 import { decrypt } from "../../utils/encryption";
 import { lastFmService } from "../../services/lastfm";
 import { tidalService } from "../../services/tidal";
@@ -174,6 +179,8 @@ const mockAxiosPut = axios.put as jest.Mock;
 const mockWriteEnvFile = writeEnvFile as jest.Mock;
 const mockInvalidateSystemSettingsCache =
     invalidateSystemSettingsCache as jest.Mock;
+const mockInvalidateUserProviderProfileCache =
+    invalidateUserProviderProfileCache as jest.Mock;
 const mockDecrypt = decrypt as jest.Mock;
 const mockLastFmService = lastFmService as jest.Mocked<typeof lastFmService>;
 const mockTidalService = tidalService as jest.Mocked<typeof tidalService>;
@@ -521,6 +528,38 @@ describe("systemSettings runtime routes", () => {
         );
     });
 
+    it("accepts a closed playback source order", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { playbackSourceOrder: "peers,library,tidal,ytmusic" },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    playbackSourceOrder: "peers,library,tidal,ytmusic",
+                }),
+            }),
+        );
+    });
+
+    it("rejects malformed playback source orders", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { playbackSourceOrder: "library,peers,spotify,ytmusic" },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(mockSystemSettingsUpsert).not.toHaveBeenCalled();
+    });
+
     it("env sync and webhook config use stored secrets when the form round-trips empty strings", async () => {
         mockSystemSettingsUpsert.mockResolvedValueOnce({
             id: "default",
@@ -771,6 +810,7 @@ describe("systemSettings runtime routes", () => {
         expect(savedUpdate).not.toHaveProperty("tidalAccessToken");
         expect(savedUpdate).not.toHaveProperty("tidalRefreshToken");
         expect(mockInvalidateSystemSettingsCache).toHaveBeenCalled();
+        expect(mockInvalidateUserProviderProfileCache).toHaveBeenCalled();
         expect(mockWriteEnvFile).toHaveBeenCalled();
         expect(mockLastFmService.refreshApiKey).toHaveBeenCalled();
         expect(mockSoulseekService.disconnect).toHaveBeenCalled();

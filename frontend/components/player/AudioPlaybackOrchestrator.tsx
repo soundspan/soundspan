@@ -23,7 +23,7 @@ import {
     isAdvancePlayIntentFresh,
     resolveLoadAutoplayDecision,
     resolvePlaybackDuration,
-    resolveRemoteStreamFormat,
+    resolveTrackFormatHint,
     shouldAttemptRecoveryOnUnexpectedPause,
 } from "./audioPlaybackOrchestratorPolicy";
 import { readMigratingStorageItem } from "@/lib/storage-migration";
@@ -525,7 +525,6 @@ export const AudioPlaybackOrchestrator = memo(
                             );
                             if (nextTrack) {
                                 let preloadUrl: string;
-                                let preloadFormat: string | undefined = "mp3";
                                 if (
                                     nextTrack.streamSource === "tidal" &&
                                     nextTrack.tidalTrackId
@@ -533,8 +532,6 @@ export const AudioPlaybackOrchestrator = memo(
                                     preloadUrl = api.getTidalStreamUrl(
                                         nextTrack.tidalTrackId,
                                     );
-                                    preloadFormat =
-                                        resolveRemoteStreamFormat("tidal");
                                 } else if (
                                     nextTrack.streamSource === "youtube" &&
                                     nextTrack.youtubeVideoId
@@ -544,8 +541,6 @@ export const AudioPlaybackOrchestrator = memo(
                                         undefined,
                                         !ytMusicAuthenticatedRef.current,
                                     );
-                                    preloadFormat =
-                                        resolveRemoteStreamFormat("youtube");
                                 } else if (
                                     nextTrack.streamSource ===
                                         "youtube-direct" &&
@@ -554,24 +549,13 @@ export const AudioPlaybackOrchestrator = memo(
                                     preloadUrl = api.getYouTubeStreamUrl(
                                         nextTrack.youtubeVideoId,
                                     );
-                                    preloadFormat =
-                                        nextTrack.youtubeAudioFormat === "webm"
-                                            ? "webm"
-                                            : "mp4";
                                 } else {
+                                    // Local and peer tracks share the
+                                    // library stream route.
                                     preloadUrl = api.getStreamUrl(nextTrack.id);
-                                    const ext = (nextTrack.filePath || "")
-                                        .split(".")
-                                        .pop()
-                                        ?.toLowerCase();
-                                    if (ext === "flac") preloadFormat = "flac";
-                                    else if (ext === "m4a" || ext === "aac")
-                                        preloadFormat = "mp4";
-                                    else if (ext === "ogg" || ext === "opus")
-                                        preloadFormat = "webm";
-                                    else if (ext === "wav")
-                                        preloadFormat = "wav";
                                 }
+                                const preloadFormat =
+                                    resolveTrackFormatHint(nextTrack);
                                 audioEngine.preload(preloadUrl, {
                                     format: preloadFormat,
                                 });
@@ -1178,6 +1162,11 @@ export const AudioPlaybackOrchestrator = memo(
                     streamUrl = api.getYouTubeStreamUrl(
                         currentTrack.youtubeVideoId,
                     );
+                } else if (currentTrack.streamSource === "peer") {
+                    // Peer tracks stream through the consumer's library
+                    // route; the backend resolves the owning peer and
+                    // applies the stream-time fallback ladder.
+                    streamUrl = api.getStreamUrl(currentTrack.id);
                 } else {
                     streamUrl = api.getStreamUrl(currentTrack.id);
                 }
@@ -1247,33 +1236,7 @@ export const AudioPlaybackOrchestrator = memo(
                     0;
                 setDuration(fallbackDuration);
 
-                let format: string | undefined = "mp3";
-                if (currentTrack?.streamSource === "youtube-direct") {
-                    // Direct YouTube audio is opus-in-webm or AAC-in-mp4
-                    // depending on the source video; /api/youtube/info reports
-                    // the container as audioFormat.
-                    format =
-                        currentTrack.youtubeAudioFormat === "webm"
-                            ? "webm"
-                            : "mp4";
-                } else if (
-                    currentTrack?.streamSource === "tidal" ||
-                    currentTrack?.streamSource === "youtube"
-                ) {
-                    format = resolveRemoteStreamFormat(
-                        currentTrack.streamSource,
-                    );
-                } else {
-                    const filePath = currentTrack?.filePath || "";
-                    if (filePath) {
-                        const ext = filePath.split(".").pop()?.toLowerCase();
-                        if (ext === "flac") format = "flac";
-                        else if (ext === "m4a" || ext === "aac") format = "mp4";
-                        else if (ext === "ogg" || ext === "opus")
-                            format = "webm";
-                        else if (ext === "wav") format = "wav";
-                    }
-                }
+                const format = resolveTrackFormatHint(currentTrack ?? null);
 
                 if (playbackType === "track" && currentTrack) {
                     setStreamProfile({

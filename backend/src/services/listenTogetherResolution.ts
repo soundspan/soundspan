@@ -1,6 +1,15 @@
 import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import {
+    parsePlaybackSourceOrder,
+    rankPlaybackSource,
+    type PlaybackSource,
+} from "./playbackSourcePriority";
+import {
+    isProviderMappingEligible,
+    MIN_PROVIDER_MAPPING_CONFIDENCE,
+} from "./providerMappingEligibility";
 
 const log = logger.child("ListenTogetherResolution");
 
@@ -33,6 +42,7 @@ export interface UserProviderProfile {
     hasLocal: true;
     hasTidal: boolean;
     hasYtMusic: boolean;
+    playbackSourceOrder?: string;
 }
 
 export interface TrackResolutionInput {
@@ -45,19 +55,23 @@ export interface TrackResolutionInput {
     tidalTrackId?: number;
     youtubeVideoId?: string;
     originSource?: ResolvedMediaSource;
+    peerOnline?: boolean;
 }
 
 type TidalTrack = { id: string; tidalId: number; duration: number };
 type YouTubeTrack = { id: string; videoId: string; duration: number };
 
 const PROFILE_CACHE_TTL_MS = 60_000;
-const DURATION_MISMATCH_THRESHOLD_SECONDS = 15;
-const MIN_MAPPING_CONFIDENCE = 0.7;
 
 const profileCache = new Map<
     string,
     { expiresAt: number; profile: UserProviderProfile }
 >();
+
+/** Invalidates cached provider profiles after system settings change. */
+export function invalidateUserProviderProfileCache(): void {
+    profileCache.clear();
+}
 
 interface ResolutionOptions {
     signal?: AbortSignal;
@@ -86,19 +100,6 @@ function hasToken(value: string | null | undefined): boolean {
     return typeof value === "string" && value.trim().length > 0;
 }
 
-function hasDurationMismatch(
-    expectedSeconds: number,
-    actualSeconds: number,
-): boolean {
-    if (!Number.isFinite(expectedSeconds) || !Number.isFinite(actualSeconds)) {
-        return false;
-    }
-    return (
-        Math.abs(Math.trunc(expectedSeconds) - Math.trunc(actualSeconds)) >
-        DURATION_MISMATCH_THRESHOLD_SECONDS
-    );
-}
-
 /**
  * Returns cached per-user provider connectivity flags used for queue resolution.
  */
@@ -122,7 +123,10 @@ export async function getUserProviderProfile(
             }),
             prisma.systemSettings.findUnique({
                 where: { id: "default" },
-                select: { ytMusicEnabled: true },
+                select: {
+                    ytMusicEnabled: true,
+                    playbackSourceOrder: true,
+                },
             }),
         ]),
         options.signal,
@@ -136,6 +140,9 @@ export async function getUserProviderProfile(
         // per-user OAuth connectivity to mark tracks playable. Still respect
         // global system-level YouTube enablement.
         hasYtMusic: systemSettings?.ytMusicEnabled !== false,
+        playbackSourceOrder: (
+            systemSettings as { playbackSourceOrder?: string } | null
+        )?.playbackSourceOrder,
     };
 
     profileCache.set(userId, {
@@ -150,6 +157,10 @@ type MappingWithTargets = {
     stale: boolean;
     confidence: number;
     trackId: string | null;
+    track?: {
+        origin: "LOCAL" | "FEDERATED";
+        federationPeer: { outboundStatus: string | null } | null;
+    } | null;
     trackTidal: { id: string; tidalId: number; duration: number } | null;
     trackYtMusic: { id: string; videoId: string; duration: number } | null;
 };
@@ -159,6 +170,99 @@ interface ResolveTrackContext {
     trackTidalById?: Map<string, TidalTrack>;
     signal?: AbortSignal;
     trackYtById?: Map<string, YouTubeTrack>;
+}
+
+type MappingCandidate = {
+    source: PlaybackSource;
+    available: boolean;
+    resolved: ResolvedSource;
+};
+
+function localMappingCandidate(
+    mapping: MappingWithTargets,
+): MappingCandidate | null {
+    if (!mapping.trackId) return null;
+    const isPeer = mapping.track?.origin === "FEDERATED";
+    return {
+        source: isPeer ? "peers" : "library",
+        available:
+            !isPeer ||
+            mapping.track?.federationPeer?.outboundStatus === "ACTIVE",
+        resolved: {
+            available: true,
+            source: "local",
+            trackId: mapping.trackId,
+        },
+    };
+}
+
+function tidalMappingCandidate(
+    mapping: MappingWithTargets,
+    item: TrackResolutionInput,
+    profile: UserProviderProfile,
+): MappingCandidate | null {
+    if (
+        !mapping.trackTidal ||
+        !isProviderMappingEligible({
+            confidence: mapping.confidence,
+            expectedDurationSeconds: item.duration,
+            actualDurationSeconds: mapping.trackTidal.duration,
+        })
+    ) {
+        return null;
+    }
+    return {
+        source: "tidal",
+        available: profile.hasTidal,
+        resolved: {
+            available: true,
+            source: "tidal",
+            tidalTrackId: mapping.trackTidal.tidalId,
+            trackTidalId: mapping.trackTidal.id,
+        },
+    };
+}
+
+function youtubeMappingCandidate(
+    mapping: MappingWithTargets,
+    item: TrackResolutionInput,
+    profile: UserProviderProfile,
+): MappingCandidate | null {
+    if (
+        !mapping.trackYtMusic ||
+        !isProviderMappingEligible({
+            confidence: mapping.confidence,
+            expectedDurationSeconds: item.duration,
+            actualDurationSeconds: mapping.trackYtMusic.duration,
+        })
+    ) {
+        return null;
+    }
+    return {
+        source: "ytmusic",
+        available: profile.hasYtMusic,
+        resolved: {
+            available: true,
+            source: "youtube",
+            youtubeVideoId: mapping.trackYtMusic.videoId,
+            trackYtMusicId: mapping.trackYtMusic.id,
+        },
+    };
+}
+
+function mappedCandidates(
+    mapping: MappingWithTargets,
+    item: TrackResolutionInput,
+    profile: UserProviderProfile,
+): MappingCandidate[] {
+    const candidates = [localMappingCandidate(mapping)];
+    candidates.push(
+        tidalMappingCandidate(mapping, item, profile),
+        youtubeMappingCandidate(mapping, item, profile),
+    );
+    return candidates.filter(
+        (candidate): candidate is MappingCandidate => candidate !== null,
+    );
 }
 
 async function loadMapping(
@@ -177,6 +281,12 @@ async function loadMapping(
                 stale: true,
                 confidence: true,
                 trackId: true,
+                track: {
+                    select: {
+                        origin: true,
+                        federationPeer: { select: { outboundStatus: true } },
+                    },
+                },
                 trackTidal: {
                     select: {
                         id: true,
@@ -206,36 +316,25 @@ async function resolveMappedTrack(
     const mapping = await loadMapping(item.trackMappingId!, context);
     if (!mapping) return { available: false, reason: "no-mapping" };
     if (mapping.stale) return { available: false, reason: "stale" };
-    if (mapping.trackId) {
-        return { available: true, source: "local", trackId: mapping.trackId };
-    }
-    if (!profile.hasTidal && !profile.hasYtMusic) {
-        return { available: false, reason: "no-provider" };
-    }
-    if (mapping.confidence < MIN_MAPPING_CONFIDENCE) {
+    const candidates = mappedCandidates(mapping, item, profile);
+    const order = parsePlaybackSourceOrder(profile.playbackSourceOrder);
+    const preferred = candidates
+        .filter((candidate) => candidate.available)
+        .sort(
+            (left, right) =>
+                rankPlaybackSource(right, order) -
+                rankPlaybackSource(left, order),
+        )[0];
+    if (preferred) return preferred.resolved;
+    if (
+        mapping.confidence < MIN_PROVIDER_MAPPING_CONFIDENCE &&
+        !mapping.trackId
+    ) {
         return { available: false, reason: "low-confidence" };
     }
-    if (mapping.trackTidal && profile.hasTidal) {
-        if (hasDurationMismatch(item.duration, mapping.trackTidal.duration)) {
-            return { available: false, reason: "duration-mismatch" };
-        }
-        return {
-            available: true,
-            source: "tidal",
-            tidalTrackId: mapping.trackTidal.tidalId,
-            trackTidalId: mapping.trackTidal.id,
-        };
-    }
-    if (mapping.trackYtMusic && profile.hasYtMusic) {
-        if (hasDurationMismatch(item.duration, mapping.trackYtMusic.duration)) {
-            return { available: false, reason: "duration-mismatch" };
-        }
-        return {
-            available: true,
-            source: "youtube",
-            youtubeVideoId: mapping.trackYtMusic.videoId,
-            trackYtMusicId: mapping.trackYtMusic.id,
-        };
+    const hasProviderTarget = mapping.trackTidal || mapping.trackYtMusic;
+    if (hasProviderTarget && candidates.length === 0) {
+        return { available: false, reason: "duration-mismatch" };
     }
     return { available: false, reason: "no-provider" };
 }
@@ -294,8 +393,11 @@ async function findYouTubeFallback(
     );
     if (
         !crossMapping?.trackYtMusic ||
-        crossMapping.confidence < MIN_MAPPING_CONFIDENCE ||
-        hasDurationMismatch(item.duration, crossMapping.trackYtMusic.duration)
+        !isProviderMappingEligible({
+            confidence: crossMapping.confidence,
+            expectedDurationSeconds: item.duration,
+            actualDurationSeconds: crossMapping.trackYtMusic.duration,
+        })
     ) {
         return null;
     }
@@ -390,8 +492,11 @@ async function findTidalFallback(
     );
     if (
         !crossMapping?.trackTidal ||
-        crossMapping.confidence < MIN_MAPPING_CONFIDENCE ||
-        hasDurationMismatch(item.duration, crossMapping.trackTidal.duration)
+        !isProviderMappingEligible({
+            confidence: crossMapping.confidence,
+            expectedDurationSeconds: item.duration,
+            actualDurationSeconds: crossMapping.trackTidal.duration,
+        })
     ) {
         return null;
     }
@@ -440,7 +545,7 @@ export async function resolveTrackForUser(
     const localTrackId =
         item.localTrackId ??
         (item.originSource === "local" ? item.id : undefined);
-    if (localTrackId) {
+    if (localTrackId && item.originSource !== "peer") {
         return { available: true, source: "local", trackId: localTrackId };
     }
 
@@ -454,6 +559,10 @@ export async function resolveTrackForUser(
 
     if (item.trackYtMusicId || typeof item.youtubeVideoId === "string") {
         return resolveYouTubeTrack(item, profile, context);
+    }
+
+    if (localTrackId && item.peerOnline) {
+        return { available: true, source: "local", trackId: localTrackId };
     }
 
     return { available: false, reason: "no-mapping" };
@@ -481,6 +590,12 @@ async function preloadMappings(ids: string[]): Promise<MappingWithTargets[]> {
             stale: true,
             confidence: true,
             trackId: true,
+            track: {
+                select: {
+                    origin: true,
+                    federationPeer: { select: { outboundStatus: true } },
+                },
+            },
             trackTidal: {
                 select: { id: true, tidalId: true, duration: true },
             },

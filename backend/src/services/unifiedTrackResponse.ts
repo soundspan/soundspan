@@ -273,11 +273,11 @@ export function normalizeYtMusicTrack(
 function toLegacyCompatibleTrackShape(
     normalized: UnifiedTrackResponse,
 ): Record<string, unknown> {
+    const streamSource =
+        normalized.source === "federated" ? "peer" : normalized.source;
     return {
         ...normalized,
-        ...(normalized.source !== "local"
-            ? { streamSource: normalized.source }
-            : {}),
+        ...(normalized.source !== "local" ? { streamSource } : {}),
         ...(normalized.provider.tidalTrackId !== null
             ? { tidalTrackId: normalized.provider.tidalTrackId }
             : {}),

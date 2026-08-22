@@ -5,7 +5,6 @@ import { prisma } from "../utils/db";
 import { z } from "zod";
 import { EnvFileSyncSkippedError, writeEnvFile } from "../utils/envWriter";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
-import { schedulerQueue } from "../workers/queues";
 import { encrypt, decrypt } from "../utils/encryption";
 import { ENCRYPTED_SETTINGS_COLUMNS } from "../utils/encryptedColumns";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
@@ -13,73 +12,22 @@ import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import { config } from "../config";
 import { federationInstanceNameSchema } from "./systemSettingsFederationSchema";
+import { isPlaybackSourceOrder } from "../services/playbackSourcePriority";
+import { invalidateUserProviderProfileCache } from "../services/listenTogetherResolution";
+import {
+    cancelQueuedQueueCleanerWorkerJob,
+    enqueueQueueCleanerWorkerJob,
+    getQueueCleanerWorkerStatus,
+    idleQueueCleanerWorkerStatus,
+    loadQueueCleanerWorkerStatus,
+    queueCleanerLog,
+} from "../services/systemSettingsQueueCleaner";
 
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
 const WEBHOOK_URL_ALIASES = [BRAND_SLUG];
-const QUEUE_CLEANER_JOB_NAME = "download-reconciliation-cycle";
-const QUEUE_CLEANER_JOB_ID = "scheduler:reconciliation:on-demand";
-const queueCleanerLog = logger.child("SystemSettingsQueueCleaner");
 // Shared validation message for admin outbound connection-test URLs.
 const ADMIN_TEST_URL_ERROR = "URL must be a valid public HTTP(S) URL";
-
-type QueueCleanerWorkerStatus = {
-    running: boolean;
-    queued: boolean;
-    state: string;
-    jobId: string | null;
-    workerOwned: true;
-};
-
-function idleQueueCleanerWorkerStatus(): QueueCleanerWorkerStatus {
-    return {
-        running: false,
-        queued: false,
-        state: "idle",
-        jobId: null,
-        workerOwned: true,
-    };
-}
-
-async function getQueueCleanerWorkerStatus(
-    job: Awaited<ReturnType<typeof schedulerQueue.getJob>>,
-): Promise<QueueCleanerWorkerStatus> {
-    if (!job) return idleQueueCleanerWorkerStatus();
-
-    const state = await job.getState();
-    return {
-        running: state === "active",
-        queued: ["waiting", "delayed", "paused"].includes(state),
-        state,
-        jobId: String(job.id),
-        workerOwned: true,
-    };
-}
-
-async function enqueueQueueCleanerWorkerJob() {
-    return schedulerQueue.add(
-        QUEUE_CLEANER_JOB_NAME,
-        { mode: "repeat", source: "system-settings" },
-        {
-            jobId: QUEUE_CLEANER_JOB_ID,
-            removeOnComplete: true,
-            removeOnFail: 10,
-        },
-    );
-}
-
-async function cancelQueuedQueueCleanerWorkerJob(): Promise<
-    "absent" | "active" | "cancelled"
-> {
-    const job = await schedulerQueue.getJob(QUEUE_CLEANER_JOB_ID);
-    if (!job) return "absent";
-
-    const status = await getQueueCleanerWorkerStatus(job);
-    if (status.running) return "active";
-
-    await job.remove();
-    return "cancelled";
-}
 
 function normalizeAdminTestUrl(url: string): string | null {
     // Deliberately the STRING check only (no DNS resolution): admin connection
@@ -153,6 +101,10 @@ const systemSettingsSchema = z.object({
 
     downloadSource: z
         .enum(["soulseek", "lidarr", "tidal", "youtube"])
+        .optional(),
+    playbackSourceOrder: z
+        .string()
+        .refine(isPlaybackSourceOrder, "Invalid playback source order")
         .optional(),
     primaryFailureFallback: z
         .enum(["none", "lidarr", "soulseek", "tidal", "youtube"])
@@ -374,6 +326,7 @@ router.post("/", async (req, res) => {
         });
 
         invalidateSystemSettingsCache();
+        invalidateUserProviderProfileCache();
 
         // Effective plaintext secret after the no-change/clear semantics
         // above: a non-empty submitted value wins, an empty string falls
@@ -1377,8 +1330,7 @@ router.post("/tidal-auth/token", async (req, res) => {
 // Get queue cleaner worker-job status from the shared scheduler queue.
 router.get("/queue-cleaner-status", async (req, res) => {
     try {
-        const job = await schedulerQueue.getJob(QUEUE_CLEANER_JOB_ID);
-        res.json(await getQueueCleanerWorkerStatus(job));
+        res.json(await loadQueueCleanerWorkerStatus());
     } catch (error) {
         queueCleanerLog.error(
             "Failed to read queue cleaner worker status",

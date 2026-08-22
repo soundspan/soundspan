@@ -8,6 +8,13 @@ const mockCleanupStreamFile = jest.fn();
 const mockLookup = jest.fn();
 const mockProxyFederatedTrackStream = jest.fn();
 const mockProxyFederatedCover = jest.fn();
+const mockLoadPeerPlaybackFallback = jest.fn();
+const mockServeMappedProviderStream = jest.fn();
+const mockTerminateCommittedStream = jest.fn((res: Response) => {
+    if (typeof res.destroy === "function") res.destroy();
+    else res.end();
+});
+const mockGetYtMusicUserIdOrPublic = jest.fn();
 const mockSubsonicLogger = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -82,6 +89,27 @@ jest.mock("../../services/federationStreamProxy", () => ({
 }));
 jest.mock("../../services/federationCoverProxy", () => ({
     proxyFederatedCover: mockProxyFederatedCover,
+}));
+jest.mock("../../services/peerPlaybackFallback", () => ({
+    loadPeerPlaybackFallback: mockLoadPeerPlaybackFallback,
+}));
+jest.mock("../../services/mappedProviderStream", () => ({
+    serveMappedProviderStream: mockServeMappedProviderStream,
+    terminateCommittedStream: mockTerminateCommittedStream,
+    mappedProviderResponseState: (res: Response) => ({
+        headersSent: Boolean(res.headersSent),
+        destroyed: Boolean(res.destroyed),
+        writableEnded: Boolean(res.writableEnded),
+    }),
+    isMappedProviderResponseUnusable: (state: {
+        headersSent: boolean;
+        destroyed: boolean;
+        writableEnded: boolean;
+    }) => state.headersSent || state.destroyed || state.writableEnded,
+}));
+jest.mock("../youtubeMusic", () => ({
+    getUserIdOrPublic: (...args: unknown[]) =>
+        mockGetYtMusicUserIdOrPublic(...args),
 }));
 jest.mock("../../utils/logger", () => ({ logger: mockSubsonicLogger }));
 
@@ -175,6 +203,9 @@ beforeEach(() => {
     mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     mockProxyFederatedTrackStream.mockResolvedValue(undefined);
     mockProxyFederatedCover.mockResolvedValue(true);
+    mockLoadPeerPlaybackFallback.mockResolvedValue([]);
+    mockServeMappedProviderStream.mockResolvedValue({ status: "served" });
+    mockGetYtMusicUserIdOrPublic.mockResolvedValue("user-1");
 });
 
 afterEach(() => {
@@ -470,6 +501,247 @@ describe("handleStream", () => {
         );
         expect(mockProxyFederatedTrackStream).not.toHaveBeenCalled();
     });
+
+    it("streams the local dedup twin when a Subsonic peer is offline", async () => {
+        mockTrackFindFirst
+            .mockResolvedValueOnce({
+                id: "federated-track",
+                origin: "FEDERATED",
+                remoteId: "remote-track",
+                mime: "audio/flac",
+                filePath: null,
+                fileModified: new Date("2026-08-15T12:00:00Z"),
+                federationPeer: {
+                    id: "peer-1",
+                    baseUrl: "https://peer.example",
+                    outboundToken: "v2:encrypted-token",
+                    outboundStatus: "OFFLINE",
+                },
+            })
+            .mockResolvedValueOnce({
+                id: "local-track",
+                origin: "LOCAL",
+                remoteId: null,
+                mime: "audio/flac",
+                filePath: "Artist/Album/track.flac",
+                fileModified: new Date("2026-08-15T12:00:00Z"),
+                federationPeer: null,
+            });
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "library", trackId: "local-track" },
+        ]);
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValueOnce(true);
+        mockGetStreamFilePath.mockResolvedValueOnce({
+            filePath: "/music/Artist/Album/track.flac",
+            mimeType: "audio/flac",
+        });
+
+        await handleStream(buildReq({ id: "tr-federated-track" }), buildRes());
+
+        expect(mockLoadPeerPlaybackFallback).toHaveBeenCalledWith(
+            "federated-track",
+        );
+        expect(mockStreamFileWithRangeSupport).toHaveBeenCalled();
+        expect(mockSendError).not.toHaveBeenCalled();
+        existsSpy.mockRestore();
+    });
+
+    it("serves an existing provider mapping for an offline Subsonic peer", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce({
+            id: "federated-track",
+            origin: "FEDERATED",
+            remoteId: "remote-track",
+            mime: "audio/flac",
+            filePath: null,
+            fileModified: new Date("2026-08-15T12:00:00Z"),
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "v2:encrypted-token",
+                outboundStatus: "OFFLINE",
+            },
+        });
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        const req = buildReq({ id: "tr-federated-track" });
+        const res = buildRes();
+
+        await handleStream(req, res);
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledWith({
+            req,
+            res,
+            userId: "user-1",
+            youtubeUserId: "user-1",
+            quality: "original",
+            fallback: { source: "ytmusic", youtubeVideoId: "video-1" },
+        });
+        expect(mockSendError).not.toHaveBeenCalled();
+    });
+
+    it("advances from a pre-header TIDAL failure to YouTube", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce({
+            id: "federated-track",
+            origin: "FEDERATED",
+            remoteId: "remote-track",
+            mime: "audio/flac",
+            filePath: null,
+            fileModified: new Date("2026-08-15T12:00:00Z"),
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "v2:encrypted-token",
+                outboundStatus: "OFFLINE",
+            },
+        });
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        mockServeMappedProviderStream
+            .mockResolvedValueOnce({
+                status: "failed",
+                error: new Error("TIDAL unavailable"),
+                responseState: {
+                    headersSent: false,
+                    destroyed: false,
+                    writableEnded: false,
+                },
+            })
+            .mockResolvedValueOnce({ status: "served" });
+
+        await handleStream(buildReq({ id: "tr-federated-track" }), buildRes());
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(2);
+        expect(mockServeMappedProviderStream).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                youtubeUserId: "user-1",
+                quality: "original",
+                fallback: {
+                    source: "ytmusic",
+                    youtubeVideoId: "video-1",
+                },
+            }),
+        );
+        expect(mockSendError).not.toHaveBeenCalled();
+    });
+
+    it("returns PEER_OFFLINE after all mapped provider rungs fail", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce({
+            id: "federated-track",
+            origin: "FEDERATED",
+            remoteId: "remote-track",
+            mime: "audio/flac",
+            filePath: null,
+            fileModified: new Date("2026-08-15T12:00:00Z"),
+            federationPeer: null,
+        });
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        mockServeMappedProviderStream.mockResolvedValue({
+            status: "failed",
+            error: new Error("provider unavailable"),
+            responseState: {
+                headersSent: false,
+                destroyed: false,
+                writableEnded: false,
+            },
+        });
+
+        await handleStream(buildReq({ id: "tr-federated-track" }), buildRes());
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(2);
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            SubsonicErrorCode.GENERIC,
+            "Federation peer is offline",
+            "json",
+            undefined,
+        );
+    });
+
+    it("destroys a committed mapped stream without advancing or writing an error", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce({
+            id: "federated-track",
+            origin: "FEDERATED",
+            remoteId: "remote-track",
+            mime: "audio/flac",
+            filePath: null,
+            fileModified: new Date("2026-08-15T12:00:00Z"),
+            federationPeer: null,
+        });
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        const res = buildRes();
+        const destroy = jest.fn();
+        (res as Response & { destroy: jest.Mock }).destroy = destroy;
+        (res as Response & { headersSent: boolean }).headersSent = true;
+        mockServeMappedProviderStream.mockResolvedValueOnce({
+            status: "failed",
+            error: new Error("stream reset"),
+            responseState: {
+                headersSent: true,
+                destroyed: false,
+                writableEnded: false,
+            },
+        });
+
+        await expect(
+            handleStream(buildReq({ id: "tr-federated-track" }), res),
+        ).resolves.toBeUndefined();
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(1);
+        expect(destroy).toHaveBeenCalledTimes(1);
+        expect(mockSendError).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])(
+        "stops after a destroyed mapped body with headersSent=%s",
+        async (headersSent) => {
+            mockTrackFindFirst.mockResolvedValueOnce({
+                id: "federated-track",
+                origin: "FEDERATED",
+                remoteId: "remote-track",
+                mime: "audio/flac",
+                filePath: null,
+                fileModified: new Date("2026-08-15T12:00:00Z"),
+                federationPeer: null,
+            });
+            mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+                { source: "tidal", tidalTrackId: 42 },
+                { source: "ytmusic", youtubeVideoId: "video-1" },
+            ]);
+            mockServeMappedProviderStream.mockResolvedValueOnce({
+                status: "failed",
+                responseState: {
+                    headersSent,
+                    writableEnded: false,
+                    destroyed: true,
+                },
+                error: new Error("body failed"),
+            });
+            const res = buildRes();
+
+            await expect(
+                handleStream(
+                    buildReq({ id: "tr-federated-track", maxBitRate: "128" }),
+                    res,
+                ),
+            ).resolves.toBeUndefined();
+
+            expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(1);
+            expect(mockSendError).not.toHaveBeenCalled();
+            expect(res.end).not.toHaveBeenCalled();
+        },
+    );
 
     it("returns not found instead of streaming a removed library track", async () => {
         mockTrackFindFirst.mockImplementationOnce(

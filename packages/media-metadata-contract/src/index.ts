@@ -4,6 +4,7 @@ export const CENTRAL_MEDIA_METADATA_CONTRACT_VERSION = "1.0.0";
 /** Complete runtime list of canonical media source identifiers. */
 export const CANONICAL_MEDIA_SOURCE_VALUES = [
     "local",
+    "peer",
     "tidal",
     "youtube",
     "youtube-direct",
@@ -23,7 +24,7 @@ export type ResolvedMediaSource = Exclude<
 >;
 
 /** Source identifiers accepted by the audio engine boundary. */
-export type AudioEngineSourceType = "local" | "tidal" | "ytmusic";
+export type AudioEngineSourceType = "local" | "peer" | "tidal" | "ytmusic";
 
 /** Canonical provider identity and optional provider-specific track metadata. */
 export interface CanonicalMediaProviderIdentity {
@@ -193,6 +194,7 @@ export const normalizeCanonicalMediaSource = (
 ): CanonicalMediaSource | null => {
     if (
         value === "local" ||
+        value === "peer" ||
         value === "tidal" ||
         value === "youtube" ||
         value === "youtube-direct"
@@ -275,6 +277,10 @@ export const normalizeCanonicalMediaProviderIdentity = (value: {
         };
     }
 
+    if (source === "peer") {
+        return { source, providerTrackId };
+    }
+
     return { source: "local" };
 };
 
@@ -290,6 +296,9 @@ export const toLegacyStreamFields = (
             streamSource: "tidal",
             tidalTrackId: provider.tidalTrackId,
         };
+    }
+    if (provider.source === "peer") {
+        return { streamSource: "peer" };
     }
     if (provider.source === "youtube") {
         return {

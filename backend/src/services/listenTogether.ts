@@ -161,6 +161,23 @@ async function resolvePresentationName(
     return user?.username ?? fallbackUsername;
 }
 
+async function loadLocalQueueMappingIds(
+    trackIds: string[],
+): Promise<Map<string, string>> {
+    const mappings = await prisma.trackMapping.findMany({
+        where: { stale: false, trackId: { in: trackIds } },
+        select: { id: true, trackId: true },
+        orderBy: [{ confidence: "desc" }, { createdAt: "desc" }],
+    });
+    const mappingByTrackId = new Map<string, string>();
+    for (const mapping of mappings) {
+        if (mapping.trackId && !mappingByTrackId.has(mapping.trackId)) {
+            mappingByTrackId.set(mapping.trackId, mapping.id);
+        }
+    }
+    return mappingByTrackId;
+}
+
 /**
  * Validates and materializes mixed-source queue input into canonical queue items.
  */
@@ -230,8 +247,12 @@ export async function validateQueueTracks(
                 title: true,
                 duration: true,
                 filePath: true,
+                origin: true,
                 loudnessLufs: true,
                 truePeakDb: true,
+                federationPeer: {
+                    select: { outboundStatus: true },
+                },
                 album: {
                     select: {
                         id: true,
@@ -244,6 +265,7 @@ export async function validateQueueTracks(
                 },
             },
         });
+        const localMappingIds = await loadLocalQueueMappingIds(uniqueLocalIds);
         const localTrackMap = new Map(
             localTracks.map((track) => [track.id, track]),
         );
@@ -251,6 +273,7 @@ export async function validateQueueTracks(
         for (const entry of localInputs) {
             const track = localTrackMap.get(entry.trackId);
             if (!track) continue;
+            const isPeer = track.origin === "FEDERATED";
             queue.push({
                 id: track.id,
                 title: track.title,
@@ -268,10 +291,14 @@ export async function validateQueueTracks(
                     albumLoudnessLufs: track.album.albumLoudnessLufs,
                     albumTruePeakDb: track.album.albumTruePeakDb,
                 },
-                mediaSource: "local",
-                provider: { source: "local" },
+                mediaSource: isPeer ? "peer" : "local",
+                provider: { source: isPeer ? "peer" : "local" },
                 localTrackId: track.id,
-                originSource: "local",
+                trackMappingId: localMappingIds.get(track.id),
+                originSource: isPeer ? "peer" : "local",
+                peerOnline: isPeer
+                    ? track.federationPeer?.outboundStatus === "ACTIVE"
+                    : undefined,
             });
         }
     }
@@ -1426,9 +1453,14 @@ function parseQueueFromDb(raw: Prisma.JsonValue | null): SyncQueueItem[] {
                 originSource:
                     q.originSource === "tidal" ||
                     q.originSource === "youtube" ||
+                    q.originSource === "peer" ||
                     q.originSource === "local"
                         ? q.originSource
                         : "local",
+                peerOnline:
+                    typeof q.peerOnline === "boolean"
+                        ? q.peerOnline
+                        : undefined,
             });
         }
     }

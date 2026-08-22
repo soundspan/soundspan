@@ -9,6 +9,10 @@ const mockParseFile = jest.fn();
 const mockLookup = jest.fn();
 const mockProxyFederatedTrackStream = jest.fn();
 const mockProxyFederatedCover = jest.fn();
+const mockLoadPeerPlaybackFallback = jest.fn();
+const mockServeMappedProviderStream = jest.fn();
+const mockTerminateCommittedStream = jest.fn((res: Response) => res.end());
+const mockGetYtMusicUserIdOrPublic = jest.fn();
 
 jest.mock("dns/promises", () => ({
     lookup: (...args: unknown[]) => mockLookup(...args),
@@ -108,6 +112,9 @@ jest.mock("../../utils/db", () => ({
         userSettings: {
             findUnique: jest.fn(),
         },
+        systemSettings: {
+            findUnique: jest.fn(),
+        },
         artist: {
             findMany: jest.fn(),
             findUnique: jest.fn(),
@@ -195,6 +202,30 @@ jest.mock("../../services/federationStreamProxy", () => ({
 jest.mock("../../services/federationCoverProxy", () => ({
     proxyFederatedCover: (...args: unknown[]) =>
         mockProxyFederatedCover(...args),
+}));
+jest.mock("../../services/peerPlaybackFallback", () => ({
+    loadPeerPlaybackFallback: (...args: unknown[]) =>
+        mockLoadPeerPlaybackFallback(...args),
+}));
+jest.mock("../../services/mappedProviderStream", () => ({
+    serveMappedProviderStream: (...args: unknown[]) =>
+        mockServeMappedProviderStream(...args),
+    terminateCommittedStream: (...args: [Response]) =>
+        mockTerminateCommittedStream(...args),
+    mappedProviderResponseState: (res: Response) => ({
+        headersSent: Boolean(res.headersSent),
+        destroyed: Boolean(res.destroyed),
+        writableEnded: Boolean(res.writableEnded),
+    }),
+    isMappedProviderResponseUnusable: (state: {
+        headersSent: boolean;
+        destroyed: boolean;
+        writableEnded: boolean;
+    }) => state.headersSent || state.destroyed || state.writableEnded,
+}));
+jest.mock("../youtubeMusic", () => ({
+    getUserIdOrPublic: (...args: unknown[]) =>
+        mockGetYtMusicUserIdOrPublic(...args),
 }));
 
 jest.mock("../../workers/queues", () => ({
@@ -1379,6 +1410,9 @@ describe("library stream runtime coverage", () => {
         mockStreamDestroy.mockImplementation(() => undefined);
         mockProxyFederatedTrackStream.mockResolvedValue(undefined);
         mockProxyFederatedCover.mockResolvedValue(true);
+        mockLoadPeerPlaybackFallback.mockResolvedValue([]);
+        mockServeMappedProviderStream.mockResolvedValue({ status: "served" });
+        mockGetYtMusicUserIdOrPublic.mockResolvedValue("user-1");
         mockFederationPeerFindUnique.mockResolvedValue({
             id: "peer-1",
             name: "Peer One",
@@ -1748,6 +1782,262 @@ describe("library stream runtime coverage", () => {
             });
             expect(mockPlayCreate).not.toHaveBeenCalled();
             expect(mockProxyFederatedTrackStream).not.toHaveBeenCalled();
+        },
+    );
+
+    it("streams the local dedup twin when the owning peer is offline", async () => {
+        mockTrackFindUnique
+            .mockResolvedValueOnce(
+                createNativeTrack({
+                    id: "fed-track-1",
+                    origin: "FEDERATED",
+                    peerId: "peer-1",
+                    remoteId: "remote-track-1",
+                    filePath: null,
+                }),
+            )
+            .mockResolvedValueOnce(createNativeTrack({ id: "local-twin-1" }));
+        mockFederationPeerFindUnique.mockResolvedValueOnce(null);
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "library", trackId: "local-twin-1" },
+        ]);
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValueOnce(true);
+        const res = createRes();
+
+        await streamHandler(
+            {
+                params: { id: "fed-track-1" },
+                query: { quality: "original" },
+                headers: {},
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(mockLoadPeerPlaybackFallback).toHaveBeenCalledWith(
+            "fed-track-1",
+        );
+        expect(mockStreamWithRangeSupport).toHaveBeenCalled();
+        existsSpy.mockRestore();
+    });
+
+    it("serves an existing TIDAL mapping when an offline peer has no local twin", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({
+                id: "fed-track-1",
+                origin: "FEDERATED",
+                peerId: "peer-1",
+                remoteId: "remote-track-1",
+                filePath: null,
+            }),
+        );
+        mockFederationPeerFindUnique.mockResolvedValueOnce(null);
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+        ]);
+        const req = {
+            params: { id: "fed-track-1" },
+            query: {},
+            headers: {},
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledWith({
+            req,
+            res,
+            userId: "user-1",
+            youtubeUserId: undefined,
+            quality: "high",
+            trackId: "fed-track-1",
+            fallback: { source: "tidal", tidalTrackId: 42 },
+        });
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
+    });
+
+    it("advances from a pre-header TIDAL failure to YouTube", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({
+                id: "fed-track-1",
+                origin: "FEDERATED",
+                peerId: "peer-1",
+                remoteId: "remote-track-1",
+                filePath: null,
+            }),
+        );
+        mockFederationPeerFindUnique.mockResolvedValueOnce(null);
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        mockServeMappedProviderStream
+            .mockResolvedValueOnce({
+                status: "failed",
+                error: new Error("TIDAL unavailable"),
+                responseState: {
+                    headersSent: false,
+                    destroyed: false,
+                    writableEnded: false,
+                },
+            })
+            .mockResolvedValueOnce({ status: "served" });
+        const req = {
+            params: { id: "fed-track-1" },
+            query: {},
+            headers: {},
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(2);
+        expect(mockServeMappedProviderStream).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                youtubeUserId: "user-1",
+                quality: "high",
+                fallback: {
+                    source: "ytmusic",
+                    youtubeVideoId: "video-1",
+                },
+            }),
+        );
+        expect(res.status).not.toHaveBeenCalledWith(503);
+    });
+
+    it("returns PEER_OFFLINE after every fallback rung fails", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({
+                id: "fed-track-1",
+                origin: "FEDERATED",
+                peerId: "peer-1",
+                remoteId: "remote-track-1",
+                filePath: null,
+            }),
+        );
+        mockFederationPeerFindUnique.mockResolvedValueOnce(null);
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        mockServeMappedProviderStream.mockResolvedValue({
+            status: "failed",
+            error: new Error("provider unavailable"),
+            responseState: {
+                headersSent: false,
+                destroyed: false,
+                writableEnded: false,
+            },
+        });
+        const res = createRes();
+
+        await streamHandler(
+            {
+                params: { id: "fed-track-1" },
+                query: {},
+                headers: {},
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(2);
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({
+            error: "Federation peer is offline",
+            code: "PEER_OFFLINE",
+        });
+    });
+
+    it("does not advance after a mapped fallback commits headers", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({
+                id: "fed-track-1",
+                origin: "FEDERATED",
+                peerId: "peer-1",
+                remoteId: "remote-track-1",
+                filePath: null,
+            }),
+        );
+        mockFederationPeerFindUnique.mockResolvedValueOnce(null);
+        mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+            { source: "tidal", tidalTrackId: 42 },
+            { source: "ytmusic", youtubeVideoId: "video-1" },
+        ]);
+        const res = createRes();
+        res.headersSent = true;
+        res.writableEnded = false;
+        mockServeMappedProviderStream.mockResolvedValueOnce({
+            status: "failed",
+            error: new Error("stream reset"),
+            responseState: {
+                headersSent: true,
+                destroyed: false,
+                writableEnded: false,
+            },
+        });
+
+        await streamHandler(
+            {
+                params: { id: "fed-track-1" },
+                query: {},
+                headers: {},
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(1);
+        expect(res.end).toHaveBeenCalledTimes(1);
+        expect(res.status).not.toHaveBeenCalledWith(503);
+    });
+
+    it.each([
+        [false, false, true],
+        [true, false, true],
+    ])(
+        "stops after a mapped body failure with headersSent=%s writableEnded=%s destroyed=%s",
+        async (headersSent, writableEnded, destroyed) => {
+            mockTrackFindUnique.mockResolvedValueOnce(
+                createNativeTrack({
+                    id: "fed-track-1",
+                    origin: "FEDERATED",
+                    peerId: "peer-1",
+                    remoteId: "remote-track-1",
+                    filePath: null,
+                }),
+            );
+            mockFederationPeerFindUnique.mockResolvedValueOnce(null);
+            mockLoadPeerPlaybackFallback.mockResolvedValueOnce([
+                { source: "tidal", tidalTrackId: 42 },
+                { source: "ytmusic", youtubeVideoId: "video-1" },
+            ]);
+            mockServeMappedProviderStream.mockResolvedValueOnce({
+                status: "failed",
+                responseState: { headersSent, writableEnded, destroyed },
+                error: new Error("body failed"),
+            });
+            const res = createRes();
+
+            await streamHandler(
+                {
+                    params: { id: "fed-track-1" },
+                    query: {},
+                    headers: {},
+                    user: { id: "user-1" },
+                } as any,
+                res,
+            );
+
+            expect(mockServeMappedProviderStream).toHaveBeenCalledTimes(1);
+            expect(res.status).not.toHaveBeenCalledWith(503);
+            expect(res.json).not.toHaveBeenCalled();
+            expect(res.end).not.toHaveBeenCalled();
         },
     );
 
@@ -4102,6 +4392,7 @@ describe("library catalog list runtime coverage", () => {
         expect(res.body).toMatchObject({
             id: "federated-track-1",
             source: "federated",
+            streamSource: "peer",
             peer: { id: "peer-1", name: "Peer One", online: true },
         });
     });

@@ -13,6 +13,7 @@ import { SettingsLayout, SidebarItem } from "@/features/settings/components/ui";
 import { useFeatures } from "@/lib/features-context";
 
 const baseSidebarItems: SidebarItem[] = [
+    { id: "playback-sources", label: "Playback Sources" },
     { id: "download-preferences", label: "Download Preferences" },
     { id: "download-services", label: "Download Services" },
     { id: "audiobookshelf", label: "Media Servers" },
@@ -38,6 +39,14 @@ const DownloadPreferencesSection = dynamic(
     () =>
         import("@/features/settings/components/sections/DownloadPreferencesSection").then(
             (mod) => mod.DownloadPreferencesSection,
+        ),
+    { loading: renderSectionFallback },
+);
+
+const PlaybackSourcesSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/PlaybackSourcesSection").then(
+            (mod) => mod.PlaybackSourcesSection,
         ),
     { loading: renderSectionFallback },
 );
@@ -273,6 +282,11 @@ export default function AdminPage() {
                 isAdmin={true}
                 title="Admin"
             >
+                <PlaybackSourcesSection
+                    settings={systemSettings}
+                    onUpdate={updateSystemSettings}
+                />
+
                 <DownloadPreferencesSection
                     settings={systemSettings}
                     onUpdate={updateSystemSettings}

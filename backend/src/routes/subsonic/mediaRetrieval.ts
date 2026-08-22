@@ -31,6 +31,13 @@ import {
     type ResponseFormat,
 } from "../../utils/subsonicResponse";
 import { AppError, ErrorCode } from "../../utils/errors";
+import { loadPeerPlaybackFallback } from "../../services/peerPlaybackFallback";
+import {
+    isMappedProviderResponseUnusable,
+    mappedProviderResponseState,
+    serveMappedProviderStream,
+    terminateCommittedStream,
+} from "../../services/mappedProviderStream";
 import {
     DEFAULT_SUBSONIC_AVATAR_PNG,
     fetchCoverArtBuffer,
@@ -481,9 +488,9 @@ async function proxySubsonicFederatedStream(input: {
     quality: Quality;
     format: ResponseFormat;
     callback?: string;
-}): Promise<boolean> {
+}): Promise<"not-peer" | "served" | "failed"> {
     const { track, res } = input;
-    if (track.origin !== "FEDERATED") return false;
+    if (track.origin !== "FEDERATED") return "not-peer";
     const peer = track.federationPeer;
     if (
         !track.remoteId ||
@@ -492,14 +499,7 @@ async function proxySubsonicFederatedStream(input: {
         !peer.baseUrl ||
         !peer.outboundToken
     ) {
-        sendSubsonicError(
-            res,
-            SubsonicErrorCode.GENERIC,
-            "Federation peer is offline",
-            input.format,
-            input.callback,
-        );
-        return true;
+        return "failed";
     }
     try {
         await proxyFederatedTrackStream({
@@ -512,21 +512,70 @@ async function proxySubsonicFederatedStream(input: {
             sourceMime: track.mime,
             quality: input.quality,
         });
+        return "served";
     } catch (error: unknown) {
         log.warn("Federated stream proxy failed", { error });
-        if (!res.headersSent) {
-            sendSubsonicError(
-                res,
-                SubsonicErrorCode.GENERIC,
-                "Federation peer is offline",
-                input.format,
-                input.callback,
+        const state = mappedProviderResponseState(res);
+        if (!isMappedProviderResponseUnusable(state)) {
+            return "failed";
+        }
+        if (!state.destroyed && !state.writableEnded) {
+            terminateCommittedStream(res);
+        }
+        return "served";
+    }
+}
+
+async function serveSubsonicPeerFallback(input: {
+    req: Request;
+    res: Response;
+    trackId: string;
+    quality: Quality;
+    timeOffsetSeconds: number;
+}): Promise<boolean> {
+    const fallbacks = await loadPeerPlaybackFallback(input.trackId);
+    let youtubeUserId: string | undefined;
+    for (let index = 0; index < 3; index += 1) {
+        const fallback = fallbacks[index];
+        if (!fallback) break;
+        if (fallback.source === "library") {
+            const localTrack = await loadSubsonicStreamTrack(fallback.trackId);
+            if (!localTrack) continue;
+            const result = await serveLocalSubsonicStream({
+                ...input,
+                track: localTrack,
+            });
+            if (result === "served") return true;
+            continue;
+        }
+        const userId = input.req.user!.id;
+        if (fallback.source === "ytmusic" && youtubeUserId === undefined) {
+            youtubeUserId = await import("../youtubeMusic").then((mod) =>
+                mod.getUserIdOrPublic(userId),
             );
-        } else if (!res.writableEnded) {
-            res.end();
+        }
+        const result = await serveMappedProviderStream({
+            req: input.req,
+            res: input.res,
+            userId,
+            youtubeUserId,
+            quality: input.quality,
+            fallback,
+        });
+        if (result.status === "served") return true;
+        if (result.status !== "failed") continue;
+        log.warn("Mapped peer fallback failed", { error: result.error });
+        if (isMappedProviderResponseUnusable(result.responseState)) {
+            if (
+                !result.responseState.destroyed &&
+                !result.responseState.writableEnded
+            ) {
+                terminateCommittedStream(input.res);
+            }
+            return true;
         }
     }
-    return true;
+    return false;
 }
 
 type StreamRequest = {
@@ -583,11 +632,11 @@ async function executeStreamRequest(
     }
 
     if (
-        await proxySubsonicFederatedStream({
+        await handleSubsonicPeerPlayback({
             req,
             res,
             track,
-            quality: request.quality,
+            request,
             format,
             callback,
         })
@@ -613,6 +662,56 @@ async function executeStreamRequest(
     }
 }
 
+async function handleSubsonicPeerPlayback(input: {
+    req: Request;
+    res: Response;
+    track: SubsonicStreamTrack;
+    request: StreamRequest;
+    format: ResponseFormat;
+    callback?: string;
+}): Promise<boolean> {
+    const peerResult = await proxySubsonicFederatedStream({
+        req: input.req,
+        res: input.res,
+        track: input.track,
+        quality: input.request.quality,
+        format: input.format,
+        callback: input.callback,
+    });
+    if (peerResult === "served") return true;
+    if (peerResult === "failed") {
+        try {
+            if (
+                await serveSubsonicPeerFallback({
+                    req: input.req,
+                    res: input.res,
+                    trackId: input.track.id,
+                    quality: input.request.quality,
+                    timeOffsetSeconds: input.request.timeOffsetSeconds,
+                })
+            ) {
+                return true;
+            }
+        } catch (error) {
+            log.warn("Peer fallback ladder failed", { error });
+        }
+        const state = mappedProviderResponseState(input.res);
+        if (!isMappedProviderResponseUnusable(state)) {
+            sendSubsonicError(
+                input.res,
+                SubsonicErrorCode.GENERIC,
+                "Federation peer is offline",
+                input.format,
+                input.callback,
+            );
+        } else if (!state.destroyed && !state.writableEnded) {
+            terminateCommittedStream(input.res);
+        }
+        return true;
+    }
+    return false;
+}
+
 /** Executes handleStream. */
 export async function handleStream(req: Request, res: Response): Promise<void> {
     const { format, callback } = getRequestContext(req);
@@ -629,6 +728,8 @@ export async function handleStream(req: Request, res: Response): Promise<void> {
                 format,
                 callback,
             );
+        } else {
+            terminateCommittedStream(res);
         }
     }
 }

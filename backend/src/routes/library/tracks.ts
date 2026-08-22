@@ -7,15 +7,10 @@ import {
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import path from "path";
 import fs from "fs";
 import { config } from "../../config";
-import {
-    AudioStreamingService,
-    type Quality as StreamingQuality,
-} from "../../services/audioStreaming";
+import { type Quality as StreamingQuality } from "../../services/audioStreaming";
 import { shuffleArray } from "../../utils/shuffle";
-import { safeResolvePath } from "../../utils/safeResolvePath";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -38,10 +33,8 @@ import {
     normalizeTidalTrack,
     normalizeYtMusicTrack,
 } from "../../services/unifiedTrackResponse";
-import { proxyFederatedTrackStream } from "../../services/federationStreamProxy";
 import {
     buildFederatedAudioInfo,
-    normalizeStreamingQuality,
     resolveAudioInfoAbsolutePath,
 } from "../../utils/libraryAudioInfo";
 import {
@@ -76,6 +69,15 @@ import {
     libraryDeletionLogger,
 } from "../../utils/libraryDeletion";
 import { deleteTrackAndRecomputeAlbum } from "../../services/trackDeletion";
+import {
+    parsePlaybackSourceOrder,
+    rankPlaybackSource,
+} from "../../services/playbackSourcePriority";
+import {
+    applyLibraryPeerFallback,
+    proxyLibraryPeerStream,
+} from "./libraryPeerStream";
+import { serveNativeLibraryTrack } from "./libraryNativeTrackStream";
 
 /**
  * Router segment for tracks routes registered at this position.
@@ -237,6 +239,9 @@ export async function handleGetTracks(req: Request, res: Response) {
     const tracks = tracksData.map(({ federationPeer, ...track }) => ({
         ...track,
         source: track.origin === "FEDERATED" ? "federated" : "local",
+        ...(track.origin === "FEDERATED"
+            ? { streamSource: "peer" as const }
+            : {}),
         peer: federationPeer
             ? {
                   id: federationPeer.id,
@@ -395,38 +400,48 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
                 }
               : { userId };
 
-    const [total, remoteTotal, userSettings, localEntries, remoteEntries] =
-        await Promise.all([
-            prisma.likedTrack.count({
-                where: { userId, track: TRACK_VISIBLE_WHERE },
-            }),
-            prisma.likedRemoteTrack.count({ where: { userId } }),
-            prisma.userSettings.findUnique({
-                where: { userId },
-                select: {
-                    tidalOAuthJson: true,
-                    ytMusicOAuthJson: true,
-                },
-            }),
-            prisma.likedTrack.findMany({
-                where: likedWhere,
-                select: {
-                    trackId: true,
-                    likedAt: true,
-                },
-                orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
-                take: fetchTake,
-            }),
-            prisma.likedRemoteTrack.findMany({
-                where: remoteWhere,
-                include: {
-                    trackTidal: true,
-                    trackYtMusic: true,
-                },
-                orderBy: [{ likedAt: "desc" }, { id: "asc" }],
-                take: fetchTake,
-            }),
-        ]);
+    const [
+        total,
+        remoteTotal,
+        userSettings,
+        localEntries,
+        remoteEntries,
+        systemSettings,
+    ] = await Promise.all([
+        prisma.likedTrack.count({
+            where: { userId, track: TRACK_VISIBLE_WHERE },
+        }),
+        prisma.likedRemoteTrack.count({ where: { userId } }),
+        prisma.userSettings.findUnique({
+            where: { userId },
+            select: {
+                tidalOAuthJson: true,
+                ytMusicOAuthJson: true,
+            },
+        }),
+        prisma.likedTrack.findMany({
+            where: likedWhere,
+            select: {
+                trackId: true,
+                likedAt: true,
+            },
+            orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
+            take: fetchTake,
+        }),
+        prisma.likedRemoteTrack.findMany({
+            where: remoteWhere,
+            include: {
+                trackTidal: true,
+                trackYtMusic: true,
+            },
+            orderBy: [{ likedAt: "desc" }, { id: "asc" }],
+            take: fetchTake,
+        }),
+        prisma.systemSettings.findUnique({
+            where: { id: "default" },
+            select: { playbackSourceOrder: true },
+        }),
+    ]);
 
     const hasTidal = hasConnectedProviderToken(userSettings?.tidalOAuthJson);
     const hasYtMusic = hasConnectedProviderToken(
@@ -638,10 +653,31 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
         grouped.set(root, bucket);
     }
 
+    const sourceOrder = parsePlaybackSourceOrder(
+        (systemSettings as { playbackSourceOrder?: unknown } | null)
+            ?.playbackSourceOrder,
+    );
     const choosePriority = (entry: MergedEntry): number => {
-        if (entry.kind === "local") return 300;
-        if (entry.source === "tidal") return hasTidal ? 220 : 120;
-        return hasYtMusic ? 210 : 110;
+        if (entry.kind === "local") {
+            const track = localTrackById.get(entry.trackId);
+            const isPeer = track?.origin === "FEDERATED";
+            return rankPlaybackSource(
+                {
+                    source: isPeer ? "peers" : "library",
+                    available:
+                        !isPeer ||
+                        track?.federationPeer?.outboundStatus === "ACTIVE",
+                },
+                sourceOrder,
+            );
+        }
+        return rankPlaybackSource(
+            {
+                source: entry.source === "tidal" ? "tidal" : "ytmusic",
+                available: entry.source === "tidal" ? hasTidal : hasYtMusic,
+            },
+            sourceOrder,
+        );
     };
 
     const deduped = Array.from(grouped.values())
@@ -938,47 +974,6 @@ tracksBrowseRouter.get(
 /**
  * Handles GET /api/library/tracks/:id/stream.
  */
-async function streamFederatedTrack(
-    req: Request<{ id: string }>,
-    res: Response,
-    peer: {
-        id: string;
-        name: string;
-        baseUrl: string;
-        outboundToken: string;
-        outboundStatus: string | null;
-    },
-    remoteId: string,
-    trackId: string,
-    sourceModified: Date,
-    sourceMime: string | null,
-    requestedQuality: string,
-): Promise<Response | void> {
-    const quality = normalizeStreamingQuality(requestedQuality) ?? "medium";
-    try {
-        await proxyFederatedTrackStream({
-            req,
-            res,
-            peer,
-            remoteId,
-            trackId,
-            sourceModified,
-            sourceMime,
-            quality,
-        });
-        return undefined;
-    } catch (error: unknown) {
-        logger.warn("Federated stream proxy failed", { error });
-        if (res.headersSent) {
-            if (!res.writableEnded) res.end();
-            return undefined;
-        }
-        return sendRouteError(res, 503, "Federation peer is offline", {
-            code: "PEER_OFFLINE",
-        });
-    }
-}
-
 export async function handleStreamTrack(
     req: Request<{ id: string }>,
     res: Response,
@@ -993,7 +988,7 @@ export async function handleStreamTrack(
             return sendRouteError(res, 401, "Unauthorized");
         }
 
-        const track = await prisma.track.findUnique({
+        let track = await prisma.track.findUnique({
             where: { id: req.params.id, ...TRACK_VISIBLE_WHERE },
         });
 
@@ -1007,167 +1002,87 @@ export async function handleStreamTrack(
         const federationPeer = isFederatedTrack
             ? await loadActiveFederationStreamPeer(track.peerId)
             : null;
-        if (isFederatedTrack && (!federationPeer || !track.remoteId)) {
-            return sendRouteError(res, 503, "Federation peer is offline", {
-                code: "PEER_OFFLINE",
-            });
-        }
-
-        // Log play start - only if this is a new playback session
-        const recentPlay = await prisma.play.findFirst({
-            where: {
-                userId,
-                trackId: track.id,
-                playedAt: {
-                    gte: new Date(Date.now() - 30 * 1000),
-                },
-            },
-            orderBy: { playedAt: "desc" },
-        });
-
-        if (!recentPlay) {
-            await prisma.play.create({
-                data: {
-                    userId,
-                    trackId: track.id,
-                },
-            });
-            logger.debug("[STREAM] Logged new play for track:", track.title);
-        }
-
-        // Get user's quality preference
-        let requestedQuality: string = "medium";
-        if (quality) {
-            requestedQuality = quality as string;
-        } else {
-            const settings = await prisma.userSettings.findUnique({
-                where: { userId },
-            });
-            requestedQuality = settings?.playbackQuality || "medium";
-        }
-
-        const ext = track.filePath
-            ? path.extname(track.filePath).toLowerCase()
-            : "";
-        logger.debug(
-            `[STREAM] Quality: requested=${
-                quality || "default"
-            }, using=${requestedQuality}, format=${ext}`,
-        );
-
-        if (isFederatedTrack && federationPeer && track.remoteId) {
-            return streamFederatedTrack(
+        const canProxyPeer = Boolean(federationPeer && track.remoteId);
+        const requestedQuality = await resolveStreamQuality(userId, quality);
+        if (isFederatedTrack && !canProxyPeer) {
+            const fallbackTrack = await applyLibraryPeerFallback({
                 req,
                 res,
-                federationPeer,
-                track.remoteId,
-                track.id,
-                track.fileModified,
-                track.mime,
+                userId,
+                trackId: track.id,
+                quality: requestedQuality,
+            });
+            if (!fallbackTrack) return;
+            track = fallbackTrack;
+        }
+
+        await recordStreamPlay(userId, track.id, track.title);
+
+        if (canProxyPeer && federationPeer && track.remoteId) {
+            const served = await proxyLibraryPeerStream({
+                req,
+                res,
+                peer: federationPeer,
+                remoteId: track.remoteId,
+                trackId: track.id,
+                sourceModified: track.fileModified,
+                sourceMime: track.mime,
                 requestedQuality,
-            );
+            });
+            if (served) return;
         }
 
-        // === NATIVE FILE STREAMING ===
-        // Check if track has native file path
-        if (track.filePath && track.fileModified) {
-            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-            const absolutePath = safeResolvePath(
-                config.music.musicPath,
-                normalizedFilePath,
-            );
-            if (!absolutePath) {
-                logger.warn(
-                    `[STREAM] Rejected out-of-root file path for track ${track.id}`,
-                );
-                return sendRouteError(res, 404, "Track not available");
-            }
-
-            let streamingService: AudioStreamingService | null = null;
-
-            try {
-                // Initialize streaming service
-                streamingService = new AudioStreamingService(
-                    config.music.musicPath,
-                    config.music.transcodeCachePath,
-                    config.music.transcodeCacheMaxGb,
-                );
-
-                logger.debug(
-                    `[STREAM] Using native file: ${track.filePath} (${requestedQuality})`,
-                );
-
-                // Get stream file (either original or transcoded)
-                const { filePath, mimeType } =
-                    await streamingService.getStreamFilePath(
-                        track.id,
-                        requestedQuality as any,
-                        track.fileModified,
-                        absolutePath,
-                    );
-
-                // Stream file with range support
-                logger.debug(
-                    `[STREAM] Sending file: ${filePath}, mimeType: ${mimeType}`,
-                );
-
-                await streamingService.streamFileWithRangeSupport(
-                    req,
-                    res,
-                    filePath,
-                    mimeType,
-                );
-                logger.debug(
-                    `[STREAM] File sent successfully: ${path.basename(
-                        filePath,
-                    )}`,
-                );
-
-                return;
-            } catch (err: any) {
-                // If FFmpeg not found, try original quality instead
-                if (
-                    err.code === "FFMPEG_NOT_FOUND" &&
-                    requestedQuality !== "original" &&
-                    streamingService !== null
-                ) {
-                    logger.warn(
-                        `[STREAM] FFmpeg not available, falling back to original quality`,
-                    );
-
-                    const { filePath, mimeType } =
-                        await streamingService.getStreamFilePath(
-                            track.id,
-                            "original",
-                            track.fileModified,
-                            absolutePath,
-                        );
-
-                    await streamingService.streamFileWithRangeSupport(
-                        req,
-                        res,
-                        filePath,
-                        mimeType,
-                    );
-                    return;
-                }
-
-                logger.error("[STREAM] Native streaming failed:", err.message);
-                return res
-                    .status(500)
-                    .json({ error: "Failed to stream track" });
-            } finally {
-                streamingService?.destroy();
-            }
+        if (canProxyPeer) {
+            const fallbackTrack = await applyLibraryPeerFallback({
+                req,
+                res,
+                userId,
+                trackId: track.id,
+                quality: requestedQuality,
+            });
+            if (!fallbackTrack) return;
+            track = fallbackTrack;
         }
 
-        // No file path available
-        logger.debug("[STREAM] Track has no file path - unavailable");
-        return sendRouteError(res, 404, "Track not available");
+        return serveNativeLibraryTrack({
+            req,
+            res,
+            track,
+            requestedQuality,
+        });
     } catch (error) {
         logger.error("Stream track error:", error);
         sendInternalRouteError(res, "Failed to stream track");
     }
+}
+
+async function recordStreamPlay(
+    userId: string,
+    trackId: string,
+    title: string,
+): Promise<void> {
+    const recent = await prisma.play.findFirst({
+        where: {
+            userId,
+            trackId,
+            playedAt: { gte: new Date(Date.now() - 30 * 1000) },
+        },
+        orderBy: { playedAt: "desc" },
+    });
+    if (recent) return;
+    await prisma.play.create({ data: { userId, trackId } });
+    logger.debug("[STREAM] Logged new play for track:", title);
+}
+
+async function resolveStreamQuality(
+    userId: string,
+    requested: unknown,
+): Promise<string> {
+    if (typeof requested === "string") return requested;
+    const settings = await prisma.userSettings.findUnique({
+        where: { userId },
+    });
+    return settings?.playbackQuality || "medium";
 }
 
 tracksStreamRouter.get("/tracks/:id/stream", handleStreamTrack);
@@ -1496,6 +1411,9 @@ export async function handleGetTrack(
         loudnessLufs: track.loudnessLufs,
         truePeakDb: track.truePeakDb,
         source: normalizedTrack.source,
+        ...(normalizedTrack.source === "federated"
+            ? { streamSource: "peer" as const }
+            : {}),
         ...(normalizedTrack.peer ? { peer: normalizedTrack.peer } : {}),
     };
 

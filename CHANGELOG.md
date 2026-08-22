@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Federation administrators can set the instance display name advertised to peers. Peer health now exposes classified probe failures and the latest embedding federation outcome, including space-mismatch skips.
+- Playback source priority is now configurable through the `playbackSourceOrder` system setting, with the default owned-library → peer-library → TIDAL → YouTube Music order and strict provider validation. (#683)
 - YouTube Music is now a selectable library download source alongside Soulseek, Lidarr, and TIDAL. Pick **YouTube Music (Albums)** in Admin → Download Preferences (or as the "When Primary Source Fails" fallback) and album download jobs dispatch through the `ytmusic-streamer` sidecar the same way TIDAL jobs do: public album search, per-track downloads with TIDAL-style `Artist/Album/NN. Title` naming and scanner-compatible tags under the shared music volume, live progress on the job row, and an automatic library scan on completion. New sidecar env values `MUSIC_PATH` (default `/music`) and `YT_ALBUM_DOWNLOAD_CONCURRENCY` (default `1`). (#701)
 
 ### Changed
 
 - The TIDAL sidecar is renamed from `tidal-downloader` to `tidal-streamer`, matching the `ytmusic-streamer` naming: images now publish under `ghcr.io/soundspan/soundspan-tidal-streamer` (with the old `soundspan-tidal-downloader` name still published as an alias), the compose service and default container name follow (`tidal-streamer` / `soundspan_tidal_streamer`), and the old `tidal-downloader` in-network hostname remains as a network alias so custom `TIDAL_SIDECAR_URL` values keep working. No variable names, ports, APIs, Helm values keys, or TIDAL logins change — the rename requires no operator action. (#701)
 - Federation pairing now creates explicit one-way host and client links instead of attempting a reciprocal callback. Pairing codes last 30 minutes, retain up to five live codes per administrator without clobbering newer codes, and return distinct used, expired, and scope-mismatch errors; outbound peer setup also distinguishes unreachable, TLS, authorization, and invalid-peer failures. Existing bidirectional peer rows remain supported.
+- Federated tracks now identify playback as the first-class `peer` source, rank between owned files and streaming providers while their peer is online, and fall back at stream time to a hidden local dedup twin or an existing TIDAL/YouTube Music mapping before reporting `PEER_OFFLINE`; the same ladder applies to OpenSubsonic streams. Offline peers rank below provider copies. During mixed-version rollout, Listen Together snapshots retain legacy `local` source fields plus additive peer-origin metadata so previous pods can validate them while current pods restore the `peer` source. (#683)
 
 ### Fixed
 

@@ -139,11 +139,17 @@ function toResolutionInput(
                 ? item.trackYtMusic.videoId.trim()
                 : undefined,
         originSource: item.track
-            ? "local"
+            ? item.track.origin === "FEDERATED"
+                ? "peer"
+                : "local"
             : item.trackTidal
               ? "tidal"
               : item.trackYtMusic
                 ? "youtube"
+                : undefined,
+        peerOnline:
+            item.track?.origin === "FEDERATED"
+                ? item.track.federationPeer?.outboundStatus === "ACTIVE"
                 : undefined,
     };
 }
@@ -297,6 +303,13 @@ export async function resolvePlaylistItemsForUser(
             ? prisma.track.findMany({
                   where: { id: { in: Array.from(missingLocalIds) } },
                   include: {
+                      federationPeer: {
+                          select: {
+                              id: true,
+                              name: true,
+                              outboundStatus: true,
+                          },
+                      },
                       album: {
                           include: {
                               artist: {

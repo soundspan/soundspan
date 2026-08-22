@@ -227,6 +227,9 @@ export default function ArtistPage() {
             streamSource: "youtube" as const,
             youtubeVideoId: t.youtubeVideoId,
         }),
+        ...(t.streamSource === "peer" && {
+            streamSource: "peer" as const,
+        }),
     });
 
     // Play track handler (for popular tracks)

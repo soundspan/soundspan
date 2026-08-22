@@ -41,6 +41,9 @@ describe("listenTogether service", () => {
             track: {
                 findMany: jest.fn(),
             },
+            trackMapping: {
+                findMany: jest.fn(async () => []),
+            },
             user: {
                 findUnique: jest.fn(),
                 updateMany: jest.fn(async () => ({ count: 1 })),
@@ -268,7 +271,6 @@ describe("listenTogether service", () => {
                 },
             },
         ]);
-
         const tx = {
             user: {
                 updateMany: jest.fn(async () => ({ count: 1 })),
@@ -366,6 +368,48 @@ describe("listenTogether service", () => {
             playback: {},
             members: [],
         });
+    });
+
+    it("serializes a federated queue row as peer media", async () => {
+        const { listenTogether, prisma } = loadService();
+        prisma.track.findMany.mockResolvedValueOnce([
+            {
+                id: "peer-track-1",
+                title: "Peer Track",
+                duration: 180,
+                filePath: null,
+                origin: "FEDERATED",
+                loudnessLufs: null,
+                truePeakDb: null,
+                federationPeer: { outboundStatus: "ACTIVE" },
+                album: {
+                    id: "album-1",
+                    title: "Album",
+                    coverUrl: null,
+                    albumLoudnessLufs: null,
+                    albumTruePeakDb: null,
+                    artist: { id: "artist-1", name: "Artist" },
+                },
+            },
+        ]);
+        prisma.trackMapping.findMany.mockResolvedValueOnce([
+            { id: "mapping-1", trackId: "peer-track-1" },
+        ]);
+
+        const queue = await listenTogether.validateQueueTracks([
+            { trackId: "peer-track-1" },
+        ]);
+
+        expect(JSON.parse(JSON.stringify(queue))).toEqual([
+            expect.objectContaining({
+                id: "peer-track-1",
+                mediaSource: "peer",
+                provider: { source: "peer" },
+                originSource: "peer",
+                peerOnline: true,
+                trackMappingId: "mapping-1",
+            }),
+        ]);
     });
 
     it("rejects group creation while the user is pending deletion", async () => {
@@ -2353,6 +2397,10 @@ describe("listenTogether service", () => {
                     id: "track-1",
                     title: "Track 1",
                     duration: 120,
+                    mediaSource: "peer",
+                    streamSource: "peer",
+                    originSource: "peer",
+                    peerOnline: true,
                     artist: { id: "artist-1", name: "Artist 1" },
                     album: {
                         id: "album-1",
@@ -2399,6 +2447,9 @@ describe("listenTogether service", () => {
                 queue: [
                     expect.objectContaining({
                         id: "track-1",
+                        mediaSource: "peer",
+                        originSource: "peer",
+                        peerOnline: true,
                     }),
                 ],
                 members: [

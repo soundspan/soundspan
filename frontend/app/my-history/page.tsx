@@ -32,7 +32,7 @@ interface PlayHistoryTrack {
         tidalTrackId: number | null;
         youtubeVideoId: string | null;
     };
-    streamSource?: "tidal" | "youtube";
+    streamSource?: "peer" | "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
     artist?: {

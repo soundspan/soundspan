@@ -564,5 +564,8 @@ const toHistoryTrackShape = (
             youtubeVideoId: normalized.provider.youtubeVideoId,
         };
     }
+    if (normalized.source === "federated") {
+        return { ...base, streamSource: "peer" as const };
+    }
     return base;
 };

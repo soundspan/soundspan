@@ -171,6 +171,36 @@ describe("plays routes integration", () => {
                 trackYtMusic: null,
             },
             {
+                id: "play-peer",
+                playedAt: new Date("2026-03-01T11:00:00.000Z"),
+                source: "LIBRARY",
+                track: {
+                    id: "peer-track-1",
+                    title: "Peer Song",
+                    duration: 211,
+                    trackNumber: 8,
+                    filePath: null,
+                    origin: "FEDERATED",
+                    federationPeer: {
+                        id: "peer-1",
+                        name: "Peer One",
+                        outboundStatus: "ACTIVE",
+                    },
+                    album: {
+                        id: "peer-album-1",
+                        title: "Peer Album",
+                        coverUrl: null,
+                        artist: {
+                            id: "peer-artist-1",
+                            name: "Peer Artist",
+                            mbid: null,
+                        },
+                    },
+                },
+                trackTidal: null,
+                trackYtMusic: null,
+            },
+            {
                 id: "play-tidal",
                 playedAt: new Date("2026-03-02T10:00:00.000Z"),
                 source: "TIDAL",
@@ -251,7 +281,7 @@ describe("plays routes integration", () => {
                 trackYtMusic: true,
             },
         });
-        expect(res.body).toHaveLength(3);
+        expect(res.body).toHaveLength(4);
         expect(res.body).toEqual([
             {
                 id: "play-local",
@@ -284,6 +314,40 @@ describe("plays routes integration", () => {
                             name: "Local Artist",
                         },
                     },
+                },
+            },
+            {
+                id: "play-peer",
+                playedAt: "2026-03-01T11:00:00.000Z",
+                source: "LIBRARY",
+                track: {
+                    id: "peer-track-1",
+                    title: "Peer Song",
+                    displayTitle: null,
+                    duration: 211,
+                    trackNo: 8,
+                    source: "federated",
+                    provider: {
+                        tidalTrackId: null,
+                        youtubeVideoId: null,
+                    },
+                    filePath: null,
+                    artist: {
+                        id: "peer-artist-1",
+                        name: "Peer Artist",
+                    },
+                    album: {
+                        id: "peer-album-1",
+                        title: "Peer Album",
+                        coverArt: null,
+                        albumLoudnessLufs: null,
+                        albumTruePeakDb: null,
+                        artist: {
+                            id: "peer-artist-1",
+                            name: "Peer Artist",
+                        },
+                    },
+                    streamSource: "peer",
                 },
             },
             {

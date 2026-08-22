@@ -26,6 +26,7 @@ jest.mock("../../utils/db", () => ({
 
 import {
     getUserProviderProfile,
+    invalidateUserProviderProfileCache,
     resolveTrackForUser,
 } from "../listenTogetherResolution";
 import type { SyncQueueItem } from "../listenTogetherManager";
@@ -44,6 +45,7 @@ function queueItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueItem {
 describe("listenTogetherResolution", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        invalidateUserProviderProfileCache();
         mockPrisma.systemSettings.findUnique.mockResolvedValue({
             ytMusicEnabled: true,
         });
@@ -102,6 +104,123 @@ describe("listenTogetherResolution", () => {
             source: "youtube",
             youtubeVideoId: "vid-1",
             trackYtMusicId: "yt-1",
+        });
+    });
+
+    it("ranks an offline peer below an available TIDAL mapping", async () => {
+        const profile = {
+            userId: "user-1",
+            hasLocal: true as const,
+            hasTidal: true,
+            hasYtMusic: true,
+        };
+        const mapping = {
+            id: "map-peer",
+            stale: false,
+            confidence: 0.92,
+            trackId: "peer-track-1",
+            track: {
+                origin: "FEDERATED" as const,
+                federationPeer: { outboundStatus: "OFFLINE" as const },
+            },
+            trackTidal: { id: "tt-1", tidalId: 123, duration: 180 },
+            trackYtMusic: { id: "yt-1", videoId: "vid-1", duration: 180 },
+        };
+
+        const resolved = await resolveTrackForUser(
+            queueItem({
+                localTrackId: "peer-track-1",
+                trackMappingId: "map-peer",
+                originSource: "peer",
+                peerOnline: false,
+            }),
+            profile,
+            { mappingsById: new Map([["map-peer", mapping]]) },
+        );
+
+        expect(resolved).toEqual({
+            available: true,
+            source: "tidal",
+            tidalTrackId: 123,
+            trackTidalId: "tt-1",
+        });
+    });
+
+    it("ranks an online peer above an available TIDAL mapping by default", async () => {
+        const profile = {
+            userId: "user-1",
+            hasLocal: true as const,
+            hasTidal: true,
+            hasYtMusic: true,
+        };
+        const mapping = {
+            id: "map-peer-online",
+            stale: false,
+            confidence: 0.92,
+            trackId: "peer-track-1",
+            track: {
+                origin: "FEDERATED" as const,
+                federationPeer: { outboundStatus: "ACTIVE" as const },
+            },
+            trackTidal: { id: "tt-1", tidalId: 123, duration: 180 },
+            trackYtMusic: null,
+        };
+
+        const resolved = await resolveTrackForUser(
+            queueItem({
+                localTrackId: "peer-track-1",
+                trackMappingId: "map-peer-online",
+                originSource: "peer",
+                peerOnline: true,
+            }),
+            profile,
+            { mappingsById: new Map([["map-peer-online", mapping]]) },
+        );
+
+        expect(resolved).toEqual({
+            available: true,
+            source: "local",
+            trackId: "peer-track-1",
+        });
+    });
+
+    it("honors the configured source order for mapped peer candidates", async () => {
+        const profile = {
+            userId: "user-1",
+            hasLocal: true as const,
+            hasTidal: true,
+            hasYtMusic: true,
+            playbackSourceOrder: "tidal,peers,library,ytmusic",
+        };
+        const mapping = {
+            id: "map-override",
+            stale: false,
+            confidence: 0.92,
+            trackId: "peer-track-1",
+            track: {
+                origin: "FEDERATED" as const,
+                federationPeer: { outboundStatus: "ACTIVE" as const },
+            },
+            trackTidal: { id: "tt-1", tidalId: 123, duration: 180 },
+            trackYtMusic: null,
+        };
+
+        const resolved = await resolveTrackForUser(
+            queueItem({
+                localTrackId: "peer-track-1",
+                trackMappingId: "map-override",
+                originSource: "peer",
+                peerOnline: true,
+            }),
+            profile,
+            { mappingsById: new Map([["map-override", mapping]]) },
+        );
+
+        expect(resolved).toEqual({
+            available: true,
+            source: "tidal",
+            tidalTrackId: 123,
+            trackTidalId: "tt-1",
         });
     });
 
@@ -314,5 +433,33 @@ describe("listenTogetherResolution", () => {
             hasTidal: true,
             hasYtMusic: false,
         });
+    });
+
+    it("reads an updated playback order immediately after invalidation", async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValue({
+            tidalOAuthJson: "tidal-token",
+        });
+        mockPrisma.systemSettings.findUnique
+            .mockResolvedValueOnce({
+                ytMusicEnabled: true,
+                playbackSourceOrder: "library,peers,tidal,ytmusic",
+            })
+            .mockResolvedValueOnce({
+                ytMusicEnabled: true,
+                playbackSourceOrder: "ytmusic,tidal,peers,library",
+            });
+
+        await expect(getUserProviderProfile("user-cache")).resolves.toEqual(
+            expect.objectContaining({
+                playbackSourceOrder: "library,peers,tidal,ytmusic",
+            }),
+        );
+        invalidateUserProviderProfileCache();
+        await expect(getUserProviderProfile("user-cache")).resolves.toEqual(
+            expect.objectContaining({
+                playbackSourceOrder: "ytmusic,tidal,peers,library",
+            }),
+        );
+        expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(2);
     });
 });

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     getNextTrackInfo,
     isLikelyTransientStreamError,
+    resolveDirectTrackSourceType,
 } from "../../lib/audio-engine/audioPlaybackTrackPolicy";
 
 test("selects the next music track in queue order", () => {
@@ -44,5 +45,20 @@ test("classifies bounded transport failures as transient", () => {
     assert.equal(
         isLikelyTransientStreamError(new Error("decode failed")),
         false,
+    );
+});
+
+test("resolves peer tracks to the peer engine source type", () => {
+    assert.equal(
+        resolveDirectTrackSourceType({ streamSource: "peer" }),
+        "peer",
+    );
+    assert.equal(resolveDirectTrackSourceType({}), "local");
+    assert.equal(
+        resolveDirectTrackSourceType({
+            streamSource: "tidal",
+            tidalTrackId: 42,
+        }),
+        "tidal",
     );
 });

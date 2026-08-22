@@ -421,6 +421,7 @@ function formatLocalAlbumTracks(album: AlbumWithTracks) {
         ...(track.origin === "FEDERATED" && federationPeer
             ? {
                   source: "federated" as const,
+                  streamSource: "peer" as const,
                   peer: {
                       id: federationPeer.id,
                       name: federationPeer.name,

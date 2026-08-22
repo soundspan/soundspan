@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     resolvePlaybackDuration,
     resolveRemoteStreamFormat,
+    resolveTrackFormatHint,
     shouldAttemptRecoveryOnUnexpectedPause,
 } from "../../components/player/audioPlaybackOrchestratorPolicy";
 
@@ -128,4 +129,32 @@ test("local stream uses low loaded duration when no metadata available", () => {
         }),
         4,
     );
+});
+
+test("format hint follows the source: remote hinted, peer detected, local by extension", () => {
+    assert.equal(resolveTrackFormatHint({ streamSource: "tidal" }), "mp4");
+    assert.equal(resolveTrackFormatHint({ streamSource: "youtube" }), "mp4");
+    assert.equal(
+        resolveTrackFormatHint({
+            streamSource: "youtube-direct",
+            youtubeAudioFormat: "webm",
+        }),
+        "webm",
+    );
+    // Peer bodies may be the original container or fallback provider
+    // bytes, so the engine must detect from Content-Type.
+    assert.equal(resolveTrackFormatHint({ streamSource: "peer" }), undefined);
+    assert.equal(
+        resolveTrackFormatHint({
+            streamSource: "peer",
+            filePath: "/music/a.flac",
+        }),
+        undefined,
+    );
+    assert.equal(resolveTrackFormatHint({ filePath: "/music/a.flac" }), "flac");
+    assert.equal(resolveTrackFormatHint({ filePath: "/music/a.m4a" }), "mp4");
+    assert.equal(resolveTrackFormatHint({ filePath: "/music/a.opus" }), "webm");
+    assert.equal(resolveTrackFormatHint({ filePath: "/music/a.wav" }), "wav");
+    assert.equal(resolveTrackFormatHint({}), "mp3");
+    assert.equal(resolveTrackFormatHint(null), "mp3");
 });

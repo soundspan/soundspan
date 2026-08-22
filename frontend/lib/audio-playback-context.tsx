@@ -44,7 +44,7 @@ import {
 
 export interface PlaybackStreamProfile {
     mode: "direct";
-    sourceType: "local" | "tidal" | "ytmusic" | "unknown";
+    sourceType: "local" | "peer" | "tidal" | "ytmusic" | "unknown";
     codec: string | null;
     bitrateKbps: number | null;
 }

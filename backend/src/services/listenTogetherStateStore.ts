@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { createIORedisClient } from "../utils/ioredis";
 import type { GroupSnapshot } from "./listenTogetherManager";
+import type { SyncQueueItem } from "./listenTogetherQueueItem";
 import { config } from "../config";
 import { withListenTogetherDeadline } from "./listenTogetherDeadline";
 import type { FencedStateWriteResult } from "./listenTogetherLeaseFencing";
@@ -27,6 +28,61 @@ const MAX_SNAPSHOT_MEMBERS = 10_000;
 const MAX_SNAPSHOT_QUEUE_ITEMS = 500;
 const log = logger.child("ListenTogetherStateStore");
 
+type RolloutQueueItem = SyncQueueItem & {
+    actualOriginSource?: "peer";
+};
+
+function toRolloutQueueItem(item: SyncQueueItem): RolloutQueueItem {
+    const isPeer =
+        item.mediaSource === "peer" ||
+        item.provider?.source === "peer" ||
+        item.streamSource === "peer" ||
+        item.originSource === "peer";
+    if (!isPeer) return item;
+    const { streamSource: _streamSource, ...legacy } = item;
+    return {
+        ...legacy,
+        mediaSource: "local",
+        provider: { ...item.provider, source: "local" },
+        originSource: "local",
+        actualOriginSource: "peer",
+    };
+}
+
+function toRolloutSnapshot(snapshot: GroupSnapshot): GroupSnapshot {
+    return {
+        ...snapshot,
+        playback: {
+            ...snapshot.playback,
+            queue: snapshot.playback.queue.map(toRolloutQueueItem),
+        },
+    };
+}
+
+function restoreRolloutQueueItem(item: SyncQueueItem): SyncQueueItem {
+    const rolloutItem = item as RolloutQueueItem;
+    if (rolloutItem.actualOriginSource !== "peer") return item;
+    const { actualOriginSource: _actualOriginSource, ...restored } =
+        rolloutItem;
+    return {
+        ...restored,
+        mediaSource: "peer",
+        provider: { ...item.provider, source: "peer" },
+        streamSource: "peer",
+        originSource: "peer",
+    };
+}
+
+function restoreRolloutSnapshot(snapshot: GroupSnapshot): GroupSnapshot {
+    return {
+        ...snapshot,
+        playback: {
+            ...snapshot.playback,
+            queue: snapshot.playback.queue.map(restoreRolloutQueueItem),
+        },
+    };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -50,6 +106,7 @@ function isOptionalNumberOrNull(value: unknown): boolean {
 function isMediaSource(value: unknown): boolean {
     return (
         value === "local" ||
+        value === "peer" ||
         value === "tidal" ||
         value === "youtube" ||
         value === "youtube-direct"
@@ -81,6 +138,7 @@ function isQueueItem(value: unknown): boolean {
                 value.streamSource !== "local")) &&
         (value.originSource === undefined ||
             value.originSource === "local" ||
+            value.originSource === "peer" ||
             value.originSource === "tidal" ||
             value.originSource === "youtube");
     return (
@@ -104,6 +162,8 @@ function isQueueItem(value: unknown): boolean {
         isOptionalString(value.trackTidalId) &&
         isOptionalString(value.trackYtMusicId) &&
         isOptionalString(value.trackMappingId) &&
+        (value.peerOnline === undefined ||
+            typeof value.peerOnline === "boolean") &&
         (value.tidalTrackId === undefined ||
             isFiniteNumber(value.tidalTrackId)) &&
         isOptionalString(value.youtubeVideoId) &&
@@ -279,7 +339,7 @@ class ListenTogetherStateStore {
         if (parsed.id !== groupId) {
             return this.rejectInvalidSnapshot(groupId, "mismatched-group-id");
         }
-        return parsed;
+        return restoreRolloutSnapshot(parsed);
     }
 
     private rejectInvalidSnapshot(
@@ -329,7 +389,7 @@ class ListenTogetherStateStore {
                 this.key(groupId),
                 this.fenceKey(groupId),
                 this.fencingCounterKey(groupId),
-                JSON.stringify(snapshot),
+                JSON.stringify(toRolloutSnapshot(snapshot)),
                 `${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS}`,
                 `${ordering.stateVersion}`,
                 `${ordering.serverTime}`,

@@ -1,5 +1,142 @@
 import { DeterministicRedisServer } from "./support/deterministicRedis";
 
+function previousIsRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function previousIsFiniteNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
+function previousIsOptionalString(value: unknown): boolean {
+    return value === undefined || typeof value === "string";
+}
+
+function previousIsOptionalNumberOrNull(value: unknown): boolean {
+    return (
+        value === undefined || value === null || previousIsFiniteNumber(value)
+    );
+}
+
+function previousIsMediaSource(value: unknown): boolean {
+    return (
+        value === "local" ||
+        value === "tidal" ||
+        value === "youtube" ||
+        value === "youtube-direct"
+    );
+}
+
+function previousAcceptsProvider(value: unknown): boolean {
+    if (value === undefined) return true;
+    if (!previousIsRecord(value) || !previousIsMediaSource(value.source)) {
+        return false;
+    }
+    return (
+        previousIsOptionalString(value.providerTrackId) &&
+        (value.tidalTrackId === undefined ||
+            previousIsFiniteNumber(value.tidalTrackId)) &&
+        previousIsOptionalString(value.youtubeVideoId) &&
+        (value.youtubeAudioFormat === undefined ||
+            value.youtubeAudioFormat === "mp4" ||
+            value.youtubeAudioFormat === "webm")
+    );
+}
+
+function previousReleaseAcceptsQueueItem(value: unknown): boolean {
+    if (
+        !previousIsRecord(value) ||
+        !previousIsRecord(value.artist) ||
+        !previousIsRecord(value.album)
+    ) {
+        return false;
+    }
+    const validSources =
+        (value.mediaSource === undefined ||
+            previousIsMediaSource(value.mediaSource)) &&
+        (value.streamSource === undefined ||
+            (previousIsMediaSource(value.streamSource) &&
+                value.streamSource !== "local")) &&
+        (value.originSource === undefined ||
+            value.originSource === "local" ||
+            value.originSource === "tidal" ||
+            value.originSource === "youtube");
+    return (
+        typeof value.id === "string" &&
+        typeof value.title === "string" &&
+        previousIsFiniteNumber(value.duration) &&
+        value.duration >= 0 &&
+        previousIsOptionalNumberOrNull(value.loudnessLufs) &&
+        previousIsOptionalNumberOrNull(value.truePeakDb) &&
+        typeof value.artist.id === "string" &&
+        typeof value.artist.name === "string" &&
+        typeof value.album.id === "string" &&
+        typeof value.album.title === "string" &&
+        (value.album.coverArt === null ||
+            typeof value.album.coverArt === "string") &&
+        previousIsOptionalNumberOrNull(value.album.albumLoudnessLufs) &&
+        previousIsOptionalNumberOrNull(value.album.albumTruePeakDb) &&
+        validSources &&
+        previousAcceptsProvider(value.provider) &&
+        previousIsOptionalString(value.localTrackId) &&
+        previousIsOptionalString(value.trackTidalId) &&
+        previousIsOptionalString(value.trackYtMusicId) &&
+        previousIsOptionalString(value.trackMappingId) &&
+        (value.tidalTrackId === undefined ||
+            previousIsFiniteNumber(value.tidalTrackId)) &&
+        previousIsOptionalString(value.youtubeVideoId) &&
+        (value.youtubeAudioFormat === undefined ||
+            value.youtubeAudioFormat === "mp4" ||
+            value.youtubeAudioFormat === "webm")
+    );
+}
+
+function previousReleaseAcceptsSnapshot(value: unknown): boolean {
+    if (!previousIsRecord(value) || !previousIsRecord(value.playback)) {
+        return false;
+    }
+    const playback = value.playback;
+    if (
+        !Array.isArray(playback.queue) ||
+        playback.queue.length > 500 ||
+        !playback.queue.every(previousReleaseAcceptsQueueItem)
+    ) {
+        return false;
+    }
+    const index = playback.currentIndex;
+    const validIndex =
+        Number.isSafeInteger(index) &&
+        (index as number) >= 0 &&
+        (playback.queue.length === 0
+            ? index === 0
+            : (index as number) < playback.queue.length);
+    return (
+        typeof value.id === "string" &&
+        typeof value.name === "string" &&
+        typeof value.joinCode === "string" &&
+        (value.groupType === "host-follower" ||
+            value.groupType === "collaborative") &&
+        (value.visibility === "public" || value.visibility === "private") &&
+        typeof value.isActive === "boolean" &&
+        typeof value.hostUserId === "string" &&
+        (value.syncState === "idle" ||
+            value.syncState === "waiting" ||
+            value.syncState === "playing" ||
+            value.syncState === "paused") &&
+        Array.isArray(value.members) &&
+        value.members.length <= 10_000 &&
+        validIndex &&
+        typeof playback.isPlaying === "boolean" &&
+        previousIsFiniteNumber(playback.positionMs) &&
+        playback.positionMs >= 0 &&
+        previousIsFiniteNumber(playback.serverTime) &&
+        playback.serverTime >= 0 &&
+        Number.isSafeInteger(playback.stateVersion) &&
+        (playback.stateVersion as number) >= 0 &&
+        (playback.trackId === null || typeof playback.trackId === "string")
+    );
+}
+
 describe("listenTogetherStateStore", () => {
     afterEach(() => {
         jest.resetModules();
@@ -131,6 +268,87 @@ describe("listenTogetherStateStore", () => {
             "34567",
             "17",
         ]);
+    });
+
+    it("accepts peer playback source metadata in persisted queue items", async () => {
+        const loaded = loadStateStore();
+        const value = snapshot();
+        value.playback.queue = [
+            {
+                id: "peer-track-1",
+                title: "Peer Song",
+                duration: 180,
+                artist: { id: "artist-1", name: "Artist" },
+                album: { id: "album-1", title: "Album", coverArt: null },
+                mediaSource: "peer",
+                streamSource: "peer",
+                originSource: "peer",
+                peerOnline: true,
+            } as never,
+        ];
+        loaded.server.write(
+            "listen-together:state:group-1",
+            JSON.stringify(value),
+        );
+
+        await expect(
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).resolves.toEqual(value);
+    });
+
+    it("writes peer snapshots in the previous release shape and restores peer origin", async () => {
+        const loaded = loadStateStore();
+        const value = snapshot();
+        value.playback.queue = [
+            {
+                id: "peer-track-1",
+                title: "Peer Song",
+                duration: 180,
+                artist: { id: "artist-1", name: "Artist" },
+                album: { id: "album-1", title: "Album", coverArt: null },
+                mediaSource: "peer",
+                provider: { source: "peer" },
+                streamSource: "peer",
+                originSource: "peer",
+                peerOnline: true,
+            } as never,
+        ];
+
+        await loaded.listenTogetherStateStore.setSnapshot(
+            "group-1",
+            value as never,
+        );
+
+        const write = loaded.server.commandLog.find(
+            (command) =>
+                command.name === "EVAL" &&
+                String(command.args[0]).includes(
+                    "listen-together:set-snapshot-if-current",
+                ),
+        );
+        const persisted = JSON.parse(String(write?.args[5])) as any;
+        expect(previousReleaseAcceptsSnapshot(persisted)).toBe(true);
+        expect(persisted.playback.queue[0]).toMatchObject({
+            mediaSource: "local",
+            provider: { source: "local" },
+            originSource: "local",
+            actualOriginSource: "peer",
+        });
+        expect(persisted.playback.queue[0].streamSource).toBeUndefined();
+        await expect(
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).resolves.toMatchObject({
+            playback: {
+                queue: [
+                    {
+                        mediaSource: "peer",
+                        provider: { source: "peer" },
+                        streamSource: "peer",
+                        originSource: "peer",
+                    },
+                ],
+            },
+        });
     });
 
     it("rejects malformed JSON as transient and suppresses repeat warnings", async () => {

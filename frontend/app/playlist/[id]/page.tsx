@@ -17,12 +17,18 @@ import {
     useAudioState,
     usePlaybackStatus,
     useAudioControls,
-    Track as AudioTrack,
 } from "@/lib/audio-context";
 import { cn } from "@/utils/cn";
 import { shuffleArray } from "@/utils/shuffle";
 import { formatTime } from "@/utils/formatTime";
 import { usePlaylistQuery } from "@/hooks/useQueries";
+import {
+    getUnplayableMessage,
+    isLocalPlayableTrackItem,
+    isPlayableTrackItem,
+    toAudioTrack,
+    TRACK_REMOVED_TOOLTIP,
+} from "@/lib/playlistItemPlayback";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import {
@@ -78,72 +84,6 @@ import { formatPlaylistDuration } from "./playlistDuration";
 
 type PlaylistItem = PlaylistDetailTrackItem;
 type PendingTrack = PlaylistPendingTrackItem;
-
-const TRACK_REMOVED_TOOLTIP =
-    "File removed from library — restore the file to bring it back";
-
-interface PlayablePlaylistItem extends PlaylistItem {
-    track: NonNullable<PlaylistItem["track"]>;
-}
-
-function isPlayableTrackItem(item: PlaylistItem): item is PlayablePlaylistItem {
-    return Boolean(item.track && item.playback?.isPlayable !== false);
-}
-
-function isLocalPlayableTrackItem(
-    item: PlaylistItem,
-): item is PlayablePlaylistItem {
-    if (!isPlayableTrackItem(item)) return false;
-    return (
-        item.track.source !== "federated" &&
-        (item.provider?.source || "local") === "local"
-    );
-}
-
-function getUnplayableMessage(item: PlaylistItem): string {
-    if (item.playback?.reason === "track_removed") {
-        return TRACK_REMOVED_TOOLTIP;
-    }
-    if (item.playback?.reason === "peer_offline") {
-        return "This peer is offline.";
-    }
-    return (
-        item.playback?.message ||
-        "Playback is unavailable for this track right now."
-    );
-}
-
-function toAudioTrack(item: PlayablePlaylistItem): AudioTrack {
-    const track = item.track;
-    return {
-        id: track.id,
-        title: track.title,
-        artist: {
-            name: track.album.artist.name,
-            id: track.album.artist.id,
-        },
-        album: {
-            title: track.album.title,
-            coverArt: track.album.coverArt || undefined,
-            id: track.album.id,
-        },
-        duration: track.duration,
-        source: track.source,
-        peer: track.peer,
-        ...(track.streamSource === "tidal"
-            ? {
-                  streamSource: "tidal" as const,
-                  tidalTrackId: track.tidalTrackId,
-              }
-            : {}),
-        ...(track.streamSource === "youtube"
-            ? {
-                  streamSource: "youtube" as const,
-                  youtubeVideoId: track.youtubeVideoId,
-              }
-            : {}),
-    };
-}
 
 /**
  * Renders the PlaylistDetailPage component.

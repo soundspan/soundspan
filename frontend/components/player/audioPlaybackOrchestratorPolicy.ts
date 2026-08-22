@@ -115,3 +115,38 @@ export function isAdvancePlayIntentFresh(
     const ageMs = nowMs - intentAtMs;
     return ageMs >= 0 && ageMs < ADVANCE_PLAY_INTENT_TTL_MS;
 }
+
+/**
+ * Resolves the engine format hint for a track load or preload.
+ *
+ * TIDAL/YT Music remote streams get the extensionless-URL hint; direct
+ * YouTube audio reports its container; peer streams get NO hint because
+ * the body may be the peer's original container or provider bytes from
+ * the stream-time fallback ladder, and the engine detects the container
+ * from Content-Type when the hint is absent; local tracks derive the
+ * hint from the file extension.
+ */
+export function resolveTrackFormatHint(
+    track: {
+        streamSource?: string | null;
+        youtubeAudioFormat?: "mp4" | "webm";
+        filePath?: string | null;
+    } | null,
+): string | undefined {
+    if (!track) return "mp3";
+    if (track.streamSource === "youtube-direct") {
+        return track.youtubeAudioFormat === "webm" ? "webm" : "mp4";
+    }
+    if (track.streamSource === "tidal" || track.streamSource === "youtube") {
+        return resolveRemoteStreamFormat(track.streamSource);
+    }
+    if (track.streamSource === "peer") {
+        return undefined;
+    }
+    const ext = (track.filePath || "").split(".").pop()?.toLowerCase();
+    if (ext === "flac") return "flac";
+    if (ext === "m4a" || ext === "aac") return "mp4";
+    if (ext === "ogg" || ext === "opus") return "webm";
+    if (ext === "wav") return "wav";
+    return "mp3";
+}

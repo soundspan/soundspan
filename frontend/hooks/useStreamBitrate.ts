@@ -183,7 +183,7 @@ export function resolveEffectiveLocalPlaybackQuality(input: {
     playbackQuality: LocalTrackQuality | null;
     streamProfile: {
         mode: "direct";
-        sourceType: "local" | "tidal" | "ytmusic" | "unknown";
+        sourceType: "local" | "peer" | "tidal" | "ytmusic" | "unknown";
         codec: string | null;
         bitrateKbps: number | null;
     } | null;
@@ -301,6 +301,7 @@ export interface PlaybackQualityBadge {
 
 export type PlaybackStreamSource =
     | "local"
+    | "peer"
     | "tidal"
     | "youtube"
     | "youtube-direct";
@@ -452,11 +453,15 @@ export function useStreamBitrate(): {
     // ── Local track quality info ───────────────────────────────────
     useEffect(() => {
         // Local tracks have no streamSource (or streamSource === "local")
-        // and always have an id that isn't a synthetic lastfm-* id
+        // and always have an id that isn't a synthetic lastfm-* id.
+        // Peer tracks are library rows synced from a federation peer:
+        // their quality metadata lives on the local Track row, so they
+        // use the same metadata lookup as local tracks.
         const isLocal =
             playbackType === "track" &&
             currentTrack &&
-            !currentTrack.streamSource &&
+            (!currentTrack.streamSource ||
+                currentTrack.streamSource === "peer") &&
             currentTrack.id &&
             !currentTrack.id.startsWith("lastfm-");
 

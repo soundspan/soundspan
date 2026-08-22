@@ -273,6 +273,33 @@ describe("playlistTrackResolution", () => {
         ).toBeNull();
     });
 
+    it("threads federated origin and online state into queue resolution", () => {
+        const input = playlistTrackResolutionTestables.toResolutionInput(
+            playlistItem({
+                trackId: "peer-track-1",
+                track: localTrack({
+                    id: "peer-track-1",
+                    origin: "FEDERATED",
+                    federationPeer: {
+                        id: "peer-1",
+                        name: "Peer One",
+                        outboundStatus: "ACTIVE",
+                    },
+                }),
+            }),
+            "mapping-1",
+        );
+
+        expect(input).toEqual(
+            expect.objectContaining({
+                localTrackId: "peer-track-1",
+                trackMappingId: "mapping-1",
+                originSource: "peer",
+                peerOnline: true,
+            }),
+        );
+    });
+
     it("prefers local mappings over remote mappings", () => {
         const preferred =
             playlistTrackResolutionTestables.selectPreferredMappingForItem(
@@ -631,6 +658,13 @@ describe("playlistTrackResolution", () => {
         expect(mockPrisma.track.findMany).toHaveBeenCalledWith({
             where: { id: { in: ["missing-local"] } },
             include: {
+                federationPeer: {
+                    select: {
+                        id: true,
+                        name: true,
+                        outboundStatus: true,
+                    },
+                },
                 album: {
                     include: {
                         artist: {

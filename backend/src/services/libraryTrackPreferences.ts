@@ -82,6 +82,10 @@ export const toLikedResponseTrack = (
         };
     }
 
+    if (normalized.source === "federated") {
+        return { ...base, streamSource: "peer" as const };
+    }
+
     return base;
 };
 

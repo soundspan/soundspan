@@ -74,6 +74,8 @@ export interface SystemSettings {
     // Federation identity
     federationInstanceName: string | null;
     primaryFailureFallback: DownloadFallback;
+    // Playback source priority (comma-separated provider order)
+    playbackSourceOrder: string;
     // YouTube Music streaming (admin toggle + OAuth app credentials)
     ytMusicEnabled: boolean;
     ytMusicClientId: string;

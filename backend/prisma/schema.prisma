@@ -254,6 +254,7 @@ model SystemSettings {
   downloadRetryAttempts       Int      @default(3)
   transcodeCacheMaxGb         Int      @default(10)
   downloadSource              String   @default("soulseek")
+  playbackSourceOrder         String   @default("library,peers,tidal,ytmusic")
   primaryFailureFallback      String   @default("none")
   updatedAt                   DateTime @updatedAt
   createdAt                   DateTime @default(now())

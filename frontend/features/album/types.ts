@@ -62,7 +62,7 @@ export interface Track {
     displayTrackNo?: number | null;
     hasUserOverrides?: boolean;
     // Streaming fields (gap-fill)
-    streamSource?: "local" | "tidal" | "youtube";
+    streamSource?: "local" | "peer" | "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
     thumbnailUrl?: string;

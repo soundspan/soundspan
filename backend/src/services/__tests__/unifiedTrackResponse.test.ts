@@ -301,6 +301,7 @@ describe("unifiedTrackResponse", () => {
         });
         expect(result.track).toMatchObject({
             source: "federated",
+            streamSource: "peer",
             peer: { id: "peer-1", name: "Peer One", online: false },
         });
     });
