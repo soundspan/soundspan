@@ -139,11 +139,11 @@ describe("remote owned library", () => {
         );
     });
 
-    it("uses a title-only user-scoped provider query for normal track search", async () => {
+    it("matches user-owned provider search by title, artist, or album", async () => {
         await loadRemoteOwnedTracksForUser("user-search", {
             query: "paranoid",
             take: 20,
-            match: "title",
+            match: "any",
         });
 
         expect(mockTidalFindMany).toHaveBeenCalledWith(
@@ -152,10 +152,26 @@ describe("remote owned library", () => {
                     likedBy: {
                         some: { userId: "user-search" },
                     },
-                    title: {
-                        contains: "paranoid",
-                        mode: "insensitive",
-                    },
+                    OR: [
+                        {
+                            title: {
+                                contains: "paranoid",
+                                mode: "insensitive",
+                            },
+                        },
+                        {
+                            artist: {
+                                contains: "paranoid",
+                                mode: "insensitive",
+                            },
+                        },
+                        {
+                            album: {
+                                contains: "paranoid",
+                                mode: "insensitive",
+                            },
+                        },
+                    ],
                 },
             }),
         );
@@ -165,10 +181,26 @@ describe("remote owned library", () => {
                     likedBy: {
                         some: { userId: "user-search" },
                     },
-                    title: {
-                        contains: "paranoid",
-                        mode: "insensitive",
-                    },
+                    OR: [
+                        {
+                            title: {
+                                contains: "paranoid",
+                                mode: "insensitive",
+                            },
+                        },
+                        {
+                            artist: {
+                                contains: "paranoid",
+                                mode: "insensitive",
+                            },
+                        },
+                        {
+                            album: {
+                                contains: "paranoid",
+                                mode: "insensitive",
+                            },
+                        },
+                    ],
                 },
             }),
         );
@@ -178,9 +210,9 @@ describe("remote owned library", () => {
         mockTidalCount.mockResolvedValueOnce(4);
         mockYtMusicCount.mockResolvedValueOnce(3);
 
-        await expect(
-            countRemoteOwnedTracksForUser("user-count"),
-        ).resolves.toBe(7);
+        await expect(countRemoteOwnedTracksForUser("user-count")).resolves.toBe(
+            7,
+        );
 
         expect(mockTidalCount).toHaveBeenCalledWith({
             where: {

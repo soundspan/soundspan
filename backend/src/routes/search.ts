@@ -248,7 +248,7 @@ async function transformSearchResultsForUser(
             query: options.query,
             take: options.limit,
             sort: "asc",
-            match: "title",
+            match: "any",
         })
     ).map(toLibraryRemoteTrack);
 
