@@ -1,7 +1,6 @@
 import type { Job } from "bull";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { config } from "../../config";
 import {
     createFederationClient,
     FederationEpochMismatchError,
@@ -49,6 +48,8 @@ import {
     mergeFederationEmbeddingOutcome,
     type FederationEmbeddingOutcome,
 } from "./federationSyncEmbeddingOutcome";
+import { refreshFederationPresence } from "./federationSyncPresence";
+import { getAvailableFederationConsumerPeer } from "./federationSyncPeer";
 
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
@@ -1409,30 +1410,11 @@ async function runIncrementalSync(
     throw new Error("Federation delta sync exceeded the page bound");
 }
 
-async function getAvailableConsumerPeer(peerId: string) {
-    const peer = await prisma.federationPeer.findUnique({
-        where: { id: peerId },
-    });
-    if (
-        !peer ||
-        !["CONSUMER", "BOTH"].includes(peer.direction) ||
-        peer.outboundStatus === "REVOKED" ||
-        !peer.baseUrl ||
-        !peer.outboundToken
-    ) {
-        throw new Error("Federation consumer peer is unavailable");
-    }
-    return peer;
-}
-
-/** Runs one serialized, resumable full or incremental consumer-peer sync. */
-export async function processFederationSync(
-    job: Job<{ peerId: string }>,
+async function runFederationCatalogSync(
+    peer: Awaited<ReturnType<typeof getAvailableFederationConsumerPeer>>,
+    client: ReturnType<typeof createFederationClient>,
+    startedAt: Date,
 ): Promise<FederationSyncResult> {
-    const data = jobDataSchema.parse(job.data);
-    const peer = await getAvailableConsumerPeer(data.peerId);
-    const startedAt = new Date();
-    const client = createFederationClient(peer, outboundClientOptions());
     const manifest = await client.getManifest();
     const localEmbeddingSpace = await resolveLocalEmbeddingSpace(peer.id);
     const context = newSyncContext(
@@ -1496,4 +1478,17 @@ export async function processFederationSync(
             refreshedManifest.mediaTypes,
         );
     }
+}
+
+/** Runs one serialized, resumable full or incremental consumer-peer sync. */
+export async function processFederationSync(
+    job: Job<{ peerId: string }>,
+): Promise<FederationSyncResult> {
+    const data = jobDataSchema.parse(job.data);
+    const peer = await getAvailableFederationConsumerPeer(data.peerId);
+    const startedAt = new Date();
+    const client = createFederationClient(peer, outboundClientOptions());
+    const result = await runFederationCatalogSync(peer, client, startedAt);
+    await refreshFederationPresence(peer, client);
+    return result;
 }

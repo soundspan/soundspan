@@ -3,6 +3,7 @@ export const FEDERATION_SCOPE_VALUES = [
     "library:read",
     "stream:read",
     "embeddings:read",
+    "social:read",
 ] as const;
 
 /** One authorization capability granted to a federation peer. */
@@ -35,6 +36,9 @@ export function parseFederationScopes(
         scopes.includes("embeddings:read") &&
         !scopes.includes("library:read")
     ) {
+        return null;
+    }
+    if (scopes.includes("social:read") && !scopes.includes("library:read")) {
         return null;
     }
     return scopes;

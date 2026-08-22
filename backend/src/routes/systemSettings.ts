@@ -111,6 +111,7 @@ const systemSettingsSchema = z.object({
         .optional(),
 
     federationInstanceName: federationInstanceNameSchema,
+    federationShowPeerStatus: z.boolean().optional(),
     // TIDAL — credential fields (tidalAccessToken, tidalRefreshToken,
     // tidalUserId) are deliberately absent: they are managed exclusively
     // by the /tidal-auth device flow. Accepting them here let a stale
@@ -130,7 +131,6 @@ const systemSettingsSchema = z.object({
     // UI
     showVersion: z.boolean().optional(),
 });
-
 type SystemSettingsUpdate = z.infer<typeof systemSettingsSchema>;
 type SystemSettingsSecret =
     (typeof ENCRYPTED_SETTINGS_COLUMNS.systemSettings)[number];
@@ -276,6 +276,7 @@ router.get("/", async (req, res) => {
  *               managed only through the TIDAL authentication endpoints.
  *             properties:
  *               federationInstanceName: { type: string, nullable: true, maxLength: 100, description: Empty or whitespace-only values clear the name }
+ *               federationShowPeerStatus: { type: boolean, description: Include cached peer presence in the local social roster }
  *     responses:
  *       200:
  *         description: Settings saved successfully

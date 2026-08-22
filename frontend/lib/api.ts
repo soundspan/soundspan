@@ -4,6 +4,7 @@ import { WithAudiobooks } from "./api/audiobooks";
 import { WithConnectors } from "./api/connectors";
 import { WithEnrichment } from "./api/enrichment";
 import { WithFederation } from "./api/federation";
+import { WithPeerPlaylists } from "./api/peerPlaylists";
 import { WithDiscover } from "./api/discover";
 import { WithDownloads } from "./api/downloads";
 import { WithImports } from "./api/imports";
@@ -453,31 +454,33 @@ export interface PlaybackClientMetricInput {
     fields?: Record<string, unknown>;
 }
 
-class ApiClient extends WithLibraryHealthDashboard(
-    WithListenGroups(
-        WithFederation(
-            WithTidal(
-                WithYouTube(
-                    WithYtMusic(
-                        WithVibe(
-                            WithAudiobooks(
-                                WithPodcasts(
-                                    WithSoulseek(
-                                        WithEnrichment(
-                                            WithMetadata(
-                                                WithNotifications(
-                                                    WithDiscover(
-                                                        WithImports(
-                                                            WithDownloads(
-                                                                WithAuth(
-                                                                    WithConnectors(
-                                                                        WithSettings(
-                                                                            WithPlays(
-                                                                                WithRecommendations(
-                                                                                    WithMedia(
-                                                                                        WithPlaylists(
-                                                                                            WithLibrary(
-                                                                                                ApiClientCore,
+class ApiClient extends WithPeerPlaylists(
+    WithLibraryHealthDashboard(
+        WithListenGroups(
+            WithFederation(
+                WithTidal(
+                    WithYouTube(
+                        WithYtMusic(
+                            WithVibe(
+                                WithAudiobooks(
+                                    WithPodcasts(
+                                        WithSoulseek(
+                                            WithEnrichment(
+                                                WithMetadata(
+                                                    WithNotifications(
+                                                        WithDiscover(
+                                                            WithImports(
+                                                                WithDownloads(
+                                                                    WithAuth(
+                                                                        WithConnectors(
+                                                                            WithSettings(
+                                                                                WithPlays(
+                                                                                    WithRecommendations(
+                                                                                        WithMedia(
+                                                                                            WithPlaylists(
+                                                                                                WithLibrary(
+                                                                                                    ApiClientCore,
+                                                                                                ),
                                                                                             ),
                                                                                         ),
                                                                                     ),

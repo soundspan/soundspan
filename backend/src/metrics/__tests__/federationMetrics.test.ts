@@ -401,6 +401,11 @@ describe("federation metrics", () => {
         metrics.recordHostStream("peer-1", "ok");
         metrics.recordAuthFailure("unknown", "no_token");
         metrics.recordQuotaRejection("peer-1", "concurrency");
+        metrics.recordPresenceFetch("peer-1", "success");
+        metrics.recordPresenceUsersExported("peer-1", 3);
+        metrics.recordPlaylistFetch("peer-1", "timeout");
+        metrics.recordPlaylistFollow("peer-1", "followed");
+        metrics.recordPlaylistCopy("peer-1", "success");
 
         const exposition = await registry.metrics();
         expect(exposition).toContain(
@@ -420,6 +425,21 @@ describe("federation metrics", () => {
         );
         expect(exposition).toContain(
             'soundspan_federation_quota_rejections_total{peer="peer-1",kind="concurrency"} 1',
+        );
+        expect(exposition).toContain(
+            'soundspan_federation_presence_fetch_total{peer="peer-1",outcome="success"} 1',
+        );
+        expect(exposition).toContain(
+            'soundspan_federation_presence_users_exported_total{peer="peer-1"} 3',
+        );
+        expect(exposition).toContain(
+            'soundspan_federation_playlist_fetch_total{peer="peer-1",outcome="timeout"} 1',
+        );
+        expect(exposition).toContain(
+            'soundspan_federation_playlist_follow_total{peer="peer-1",outcome="followed"} 1',
+        );
+        expect(exposition).toContain(
+            'soundspan_federation_playlist_copy_total{peer="peer-1",outcome="success"} 1',
         );
     });
 

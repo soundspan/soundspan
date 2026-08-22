@@ -192,6 +192,8 @@ const existingSettings = {
     playbackQuality: "high",
     loudnessMode: "auto",
     shareOnlinePresence: true,
+    sharePresenceToPeers: false,
+    sharePlaylistsToPeers: false,
     shareListeningStatus: false,
     wifiOnly: true,
     offlineEnabled: false,
@@ -270,6 +272,8 @@ describe("settings routes integration", () => {
                 userId: "user-1",
                 playbackQuality: "medium",
                 shareOnlinePresence: false,
+                sharePresenceToPeers: false,
+                sharePlaylistsToPeers: false,
                 shareListeningStatus: false,
                 wifiOnly: false,
                 offlineEnabled: false,
@@ -330,6 +334,34 @@ describe("settings routes integration", () => {
                 displayName: "Mary Jane",
             }),
         );
+    });
+
+    it("updates the peer presence export preference", async () => {
+        const res = await request(app)
+            .post("/api/settings")
+            .set(AUTH_HEADER, AUTH_VALUE)
+            .send({ sharePresenceToPeers: true });
+
+        expect(res.status).toBe(200);
+        expect(mockUserSettingsUpsert).toHaveBeenCalledWith({
+            where: { userId: "user-1" },
+            create: { userId: "user-1", sharePresenceToPeers: true },
+            update: { sharePresenceToPeers: true },
+        });
+    });
+
+    it("updates the peer playlist export preference", async () => {
+        const res = await request(app)
+            .post("/api/settings")
+            .set(AUTH_HEADER, AUTH_VALUE)
+            .send({ sharePlaylistsToPeers: true });
+
+        expect(res.status).toBe(200);
+        expect(mockUserSettingsUpsert).toHaveBeenCalledWith({
+            where: { userId: "user-1" },
+            create: { userId: "user-1", sharePlaylistsToPeers: true },
+            update: { sharePlaylistsToPeers: true },
+        });
     });
 
     it("clears the TIDAL quality cache when tidalStreamingQuality is updated", async () => {

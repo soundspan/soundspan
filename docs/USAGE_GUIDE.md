@@ -130,6 +130,16 @@ By default your server introduces itself to peers using its hostname, which in c
 
 The federation health panel shows per-peer sync freshness, stream usage, and the class of the last failure (unreachable, TLS, authentication, or invalid response). It also shows whether vibe embeddings are federating with each peer; if the peers run different embedding spaces, the panel says so and the fix is upgrading the out-of-date server.
 
+### Social sharing between servers (Federation)
+
+If your server is federated with others, two social surfaces can cross between them. Both are off by default, and both need two switches: the person sharing must opt in, and nothing is shown unless the receiving side wants it.
+
+**Seeing friends on other servers.** When your admin turns on `Show user status from peers` (under `Admin -> Federation`), the Social tab gains sections like "From Family server" listing people on that server who chose to share. Peer status updates every few minutes — the tab shows how fresh each section is. To appear on other servers yourself, turn on `Share presence with trusted peers` in `Settings -> Social`. Your current track travels only if `Share listening status` is also on.
+
+**Playlists from other servers.** People on federated servers can share their public playlists. Turn on `Share public playlists with trusted peers` in `Settings -> Social` to share yours; private playlists never leave your server. Shared playlists from peers appear in a "From your peers" section on Home. Open one to play it, `Follow` it (it stays live and updates when the owner changes it), or `Save a copy` (a snapshot that becomes a normal playlist of yours). Tracks you also have locally play from your library; the rest stream from the peer, and anything the peer can no longer provide is shown dimmed.
+
+When you opt in, the other server sees your username or display name — that is how friends recognize you. What never crosses servers: your listening history, your private playlists, your email, and your login details. Servers only exchange what the people involved explicitly chose to share.
+
 ---
 
 ## See also

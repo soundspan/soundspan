@@ -13,6 +13,12 @@ const catalog = {
     decodeFederationDeltaCursor: jest.fn(),
 };
 const peers = { consumeFederationPairingRequest: jest.fn() };
+const presence = { getFederationPresenceExport: jest.fn() };
+const playlistExport = {
+    getFederationPlaylistPage: jest.fn(),
+    getFederationPlaylistDetail: jest.fn(),
+};
+const recordFederationPresenceUsersExported = jest.fn();
 const streamFileWithRangeSupport = jest.fn();
 const getStreamFilePath = jest.fn();
 const destroy = jest.fn();
@@ -26,7 +32,18 @@ const redisEval = jest.fn();
 jest.mock("../../services/federationCatalog", () => catalog);
 jest.mock("../../services/federationPeers", () => ({
     ...peers,
-    FEDERATION_SCOPE_VALUES: ["library:read", "stream:read", "embeddings:read"],
+    FEDERATION_SCOPE_VALUES: [
+        "library:read",
+        "stream:read",
+        "embeddings:read",
+        "social:read",
+    ],
+}));
+jest.mock("../../services/federationPresence", () => presence);
+jest.mock("../../services/federationPlaylistExport", () => playlistExport);
+jest.mock("../../metrics", () => ({
+    ...jest.requireActual("../../metrics"),
+    recordFederationPresenceUsersExported,
 }));
 jest.mock("../../middleware/federationAuth", () => ({
     requireFederationPeer:
@@ -137,6 +154,115 @@ describe("federation host routes", () => {
             mimeType: "audio/flac",
         });
         redisEval.mockResolvedValue(1);
+        presence.getFederationPresenceExport.mockResolvedValue({ users: [] });
+        playlistExport.getFederationPlaylistPage.mockResolvedValue({
+            playlists: [],
+            nextOffset: null,
+        });
+        playlistExport.getFederationPlaylistDetail.mockResolvedValue(null);
+    });
+
+    it.each([
+        ["/api/federation/v1/social/playlists", undefined, 401],
+        ["/api/federation/v1/social/playlists", "library:read", 403],
+        ["/api/federation/v1/social/playlists", "social:read", 200],
+        ["/api/federation/v1/social/playlists/playlist-1", undefined, 401],
+        ["/api/federation/v1/social/playlists/playlist-1", "library:read", 403],
+        ["/api/federation/v1/social/playlists/playlist-1", "social:read", 404],
+    ])(
+        "enforces playlist scope for %s with %s",
+        async (path, scopes, status) => {
+            let call = request(app).get(path);
+            if (scopes !== undefined) {
+                call = call
+                    .set("Authorization", "Bearer valid")
+                    .set("x-test-scopes", scopes);
+            }
+            const response = await call;
+            expect(response.status).toBe(status);
+        },
+    );
+
+    it("validates and forwards bounded playlist pagination", async () => {
+        const response = await request(app)
+            .get("/api/federation/v1/social/playlists?offset=100&limit=100")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "social:read");
+
+        expect(response.status).toBe(200);
+        expect(playlistExport.getFederationPlaylistPage).toHaveBeenCalledWith({
+            offset: 100,
+            limit: 100,
+        });
+
+        const invalid = await request(app)
+            .get("/api/federation/v1/social/playlists?limit=101")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "social:read");
+        expect(invalid.status).toBe(400);
+    });
+
+    it("returns playlist detail without user or history fields", async () => {
+        playlistExport.getFederationPlaylistDetail.mockResolvedValueOnce({
+            playlist: {
+                remoteId: "playlist-1",
+                name: "Shared mix",
+                owner: { displayName: "Alice" },
+                updatedAt: "2026-08-22T12:00:00.000Z",
+                tracks: [],
+            },
+        });
+
+        const response = await request(app)
+            .get("/api/federation/v1/social/playlists/playlist-1")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "social:read");
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual(
+            expect.objectContaining({ playlist: expect.any(Object) }),
+        );
+        expect(JSON.stringify(response.body)).not.toMatch(
+            /userId|username|email|playHistory|playedAt/,
+        );
+    });
+
+    it.each([
+        [undefined, 401],
+        ["library:read", 403],
+        ["social:read", 200],
+    ])("enforces presence scope matrix for %s", async (scopes, status) => {
+        let call = request(app).get("/api/federation/v1/social/presence");
+        if (scopes !== undefined) {
+            call = call
+                .set("Authorization", "Bearer valid")
+                .set("x-test-scopes", scopes);
+        }
+        const response = await call;
+        expect(response.status).toBe(status);
+    });
+
+    it("counts users exported to the authenticated peer", async () => {
+        presence.getFederationPresenceExport.mockResolvedValueOnce({
+            users: [
+                {
+                    username: "alice",
+                    status: "idle",
+                    updatedAt: "2026-08-22T12:00:00.000Z",
+                },
+            ],
+        });
+
+        const response = await request(app)
+            .get("/api/federation/v1/social/presence")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "social:read");
+
+        expect(response.status).toBe(200);
+        expect(recordFederationPresenceUsersExported).toHaveBeenCalledWith(
+            "peer-1",
+            1,
+        );
     });
 
     it.each([
@@ -402,6 +528,24 @@ describe("federation host routes", () => {
         );
         expect(response.body.peer.direction).toBe("HOST");
     });
+
+    it.each(["requestedScopes", "reciprocalScopes"])(
+        "rejects social access without library access in %s",
+        async (field) => {
+            const response = await request(app)
+                .post("/api/federation/v1/pair")
+                .send({
+                    code: "ABCDEFGH",
+                    name: "Peer",
+                    [field]: ["social:read"],
+                });
+
+            expect(response.status).toBe(400);
+            expect(
+                peers.consumeFederationPairingRequest,
+            ).not.toHaveBeenCalled();
+        },
+    );
 
     it.each([
         ["used", 400, "FEDERATION_CODE_USED"],

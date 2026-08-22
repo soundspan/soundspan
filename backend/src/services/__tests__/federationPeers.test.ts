@@ -353,6 +353,27 @@ describe("federation consumer peers", () => {
         expect(JSON.stringify(result)).not.toContain("raw-token");
     });
 
+    it("stores no social grant for a scope-less legacy link", async () => {
+        mockGetManifest.mockResolvedValueOnce({
+            ...manifest,
+            embeddingsAvailable: false,
+        });
+
+        await linkConsumerFederationPeer({
+            baseUrl: "https://legacy.example",
+            token: "legacy-token",
+            createdById: "admin-1",
+        });
+
+        expect(prisma.federationPeer.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    scopes: ["library:read", "stream:read"],
+                }),
+            }),
+        );
+    });
+
     it("does not write a peer when manifest validation fails", async () => {
         mockGetManifest.mockRejectedValueOnce(new Error("malformed peer"));
 
@@ -487,6 +508,28 @@ describe("federation consumer peers", () => {
                 scopes: ["stream:read"],
             }),
         ).rejects.toBeInstanceOf(FederationScopeMismatchError);
+        expect(prisma.federationPeer.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects an invalid final scope intersection before persistence", async () => {
+        mockPairFederationPeer.mockResolvedValueOnce({
+            token: "paired-token",
+            peer: {
+                id: "remote-peer",
+                scopes: ["library:read", "social:read"],
+            },
+        });
+
+        await expect(
+            pairAndLinkConsumerFederationPeer({
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Consumer Name",
+                createdById: "admin-1",
+                scopes: ["social:read"],
+            }),
+        ).rejects.toBeInstanceOf(FederationScopeMismatchError);
+        expect(mockCreateFederationClient).not.toHaveBeenCalled();
         expect(prisma.federationPeer.create).not.toHaveBeenCalled();
     });
 
@@ -812,6 +855,30 @@ describe("federation pairing codes", () => {
         expect(prisma.federationPeer.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({ capabilities: [] }),
+            }),
+        );
+    });
+
+    it("persists explicitly granted social presence with library access", async () => {
+        prisma.federationPairingCode.findUnique.mockResolvedValue({
+            id: "code-1",
+            code: "ABCDEFGH",
+            createdById: "admin-1",
+            scopes: ["library:read", "social:read"],
+            expiresAt: new Date(Date.now() + 60_000),
+            usedAt: null,
+        });
+
+        await consumePairingCode(
+            { code: "ABCDEFGH", name: "Social Peer" },
+            new Date("2026-08-15T12:00:00.000Z"),
+        );
+
+        expect(prisma.federationPeer.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    scopes: ["library:read", "social:read"],
+                }),
             }),
         );
     });

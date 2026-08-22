@@ -147,6 +147,9 @@ mock.module("@/components/ui/GradientSpinner", {
     namedExports: { GradientSpinner: marker("gradient-spinner") },
 });
 
+mock.module("@/features/social/components/PeerPlaylistsShelf", {
+    namedExports: { PeerPlaylistsShelf: () => null },
+});
 mock.module("@/features/home/components/FeaturedPlaylistsGrid", {
     namedExports: { FeaturedPlaylistsGrid: marker("featured-playlists-grid") },
 });

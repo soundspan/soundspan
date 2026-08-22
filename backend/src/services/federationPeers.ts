@@ -289,6 +289,8 @@ export function outboundClientOptions() {
 }
 
 function consumerScopes(embeddingsAvailable: boolean): FederationScope[] {
+    // Phase 0 social exchange piggybacks on catalog sync. Legacy links infer
+    // catalog scopes only; social access must always come from an explicit grant.
     return embeddingsAvailable
         ? ["library:read", "stream:read", "embeddings:read"]
         : ["library:read", "stream:read"];
@@ -370,8 +372,10 @@ export async function pairAndLinkConsumerFederationPeer(input: {
         requestedScopes: scopes,
         options: outboundClientOptions(),
     });
-    const linkedScopes = mutualScopes(paired.peer.scopes, scopes);
-    if (linkedScopes.length === 0) {
+    const linkedScopes = parseFederationScopes(
+        mutualScopes(paired.peer.scopes, scopes),
+    );
+    if (!linkedScopes) {
         throw new FederationScopeMismatchError();
     }
     const peer = await linkConsumerFederationPeer({

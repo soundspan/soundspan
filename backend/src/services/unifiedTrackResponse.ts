@@ -200,7 +200,7 @@ function formatPersistedTrackItem(
                   reason: "peer_offline",
                   message: `Playback is unavailable while ${normalizedTrack.peer?.name ?? "the federation peer"} is offline.`,
               },
-        track: toLegacyCompatibleTrackShape(normalizedTrack),
+        track: formatPlaylistDetailTrack(normalizedTrack),
     };
 }
 
@@ -270,7 +270,8 @@ export function normalizeYtMusicTrack(
     };
 }
 
-function toLegacyCompatibleTrackShape(
+/** Serialize one normalized track for the playlist-detail track payload. */
+export function formatPlaylistDetailTrack(
     normalized: UnifiedTrackResponse,
 ): Record<string, unknown> {
     const streamSource =
@@ -360,7 +361,7 @@ export function formatUnifiedTrackItem(
                       message:
                           "Playback is unavailable because this TIDAL item is missing a valid track id.",
                   },
-            track: toLegacyCompatibleTrackShape(normalizedTrack),
+            track: formatPlaylistDetailTrack(normalizedTrack),
         };
     }
 
@@ -387,7 +388,7 @@ export function formatUnifiedTrackItem(
                       message:
                           "Playback is unavailable because this YouTube Music item is missing a video id.",
                   },
-            track: toLegacyCompatibleTrackShape(normalizedTrack),
+            track: formatPlaylistDetailTrack(normalizedTrack),
         };
     }
 

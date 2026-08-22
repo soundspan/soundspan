@@ -18,6 +18,8 @@ export interface UserSettings {
     loudnessMode: "off" | "track" | "album" | "auto";
     shareOnlinePresence: boolean;
     shareListeningStatus: boolean;
+    sharePresenceToPeers: boolean;
+    sharePlaylistsToPeers: boolean;
     wifiOnly: boolean;
     offlineEnabled: boolean;
     maxCacheSizeMb: number;
@@ -73,6 +75,7 @@ export interface SystemSettings {
     downloadSource: DownloadSource;
     // Federation identity
     federationInstanceName: string | null;
+    federationShowPeerStatus: boolean;
     primaryFailureFallback: DownloadFallback;
     // Playback source priority (comma-separated provider order)
     playbackSourceOrder: string;

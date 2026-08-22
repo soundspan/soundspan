@@ -13,7 +13,31 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
+}));
+
+const mockGetSystemSettings = jest.fn();
+const mockReadPeerPresence = jest.fn();
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: mockGetSystemSettings,
+}));
+jest.mock("../../services/federationPresence", () => ({
+    readFederationPeerPresenceSnapshots: mockReadPeerPresence,
+}));
+jest.mock("../../services/federationPeerPlaylists", () => ({
+    browseFederationPeerPlaylists: jest.fn(),
+    copyFederationPeerPlaylist: jest.fn(),
+    followFederationPeerPlaylist: jest.fn(),
+    getFederationPeerPlaylist: jest.fn(),
+    listFollowedFederationPeerPlaylists: jest.fn(),
+    unfollowFederationPeerPlaylist: jest.fn(),
+    PeerPlaylistError: class PeerPlaylistError extends Error {},
 }));
 
 jest.mock("../../utils/redis", () => ({
@@ -26,6 +50,9 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("../../utils/db", () => ({
     prisma: {
+        systemSettings: {
+            findUnique: jest.fn(),
+        },
         user: {
             findMany: jest.fn(),
         },
@@ -45,6 +72,8 @@ import { prisma } from "../../utils/db";
 const mockScanIterator = redisClient.scanIterator as jest.Mock;
 const mockMGet = redisClient.mGet as jest.Mock;
 const mockSet = redisClient.set as jest.Mock;
+const mockSystemSettingsFindUnique = prisma.systemSettings
+    .findUnique as jest.Mock;
 const mockUserFindMany = prisma.user.findMany as jest.Mock;
 const mockSyncGroupMemberFindMany = prisma.syncGroupMember
     .findMany as jest.Mock;
@@ -110,6 +139,13 @@ describe("social presence compatibility", () => {
             async (args: { where: { id: { in: string[] } } }) =>
                 args.where.id.in.map((id) => ({ id })),
         );
+        mockGetSystemSettings.mockResolvedValue({
+            federationShowPeerStatus: false,
+        });
+        mockSystemSettingsFindUnique.mockResolvedValue({
+            federationShowPeerStatus: false,
+        });
+        mockReadPeerPresence.mockResolvedValue([]);
     });
 
     it("returns online roster with privacy filtering and listen-together indicator", async () => {
@@ -253,6 +289,96 @@ describe("social presence compatibility", () => {
         expect(res.body).toEqual({ users: [] });
         expect(mockUserFindMany).not.toHaveBeenCalled();
         expect(mockSyncGroupMemberFindMany).not.toHaveBeenCalled();
+    });
+
+    it("omits warm peer snapshots when the display toggle is off", async () => {
+        mockScanIterator.mockReturnValue(asScanIterable([]));
+        mockReadPeerPresence.mockResolvedValue([
+            {
+                peerId: "peer-1",
+                peerName: "Remote",
+                users: [],
+                fetchedAt: "2026-08-22T12:00:00.000Z",
+            },
+        ]);
+        const res = createRes();
+
+        await onlineHandler({ user: { id: "viewer-1" } } as any, res);
+
+        expect(res.body).toEqual({ users: [] });
+        expect(mockReadPeerPresence).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when the peer display setting cannot be loaded", async () => {
+        mockScanIterator.mockReturnValue(asScanIterable([]));
+        mockSystemSettingsFindUnique.mockRejectedValue(
+            new Error("database offline"),
+        );
+        const res = createRes();
+
+        await onlineHandler({ user: { id: "viewer-1" } } as any, res);
+
+        expect(res.body).toEqual({ users: [] });
+        expect(mockReadPeerPresence).not.toHaveBeenCalled();
+    });
+
+    it("includes peer snapshots only when the display toggle is on", async () => {
+        mockScanIterator.mockReturnValue(asScanIterable([]));
+        mockSystemSettingsFindUnique.mockResolvedValue({
+            federationShowPeerStatus: true,
+        });
+        const peers = [
+            {
+                peerId: "peer-1",
+                peerName: "Remote",
+                users: [
+                    {
+                        username: "remote-user",
+                        status: "idle",
+                        updatedAt: "2026-08-22T12:00:00.000Z",
+                    },
+                ],
+                fetchedAt: "2026-08-22T12:01:00.000Z",
+            },
+        ];
+        mockReadPeerPresence.mockResolvedValue(peers);
+        const res = createRes();
+
+        await onlineHandler({ user: { id: "viewer-1" } } as any, res);
+
+        expect(res.body).toEqual({ users: [], peers });
+    });
+
+    it("honors toggle-off on the next request despite a warm settings cache", async () => {
+        mockScanIterator.mockReturnValue(asScanIterable([]));
+        mockGetSystemSettings.mockResolvedValue({
+            federationShowPeerStatus: true,
+        });
+        mockSystemSettingsFindUnique
+            .mockResolvedValueOnce({ federationShowPeerStatus: true })
+            .mockResolvedValueOnce({ federationShowPeerStatus: false });
+        mockReadPeerPresence.mockResolvedValue([
+            {
+                peerId: "peer-1",
+                peerName: "Remote",
+                users: [],
+                fetchedAt: "2026-08-22T12:00:00.000Z",
+            },
+        ]);
+
+        const enabled = createRes();
+        await onlineHandler({ user: { id: "viewer-1" } } as any, enabled);
+        const disabled = createRes();
+        await onlineHandler({ user: { id: "viewer-1" } } as any, disabled);
+
+        expect(enabled.body).toHaveProperty("peers");
+        expect(disabled.body).toEqual({ users: [] });
+        expect(mockSystemSettingsFindUnique).toHaveBeenCalledTimes(2);
+        expect(mockSystemSettingsFindUnique).toHaveBeenLastCalledWith({
+            where: { id: "default" },
+            select: { federationShowPeerStatus: true },
+        });
+        expect(mockGetSystemSettings).not.toHaveBeenCalled();
     });
 
     it("hides removed local now-listening tracks and keeps active tracks", async () => {

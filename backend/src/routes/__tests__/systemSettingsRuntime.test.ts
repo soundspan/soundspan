@@ -373,6 +373,28 @@ describe("systemSettings runtime routes", () => {
         expect(mockInvalidateSystemSettingsCache).toHaveBeenCalledTimes(1);
     });
 
+    it("persists the peer status display gate", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { federationShowPeerStatus: true },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    federationShowPeerStatus: true,
+                }),
+                update: expect.objectContaining({
+                    federationShowPeerStatus: true,
+                }),
+            }),
+        );
+    });
+
     it.each(["", "   ", null])(
         "clears a federation instance name with %p",
         async (federationInstanceName) => {

@@ -88,6 +88,7 @@ const settings: SystemSettings = {
     downloadSource: "soulseek",
     federationInstanceName: null,
     playbackSourceOrder: "library,peers,tidal,ytmusic",
+    federationShowPeerStatus: false,
     primaryFailureFallback: "none",
     ytMusicEnabled: false,
     ytMusicClientId: "",

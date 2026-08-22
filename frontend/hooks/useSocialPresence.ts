@@ -55,8 +55,24 @@ export interface AdminConnectedUser {
     lastHeartbeatAt: string;
 }
 
+export interface PeerPresenceUser {
+    username: string;
+    displayName?: string;
+    status: SocialListeningStatus;
+    track?: { title: string; artist: string; album: string };
+    updatedAt: string;
+}
+
+export interface PeerPresenceSnapshot {
+    peerId: string;
+    peerName: string;
+    users: PeerPresenceUser[];
+    fetchedAt: string;
+}
+
 interface SocialOnlineResponse {
     users: SocialOnlineUser[];
+    peers?: PeerPresenceSnapshot[];
 }
 
 interface ConnectedUsersResponse {
@@ -132,6 +148,7 @@ export function useSocialPresence(options: SocialPresenceOptions = {}) {
     return {
         ...query,
         users: query.data?.users ?? [],
+        peers: query.data?.peers ?? [],
     };
 }
 

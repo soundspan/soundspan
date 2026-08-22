@@ -11,6 +11,16 @@ import {
     FEDERATION_SCOPE_VALUES,
     type FederationScope,
 } from "../utils/federationScopes";
+import {
+    federationPresenceSchema,
+    type FederationPresence,
+} from "../utils/federationPresenceSchemas";
+import {
+    federationPlaylistDetailSchema,
+    federationPlaylistPageSchema,
+    type FederationPlaylistDetail,
+    type FederationPlaylistPage,
+} from "../utils/federationPlaylistSchemas";
 import type { ParsedFederationEmbeddingSpaceIdentity } from "./federationEmbeddingSpace";
 import { decryptFederationOutboundToken } from "./federationCredentialCipher";
 import {
@@ -228,6 +238,10 @@ const pairedScopesSchema = z
         (scopes) =>
             !scopes.includes("embeddings:read") ||
             scopes.includes("library:read"),
+    )
+    .refine(
+        (scopes) =>
+            !scopes.includes("social:read") || scopes.includes("library:read"),
     );
 const pairedPeerSchema = z.object({
     peer: z.object({
@@ -274,6 +288,12 @@ export interface FederationDelta {
     skippedUnknownTombstones: number;
     embeddingSpace?: ParsedFederationEmbeddingSpaceIdentity;
 }
+/** Validated, bounded peer presence response. */
+export type { FederationPresence } from "../utils/federationPresenceSchemas";
+export type {
+    FederationPlaylistDetail,
+    FederationPlaylistPage,
+} from "../utils/federationPlaylistSchemas";
 
 function isKnownMediaType(
     value: string,
@@ -777,6 +797,36 @@ class FederationClient {
         return this.requestJson(
             "/api/federation/v1/manifest",
             federationManifestSchema,
+            { signal },
+        );
+    }
+
+    async getPresence(signal?: AbortSignal): Promise<FederationPresence> {
+        return this.requestJson(
+            "/api/federation/v1/social/presence",
+            federationPresenceSchema,
+            { signal },
+        );
+    }
+
+    async getPlaylists(
+        input: { offset: number; limit: number },
+        signal?: AbortSignal,
+    ): Promise<FederationPlaylistPage> {
+        return this.requestJson(
+            "/api/federation/v1/social/playlists",
+            federationPlaylistPageSchema,
+            { params: input, signal },
+        );
+    }
+
+    async getPlaylist(
+        remoteId: string,
+        signal?: AbortSignal,
+    ): Promise<FederationPlaylistDetail> {
+        return this.requestJson(
+            `/api/federation/v1/social/playlists/${encodeURIComponent(remoteId)}`,
+            federationPlaylistDetailSchema,
             { signal },
         );
     }

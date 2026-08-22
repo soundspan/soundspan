@@ -26,6 +26,7 @@ const client = {
     getCatalogItems: jest.fn(),
     getCatalogDelta: jest.fn(),
     getCatalogItem: jest.fn(),
+    getPresence: jest.fn(),
 };
 const createFederationClient = jest.fn(() => client);
 const createMapping = jest.fn();
@@ -35,6 +36,8 @@ const updateArtistCountsInBatches = jest.fn();
 const clearTrackTranscodeCache = jest.fn();
 const getActiveSpace = jest.fn();
 const recordFederationEmbeddingPageOutcome = jest.fn();
+const recordFederationPresenceFetch = jest.fn();
+const redisSet = jest.fn();
 
 const mockLog = {
     debug: jest.fn(),
@@ -97,7 +100,10 @@ jest.mock("../../../services/federationClient", () => ({
     FederationHttpError: MockFederationHttpError,
 }));
 jest.mock("../../../config", () => ({
-    config: { federation: { allowPrivatePeers: false, allowProxy: false } },
+    config: {
+        federation: { allowPrivatePeers: false, allowProxy: false },
+        workers: { federationSyncIntervalMinutes: 15 },
+    },
 }));
 jest.mock("../../../services/trackMappingService", () => ({
     trackMappingService: { createMapping },
@@ -115,6 +121,10 @@ jest.mock("../../../services/embeddingSpaces", () => ({
 }));
 jest.mock("../../../metrics", () => ({
     recordFederationEmbeddingPageOutcome,
+    recordFederationPresenceFetch,
+}));
+jest.mock("../../../utils/redis", () => ({
+    redisClient: { set: redisSet },
 }));
 jest.mock("../../../services/artistCountsService", () => ({
     backfillAllArtistCounts,
@@ -295,6 +305,7 @@ describe("federation sync processor", () => {
         prisma.federationPeer.findUnique.mockResolvedValue({ ...peer });
         prisma.federationPeer.update.mockResolvedValue({});
         client.getManifest.mockResolvedValue(manifest);
+        client.getPresence.mockResolvedValue({ users: [] });
         client.getCatalogItems.mockImplementation((type: string) =>
             Promise.resolve(catalogPageFor(type)),
         );
@@ -383,6 +394,7 @@ describe("federation sync processor", () => {
         });
         clearTrackTranscodeCache.mockResolvedValue(undefined);
         getActiveSpace.mockResolvedValue(activeSpace);
+        redisSet.mockResolvedValue("OK");
     });
 
     it("imports a full catalog in parent order and persists the final cursor", async () => {
@@ -506,6 +518,69 @@ describe("federation sync processor", () => {
             audiobooks: 1,
             skippedInvalid: 0,
         });
+    });
+
+    it("stores scoped peer presence with three sync intervals of TTL", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            name: "Remote Library",
+            scopes: [...peer.scopes, "social:read"],
+        });
+        client.getPresence.mockResolvedValue({
+            users: [
+                {
+                    username: "alice",
+                    status: "idle",
+                    updatedAt: "2026-08-22T12:00:00.000Z",
+                },
+            ],
+        });
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+        });
+
+        expect(client.getPresence).toHaveBeenCalledTimes(1);
+        expect(redisSet).toHaveBeenCalledWith(
+            "federation:social:presence:v1:peer-1",
+            expect.stringContaining('"peerName":"Remote Library"'),
+            { expiration: { type: "EX", value: 2_700 } },
+        );
+        expect(recordFederationPresenceFetch).toHaveBeenCalledWith(
+            "peer-1",
+            "success",
+        );
+    });
+
+    it("does not fail catalog sync when presence fetch fails", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            name: "Remote Library",
+            scopes: [...peer.scopes, "social:read"],
+        });
+        client.getPresence.mockRejectedValue(new Error("peer offline"));
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+        });
+
+        expect(redisSet).not.toHaveBeenCalled();
+        expect(recordFederationPresenceFetch).toHaveBeenCalledWith(
+            "peer-1",
+            "failure",
+        );
+        expect(mockLog.debug).toHaveBeenCalledWith(
+            "Federation peer presence fetch failed",
+            expect.objectContaining({ peerId: "peer-1" }),
+        );
+    });
+
+    it("does not request presence without the social scope", async () => {
+        await processFederationSync(job());
+
+        expect(client.getPresence).not.toHaveBeenCalled();
+        expect(redisSet).not.toHaveBeenCalled();
+        expect(recordFederationPresenceFetch).not.toHaveBeenCalled();
     });
 
     it.each([

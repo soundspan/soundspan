@@ -149,6 +149,145 @@ describe("federation HTTP client", () => {
         });
     });
 
+    it("fetches a bounded, forward-compatible presence snapshot", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                users: [
+                    {
+                        username: "alice",
+                        displayName: "Alice",
+                        status: "playing",
+                        track: {
+                            title: "Song",
+                            artist: "Artist",
+                            album: "Album",
+                            futureTrackField: true,
+                        },
+                        updatedAt: "2026-08-22T12:00:00.000Z",
+                        futureUserField: true,
+                    },
+                ],
+                futureEnvelopeField: true,
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getPresence(),
+        ).resolves.toEqual({
+            users: [
+                {
+                    username: "alice",
+                    displayName: "Alice",
+                    status: "playing",
+                    track: {
+                        title: "Song",
+                        artist: "Artist",
+                        album: "Album",
+                    },
+                    updatedAt: "2026-08-22T12:00:00.000Z",
+                },
+            ],
+        });
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "https://peer.example/api/federation/v1/social/presence",
+                timeout: 15_000,
+            }),
+        );
+    });
+
+    it("parses forward-compatible peer playlist pages", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                playlists: [
+                    {
+                        remoteId: "playlist-1",
+                        name: "Shared mix",
+                        trackCount: 2,
+                        updatedAt: "2026-08-22T12:00:00.000Z",
+                        owner: { displayName: "Alice", future: true },
+                        future: true,
+                    },
+                ],
+                nextOffset: 25,
+                future: true,
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getPlaylists({ offset: 0, limit: 25 }),
+        ).resolves.toEqual({
+            playlists: [
+                {
+                    remoteId: "playlist-1",
+                    name: "Shared mix",
+                    trackCount: 2,
+                    updatedAt: "2026-08-22T12:00:00.000Z",
+                    owner: { displayName: "Alice" },
+                },
+            ],
+            nextOffset: 25,
+        });
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "https://peer.example/api/federation/v1/social/playlists",
+                params: { offset: 0, limit: 25 },
+            }),
+        );
+    });
+
+    it("parses forward-compatible peer playlist detail", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                playlist: {
+                    remoteId: "playlist/1",
+                    name: "Shared mix",
+                    owner: { displayName: "Alice" },
+                    updatedAt: "2026-08-22T12:00:00.000Z",
+                    tracks: [
+                        {
+                            remoteTrackId: "track-1",
+                            title: "Song",
+                            artist: "Artist",
+                            album: "Album",
+                            duration: 180,
+                            future: true,
+                        },
+                    ],
+                    future: true,
+                },
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getPlaylist("playlist/1"),
+        ).resolves.toEqual({
+            playlist: {
+                remoteId: "playlist/1",
+                name: "Shared mix",
+                owner: { displayName: "Alice" },
+                updatedAt: "2026-08-22T12:00:00.000Z",
+                tracks: [
+                    {
+                        remoteTrackId: "track-1",
+                        title: "Song",
+                        artist: "Artist",
+                        album: "Album",
+                        duration: 180,
+                    },
+                ],
+            },
+        });
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "https://peer.example/api/federation/v1/social/playlists/playlist%2F1",
+            }),
+        );
+    });
+
     it("uses Axios proxy handling without a pinned lookup when explicitly enabled", async () => {
         axiosRequest.mockResolvedValueOnce({ status: 200, data: manifest });
 
@@ -1115,6 +1254,39 @@ describe("federation HTTP client", () => {
             status: 400,
             peerCode: "FEDERATION_CODE_EXPIRED",
         });
+    });
+
+    it("rejects a pairing response that grants social access without library access", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 201,
+            data: {
+                peer: {
+                    id: "peer-2",
+                    name: "Peer Two",
+                    direction: "HOST",
+                    baseUrl: null,
+                    scopes: ["social:read"],
+                    inboundStatus: "ACTIVE",
+                    outboundStatus: null,
+                    lastSeenAt: null,
+                    lastSyncCursor: null,
+                    catalogEpoch: null,
+                    createdAt: "2026-08-15T12:00:00.000Z",
+                    updatedAt: "2026-08-15T12:00:00.000Z",
+                },
+                token: "paired-token",
+                capabilities: [],
+            },
+        });
+
+        await expect(
+            pairFederationPeer({
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Consumer",
+                options: { retryDelayMs: 0 },
+            }),
+        ).rejects.toBeInstanceOf(FederationResponseError);
     });
 
     it("rejects a malformed pairing response at the public trust boundary", async () => {

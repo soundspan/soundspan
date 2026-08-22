@@ -10,8 +10,23 @@ import { logger } from "../utils/logger";
 import { publishSocialPresenceUpdate } from "../services/socialPresenceEvents";
 import { resolveCanonicalMediaSource } from "@soundspan/media-metadata-contract";
 import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import { readFederationPeerPresenceSnapshots } from "../services/federationPresence";
+import type { FederationPeerPresenceSnapshot } from "../utils/federationPresenceSchemas";
+import { z } from "zod";
+import { asyncHandler } from "../middleware/asyncHandler";
+import { sendRouteError } from "./routeErrorResponse";
+import {
+    browseFederationPeerPlaylists,
+    copyFederationPeerPlaylist,
+    followFederationPeerPlaylist,
+    getFederationPeerPlaylist,
+    listFollowedFederationPeerPlaylists,
+    PeerPlaylistError,
+    unfollowFederationPeerPlaylist,
+} from "../services/federationPeerPlaylists";
 
 const router = express.Router();
+const log = logger.child("Social");
 
 /**
  * @openapi
@@ -62,7 +77,7 @@ router.get<{ userId: string }>(
             res.set("Cache-Control", "public, max-age=300");
             return res.send(Buffer.from(user.profilePicture));
         } catch (error) {
-            logger.error("[Social] Failed to serve profile picture:", error);
+            log.error("Failed to serve profile picture", { error });
             return res
                 .status(500)
                 .json({ error: "Failed to get profile picture" });
@@ -71,6 +86,193 @@ router.get<{ userId: string }>(
 );
 
 router.use(requireAuth);
+
+const peerPlaylistParamsSchema = z.strictObject({
+    peerId: z.string().trim().min(1).max(256),
+    remoteId: z.string().trim().min(1).max(256),
+});
+const noQuerySchema = z.strictObject({});
+
+function peerPlaylistErrorResponse(res: express.Response, error: unknown) {
+    if (!(error instanceof PeerPlaylistError)) throw error;
+    if (error.errorClass === "not_found") {
+        return sendRouteError(res, 404, "Peer playlist not found");
+    }
+    if (error.errorClass === "timeout") {
+        return sendRouteError(res, 504, "Peer playlist request timed out");
+    }
+    if (error.errorClass === "offline") {
+        return sendRouteError(res, 503, "Federation peer is offline");
+    }
+    return sendRouteError(res, 502, "Peer playlist request failed");
+}
+
+function parsedPeerPlaylistParams(req: express.Request) {
+    return peerPlaylistParamsSchema.safeParse(req.params);
+}
+
+/** @openapi
+ * /api/social/peer-playlists:
+ *   get:
+ *     summary: Browse public playlists from active social-scoped peers
+ *     tags: [Social]
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses:
+ *       200: { description: Partial peer playlist results and classified per-peer errors }
+ *       401: { description: Not authenticated }
+ */
+router.get(
+    "/peer-playlists",
+    asyncHandler(async (req, res) => {
+        if (!noQuerySchema.safeParse(req.query).success) {
+            return sendRouteError(res, 400, "Invalid request");
+        }
+        return res.json(await browseFederationPeerPlaylists());
+    }),
+);
+
+/** @openapi
+ * /api/social/peer-playlists/followed:
+ *   get:
+ *     summary: Resolve the caller's followed peer playlists live
+ *     tags: [Social]
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses:
+ *       200: { description: Followed playlists with per-playlist offline errors }
+ *       401: { description: Not authenticated }
+ */
+router.get(
+    "/peer-playlists/followed",
+    asyncHandler(async (req, res) => {
+        if (!req.user) return sendRouteError(res, 401, "Unauthorized");
+        if (!noQuerySchema.safeParse(req.query).success) {
+            return sendRouteError(res, 400, "Invalid request");
+        }
+        return res.json(await listFollowedFederationPeerPlaylists(req.user.id));
+    }),
+);
+
+/** @openapi
+ * /api/social/peer-playlists/{peerId}/{remoteId}:
+ *   get:
+ *     summary: Fetch and locally resolve one peer playlist
+ *     tags: [Social]
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses:
+ *       200: { description: Live playlist detail with local resolution states }
+ *       401: { description: Not authenticated }
+ *       404: { description: Peer playlist not found }
+ *       503: { description: Peer offline }
+ *       504: { description: Peer timeout }
+ */
+router.get(
+    "/peer-playlists/:peerId/:remoteId",
+    asyncHandler(async (req, res) => {
+        const params = parsedPeerPlaylistParams(req);
+        if (!params.success || !noQuerySchema.safeParse(req.query).success) {
+            return sendRouteError(res, 400, "Invalid request");
+        }
+        try {
+            return res.json(
+                await getFederationPeerPlaylist(
+                    params.data.peerId,
+                    params.data.remoteId,
+                ),
+            );
+        } catch (error) {
+            return peerPlaylistErrorResponse(res, error);
+        }
+    }),
+);
+
+/** @openapi
+ * /api/social/peer-playlists/{peerId}/{remoteId}/follow:
+ *   post:
+ *     summary: Follow one peer playlist
+ *     tags: [Social]
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses:
+ *       200: { description: Playlist followed idempotently }
+ *       401: { description: Not authenticated }
+ *   delete:
+ *     summary: Unfollow one peer playlist
+ *     tags: [Social]
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses:
+ *       200: { description: Playlist unfollowed idempotently }
+ *       401: { description: Not authenticated }
+ */
+router.post(
+    "/peer-playlists/:peerId/:remoteId/follow",
+    asyncHandler(async (req, res) => {
+        const params = parsedPeerPlaylistParams(req);
+        if (!req.user) return sendRouteError(res, 401, "Unauthorized");
+        if (!params.success || !noQuerySchema.safeParse(req.query).success) {
+            return sendRouteError(res, 400, "Invalid request");
+        }
+        try {
+            return res.json(
+                await followFederationPeerPlaylist(
+                    req.user.id,
+                    params.data.peerId,
+                    params.data.remoteId,
+                ),
+            );
+        } catch (error) {
+            return peerPlaylistErrorResponse(res, error);
+        }
+    }),
+);
+
+router.delete(
+    "/peer-playlists/:peerId/:remoteId/follow",
+    asyncHandler(async (req, res) => {
+        const params = parsedPeerPlaylistParams(req);
+        if (!req.user) return sendRouteError(res, 401, "Unauthorized");
+        if (!params.success || !noQuerySchema.safeParse(req.query).success) {
+            return sendRouteError(res, 400, "Invalid request");
+        }
+        return res.json(
+            await unfollowFederationPeerPlaylist(
+                req.user.id,
+                params.data.peerId,
+                params.data.remoteId,
+            ),
+        );
+    }),
+);
+
+/** @openapi
+ * /api/social/peer-playlists/{peerId}/{remoteId}/copy:
+ *   post:
+ *     summary: Copy resolvable peer tracks into a caller-owned local playlist
+ *     tags: [Social]
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses:
+ *       200: { description: Copy result with copied and skipped counts }
+ *       401: { description: Not authenticated }
+ */
+router.post(
+    "/peer-playlists/:peerId/:remoteId/copy",
+    asyncHandler(async (req, res) => {
+        const params = parsedPeerPlaylistParams(req);
+        if (!req.user) return sendRouteError(res, 401, "Unauthorized");
+        if (!params.success || !noQuerySchema.safeParse(req.query).success) {
+            return sendRouteError(res, 400, "Invalid request");
+        }
+        try {
+            return res.json(
+                await copyFederationPeerPlaylist(
+                    req.user.id,
+                    params.data.peerId,
+                    params.data.remoteId,
+                ),
+            );
+        } catch (error) {
+            return peerPlaylistErrorResponse(res, error);
+        }
+    }),
+);
 
 const PRESENCE_KEY_PREFIX = "social:presence:user:";
 const PRESENCE_TTL_SECONDS = 75;
@@ -283,9 +485,32 @@ async function getOnlinePresenceMap(): Promise<Map<string, number>> {
 
         return byUserId;
     } catch (error) {
-        logger.error("[Social] Failed to fetch online presence keys:", error);
+        log.error("Failed to fetch online presence keys", { error });
         return new Map();
     }
+}
+
+async function visiblePeerPresence(): Promise<
+    FederationPeerPresenceSnapshot[] | undefined
+> {
+    try {
+        const settings = await prisma.systemSettings.findUnique({
+            where: { id: "default" },
+            select: { federationShowPeerStatus: true },
+        });
+        if (settings?.federationShowPeerStatus !== true) return undefined;
+        return await readFederationPeerPresenceSnapshots();
+    } catch (error) {
+        log.error("Failed to load peer presence display data", { error });
+        return undefined;
+    }
+}
+
+function rosterPayload(
+    users: unknown[],
+    peers: FederationPeerPresenceSnapshot[] | undefined,
+) {
+    return peers === undefined ? { users } : { users, peers };
 }
 
 /**
@@ -335,7 +560,7 @@ router.post("/presence/heartbeat", async (req, res) => {
             ttlSeconds: PRESENCE_TTL_SECONDS,
         });
     } catch (error) {
-        logger.error("[Social] Presence heartbeat failed:", error);
+        log.error("Presence heartbeat failed", { error });
         return res.status(503).json({ error: "Presence unavailable" });
     }
 });
@@ -381,16 +606,34 @@ router.post("/presence/heartbeat", async (req, res) => {
  *                       lastHeartbeatAt:
  *                         type: string
  *                         format: date-time
+ *                 peers:
+ *                   type: array
+ *                   description: Present only when peer status display is enabled
+ *                   items:
+ *                     type: object
+ *                     required: [peerId, peerName, users, fetchedAt]
+ *                     properties:
+ *                       peerId: { type: string }
+ *                       peerName: { type: string }
+ *                       users:
+ *                         type: array
+ *                         maxItems: 100
+ *                         items:
+ *                           type: object
+ *                       fetchedAt: { type: string, format: date-time }
  *       401:
  *         description: Not authenticated
  */
 router.get("/online", async (_req, res) => {
     try {
-        const onlinePresenceByUserId = await getOnlinePresenceMap();
+        const [onlinePresenceByUserId, peers] = await Promise.all([
+            getOnlinePresenceMap(),
+            visiblePeerPresence(),
+        ]);
         const onlineUserIds = Array.from(onlinePresenceByUserId.keys());
 
         if (onlineUserIds.length === 0) {
-            return res.json({ users: [] });
+            return res.json(rosterPayload([], peers));
         }
 
         const [users, activeMemberships] = await Promise.all([
@@ -478,9 +721,9 @@ router.get("/online", async (_req, res) => {
             })
             .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-        return res.json({ users: socialUsers });
+        return res.json(rosterPayload(socialUsers, peers));
     } catch (error) {
-        logger.error("[Social] Failed to load online roster:", error);
+        log.error("Failed to load online roster", { error });
         return res.status(500).json({ error: "Failed to get online users" });
     }
 });
@@ -592,7 +835,7 @@ router.get("/connected", requireAdmin, async (req, res) => {
 
         return res.json({ users: connectedUsers });
     } catch (error) {
-        logger.error("[Social] Failed to load connected users:", error);
+        log.error("Failed to load connected users", { error });
         return res.status(500).json({ error: "Failed to get connected users" });
     }
 });

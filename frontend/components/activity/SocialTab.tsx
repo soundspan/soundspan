@@ -8,6 +8,7 @@ import {
     useSocialPresence,
     type SocialOnlineUser,
 } from "@/hooks/useSocialPresence";
+import { PeerPresenceSection } from "@/components/activity/PeerPresenceSection";
 import { api } from "@/lib/api";
 
 function formatLastSeen(isoDate: string): string {
@@ -67,9 +68,11 @@ export function SocialTab({
 }: SocialTabProps = {}) {
     const socialQuery = useSocialPresence({ enabled: queryEnabled });
     const users = usersProp ?? socialQuery.users;
+    const peers = socialQuery.peers ?? [];
     const isLoading = isLoadingProp ?? socialQuery.isLoading;
     const error = errorProp ?? socialQuery.error;
-    const hasUsers = users.length > 0;
+    const hasPeerUsers = peers.some((peer) => peer.users.length > 0);
+    const hasUsers = users.length > 0 || hasPeerUsers;
     const showLoadingState = isLoading && !hasUsers;
     const showUnavailableState = Boolean(error) && !hasUsers;
 
@@ -116,6 +119,8 @@ export function SocialTab({
                     aria-live="polite"
                 >
                     {users.length} online
+                    {hasPeerUsers &&
+                        ` · ${peers.reduce((total, peer) => total + peer.users.length, 0)} on peers`}
                 </span>
                 <span className="text-xs text-green-400 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -276,6 +281,7 @@ export function SocialTab({
                         </div>
                     );
                 })}
+                <PeerPresenceSection peers={peers} />
             </div>
         </div>
     );

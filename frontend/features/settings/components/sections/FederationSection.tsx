@@ -20,7 +20,7 @@ import type {
 import type { SystemSettings } from "../../types";
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { SettingsSection, SettingsRow } from "../ui";
+import { SettingsSection, SettingsRow, SettingsToggle } from "../ui";
 import { PeerDedupList, PeerSettingsPanel } from "./federationPeerSettings";
 import { FederationHealthPanel } from "./FederationHealthPanel";
 import {
@@ -580,6 +580,28 @@ interface FederationSettingsContentProps {
     onUpdateSettings?: (updates: Partial<SystemSettings>) => void;
 }
 
+function FederationPeerStatusRow(props: {
+    settings: SystemSettings;
+    onUpdateSettings: (updates: Partial<SystemSettings>) => void;
+}) {
+    return (
+        <SettingsRow
+            label="Show user status from peers"
+            description="Display online users from federated servers in the Social tab. Freshness is minutes, not seconds. Off by default."
+        >
+            <SettingsToggle
+                id="federation-show-peer-status"
+                checked={props.settings.federationShowPeerStatus}
+                onChange={(checked) =>
+                    props.onUpdateSettings({
+                        federationShowPeerStatus: checked,
+                    })
+                }
+            />
+        </SettingsRow>
+    );
+}
+
 function FederationInstanceNameRow(props: {
     settings: SystemSettings;
     onUpdateSettings: (updates: Partial<SystemSettings>) => void;
@@ -619,10 +641,16 @@ function FederationSettingsContent(props: FederationSettingsContentProps) {
                 </p>
             )}
             {props.settings && props.onUpdateSettings && (
-                <FederationInstanceNameRow
-                    settings={props.settings}
-                    onUpdateSettings={props.onUpdateSettings}
-                />
+                <>
+                    <FederationInstanceNameRow
+                        settings={props.settings}
+                        onUpdateSettings={props.onUpdateSettings}
+                    />
+                    <FederationPeerStatusRow
+                        settings={props.settings}
+                        onUpdateSettings={props.onUpdateSettings}
+                    />
+                </>
             )}
             <PeerManagementPanel
                 loading={props.loading}

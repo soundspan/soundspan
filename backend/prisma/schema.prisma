@@ -65,6 +65,7 @@ model User {
   shareLinks             ShareLink[]
   federationPeersCreated FederationPeer[]
   federationPairingCodes FederationPairingCode[]
+  federationPlaylistFollows FederationPlaylistFollow[]
 }
 
 model UserSettings {
@@ -72,6 +73,8 @@ model UserSettings {
   playbackQuality       String  @default("original")
   loudnessMode          String  @default("auto")
   shareOnlinePresence   Boolean @default(false)
+  sharePresenceToPeers  Boolean @default(false)
+  sharePlaylistsToPeers Boolean @default(false)
   shareListeningStatus  Boolean @default(false)
   wifiOnly              Boolean @default(false)
   offlineEnabled        Boolean @default(false)
@@ -271,6 +274,7 @@ model SystemSettings {
   showVersion                 Boolean  @default(false)
   federationInstanceId        String?
   federationInstanceName      String?
+  federationShowPeerStatus    Boolean  @default(false)
   catalogEpoch                String?
 }
 
@@ -529,6 +533,22 @@ model FederationPeer {
   tracks         Track[]
   audiobooks     Audiobook[]
   podcastListings FederationPodcastListing[]
+  playlistFollows FederationPlaylistFollow[]
+}
+
+model FederationPlaylistFollow {
+  id        String   @id @default(cuid())
+  userId    String
+  peerId    String
+  remoteId  String
+  name      String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  peer      FederationPeer @relation(fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, peerId, remoteId])
+  @@index([userId, createdAt])
+  @@index([peerId])
 }
 
 model FederationPodcastListing {

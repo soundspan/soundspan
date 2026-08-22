@@ -10,6 +10,10 @@ import {
     type FederationCacheResult,
     type FederationMetrics,
     type FederationMetricsRole,
+    type FederationPresenceFetchOutcome,
+    type FederationPlaylistCopyOutcome,
+    type FederationPlaylistFetchOutcome,
+    type FederationPlaylistFollowOutcome,
     type FederationQuotaKind,
     type FederationStreamOutcome,
     type FederationSyncOutcome,
@@ -57,6 +61,10 @@ export type {
     FederationQuotaKind,
     FederationStreamOutcome,
     FederationSyncOutcome,
+    FederationPresenceFetchOutcome,
+    FederationPlaylistCopyOutcome,
+    FederationPlaylistFetchOutcome,
+    FederationPlaylistFollowOutcome,
 } from "./federationMetrics";
 
 /** Single process-local Prometheus registry. */
@@ -191,6 +199,46 @@ export function recordFederationQuotaRejection(
     kind: FederationQuotaKind,
 ): void {
     activeFederationMetrics()?.recordQuotaRejection(peerId, kind);
+}
+
+/** Records one best-effort consumer presence fetch outcome. */
+export function recordFederationPresenceFetch(
+    peerId: string,
+    outcome: FederationPresenceFetchOutcome,
+): void {
+    activeFederationMetrics()?.recordPresenceFetch(peerId, outcome);
+}
+
+/** Adds the privacy-filtered users served to one authenticated peer. */
+export function recordFederationPresenceUsersExported(
+    peerId: string,
+    count: number,
+): void {
+    activeFederationMetrics()?.recordPresenceUsersExported(peerId, count);
+}
+
+/** Records one final on-demand peer playlist fetch outcome. */
+export function recordFederationPlaylistFetch(
+    peerId: string,
+    outcome: FederationPlaylistFetchOutcome,
+): void {
+    activeFederationMetrics()?.recordPlaylistFetch(peerId, outcome);
+}
+
+/** Records one local peer-playlist follow state change. */
+export function recordFederationPlaylistFollow(
+    peerId: string,
+    outcome: FederationPlaylistFollowOutcome,
+): void {
+    activeFederationMetrics()?.recordPlaylistFollow(peerId, outcome);
+}
+
+/** Records one final peer-playlist copy outcome. */
+export function recordFederationPlaylistCopy(
+    peerId: string,
+    outcome: FederationPlaylistCopyOutcome,
+): void {
+    activeFederationMetrics()?.recordPlaylistCopy(peerId, outcome);
 }
 
 /** Records bounded federation data discarded during compatibility parsing. */

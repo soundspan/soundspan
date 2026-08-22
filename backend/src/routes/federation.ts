@@ -43,6 +43,12 @@ import { handleGetCoverArt } from "./library/coverArt";
 import { sendRouteError } from "./routeErrorResponse";
 import { handleAudiobookCover } from "./audiobooks";
 import { withFederationStreamControls } from "../services/federationStreamControls";
+import { getFederationPresenceExport } from "../services/federationPresence";
+import { recordFederationPresenceUsersExported } from "../metrics";
+import {
+    getFederationPlaylistDetail,
+    getFederationPlaylistPage,
+} from "../services/federationPlaylistExport";
 
 const router = Router();
 const albumParamsSchema = z.strictObject({
@@ -81,7 +87,16 @@ const pairingScopesSchema = z
     .array(z.enum(FEDERATION_SCOPE_VALUES))
     .min(1)
     .max(FEDERATION_SCOPE_VALUES.length)
-    .refine((values) => new Set(values).size === values.length);
+    .refine((values) => new Set(values).size === values.length)
+    .refine(
+        (values) =>
+            !values.includes("embeddings:read") ||
+            values.includes("library:read"),
+    )
+    .refine(
+        (values) =>
+            !values.includes("social:read") || values.includes("library:read"),
+    );
 const pairingSchema = z.strictObject({
     code: pairingCodeValueSchema,
     name: z.string().trim().min(1).max(120),
@@ -98,6 +113,13 @@ const streamQuerySchema = z.strictObject({
     quality: z.enum(["original", "high", "medium", "low"]).default("original"),
 });
 const emptyQuerySchema = z.strictObject({});
+const playlistPageQuerySchema = z.strictObject({
+    offset: z.coerce.number().int().min(0).default(0),
+    limit: z.coerce.number().int().min(1).max(100).default(100),
+});
+const playlistParamsSchema = z.strictObject({
+    id: z.string().trim().min(1).max(256),
+});
 
 function validationError(res: Response): Response {
     return sendRouteError(res, 400, "Invalid federation request");
@@ -165,6 +187,25 @@ function sendCatalogResponse(
  *   post:
  *     summary: Consume a federation pairing code for one host link
  *     tags: [Federation]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code, name]
+ *             properties:
+ *               code: { type: string, pattern: '^[A-HJ-NP-Z2-9]{8}$' }
+ *               name: { type: string }
+ *               requestedScopes:
+ *                 type: array
+ *                 description: social:read and embeddings:read each require library:read
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
+ *               reciprocalScopes:
+ *                 type: array
+ *                 deprecated: true
+ *                 description: Legacy field; social:read and embeddings:read each require library:read
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
  *     responses:
  *       201: { description: Peer credential issued once }
  *       400: { description: Invalid pairing input, FEDERATION_CODE_USED, FEDERATION_CODE_EXPIRED, or FEDERATION_SCOPE_MISMATCH }
@@ -215,6 +256,119 @@ router.get(
         return res.json(
             await getFederationManifest(includesEmbeddingScope(req)),
         );
+    }),
+);
+
+/** @openapi
+ * /api/federation/v1/social/presence:
+ *   get:
+ *     summary: Get the host's privacy-filtered online presence
+ *     tags: [Federation]
+ *     security: [{ federationPeerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: At most 100 users who opted into peer presence sharing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [users]
+ *               properties:
+ *                 users:
+ *                   type: array
+ *                   maxItems: 100
+ *                   items:
+ *                     type: object
+ *                     required: [username, status, updatedAt]
+ *                     properties:
+ *                       username: { type: string }
+ *                       displayName: { type: string }
+ *                       status: { type: string, enum: [playing, paused, idle] }
+ *                       track:
+ *                         type: object
+ *                         required: [title, artist, album]
+ *                         properties:
+ *                           title: { type: string }
+ *                           artist: { type: string }
+ *                           album: { type: string }
+ *                       updatedAt: { type: string, format: date-time }
+ *       401: { description: Peer authentication required }
+ *       403: { description: social:read scope required }
+ *       429: { description: Federation peer rate limit exceeded }
+ */
+router.get(
+    "/social/presence",
+    requireFederationPeer("social:read"),
+    federationPeerLimiter,
+    asyncHandler(async (req, res) => {
+        const query = emptyQuerySchema.safeParse(req.query);
+        if (!query.success) return validationError(res);
+        const payload = await getFederationPresenceExport();
+        recordFederationPresenceUsersExported(
+            req.federationPeer?.id ?? "unknown",
+            payload.users.length,
+        );
+        return res.json(payload);
+    }),
+);
+
+/** @openapi
+ * /api/federation/v1/social/playlists:
+ *   get:
+ *     summary: List public playlists whose owners opted into peer sharing
+ *     tags: [Federation]
+ *     security: [{ federationPeerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, minimum: 0, default: 0 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+ *     responses:
+ *       200: { description: Privacy-filtered bounded playlist page }
+ *       401: { description: Peer authentication required }
+ *       403: { description: social:read scope required }
+ */
+router.get(
+    "/social/playlists",
+    requireFederationPeer("social:read"),
+    federationPeerLimiter,
+    asyncHandler(async (req, res) => {
+        const parsed = playlistPageQuerySchema.safeParse(req.query);
+        if (!parsed.success) return validationError(res);
+        return res.json(await getFederationPlaylistPage(parsed.data));
+    }),
+);
+
+/** @openapi
+ * /api/federation/v1/social/playlists/{id}:
+ *   get:
+ *     summary: Get one still-public, still-opted-in peer playlist
+ *     tags: [Federation]
+ *     security: [{ federationPeerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Playlist detail with at most 1000 tracks }
+ *       401: { description: Peer authentication required }
+ *       403: { description: social:read scope required }
+ *       404: { description: Playlist not exported }
+ */
+router.get(
+    "/social/playlists/:id",
+    requireFederationPeer("social:read"),
+    federationPeerLimiter,
+    asyncHandler(async (req, res) => {
+        const params = playlistParamsSchema.safeParse(req.params);
+        const query = emptyQuerySchema.safeParse(req.query);
+        if (!params.success || !query.success) return validationError(res);
+        const detail = await getFederationPlaylistDetail(params.data.id);
+        if (!detail) return sendRouteError(res, 404, "Playlist not found");
+        return res.json(detail);
     }),
 );
 

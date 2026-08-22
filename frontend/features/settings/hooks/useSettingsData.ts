@@ -15,6 +15,8 @@ export const defaultSettings: UserSettings = {
     loudnessMode: "auto",
     shareOnlinePresence: false,
     shareListeningStatus: false,
+    sharePresenceToPeers: false,
+    sharePlaylistsToPeers: false,
     wifiOnly: false,
     offlineEnabled: false,
     maxCacheSizeMb: 5120,
@@ -50,6 +52,8 @@ export function useSettingsData() {
                     displayName: data.displayName ?? "",
                     shareOnlinePresence: data.shareOnlinePresence ?? false,
                     shareListeningStatus: data.shareListeningStatus ?? false,
+                    sharePresenceToPeers: data.sharePresenceToPeers ?? false,
+                    sharePlaylistsToPeers: data.sharePlaylistsToPeers ?? false,
                     showYtMusicExplore: data.showYtMusicExplore ?? true,
                     showTidalExplore: data.showTidalExplore ?? true,
                 });

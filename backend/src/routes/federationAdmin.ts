@@ -39,6 +39,10 @@ const scopesSchema = z
         (values) =>
             !values.includes("embeddings:read") ||
             values.includes("library:read"),
+    )
+    .refine(
+        (values) =>
+            !values.includes("social:read") || values.includes("library:read"),
     );
 const httpsUrlSchema = z
     .url()
@@ -288,6 +292,20 @@ router.post(
  *     summary: Create a host federation peer
  *     tags: [Federation Admin]
  *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, scopes]
+ *             properties:
+ *               name: { type: string }
+ *               scopes:
+ *                 type: array
+ *                 description: social:read and embeddings:read each require library:read
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
+ *               baseUrl: { type: string, format: uri }
  *     responses:
  *       201: { description: Peer and one-time credential }
  *       400: { description: Invalid peer input }
@@ -381,7 +399,8 @@ router.post(
  *               name: { type: string }
  *               scopes:
  *                 type: array
- *                 items: { type: string, enum: [library:read, stream:read, embeddings:read] }
+ *                 description: social:read and embeddings:read each require library:read
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
  *     responses:
  *       201: { description: Consumer peer paired and linked }
  *       400: { description: Invalid input or peer code rejected (FEDERATION_CODE_USED or FEDERATION_CODE_EXPIRED) }
@@ -521,6 +540,17 @@ router.delete(
  *     summary: Create a short-lived federation pairing code
  *     tags: [Federation Admin]
  *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               scopes:
+ *                 type: array
+ *                 description: social:read and embeddings:read each require library:read
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
  *     responses:
  *       201: { description: Eight-character pairing code valid for 30 minutes }
  *       400: { description: Invalid scope input }

@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/HorizontalCarousel";
 import { MixCard } from "@/components/MixCard";
 import { HomeHero } from "@/features/home/components/HomeHero";
+import { PeerPlaylistsShelf } from "@/features/social/components/PeerPlaylistsShelf";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { ContinueListening } from "@/features/home/components/ContinueListening";
 import { ArtistsGrid } from "@/features/home/components/ArtistsGrid";
@@ -216,6 +217,8 @@ export default function HomePage() {
                             )}
                         </section>
                     )}
+
+                    <PeerPlaylistsShelf />
 
                     {/* Popular Podcasts */}
                     {recentPodcasts.length > 0 && (

@@ -26,7 +26,12 @@ jest.mock("../../services/federationPeers", () => ({
     FederationScopeMismatchError: class FederationScopeMismatchError extends Error {
         readonly code = "FEDERATION_SCOPE_MISMATCH";
     },
-    FEDERATION_SCOPE_VALUES: ["library:read", "stream:read", "embeddings:read"],
+    FEDERATION_SCOPE_VALUES: [
+        "library:read",
+        "stream:read",
+        "embeddings:read",
+        "social:read",
+    ],
 }));
 jest.mock("../../workers/federationJobs", () => ({
     enqueueFederationSyncNow,
@@ -129,11 +134,43 @@ describe("federation admin routes", () => {
         });
     });
 
+    it("accepts social presence with its library dependency", async () => {
+        const response = await request(app)
+            .post("/api/federation/admin/peers")
+            .set("Authorization", "Bearer admin")
+            .send({
+                name: "Social Peer",
+                scopes: ["library:read", "social:read"],
+            });
+
+        expect(response.status).toBe(201);
+        expect(service.createHostFederationPeer).toHaveBeenCalledWith({
+            name: "Social Peer",
+            scopes: ["library:read", "social:read"],
+            createdById: "admin-1",
+            baseUrl: undefined,
+        });
+    });
+
+    it("creates a pairing code granting social presence", async () => {
+        const response = await request(app)
+            .post("/api/federation/admin/pairing-codes")
+            .set("Authorization", "Bearer admin")
+            .send({ scopes: ["library:read", "social:read"] });
+
+        expect(response.status).toBe(201);
+        expect(service.createFederationPairingCode).toHaveBeenCalledWith({
+            createdById: "admin-1",
+            scopes: ["library:read", "social:read"],
+        });
+    });
+
     it("rejects unknown, duplicate, and dependency-invalid scopes", async () => {
         for (const scopes of [
             ["unknown"],
             ["library:read", "library:read"],
             ["embeddings:read"],
+            ["social:read"],
         ]) {
             const response = await request(app)
                 .post("/api/federation/admin/peers")

@@ -41,6 +41,20 @@ async function defaultLeaseSnapshot(): Promise<
 
 export type FederationMetricsRole = "api" | "worker" | "all";
 export type FederationSyncOutcome = "success" | "failure";
+export type FederationPresenceFetchOutcome = "success" | "failure";
+export type FederationPlaylistFetchOutcome =
+    | "success"
+    | "timeout"
+    | "offline"
+    | "unauthorized"
+    | "not_found"
+    | "invalid_response"
+    | "failure";
+export type FederationPlaylistFollowOutcome =
+    | "followed"
+    | "unfollowed"
+    | "failure";
+export type FederationPlaylistCopyOutcome = "success" | "failure";
 export type FederationStreamOutcome =
     | "ok"
     | "http_4xx"
@@ -77,6 +91,7 @@ interface WorkerInstruments {
     lastSyncSuccess: Gauge<"peer">;
     catalogItems: Gauge<"peer" | "type">;
     syncDuration: Histogram<"peer" | "outcome">;
+    presenceFetch: Counter<"peer" | "outcome">;
 }
 
 interface ApiInstruments {
@@ -87,6 +102,10 @@ interface ApiInstruments {
     authFailures: Counter<"peer" | "reason">;
     streamLeases: Gauge<"peer">;
     quotaRejections: Counter<"peer" | "kind">;
+    presenceUsersExported: Counter<"peer">;
+    playlistFetches: Counter<"peer" | "outcome">;
+    playlistFollows: Counter<"peer" | "outcome">;
+    playlistCopies: Counter<"peer" | "outcome">;
 }
 
 async function collectWithTimeout<T>(
@@ -177,6 +196,23 @@ export interface FederationMetrics {
         reason: FederationAuthFailureReason,
     ): void;
     recordQuotaRejection(peerId: string, kind: FederationQuotaKind): void;
+    recordPresenceFetch(
+        peerId: string,
+        outcome: FederationPresenceFetchOutcome,
+    ): void;
+    recordPresenceUsersExported(peerId: string, count: number): void;
+    recordPlaylistFetch(
+        peerId: string,
+        outcome: FederationPlaylistFetchOutcome,
+    ): void;
+    recordPlaylistFollow(
+        peerId: string,
+        outcome: FederationPlaylistFollowOutcome,
+    ): void;
+    recordPlaylistCopy(
+        peerId: string,
+        outcome: FederationPlaylistCopyOutcome,
+    ): void;
 }
 
 function peerLabelGuard(maxPeerLabels: number) {
@@ -349,11 +385,18 @@ function registerWorkerMetrics(
         buckets: DURATION_BUCKETS,
         registers: [registry],
     });
+    const presenceFetch = new Counter({
+        name: "soundspan_federation_presence_fetch_total",
+        help: "Consumer peer presence fetches by bounded peer and closed final outcome; peer labels are bounded to 100 values plus other.",
+        labelNames: ["peer", "outcome"] as const,
+        registers: [registry],
+    });
     const instruments = {
         syncLag,
         lastSyncSuccess,
         catalogItems,
         syncDuration,
+        presenceFetch,
     };
     collectAll = workerCollector(
         instruments,
@@ -483,6 +526,39 @@ function registerHostMetrics(
     return { hostRequests, authFailures, streamLeases, quotaRejections };
 }
 
+function registerPresenceExportMetric(registry: Registry): Counter<"peer"> {
+    return new Counter({
+        name: "soundspan_federation_presence_users_exported_total",
+        help: "Privacy-filtered presence users exported to bounded peers; peer labels are bounded to 100 values plus other.",
+        labelNames: ["peer"] as const,
+        registers: [registry],
+    });
+}
+
+function registerPlaylistMetrics(registry: Registry) {
+    const boundedHelp = "peer labels are bounded to 100 values plus other.";
+    return {
+        playlistFetches: new Counter({
+            name: "soundspan_federation_playlist_fetch_total",
+            help: `Consumer peer playlist fetches by closed outcome; ${boundedHelp}`,
+            labelNames: ["peer", "outcome"] as const,
+            registers: [registry],
+        }),
+        playlistFollows: new Counter({
+            name: "soundspan_federation_playlist_follow_total",
+            help: `Local peer playlist follow changes by closed outcome; ${boundedHelp}`,
+            labelNames: ["peer", "outcome"] as const,
+            registers: [registry],
+        }),
+        playlistCopies: new Counter({
+            name: "soundspan_federation_playlist_copy_total",
+            help: `Local peer playlist copies by closed outcome; ${boundedHelp}`,
+            labelNames: ["peer", "outcome"] as const,
+            registers: [registry],
+        }),
+    };
+}
+
 function registerApiMetrics(
     registry: Registry,
     collectLeases: () => Promise<FederationLeaseMetricSnapshot[]>,
@@ -497,6 +573,8 @@ function registerApiMetrics(
             leasePeer,
             recordFailure,
         ),
+        presenceUsersExported: registerPresenceExportMetric(registry),
+        ...registerPlaylistMetrics(registry),
     };
 }
 
@@ -535,6 +613,11 @@ export function createFederationMetrics(
     const hostPeer = peerLabelGuard(maxPeers);
     const authPeer = peerLabelGuard(maxPeers);
     const quotaPeer = peerLabelGuard(maxPeers);
+    const presenceFetchPeer = peerLabelGuard(maxPeers);
+    const presenceExportPeer = peerLabelGuard(maxPeers);
+    const playlistFetchPeer = peerLabelGuard(maxPeers);
+    const playlistFollowPeer = peerLabelGuard(maxPeers);
+    const playlistCopyPeer = peerLabelGuard(maxPeers);
     return {
         recordPeerSync(peerId, outcome, durationSeconds): void {
             worker?.syncDuration.observe(
@@ -558,6 +641,37 @@ export function createFederationMetrics(
         },
         recordQuotaRejection(peerId, kind): void {
             api?.quotaRejections.inc({ peer: quotaPeer(peerId), kind });
+        },
+        recordPresenceFetch(peerId, outcome): void {
+            worker?.presenceFetch.inc({
+                peer: presenceFetchPeer(peerId),
+                outcome,
+            });
+        },
+        recordPresenceUsersExported(peerId, count): void {
+            if (!Number.isInteger(count) || count < 0) return;
+            api?.presenceUsersExported.inc(
+                { peer: presenceExportPeer(peerId) },
+                count,
+            );
+        },
+        recordPlaylistFetch(peerId, outcome): void {
+            api?.playlistFetches.inc({
+                peer: playlistFetchPeer(peerId),
+                outcome,
+            });
+        },
+        recordPlaylistFollow(peerId, outcome): void {
+            api?.playlistFollows.inc({
+                peer: playlistFollowPeer(peerId),
+                outcome,
+            });
+        },
+        recordPlaylistCopy(peerId, outcome): void {
+            api?.playlistCopies.inc({
+                peer: playlistCopyPeer(peerId),
+                outcome,
+            });
         },
     };
 }
