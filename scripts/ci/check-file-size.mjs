@@ -78,7 +78,7 @@ const BASELINE = Object.freeze({
     "frontend/lib/audio-controls-context.tsx": 2311,
     "frontend/lib/listen-together-context.tsx": 2073,
     "services/audio-analyzer/analyzer.py": 2266,
-    "services/tidal-downloader/app.py": 2209,
+    "services/tidal-streamer/app.py": 2209,
 });
 
 function packageScanRoots(repoRoot) {

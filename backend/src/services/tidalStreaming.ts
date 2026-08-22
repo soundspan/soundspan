@@ -1,7 +1,7 @@
 /**
  * TIDAL Streaming Service
  *
- * Communicates with the tidal-downloader Python sidecar for per-user
+ * Communicates with the tidal-streamer Python sidecar for per-user
  * streaming. Each soundspan user connects their own TIDAL account via
  * device-code OAuth. Credentials are stored encrypted in UserSettings.
  *

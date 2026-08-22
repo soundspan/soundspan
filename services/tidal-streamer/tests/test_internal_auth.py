@@ -1,4 +1,4 @@
-"""Inbound internal-secret auth for the tidal-downloader sidecar (F31).
+"""Inbound internal-secret auth for the tidal-streamer sidecar (F31).
 
 These construct their own clients (no default auth header) so they can
 exercise the missing/wrong/unset-secret branches directly, independent of the
@@ -32,7 +32,7 @@ async def test_health_reachable_without_secret(monkeypatch: pytest.MonkeyPatch) 
     async with _client() as client:
         resp = await client.get("/health")
     assert resp.status_code == 200
-    assert resp.json()["service"] == "tidal-downloader"
+    assert resp.json()["service"] == "tidal-streamer"
 
 
 @pytest.mark.anyio

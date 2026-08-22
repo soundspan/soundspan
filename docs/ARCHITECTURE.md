@@ -12,7 +12,7 @@ graph TD
     BW["backend-worker<br/>Express.js :3010<br/>(optional profile)"]
     PG["PostgreSQL<br/>pgvector/pg16 :5432"]
     RD["Redis 7 :6379"]
-    TD["tidal-downloader<br/>FastAPI :8585"]
+    TD["tidal-streamer<br/>FastAPI :8585"]
     YT["ytmusic-streamer<br/>FastAPI :8586"]
     AA["audio-analyzer<br/>Essentia/MusiCNN"]
     VQ["audio:clap:queue<br/>Redis provider jobs"]
@@ -48,7 +48,7 @@ graph TD
 | frontend                 | backend                 | WebSocket (Socket.IO, proxied by the custom server)                        | 3006                            | JWT (`handshake.auth.token`)                                                                                                  | Listen Together real-time sync                                                                        |
 | backend                  | PostgreSQL              | TCP (Prisma)                                                               | 5432                            | Connection string                                                                                                             | All persistent state                                                                                  |
 | backend                  | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | Listen Together presence/state, OIDC flow state, cache, pub/sub, stream queues                        |
-| backend                  | tidal-downloader        | HTTP                                                                       | 8585                            | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt                                                                 | TIDAL OAuth, search, stream extraction, downloads                                                     |
+| backend                  | tidal-streamer          | HTTP                                                                       | 8585                            | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt                                                                 | TIDAL OAuth, search, stream extraction, downloads                                                     |
 | backend                  | ytmusic-streamer        | HTTP                                                                       | 8586                            | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt                                                                 | YT Music OAuth, search, stream proxy, browse shelves; `/yt/*` pasted-URL preview/stream/download jobs; library album download jobs |
 | backend-worker           | PostgreSQL              | TCP (Prisma)                                                               | 5432                            | Connection string                                                                                                             | Background job state                                                                                  |
 | backend-worker           | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | Job queues (Bull/streams), scheduler claims                                                           |
@@ -93,8 +93,8 @@ Local files are served directly from the mounted `/music` volume. Transcoded var
 
 ```
 Browser → GET /api/tidal-streaming/stream/:tidalId
-  → backend → tidal-downloader:8585/stream
-    → tidal-downloader uses tiddl + per-user OAuth token → TIDAL CDN
+  → backend → tidal-streamer:8585/stream
+    → tidal-streamer uses tiddl + per-user OAuth token → TIDAL CDN
   → audio stream proxied back to browser
 ```
 

@@ -5,7 +5,7 @@
                 "frontend",
                 "backend",
                 "backend-worker",
-                "tidal-downloader",
+                "tidal-streamer",
                 "ytmusic-streamer",
                 "audio-analyzer",
                 "vibe-provider-dclap"
@@ -18,7 +18,7 @@
             "targets": ["postgres", "redis"]
         },
         "external": {
-            "targets": ["tidal-downloader", "ytmusic-streamer"]
+            "targets": ["tidal-streamer", "ytmusic-streamer"]
         },
         "analysis": {
             "targets": ["audio-analyzer", "vibe-provider-dclap"]
@@ -73,10 +73,10 @@
             "tags": ["soundspan-redis:latest"]
         },
 
-        "tidal-downloader": {
+        "tidal-streamer": {
             "context": ".",
-            "dockerfile": "services/tidal-downloader/Dockerfile",
-            "tags": ["soundspan-tidal-downloader:latest"]
+            "dockerfile": "services/tidal-streamer/Dockerfile",
+            "tags": ["soundspan-tidal-streamer:latest"]
         },
 
         "ytmusic-streamer": {

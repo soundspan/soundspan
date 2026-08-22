@@ -156,7 +156,7 @@ pip install \
   -r services/requirements-quality.txt \
   -r services/audio-analyzer/requirements-test.txt \
   -r services/vibe-provider-dclap/requirements-test.txt \
-  -r services/tidal-downloader/requirements-test.txt \
+  -r services/tidal-streamer/requirements-test.txt \
   -r services/ytmusic-streamer/requirements-test.txt
 npm run verify:python
 npm run verify:python-quality
@@ -377,7 +377,7 @@ Python sidecar `pytest` suites exist for all four sidecars:
 
 - `services/audio-analyzer/tests/`
 - `services/vibe-provider-dclap/tests/`
-- `services/tidal-downloader/tests/`
+- `services/tidal-streamer/tests/`
 - `services/ytmusic-streamer/tests/`
 
 Release-gated long-audio suites live separately under:

@@ -1,4 +1,4 @@
-# TIDAL Downloader Service - FastAPI sidecar using tiddl for TIDAL downloads
+# TIDAL Streamer Service - FastAPI sidecar using tiddl for TIDAL streaming and downloads
 FROM python:3.14-slim@sha256:d6e0850f13fda0e2305d4c3c1c2f7930fe1042d34ddd958e49bba6ef685d0bb2
 
 # Avoid interactive prompts
@@ -16,7 +16,7 @@ WORKDIR /app
 
 # Install Python dependencies from the hash-pinned lock (roadmap F50) so a
 # rebuild of this commit resolves the identical transitive tree.
-COPY services/tidal-downloader/requirements.lock ./requirements.lock
+COPY services/tidal-streamer/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # pip is build-time tooling only; removing it from the runtime image drops
@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 RUN python3 -m pip uninstall -y pip
 
 # Copy application code
-COPY services/tidal-downloader/app.py ./app.py
+COPY services/tidal-streamer/app.py ./app.py
 COPY services/common ./common
 
 # Create writable directories and non-root user

@@ -409,7 +409,7 @@ redis:
 tidalSidecar:
   enabled: false
   image:
-    repository: ghcr.io/soundspan/soundspan-tidal-downloader
+    repository: ghcr.io/soundspan/soundspan-tidal-streamer
     tag: 2.4.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
@@ -649,7 +649,7 @@ music:
     size: 100Gi
     storageClass: ""
     # -- RWX required if multiple pods need read/write access (individual mode
-    #    with tidal-downloader). Use RWO if only one pod accesses it.
+    #    with tidal-streamer). Use RWO if only one pod accesses it.
     accessMode: ReadWriteMany
     # -- Name of a pre-existing PVC to mount. When set, no new PVC is created.
     existingClaim: ""

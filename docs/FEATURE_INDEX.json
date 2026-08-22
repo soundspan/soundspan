@@ -422,7 +422,7 @@
         {
             "id": "tidal-streaming",
             "name": "TIDAL Streaming",
-            "description": "Per-user TIDAL gap-fill streaming via device-code OAuth and tidal-downloader sidecar",
+            "description": "Per-user TIDAL gap-fill streaming via device-code OAuth and tidal-streamer sidecar",
             "frontend": {
                 "feature_dirs": [],
                 "routes": []

@@ -1430,6 +1430,11 @@ describe("systemSettings runtime routes", () => {
         const downRes = createRes();
         await testTidalHandler(downReq, downRes);
         expect(downRes.statusCode).toBe(503);
+        expect(downRes.body).toEqual({
+            error: "TIDAL service is not running",
+            details:
+                "The tidal-streamer container is not reachable. Make sure it is running.",
+        });
 
         mockTidalService.isSidecarHealthy.mockResolvedValueOnce(true);
         mockTidalService.verifySession.mockResolvedValueOnce({ valid: false });

@@ -1,7 +1,7 @@
 /**
  * TIDAL Download Service
  *
- * Communicates with the tidal-downloader Python sidecar (FastAPI)
+ * Communicates with the tidal-streamer Python sidecar (FastAPI)
  * to authenticate, search, and download tracks/albums from TIDAL.
  *
  * Auth tokens are persisted in SystemSettings (encrypted at rest).

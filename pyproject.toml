@@ -42,7 +42,7 @@ ignore = [
 "services/*/app.py" = [
   "B008", # FastAPI Depends and Query objects are intentionally constructed as defaults.
 ]
-"services/tidal-downloader/app.py" = [
+"services/tidal-streamer/app.py" = [
   "B008", # FastAPI Depends and Query objects are intentionally constructed as defaults.
   "B904", # Endpoint handlers intentionally translate provider failures into stable HTTP errors.
   "E402", # The shared-service path bootstrap must run before local imports.

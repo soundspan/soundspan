@@ -143,7 +143,7 @@ Stream unowned tracks via per-user TIDAL OAuth.
 
 ### Requirements
 
-- Running `tidal-downloader` sidecar
+- Running `tidal-streamer` sidecar
 - TIDAL enabled in admin settings
 
 ### Per-user setup
@@ -172,7 +172,7 @@ Use TIDAL as a download source for tracks/albums.
 
 ### Setup
 
-1. Ensure `tidal-downloader` service is running
+1. Ensure `tidal-streamer` service is running
 2. Open **Admin** → **Download Services**
 3. Authenticate via device-code flow
 4. Choose download quality and naming template
@@ -209,8 +209,10 @@ Default template:
 Main-channel image:
 
 ```bash
-docker pull ghcr.io/soundspan/soundspan-tidal-downloader:main
+docker pull ghcr.io/soundspan/soundspan-tidal-streamer:main
 ```
+
+The old `ghcr.io/soundspan/soundspan-tidal-downloader` image remains published as an alias, and the old Compose hostname `tidal-downloader` still resolves to `tidal-streamer`.
 
 ## YouTube Music Downloads
 

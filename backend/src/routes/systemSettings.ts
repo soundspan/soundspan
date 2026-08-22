@@ -1226,7 +1226,7 @@ router.post("/test-tidal", async (req, res) => {
             return res.status(503).json({
                 error: "TIDAL service is not running",
                 details:
-                    "The tidal-downloader container is not reachable. Make sure it is running.",
+                    "The tidal-streamer container is not reachable. Make sure it is running.",
             });
         }
 

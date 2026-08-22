@@ -129,7 +129,7 @@ services:
             # Streaming sidecars (both optional — features hidden when unavailable)
             # Backend code defaults to 127.0.0.1; docker-compose overrides with
             # service names so containers resolve each other on the Docker network.
-            TIDAL_SIDECAR_URL: ${TIDAL_SIDECAR_URL:-http://tidal-downloader:8585}
+            TIDAL_SIDECAR_URL: ${TIDAL_SIDECAR_URL:-http://tidal-streamer:8585}
             YTMUSIC_STREAMER_URL: ${YTMUSIC_STREAMER_URL:-http://ytmusic-streamer:8586}
         volumes:
             - ${MUSIC_PATH:-./music}:/music
@@ -348,11 +348,11 @@ services:
     #
     # K8s note: /music should be RWX (ReadWriteMany) if multiple pods share it;
     # tidal_data can be RWO (ReadWriteOnce).
-    tidal-downloader:
+    tidal-streamer:
         build:
             context: .
-            dockerfile: services/tidal-downloader/Dockerfile
-        container_name: ${SOUNDSPAN_TIDAL_CONTAINER_NAME:-soundspan_tidal_downloader}
+            dockerfile: services/tidal-streamer/Dockerfile
+        container_name: ${SOUNDSPAN_TIDAL_CONTAINER_NAME:-soundspan_tidal_streamer}
         environment:
             - TIDDL_PATH=/data/.tiddl
             - MUSIC_PATH=/music
@@ -374,6 +374,10 @@ services:
             timeout: 10s
             retries: 3
             start_period: 15s
+        networks:
+            default:
+                aliases:
+                    - tidal-downloader # Old service name kept as a DNS alias for pre-rename TIDAL_SIDECAR_URL values.
         deploy:
             resources:
                 limits:

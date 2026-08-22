@@ -66,7 +66,7 @@ Images are published to GHCR.
 | Frontend                         | `ghcr.io/soundspan/soundspan-frontend:latest`            | 3030 |
 | Audio Analyzer                   | `ghcr.io/soundspan/soundspan-audio-analyzer:latest`      | —    |
 | Vibe Embedding Provider (DCLAP)  | `ghcr.io/soundspan/soundspan-vibe-provider-dclap:latest` | 8091 |
-| TIDAL Sidecar                    | `ghcr.io/soundspan/soundspan-tidal-downloader:latest`    | 8585 |
+| TIDAL Sidecar                    | `ghcr.io/soundspan/soundspan-tidal-streamer:latest` (also published as `soundspan-tidal-downloader`) | 8585 |
 | YT Music Streamer                | `ghcr.io/soundspan/soundspan-ytmusic-streamer:latest`    | 8586 |
 
 Notes:

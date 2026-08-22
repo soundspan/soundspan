@@ -967,7 +967,7 @@ export const config = {
     ytmusicRegion: process.env.YTMUSIC_REGION || "US",
 
     tidal: {
-        // TIDAL downloader/streamer sidecar base URL.
+        // TIDAL streamer sidecar base URL.
         sidecarUrl: process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585",
     },
 

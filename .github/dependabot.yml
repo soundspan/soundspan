@@ -103,7 +103,7 @@ updates:
           - patch
 
   - package-ecosystem: pip
-    directory: "/services/tidal-downloader"
+    directory: "/services/tidal-streamer"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -176,7 +176,7 @@ updates:
           - patch
 
   - package-ecosystem: docker
-    directory: "/services/tidal-downloader"
+    directory: "/services/tidal-streamer"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

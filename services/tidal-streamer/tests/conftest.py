@@ -1,4 +1,4 @@
-"""Shared fixtures for tidal-downloader tests."""
+"""Shared fixtures for tidal-streamer tests."""
 
 from __future__ import annotations
 

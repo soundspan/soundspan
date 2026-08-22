@@ -225,7 +225,7 @@ jobs:
       # wheels; its dependency-light test job remains on 3.12.
       matrix:
         include:
-          - service: tidal-downloader
+          - service: tidal-streamer
             python-version: "3.14"
           - service: ytmusic-streamer
             python-version: "3.14"
@@ -267,7 +267,7 @@ jobs:
             services/requirements-quality.txt
             services/audio-analyzer/requirements-test.txt
             services/vibe-provider-dclap/requirements-test.txt
-            services/tidal-downloader/requirements-test.txt
+            services/tidal-streamer/requirements-test.txt
             services/ytmusic-streamer/requirements-test.txt
 
       - name: Install quality and sidecar test dependencies
@@ -276,7 +276,7 @@ jobs:
             -r services/requirements-quality.txt \
             -r services/audio-analyzer/requirements-test.txt \
             -r services/vibe-provider-dclap/requirements-test.txt \
-            -r services/tidal-downloader/requirements-test.txt \
+            -r services/tidal-streamer/requirements-test.txt \
             -r services/ytmusic-streamer/requirements-test.txt
 
       - name: Run AIO image hardening tests
@@ -291,8 +291,8 @@ jobs:
       - name: Mypy shared services
         run: mypy
 
-      - name: Mypy TIDAL downloader
-        run: MYPYPATH=services mypy services/tidal-downloader/app.py services/tidal-downloader/tests
+      - name: Mypy TIDAL streamer
+        run: MYPYPATH=services mypy services/tidal-streamer/app.py services/tidal-streamer/tests
 
       - name: Mypy YouTube Music streamer
         run: MYPYPATH=services mypy services/ytmusic-streamer/app.py services/ytmusic-streamer/yt_download.py services/ytmusic-streamer/ytmusic_auth.py services/ytmusic-streamer/ytmusic_browse.py services/ytmusic-streamer/ytmusic_client.py services/ytmusic-streamer/ytmusic_downloads.py services/ytmusic-streamer/ytmusic_library.py services/ytmusic-streamer/ytmusic_lifecycle.py services/ytmusic-streamer/ytmusic_models.py services/ytmusic-streamer/ytmusic_runtime.py services/ytmusic-streamer/ytmusic_search.py services/ytmusic-streamer/ytmusic_stream.py services/ytmusic-streamer/tests

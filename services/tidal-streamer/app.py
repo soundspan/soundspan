@@ -1,5 +1,5 @@
 """
-TIDAL Downloader & Streamer — FastAPI sidecar for soundspan.
+TIDAL Streamer — FastAPI sidecar for soundspan.
 
 Uses the `tiddl` Python library to authenticate, search, download,
 and stream tracks/albums from TIDAL. The Node.js backend communicates
@@ -84,7 +84,7 @@ class TidalAPIProtocol(TrackDownloadAPIProtocol, AlbumAPIProtocol, Protocol):
 
 
 # ── Logging ─────────────────────────────────────────────────────────
-log = configure_service_logger("tidal-downloader")
+log = configure_service_logger("tidal-streamer")
 
 
 class _ThrottlePoolFullWarning(logging.Filter):
@@ -142,7 +142,7 @@ async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 # ── FastAPI app ─────────────────────────────────────────────────────
 app = FastAPI(
-    title="soundspan TIDAL Downloader & Streamer",
+    title="soundspan TIDAL Streamer",
     version="2.0.0",
     lifespan=_app_lifespan,
     dependencies=[Depends(require_internal_secret)],
@@ -1136,7 +1136,7 @@ def _serialize_playlist_detail(playlist: Any) -> JsonObject:
 
 @app.get("/health")
 async def health() -> JsonObject:
-    return {"status": "ok", "service": "tidal-downloader"}
+    return {"status": "ok", "service": "tidal-streamer"}
 
 
 # ── Authentication ──────────────────────────────────────────────────

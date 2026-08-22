@@ -336,7 +336,7 @@ invalidate both cache rows and files.
 PlaylistItem/Queue Item
   → trackId? → active Track.filePath where Track.removedAt is null (local file, best quality)
   → trackId? → active FEDERATED Track → consumer proxy → owning peer /api/federation/v1/stream/:remoteId
-  → trackTidalId? → TrackTidal.tidalId → tidal-downloader:8585/stream (if user has TIDAL OAuth)
+  → trackTidalId? → TrackTidal.tidalId → tidal-streamer:8585/stream (if user has TIDAL OAuth)
   → trackYtMusicId? → TrackYtMusic.videoId → ytmusic-streamer:8586/proxy (free tier or OAuth)
   → Removed local playlist item → retained as unplayable with reason track_removed
   → Other unplayable item (skipped)

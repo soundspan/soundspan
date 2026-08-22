@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The TIDAL sidecar is renamed from `tidal-downloader` to `tidal-streamer`, matching the `ytmusic-streamer` naming: images now publish under `ghcr.io/soundspan/soundspan-tidal-streamer` (with the old `soundspan-tidal-downloader` name still published as an alias), the compose service and default container name follow (`tidal-streamer` / `soundspan_tidal_streamer`), and the old `tidal-downloader` in-network hostname remains as a network alias so custom `TIDAL_SIDECAR_URL` values keep working. No variable names, ports, APIs, Helm values keys, or TIDAL logins change — the rename requires no operator action. (#701)
+
 ### Fixed
 
 ### Security

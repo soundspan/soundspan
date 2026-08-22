@@ -295,7 +295,7 @@ music:
     enabled: true
     size: 500Gi
     storageClass: nfs-client
-    accessMode: ReadWriteMany   # RWX needed if TIDAL downloader writes to it
+    accessMode: ReadWriteMany   # RWX needed if TIDAL streamer writes to it
 ```
 
 ### Optional Sidecars

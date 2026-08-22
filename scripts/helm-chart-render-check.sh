@@ -491,7 +491,7 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
 assert_deployment_image "backend Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-backend" "ghcr.io/soundspan/soundspan-backend@${digest_backend}"
 assert_deployment_image "backend-worker Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-backend-worker" "ghcr.io/soundspan/soundspan-backend-worker@${digest_worker}"
 assert_deployment_image "frontend Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-frontend" "ghcr.io/soundspan/soundspan-frontend@${digest_frontend}"
-assert_deployment_image "TIDAL Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-tidal" "ghcr.io/soundspan/soundspan-tidal-downloader@${digest_tidal}"
+assert_deployment_image "TIDAL Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-tidal" "ghcr.io/soundspan/soundspan-tidal-streamer@${digest_tidal}"
 assert_deployment_image "YT Music Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-ytmusic" "ghcr.io/soundspan/soundspan-ytmusic-streamer@${digest_ytmusic}"
 assert_deployment_image "audio analyzer Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-audio-analyzer" "ghcr.io/soundspan/soundspan-audio-analyzer@${digest_analyzer}"
 assert_deployment_image "DCLAP provider Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-vibe-provider-dclap" "ghcr.io/soundspan/soundspan-vibe-provider-dclap@${digest_dclap}"

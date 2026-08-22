@@ -34,6 +34,7 @@ data volume while the container is stopped.
 
 | Upgrading across | Action needed? |
 | ---------------- | -------------- |
+| **Unreleased (next release)** | None — the TIDAL sidecar is renamed to `tidal-streamer`, but every old reference keeps working: the old image name still receives new versions, and the old in-network hostname still resolves. See the section below if you want to move your pins to the new name. |
 | **2.4.1** | None — plain rolling update; no database migrations. Fixes Subsonic full syncs of large libraries (Symfonium and similar clients importing nothing) and the Library Enrichment failures view. If your server must federate through an egress proxy, the new `FEDERATION_ALLOW_PROXY=true` opt-in restores proxy support that 2.4.0 disabled. |
 | **2.4.0** | Usually none — plain rolling update; all database migrations apply automatically. **Exception:** federation now resolves peer hostnames and rejects private, loopback, and link-local addresses whether configured literally or returned by DNS — if any peer lives on a LAN or VPN, set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading or that peer stops syncing. Federation traffic also no longer routes through `HTTP(S)_PROXY` egress proxies. Heads-up for very large libraries: two migrations do heavier work (track-mapping housekeeping and an album-ownership guard), so the first startup can take longer than usual. Also new: a daily cleanup removes stale, unliked, unplayable TIDAL/YouTube Music catalog rows after 30 days (`PROVIDER_TRACK_RETENTION_DAYS` to tune); liked, playlisted, recently played, and file-backed content is always kept. |
 | **2.3.3** | Usually none — plain rolling update; a small database change applies automatically. **Exception:** if a federation peer is configured by a literal private, loopback, or link-local IP address (LAN/VPN IPs, `127.x`, `169.254.x`) or by `localhost`, set `FEDERATION_ALLOW_PRIVATE_PEERS=true` first — outbound federation now rejects these by default (peers configured by a DNS hostname other than `localhost` are unaffected). If you are on 2.3.2, upgrade promptly: its audio-analyzer container could not start, so loudness measurement was paused until this release. |
@@ -47,6 +48,31 @@ data volume while the container is stopped.
 Anything not listed: drop-in.
 
 ---
+
+## Unreleased (next release): TIDAL sidecar renamed to `tidal-streamer`
+
+The TIDAL sidecar now matches the YouTube sidecar's naming. It streams and
+downloads, so it is named for its primary role, like `ytmusic-streamer`.
+
+**No action is required.** Every old reference keeps working:
+
+- Images are published under both names. `soundspan-tidal-streamer` is the
+  new primary; `soundspan-tidal-downloader` receives the same versions as an
+  alias.
+- The compose service is now `tidal-streamer`, but the old in-network
+  hostname `tidal-downloader` still resolves to it. A custom
+  `TIDAL_SIDECAR_URL=http://tidal-downloader:8585` keeps working.
+- The `TIDAL_SIDECAR_URL` and `SOUNDSPAN_TIDAL_CONTAINER_NAME` variable
+  names, the sidecar's port (8585), its API, your TIDAL login, and all Helm
+  values keys (`tidalSidecar`) are unchanged.
+
+Cosmetic changes you may notice: the default container name is now
+`soundspan_tidal_streamer`, and the Helm chart's default image points at the
+new name. Set `SOUNDSPAN_TIDAL_CONTAINER_NAME=soundspan_tidal_downloader` if
+your tooling keys on the old container name.
+
+When convenient, move image pins and custom URLs to the new name — the alias
+exists so you never have to do this during the upgrade itself.
 
 ## 2.3.0: DCLAP replaces the torch CLAP analyzer
 

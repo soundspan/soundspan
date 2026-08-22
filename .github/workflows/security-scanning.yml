@@ -192,12 +192,12 @@ jobs:
         # -- the versions checked are exactly what the image installs. Only
         # environment markers are evaluated on the runner's interpreter.
         include:
-          # ytmusic-streamer + tidal-downloader images are python:3.14-slim.
+          # ytmusic-streamer + tidal-streamer images are python:3.14-slim.
           - requirements: services/ytmusic-streamer/requirements.lock
             python-version: "3.14"
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
-          - requirements: services/tidal-downloader/requirements.lock
+          - requirements: services/tidal-streamer/requirements.lock
             python-version: "3.14"
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
@@ -255,7 +255,7 @@ jobs:
           # audits the un-locked floors, INCLUDING the deliberately-exempt
           # yt-dlp/ytmusicapi that never appear in a lock. Images are
           # python:3.14-slim.
-          - requirements: services/tidal-downloader/requirements-test.txt
+          - requirements: services/tidal-streamer/requirements-test.txt
             python-version: "3.14"
             audit-args: ""
             ignore-vulns: ""

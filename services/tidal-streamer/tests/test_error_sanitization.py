@@ -25,7 +25,7 @@ async def test_auth_device_error_sanitized(
 
     monkeypatch.setattr(app, "AuthAPI", FailingAuthAPI)
 
-    with caplog.at_level(logging.ERROR, logger="tidal-downloader"):
+    with caplog.at_level(logging.ERROR, logger="tidal-streamer"):
         resp = await client.post("/auth/device")
 
     assert resp.status_code == 500
@@ -45,7 +45,7 @@ async def test_auth_session_api_error_sanitized(
 
     monkeypatch.setattr(app, "_build_api", _raise_api_error)
 
-    with caplog.at_level(logging.ERROR, logger="tidal-downloader"):
+    with caplog.at_level(logging.ERROR, logger="tidal-streamer"):
         resp = await client.post(
             "/auth/session",
             json={"access_token": "a", "user_id": "u", "country_code": "US"},
@@ -72,7 +72,7 @@ async def test_search_api_error_sanitized(
         lambda *_args, **_kwargs: types.SimpleNamespace(get_search=_raise_api_error),
     )
 
-    with caplog.at_level(logging.ERROR, logger="tidal-downloader"):
+    with caplog.at_level(logging.ERROR, logger="tidal-streamer"):
         resp = await client.post(
             "/search?access_token=t&user_id=u&country_code=US",
             json={"query": "q"},
@@ -104,7 +104,7 @@ async def test_user_auth_restore_failure_sanitized(
     )
     monkeypatch.setattr(app, "AuthAPI", FailingAuthAPI)
 
-    with caplog.at_level(logging.WARNING, logger="tidal-downloader"):
+    with caplog.at_level(logging.WARNING, logger="tidal-streamer"):
         resp = await client.post(
             "/user/auth/restore?user_id=u1",
             json={
@@ -137,7 +137,7 @@ async def test_browse_home_error_sanitized(
         lambda user_id, quality=None: types.SimpleNamespace(home=_boom),
     )
 
-    with caplog.at_level(logging.ERROR, logger="tidal-downloader"):
+    with caplog.at_level(logging.ERROR, logger="tidal-streamer"):
         resp = await client.get("/user/browse/home?user_id=u1")
 
     assert resp.status_code == 500
@@ -171,7 +171,7 @@ async def test_download_album_per_track_error_sanitized(
     monkeypatch.setattr(app, "_build_api", lambda *_args, **_kwargs: api)
     monkeypatch.setattr(app, "_download_track_sync", _raise_download_error)
 
-    with caplog.at_level(logging.ERROR, logger="tidal-downloader"):
+    with caplog.at_level(logging.ERROR, logger="tidal-streamer"):
         resp = await client.post(
             "/download/album?access_token=t&user_id=u",
             json={"album_id": 2},

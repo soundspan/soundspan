@@ -49,8 +49,8 @@ jobs:
             image: soundspan-audio-analyzer
           - name: vibe-provider-dclap
             image: soundspan-vibe-provider-dclap
-          - name: tidal-downloader
-            image: soundspan-tidal-downloader
+          - name: tidal-streamer
+            image: soundspan-tidal-streamer
           - name: ytmusic-streamer
             image: soundspan-ytmusic-streamer
     steps:

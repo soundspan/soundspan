@@ -11,7 +11,7 @@ const dockerfilePaths = [
     "backend/Dockerfile",
     "frontend/Dockerfile",
     "services/audio-analyzer/Dockerfile",
-    "services/tidal-downloader/Dockerfile",
+    "services/tidal-streamer/Dockerfile",
     "services/ytmusic-streamer/Dockerfile",
     "services/vibe-provider-dclap/Dockerfile",
 ];
@@ -40,7 +40,7 @@ const chartComponentDockerfiles = new Map([
     ["backend", "backend/Dockerfile"],
     ["backendWorker", "backend/Dockerfile"],
     ["frontend", "frontend/Dockerfile"],
-    ["tidalSidecar", "services/tidal-downloader/Dockerfile"],
+    ["tidalSidecar", "services/tidal-streamer/Dockerfile"],
     ["ytmusicStreamer", "services/ytmusic-streamer/Dockerfile"],
     ["audioAnalyzer", "services/audio-analyzer/Dockerfile"],
 ]);

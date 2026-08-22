@@ -126,19 +126,21 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: vibe-provider-dclap
-                    - id: tidal-downloader
-                      job_name: Build & Push TIDAL Downloader Image
+                    - id: tidal-streamer
+                      job_name: Build & Push TIDAL Streamer Image
                       runs_on: ubuntu-latest
-                      image_name: tidal-downloader
+                      image_name: tidal-streamer
+                      # Rename back-compat: keep publishing identical tags under the old image name.
+                      alias_image_name: tidal-downloader
                       image_repo_mode: suffixed
                       context: .
-                      file: ./services/tidal-downloader/Dockerfile
+                      file: ./services/tidal-streamer/Dockerfile
                       target: ""
                       build_contexts: ""
                       include_hf_token: false
                       needs_node: false
                       include_frontend_build_args: false
-                      cache_scope: tidal-downloader
+                      cache_scope: tidal-streamer
                     - id: ytmusic-streamer
                       job_name: Build & Push YTMusic Streamer Image
                       runs_on: ubuntu-latest
@@ -226,6 +228,20 @@ jobs:
                   fi
                   echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
 
+                  ALIAS_IMAGE_NAME="${{ matrix.alias_image_name || '' }}"
+                  ALIAS_IMAGE_REPO=""
+                  if [ -n "${ALIAS_IMAGE_NAME}" ]; then
+                    ALIAS_IMAGE_REPO="${GHCR_REPO}-${ALIAS_IMAGE_NAME}"
+                  fi
+
+                  emit_tag() {
+                    local tag="$1"
+                    echo "${IMAGE_REPO}:${tag}"
+                    if [ -n "${ALIAS_IMAGE_REPO}" ]; then
+                      echo "${ALIAS_IMAGE_REPO}:${tag}"
+                    fi
+                  }
+
                   if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
                     RELEASE_TAG="${{ needs.validate-release-tag.outputs.release_tag }}"
                     if [ -z "${RELEASE_TAG}" ]; then
@@ -242,14 +258,14 @@ jobs:
                     if [[ "${RELEASE_TAG}" == *-* ]]; then
                       {
                         echo "tags<<EOF"
-                        echo "${IMAGE_REPO}:${RELEASE_TAG}"
+                        emit_tag "${RELEASE_TAG}"
                         echo "EOF"
                       } >> "$GITHUB_OUTPUT"
                     else
                       {
                         echo "tags<<EOF"
-                        echo "${IMAGE_REPO}:latest"
-                        echo "${IMAGE_REPO}:${RELEASE_TAG}"
+                        emit_tag "latest"
+                        emit_tag "${RELEASE_TAG}"
                         echo "EOF"
                       } >> "$GITHUB_OUTPUT"
                     fi
@@ -267,8 +283,8 @@ jobs:
                     fi
                     {
                       echo "tags<<EOF"
-                      echo "${IMAGE_REPO}:${CHANNEL}"
-                      echo "${IMAGE_REPO}:${CHANNEL}-${{ steps.sha.outputs.short }}"
+                      emit_tag "${CHANNEL}"
+                      emit_tag "${CHANNEL}-${{ steps.sha.outputs.short }}"
                       echo "EOF"
                     } >> "$GITHUB_OUTPUT"
                   fi
