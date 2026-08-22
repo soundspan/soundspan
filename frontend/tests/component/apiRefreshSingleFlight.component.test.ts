@@ -42,14 +42,12 @@ test("shares one token refresh across concurrent 401 responses", async () => {
             refreshCount += 1;
             return new Promise<Response>((resolve) => {
                 setTimeout(() => {
-                    resolve({
-                        ok: true,
-                        status: 200,
-                        json: async () => ({
+                    resolve(
+                        Response.json({
                             token: "access-new",
                             refreshToken: "refresh-new",
                         }),
-                    } as Response);
+                    );
                 }, 5);
             });
         }
@@ -67,11 +65,7 @@ test("shares one token refresh across concurrent 401 responses", async () => {
             } as Response;
         }
         if (authorization === "Bearer access-new") {
-            return {
-                ok: true,
-                status: 200,
-                json: async () => ({ ok: true }),
-            } as Response;
+            return Response.json({ ok: true });
         }
 
         throw new Error(`Unexpected Authorization header for ${url}`);
@@ -214,23 +208,15 @@ test("refreshes a second time after one spurious post-refresh 401", async () => 
                 (init as RequestInit & { priority?: string }).priority,
                 "high",
             );
-            return {
-                ok: true,
-                status: 200,
-                json: async () => ({
-                    token: `access-${refreshCount}`,
-                    refreshToken: `refresh-${refreshCount}`,
-                }),
-            } as Response;
+            return Response.json({
+                token: `access-${refreshCount}`,
+                refreshToken: `refresh-${refreshCount}`,
+            });
         }
 
         const authorization = new Headers(init?.headers).get("Authorization");
         if (authorization === "Bearer access-2") {
-            return {
-                ok: true,
-                status: 200,
-                json: async () => ({ ok: true }),
-            } as Response;
+            return Response.json({ ok: true });
         }
         return {
             ok: false,
@@ -266,14 +252,10 @@ test("logs out when the second refresh is rejected", async () => {
         if (String(input).endsWith("/api/auth/refresh")) {
             refreshCount += 1;
             if (refreshCount === 1) {
-                return {
-                    ok: true,
-                    status: 200,
-                    json: async () => ({
-                        token: "access-1",
-                        refreshToken: "refresh-1",
-                    }),
-                } as Response;
+                return Response.json({
+                    token: "access-1",
+                    refreshToken: "refresh-1",
+                });
             }
             return {
                 ok: false,
