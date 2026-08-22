@@ -493,6 +493,104 @@ describe("workers runtime behavior", () => {
         expect(mocks.audiobookCacheService.syncAll).not.toHaveBeenCalled();
     });
 
+    it("resolves repeat audiobook sync failures and warns", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        (mocks.getSystemSettings as jest.Mock).mockResolvedValue({
+            audiobookshelfEnabled: true,
+            audiobookshelfUrl: "http://abs.local",
+        });
+        mocks.audiobookCacheService.syncMissing.mockRejectedValueOnce(
+            new Error("abs down"),
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+
+        await expect(
+            schedulerHandler({
+                id: "audiobook-sync-failure",
+                name: "audiobook-auto-sync-startup",
+                data: { mode: "repeat" },
+            }),
+        ).resolves.toBeUndefined();
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            "Repeat audiobook auto-sync failed; will retry on the next cycle",
+            expect.objectContaining({ message: "abs down" }),
+        );
+    });
+
+    it("debounces repeat audiobook sync failure warnings without rejecting", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        (mocks.getSystemSettings as jest.Mock).mockResolvedValue({
+            audiobookshelfEnabled: true,
+            audiobookshelfUrl: "http://abs.local",
+        });
+        mocks.audiobookCacheService.syncMissing
+            .mockRejectedValueOnce(new Error("abs down"))
+            .mockRejectedValueOnce(new Error("abs down"));
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+        const repeatJob = {
+            id: "audiobook-sync-failure",
+            name: "audiobook-auto-sync-startup",
+            data: { mode: "repeat" },
+        };
+
+        await expect(schedulerHandler(repeatJob)).resolves.toBeUndefined();
+        await expect(schedulerHandler(repeatJob)).resolves.toBeUndefined();
+
+        expect(mocks.logger.warn).toHaveBeenCalledTimes(1);
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            "Repeat audiobook auto-sync failed; will retry on the next cycle",
+            expect.objectContaining({ message: "abs down" }),
+        );
+        expect(mocks.logger.debug).toHaveBeenCalledWith(
+            "Repeat audiobook auto-sync failed; will retry on the next cycle",
+            expect.objectContaining({ message: "abs down" }),
+        );
+    });
+
+    it("propagates startup audiobook sync failures", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        (mocks.getSystemSettings as jest.Mock).mockResolvedValue({
+            audiobookshelfEnabled: true,
+            audiobookshelfUrl: "http://abs.local",
+        });
+        mocks.audiobookCacheService.syncMissing.mockRejectedValueOnce(
+            new Error("abs down"),
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+
+        await expect(
+            schedulerHandler({
+                id: "audiobook-startup-failure",
+                name: "audiobook-auto-sync-startup",
+                data: { mode: "startup" },
+            }),
+        ).rejects.toThrow("abs down");
+    });
+
     it("dispatches track-removal purge jobs through the scheduler", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();

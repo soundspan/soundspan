@@ -53,23 +53,19 @@ import { createIORedisClient } from "../utils/ioredis";
 import { dataCacheService } from "../services/dataCache";
 import { genericImportJobRunner } from "../services/genericImportJobRunner";
 import type { ReconciliationCursor } from "../services/trackReconciliation";
-import {
-    AUDIO_HASH_BACKFILL_JOB_NAME,
-    processAudioHashBackfill,
-} from "./processors/audioHashBackfillProcessor";
-import {
-    LOUDNESS_BACKFILL_JOB_NAME,
-    processLoudnessBackfill,
-} from "./processors/loudnessBackfillProcessor";
-import { loudnessBackfillRepeatSchedule } from "./loudnessBackfillSchedule";
-import {
-    processTrackRemovalPurge,
-    TRACK_REMOVAL_PURGE_JOB_NAME,
-} from "./processors/trackRemovalPurgeProcessor";
+import { processAudioHashBackfill } from "./processors/audioHashBackfillProcessor";
+import { processLoudnessBackfill } from "./processors/loudnessBackfillProcessor";
+import { processTrackRemovalPurge } from "./processors/trackRemovalPurgeProcessor";
 import {
     registerFederationProcessors,
     registerFederationSchedules,
 } from "./federationJobs";
+import {
+    buildSchedulerJobs,
+    ONE_HOUR_MS,
+    ONE_MINUTE_MS,
+    SCHEDULER_JOB_TYPES,
+} from "./schedulerJobRegistry";
 
 const log = logger.child("WorkerScheduler");
 const claimLog = log.child("SchedulerClaim");
@@ -85,8 +81,6 @@ let schedulerLockRedis: Redis = createIORedisClient(
     jestLazyConnectOverride,
 );
 const schedulerLockOwnerId = `${WORKER_PROCESSOR_ID}:scheduler-claims`;
-const ONE_MINUTE_MS = 60_000;
-const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
 const TRACK_RECONCILIATION_CURSOR_KEY =
     "scheduler:cursor:track-mapping-reconcile";
 const MAX_RECONCILIATION_CURSOR_BYTES = 512;
@@ -287,50 +281,6 @@ async function saveReconciliationCursor(
         schedulerLockRedis.set(TRACK_RECONCILIATION_CURSOR_KEY, stored),
     );
 }
-
-const SCHEDULER_JOB_TYPES = {
-    dataIntegrity: "data-integrity-check",
-    reconciliation: "download-reconciliation-cycle",
-    lidarrCleanup: "lidarr-cleanup-cycle",
-    cacheWarmup: "cache-warmup-startup",
-    podcastCleanup: "podcast-cache-cleanup",
-    audiobookAutoSync: "audiobook-auto-sync-startup",
-    downloadQueueReconcile: "download-queue-reconcile-startup",
-    artistCountsBackfill: "artist-counts-backfill-startup",
-    imageBackfill: "image-backfill-startup",
-    audioHashBackfill: AUDIO_HASH_BACKFILL_JOB_NAME,
-    loudnessBackfill: LOUDNESS_BACKFILL_JOB_NAME,
-    trackRemovalPurge: TRACK_REMOVAL_PURGE_JOB_NAME,
-    trackMappingReconcile: "track-mapping-reconcile",
-    remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
-} as const;
-
-const SCHEDULER_JOB_IDS = {
-    dataIntegrityStartup: "scheduler:data-integrity:startup",
-    dataIntegrityRepeat: "scheduler:data-integrity:repeat",
-    reconciliationStartup: "scheduler:reconciliation:startup",
-    reconciliationRepeat: "scheduler:reconciliation:repeat",
-    lidarrCleanupStartup: "scheduler:lidarr-cleanup:startup",
-    lidarrCleanupRepeat: "scheduler:lidarr-cleanup:repeat",
-    cacheWarmupStartup: "scheduler:cache-warmup:startup",
-    podcastCleanupStartup: "scheduler:podcast-cleanup:startup",
-    podcastCleanupRepeat: "scheduler:podcast-cleanup:repeat",
-    audiobookAutoSyncStartup: "scheduler:audiobook-auto-sync:startup",
-    audiobookAutoSyncRepeat: "scheduler:audiobook-auto-sync:repeat",
-    downloadQueueReconcileStartup: "scheduler:download-queue-reconcile:startup",
-    artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
-    imageBackfillStartup: "scheduler:image-backfill:startup",
-    audioHashBackfillStartup: "scheduler:audio-hash-backfill:startup",
-    loudnessBackfillStartup: "scheduler:loudness-backfill:startup",
-    trackRemovalPurgeStartup: "scheduler:track-removal-purge:startup",
-    trackRemovalPurgeRepeat: "scheduler:track-removal-purge:repeat",
-    trackMappingReconcileStartup: "scheduler:track-mapping-reconcile:startup",
-    trackMappingReconcileRepeat: "scheduler:track-mapping-reconcile:repeat",
-    remoteTrackMetadataRefreshStartup:
-        "scheduler:remote-track-metadata-refresh:startup",
-    remoteTrackMetadataRefreshRepeat:
-        "scheduler:remote-track-metadata-refresh:repeat",
-} as const;
 
 async function runWithSchedulerClaim(
     claimKey: string,
@@ -595,6 +545,9 @@ async function processPodcastCleanupJob(
     );
 }
 
+const REPEAT_SYNC_FAILURE_WARN_INTERVAL_MS = ONE_HOUR_MS;
+let lastAudiobookRepeatFailureWarnAt = 0;
+
 async function processAudiobookAutoSyncJob(
     mode: "startup" | "repeat",
 ): Promise<void> {
@@ -619,11 +572,31 @@ async function processAudiobookAutoSyncJob(
             }
             const { audiobookCacheService } =
                 await import("../services/audiobookCache");
-            const result = await withTimeout(
-                () => audiobookCacheService.syncMissing(),
-                2 * ONE_HOUR_MS,
-                "audiobookCacheService.syncMissing",
-            );
+            let result;
+            try {
+                result = await withTimeout(
+                    () => audiobookCacheService.syncMissing(),
+                    2 * ONE_HOUR_MS,
+                    "audiobookCacheService.syncMissing",
+                );
+            } catch (error) {
+                if (mode === "startup") {
+                    throw error;
+                }
+                const now = Date.now();
+                const message =
+                    "Repeat audiobook auto-sync failed; will retry on the next cycle";
+                if (
+                    now - lastAudiobookRepeatFailureWarnAt >=
+                    REPEAT_SYNC_FAILURE_WARN_INTERVAL_MS
+                ) {
+                    lastAudiobookRepeatFailureWarnAt = now;
+                    startupLog.warn(message, error);
+                } else {
+                    startupLog.debug(message, error);
+                }
+                return;
+            }
             if (
                 result &&
                 (mode === "startup" || result.synced || result.failed)
@@ -788,253 +761,10 @@ async function processRemoteTrackMetadataRefreshJob(): Promise<void> {
     );
 }
 
-type SchedulerRegistration = {
-    type: (typeof SCHEDULER_JOB_TYPES)[keyof typeof SCHEDULER_JOB_TYPES];
-    data: { mode: "startup" | "repeat"; sweepStartedAt?: string };
-    opts: Bull.JobOptions;
-};
-
-function analysisBackfillStartupJob(
-    type: SchedulerRegistration["type"],
-    jobId: string,
-    delay: number,
-): SchedulerRegistration {
-    return {
-        type,
-        data: { mode: "startup", sweepStartedAt: new Date().toISOString() },
-        opts: {
-            jobId,
-            delay,
-            attempts: 3,
-            backoff: { type: "exponential", delay: 5_000 },
-            removeOnComplete: true,
-            removeOnFail: 10,
-        },
-    };
-}
-
-// Cohesion exception: this pre-existing function is one declarative schedule
-// registry. Analysis backfill construction is extracted above for reviewability.
 async function registerSchedulerJobs(): Promise<void> {
     await schedulerQueue.isReady();
 
-    const schedulerJobs: SchedulerRegistration[] = [
-        {
-            type: SCHEDULER_JOB_TYPES.dataIntegrity,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.dataIntegrityStartup,
-                delay: 10_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.dataIntegrity,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.dataIntegrityRepeat,
-                repeat: { every: 24 * ONE_HOUR_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.reconciliation,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.reconciliationStartup,
-                delay: 2 * ONE_MINUTE_MS,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.reconciliation,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.reconciliationRepeat,
-                repeat: { every: 2 * ONE_MINUTE_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.lidarrCleanup,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.lidarrCleanupStartup,
-                delay: 30_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.lidarrCleanup,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.lidarrCleanupRepeat,
-                repeat: { every: 5 * ONE_MINUTE_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.cacheWarmup,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.cacheWarmupStartup,
-                delay: 5_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.podcastCleanup,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.podcastCleanupStartup,
-                delay: 15_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.podcastCleanup,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.podcastCleanupRepeat,
-                repeat: { every: 24 * ONE_HOUR_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.audiobookAutoSync,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.audiobookAutoSyncStartup,
-                delay: 20_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.audiobookAutoSync,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.audiobookAutoSyncRepeat,
-                repeat: { every: 5 * ONE_MINUTE_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.downloadQueueReconcile,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.downloadQueueReconcileStartup,
-                delay: 25_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.artistCountsBackfill,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.artistCountsBackfillStartup,
-                delay: 30_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.imageBackfill,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.imageBackfillStartup,
-                delay: 40_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        analysisBackfillStartupJob(
-            SCHEDULER_JOB_TYPES.audioHashBackfill,
-            SCHEDULER_JOB_IDS.audioHashBackfillStartup,
-            50_000,
-        ),
-        analysisBackfillStartupJob(
-            SCHEDULER_JOB_TYPES.loudnessBackfill,
-            SCHEDULER_JOB_IDS.loudnessBackfillStartup,
-            55_000,
-        ),
-        loudnessBackfillRepeatSchedule,
-        {
-            type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.trackRemovalPurgeStartup,
-                delay: ONE_MINUTE_MS,
-                attempts: 3,
-                backoff: { type: "exponential", delay: 5_000 },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.trackRemovalPurgeRepeat,
-                repeat: { every: 24 * ONE_HOUR_MS },
-                attempts: 3,
-                backoff: { type: "exponential", delay: 5_000 },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.trackMappingReconcileStartup,
-                delay: 45_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.trackMappingReconcileRepeat,
-                repeat: { every: 6 * ONE_HOUR_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh,
-            data: { mode: "startup" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.remoteTrackMetadataRefreshStartup,
-                delay: 90_000,
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh,
-            data: { mode: "repeat" },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.remoteTrackMetadataRefreshRepeat,
-                repeat: { every: 12 * ONE_HOUR_MS },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-    ];
+    const schedulerJobs = buildSchedulerJobs();
 
     for (const job of schedulerJobs) {
         await schedulerQueue.add(job.type, job.data, job.opts);
