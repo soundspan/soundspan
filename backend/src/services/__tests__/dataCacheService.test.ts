@@ -307,6 +307,30 @@ describe("dataCacheService", () => {
         );
     });
 
+    it("routes a coverless federated album with a real MBID through the album cover endpoint", async () => {
+        mockAlbumFindUnique.mockResolvedValue({
+            coverUrl: null,
+            location: "FEDERATED",
+        });
+
+        const result = await dataCacheService.getAlbumCover(
+            "federated-album",
+            "11111111-1111-4111-8111-111111111111",
+        );
+
+        expect(result).toBe("/api/library/cover-art/federated-album");
+        expect(mockCoverArtGet).not.toHaveBeenCalled();
+        expect(mockRedisSetEx).not.toHaveBeenCalledWith(
+            "album-cover:federated-album",
+            NEGATIVE_CACHE_SECONDS,
+            "NOT_FOUND",
+        );
+        expect(mockAlbumFindUnique).toHaveBeenCalledWith({
+            where: { id: "federated-album" },
+            select: { coverUrl: true, location: true },
+        });
+    });
+
     it("returns track cover from album row when rgMbid is missing", async () => {
         mockAlbumFindUnique.mockResolvedValue({
             rgMbid: null,

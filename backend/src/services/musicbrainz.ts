@@ -13,8 +13,13 @@ const MBID_PATTERN =
 
 type MbidEntity = "artist" | "release group" | "release";
 
+/** Returns whether a value has the UUID shape required for MusicBrainz IDs. */
+export function isValidMbid(value: unknown): value is string {
+    return typeof value === "string" && MBID_PATTERN.test(value);
+}
+
 function validateMbid(value: unknown, entity: MbidEntity): string {
-    if (typeof value !== "string" || !MBID_PATTERN.test(value)) {
+    if (!isValidMbid(value)) {
         throw new TypeError(`Invalid ${entity} MBID`);
     }
 

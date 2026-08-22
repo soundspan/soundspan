@@ -377,6 +377,48 @@ describe("subsonic core compatibility handlers", () => {
         expect(payload.albumList2.album[0]).not.toHaveProperty("played");
     });
 
+    it("advertises cover art for coverless federated albums but not coverless local albums", async () => {
+        const albumBase = {
+            year: 2024,
+            lastSynced: new Date("2026-08-01T00:00:00.000Z"),
+            coverUrl: null,
+            genres: [],
+            userGenres: [],
+            artist: { id: "artist-1", name: "Artist One" },
+            tracks: [{ id: "track-1", duration: 120 }],
+        };
+        mockAlbumFindMany.mockResolvedValue([
+            {
+                ...albumBase,
+                id: "federated-album",
+                title: "Federated Album",
+                location: "FEDERATED",
+            },
+            {
+                ...albumBase,
+                id: "local-album",
+                title: "Local Album",
+                location: "LIBRARY",
+            },
+        ]);
+
+        await handleGetAlbumList2(
+            buildReq({ type: "alphabeticalByName", size: "2" }),
+            buildRes(),
+        );
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            albumList2: { album: Array<Record<string, unknown>> };
+        };
+        expect(payload.albumList2.album).toEqual([
+            expect.objectContaining({
+                id: "al-federated-album",
+                coverArt: "al-federated-album",
+            }),
+            expect.not.objectContaining({ coverArt: expect.anything() }),
+        ]);
+    });
+
     it("defaults random-song size and ignores an invalid fromYear while shuffling", async () => {
         const candidateSongs = Array.from({ length: 20 }, (_, index) => {
             const artistNumber = Math.floor(index / 4) + 1;
@@ -439,6 +481,70 @@ describe("subsonic core compatibility handlers", () => {
                     }),
                 }),
                 take: 5000,
+            }),
+        );
+        randomSpy.mockRestore();
+    });
+
+    it("advertises cover art for coverless federated songs but not coverless local songs", async () => {
+        const songBase = {
+            title: "Coverless song",
+            trackNo: 1,
+            discNo: 1,
+            duration: 180,
+            fileSize: 1234,
+            mime: "audio/mpeg",
+            filePath: "Artist/Album/song.mp3",
+        };
+        const albumBase = {
+            title: "Coverless album",
+            year: 2024,
+            coverUrl: null,
+            genres: [],
+            userGenres: null,
+            artist: { id: "artist-1", name: "Artist" },
+        };
+        mockTrackFindMany.mockResolvedValue([
+            {
+                ...songBase,
+                id: "federated-track",
+                album: {
+                    ...albumBase,
+                    id: "federated-album",
+                    location: "FEDERATED",
+                },
+            },
+            {
+                ...songBase,
+                id: "local-track",
+                album: {
+                    ...albumBase,
+                    id: "local-album",
+                    location: "LIBRARY",
+                },
+            },
+        ]);
+        const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.5);
+
+        await handleGetRandomSongs(buildReq({ size: "2" }), buildRes());
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            randomSongs: { song: Array<Record<string, unknown>> };
+        };
+        const songsById = new Map(
+            payload.randomSongs.song.map((song) => [song.id, song]),
+        );
+        expect(songsById.get("tr-federated-track")).toEqual(
+            expect.objectContaining({ coverArt: "al-federated-album" }),
+        );
+        expect(songsById.get("tr-local-track")).not.toHaveProperty("coverArt");
+        expect(mockTrackFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                select: expect.objectContaining({
+                    album: expect.objectContaining({
+                        select: expect.objectContaining({ location: true }),
+                    }),
+                }),
             }),
         );
         randomSpy.mockRestore();

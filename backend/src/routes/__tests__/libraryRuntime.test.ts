@@ -126,6 +126,7 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             delete: jest.fn(),
             update: jest.fn(),
+            updateMany: jest.fn(),
         },
         audiobookProgress: {
             findMany: jest.fn(),
@@ -237,6 +238,11 @@ jest.mock("../../services/imageProvider", () => ({
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
+    isValidMbid: (value: unknown) =>
+        typeof value === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            value,
+        ),
     musicBrainzService: {
         searchArtist: jest.fn(),
         getReleaseGroups: jest.fn(),
@@ -371,6 +377,7 @@ import { lastFmService } from "../../services/lastfm";
 import { deezerService } from "../../services/deezer";
 import { imageProviderService } from "../../services/imageProvider";
 import { musicBrainzService } from "../../services/musicbrainz";
+import { nativeCoverHealInFlight } from "../../services/nativeCoverHealing";
 import { getMergedGenres } from "../../utils/metadataOverrides";
 import {
     isBackfillNeeded,
@@ -439,6 +446,7 @@ const mockAlbumFindFirst = prisma.album.findFirst as jest.Mock;
 const mockAlbumFindUnique = prisma.album.findUnique as jest.Mock;
 const mockAlbumDelete = prisma.album.delete as jest.Mock;
 const mockAlbumUpdate = prisma.album.update as jest.Mock;
+const mockAlbumUpdateMany = prisma.album.updateMany as jest.Mock;
 const mockAudiobookProgressFindMany = prisma.audiobookProgress
     .findMany as jest.Mock;
 const mockPodcastProgressFindMany = prisma.podcastProgress
@@ -466,6 +474,8 @@ const mockLoggerWarn = logger.warn as jest.Mock;
 const mockLoggerDebug = logger.debug as jest.Mock;
 const mockAudioStreamingCtor = AudioStreamingService as unknown as jest.Mock;
 const mockCoverArtGetCoverArt = coverArtService.getCoverArt as jest.Mock;
+const mockCoverArtClearNotFoundCache =
+    coverArtService.clearNotFoundCache as jest.Mock;
 const mockFetchExternalImage = fetchExternalImage as jest.Mock;
 const mockNormalizeExternalImageUrl = normalizeExternalImageUrl as jest.Mock;
 const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
@@ -1806,6 +1816,7 @@ describe("library catalog list runtime coverage", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        nativeCoverHealInFlight.clear();
         mockLookup.mockReset();
         mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
         mockTrackFindUnique.mockReset();
@@ -1836,6 +1847,7 @@ describe("library catalog list runtime coverage", () => {
         mockAlbumFindUnique.mockReset();
         mockAlbumDelete.mockReset();
         mockAlbumUpdate.mockReset();
+        mockAlbumUpdateMany.mockReset();
         mockOwnedAlbumGroupBy.mockReset();
         mockOwnedAlbumFindMany.mockReset();
         mockOwnedAlbumFindUnique.mockReset();
@@ -1905,7 +1917,7 @@ describe("library catalog list runtime coverage", () => {
         mockRemoteLikedTrackCount.mockResolvedValue(0);
         mockTrackMappingFindMany.mockResolvedValue([]);
         mockDownloadAndStoreImage.mockResolvedValue(
-            "native:albums/cover-miss.jpg",
+            "native:albums/library-runtime-default-cover.jpg",
         );
         mockPlayGroupBy.mockResolvedValue([]);
         mockPlayFindFirst.mockResolvedValue(null);
@@ -1938,6 +1950,7 @@ describe("library catalog list runtime coverage", () => {
         mockAlbumFindUnique.mockResolvedValue(null);
         mockAlbumDelete.mockResolvedValue(undefined);
         mockAlbumUpdate.mockResolvedValue(undefined);
+        mockAlbumUpdateMany.mockResolvedValue({ count: 1 });
         mockSimilarArtistDeleteMany.mockResolvedValue({ count: 0 });
         mockUserSettingsFindUnique.mockResolvedValue({
             playbackQuality: "medium",
@@ -5706,13 +5719,14 @@ describe("library catalog list runtime coverage", () => {
         expect(errRes.statusCode).toBe(500);
     });
 
-    it("falls back to the owning peer when a federated album has no resolved cover", async () => {
-        mockDeezerGetAlbumCover.mockResolvedValueOnce(null);
+    it("proxies a federated placeholder album before external fallbacks or cache access", async () => {
+        mockProxyFederatedCover.mockResolvedValueOnce(true);
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "fed-album-1",
             title: "Federated Album",
-            rgMbid: "temp-federated",
+            rgMbid: "federation:peer-1:cmVtb3RlLWFsYnVtLTE",
             coverUrl: null,
+            location: "FEDERATED",
             peerId: "peer-1",
             remoteId: "remote-album-1",
             federationPeer: {
@@ -5743,16 +5757,164 @@ describe("library catalog list runtime coverage", () => {
             },
             remoteId: "remote-album-1",
         });
+        expect(mockCoverArtClearNotFoundCache).not.toHaveBeenCalled();
+        expect(mockCoverArtGetCoverArt).not.toHaveBeenCalled();
+        expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+        expect(mockAlbumUpdate).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
     });
 
+    it("redirects a persisted external federated cover without contacting the peer", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "fed-external-cover",
+            title: "Federated Persisted Cover",
+            rgMbid: "11111111-1111-4111-8111-111111111111",
+            coverUrl: "https://images.example/federated-cover.jpg",
+            location: "FEDERATED",
+            peerId: "peer-1",
+            remoteId: "remote-album-external",
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "v2:encrypted-token",
+                outboundStatus: "ACTIVE",
+            },
+            artist: { name: "Remote Artist" },
+        });
+        const res = createRes();
+
+        await coverArtHandler(
+            {
+                params: { id: "fed-external-cover" },
+                query: {},
+                headers: {},
+            } as any,
+            res,
+        );
+
+        expect(res.body).toEqual({
+            redirect: "https://images.example/federated-cover.jpg",
+        });
+        expect(mockProxyFederatedCover).not.toHaveBeenCalled();
+        expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+    });
+
+    it("proxies a federated album with a missing persisted native cover without local providers", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
+        mockProxyFederatedCover.mockResolvedValueOnce(true);
+        const req = {
+            params: { id: "fed-missing-native" },
+            query: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "fed-missing-native",
+            title: "Federated Missing Native",
+            rgMbid: "22222222-2222-4222-8222-222222222222",
+            coverUrl: "native:albums/fed-missing-native.jpg",
+            location: "FEDERATED",
+            peerId: "peer-1",
+            remoteId: "remote-album-native",
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "v2:encrypted-token",
+                outboundStatus: "ACTIVE",
+            },
+            artist: { name: "Remote Artist" },
+        });
+
+        try {
+            await coverArtHandler(req, res);
+
+            expect(mockProxyFederatedCover).toHaveBeenCalledWith({
+                req,
+                res,
+                peer: expect.objectContaining({ id: "peer-1" }),
+                remoteId: "remote-album-native",
+            });
+            expect(mockCoverArtGetCoverArt).not.toHaveBeenCalled();
+            expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+        } finally {
+            existsSpy.mockRestore();
+        }
+    });
+
+    it("clears a missing federated native cover before the follow-up request terminates at the peer proxy", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
+        mockProxyFederatedCover.mockResolvedValueOnce(true);
+        const staleAlbum = {
+            id: "fed-native-album",
+            title: "Federated Native Album",
+            rgMbid: "federation:peer-1:cmVtb3RlLWFsYnVtLTI",
+            coverUrl: "native:albums/fed-native-album.jpg",
+            location: "FEDERATED",
+            peerId: "peer-1",
+            remoteId: "remote-album-2",
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "v2:encrypted-token",
+                outboundStatus: "ACTIVE",
+            },
+            artist: { name: "Remote Artist" },
+        };
+        mockAlbumFindUnique
+            .mockResolvedValueOnce(staleAlbum)
+            .mockResolvedValueOnce({ ...staleAlbum, coverUrl: null });
+
+        try {
+            const nativeRes = createRes();
+            await coverArtHandler(
+                {
+                    params: { id: "native:albums/fed-native-album.jpg" },
+                    query: {},
+                    headers: {},
+                } as any,
+                nativeRes,
+            );
+
+            expect(nativeRes.body).toEqual({
+                redirect: "/api/library/cover-art/fed-native-album",
+            });
+            expect(mockAlbumUpdateMany).toHaveBeenCalledWith({
+                where: {
+                    id: "fed-native-album",
+                    coverUrl: "native:albums/fed-native-album.jpg",
+                },
+                data: { coverUrl: null },
+            });
+
+            const followUpReq = {
+                params: { id: "fed-native-album" },
+                query: {},
+                headers: {},
+            } as any;
+            const followUpRes = createRes();
+            await coverArtHandler(followUpReq, followUpRes);
+
+            expect(mockAlbumFindUnique).toHaveBeenCalledTimes(2);
+            expect(mockProxyFederatedCover).toHaveBeenCalledTimes(1);
+            expect(mockProxyFederatedCover).toHaveBeenCalledWith({
+                req: followUpReq,
+                res: followUpRes,
+                peer: staleAlbum.federationPeer,
+                remoteId: "remote-album-2",
+            });
+            expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+        } finally {
+            existsSpy.mockRestore();
+        }
+    });
+
     it("does not contact an offline peer for a missing federated cover", async () => {
-        mockDeezerGetAlbumCover.mockResolvedValueOnce(null);
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "fed-album-1",
             title: "Federated Album",
             rgMbid: "temp-federated",
             coverUrl: null,
+            location: "FEDERATED",
             peerId: "peer-1",
             remoteId: "remote-album-1",
             federationPeer: {
@@ -5775,10 +5937,13 @@ describe("library catalog list runtime coverage", () => {
         );
 
         expect(mockProxyFederatedCover).not.toHaveBeenCalled();
+        expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(404);
     });
 
     it("serves local native cover IDs from disk and falls back to Deezer when missing", async () => {
+        const missingCoverId = "library-runtime-deezer-miss";
+        const presentCoverId = "library-runtime-present";
         const { config } = jest.requireMock("../../config") as {
             config: Record<string, unknown>;
         };
@@ -5788,10 +5953,10 @@ describe("library catalog list runtime coverage", () => {
             .mockImplementation(
                 (candidatePath: fs.PathLike) =>
                     typeof candidatePath === "string" &&
-                    candidatePath.includes("cover-present.jpg"),
+                    candidatePath.includes(`${presentCoverId}.jpg`),
             );
         mockAlbumFindUnique.mockResolvedValueOnce({
-            id: "cover-miss",
+            id: missingCoverId,
             title: "Missed Album",
             artist: {
                 id: "artist-cover",
@@ -5802,12 +5967,12 @@ describe("library catalog list runtime coverage", () => {
             "https://images.example/cover.jpg",
         );
         mockDownloadAndStoreImage.mockResolvedValueOnce(
-            "native:albums/cover-miss.jpg",
+            `native:albums/${missingCoverId}.jpg`,
         );
 
         try {
             const missingReq = {
-                params: { id: "native:cover-miss.jpg" },
+                params: { id: `native:${missingCoverId}.jpg` },
                 query: {},
                 headers: {},
             } as any;
@@ -5820,20 +5985,19 @@ describe("library catalog list runtime coverage", () => {
             );
             expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
                 "https://images.example/cover.jpg",
-                "cover-miss",
+                missingCoverId,
                 "album",
             );
             expect(mockAlbumUpdate).toHaveBeenCalledWith({
-                where: { id: "cover-miss" },
-                data: { coverUrl: "native:albums/cover-miss.jpg" },
+                where: { id: missingCoverId },
+                data: { coverUrl: `native:albums/${missingCoverId}.jpg` },
             });
             expect(missingRes.statusCode).toBe(200);
             expect(missingRes.body).toEqual({
-                redirect:
-                    "/api/library/cover-art?url=native%3Aalbums%2Fcover-miss.jpg",
+                redirect: `/api/library/cover-art?url=native%3Aalbums%2F${missingCoverId}.jpg`,
             });
             const presentReq = {
-                params: { id: "native:cover-present.jpg" },
+                params: { id: `native:${presentCoverId}.jpg` },
                 query: {},
                 headers: { origin: "https://app.example" },
             } as any;
@@ -5842,7 +6006,7 @@ describe("library catalog list runtime coverage", () => {
 
             expect(presentRes.statusCode).toBe(200);
             expect(presentRes.body).toEqual({
-                filePath: "cover-present.jpg",
+                filePath: `${presentCoverId}.jpg`,
                 options: {
                     dotfiles: "ignore",
                     root: "/tmp/covers",
@@ -5863,44 +6027,47 @@ describe("library catalog list runtime coverage", () => {
 
     it("recovers missing native cover IDs via Cover Art service when Deezer has no result", async () => {
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
+        const fallbackCoverId = "library-runtime-caa-fallback";
+        const releaseGroupMbid = "33333333-3333-4333-8333-333333333333";
         mockAlbumFindUnique.mockResolvedValue({
-            id: "cover-fallback",
+            id: fallbackCoverId,
             title: "Fallback Album",
-            rgMbid: "rg-fallback",
+            rgMbid: releaseGroupMbid,
             artist: {
                 id: "artist-fallback",
                 name: "Fallback Artist",
             },
         });
         mockCoverArtGetCoverArt.mockResolvedValue(
-            "https://coverartarchive.org/release-group/rg-fallback/front.jpg",
+            `https://coverartarchive.org/release-group/${releaseGroupMbid}/front.jpg`,
         );
         mockDeezerGetAlbumCover.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(
-            "native:albums/cover-fallback.jpg",
+            `native:albums/${fallbackCoverId}.jpg`,
         );
 
         const req = {
-            params: { id: "native:cover-fallback.jpg" },
+            params: { id: `native:${fallbackCoverId}.jpg` },
             query: {},
             headers: {},
         } as any;
         mockAlbumUpdate.mockClear();
         const res = createRes();
-        await coverArtHandler(req, res);
+        try {
+            await coverArtHandler(req, res);
 
-        expect(mockDownloadAndStoreImage).toHaveBeenCalled();
-        expect(mockAlbumUpdate).toHaveBeenCalledWith({
-            where: { id: "cover-fallback" },
-            data: { coverUrl: "native:albums/cover-fallback.jpg" },
-        });
-        expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual({
-            redirect:
-                "/api/library/cover-art?url=native%3Aalbums%2Fcover-fallback.jpg",
-        });
-
-        existsSpy.mockRestore();
+            expect(mockDownloadAndStoreImage).toHaveBeenCalled();
+            expect(mockAlbumUpdate).toHaveBeenCalledWith({
+                where: { id: fallbackCoverId },
+                data: { coverUrl: `native:albums/${fallbackCoverId}.jpg` },
+            });
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual({
+                redirect: `/api/library/cover-art?url=native%3Aalbums%2F${fallbackCoverId}.jpg`,
+            });
+        } finally {
+            existsSpy.mockRestore();
+        }
     });
 
     it("returns invalid cover ID format for malformed /cover-art path params", async () => {

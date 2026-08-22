@@ -1023,6 +1023,11 @@ export async function handleGetCoverArt(
             const resolvedNativePath = resolveNativeCoverPath(nativePath);
 
             if (!resolvedNativePath || !fs.existsSync(resolvedNativePath)) {
+                if (
+                    await proxySubsonicFederatedCover(req, res, type, entityId)
+                ) {
+                    return;
+                }
                 sendSubsonicError(
                     res,
                     SubsonicErrorCode.NOT_FOUND,

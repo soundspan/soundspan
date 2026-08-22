@@ -44,6 +44,7 @@ const coverAlbumSelect = {
     title: true,
     rgMbid: true,
     coverUrl: true,
+    location: true,
     peerId: true,
     remoteId: true,
     federationPeer: {
@@ -71,6 +72,37 @@ function findCoverAlbum(id: string) {
         where: { id },
         select: coverAlbumSelect,
     });
+}
+
+type CoverAlbum = Prisma.AlbumGetPayload<{ select: typeof coverAlbumSelect }>;
+
+async function tryProxyFederatedAlbumCover(
+    req: Request,
+    res: Response,
+    album: CoverAlbum,
+): Promise<boolean> {
+    if (
+        album.location !== "FEDERATED" ||
+        !config.features.federation ||
+        !album.remoteId ||
+        album.federationPeer?.outboundStatus !== "ACTIVE" ||
+        !album.federationPeer.baseUrl ||
+        !album.federationPeer.outboundToken
+    ) {
+        return false;
+    }
+
+    try {
+        return await proxyFederatedCover({
+            req,
+            res,
+            peer: album.federationPeer,
+            remoteId: album.remoteId,
+        });
+    } catch (error: unknown) {
+        logger.warn("Federated cover proxy failed", { error });
+        return false;
+    }
 }
 
 async function resolveCoverId(raw: string) {
@@ -353,10 +385,55 @@ export async function handleGetCoverArt(
 
             // If album already has a cover URL, redirect to it
             if (album.coverUrl) {
+                if (album.coverUrl.startsWith("native:")) {
+                    const nativePath = album.coverUrl.slice("native:".length);
+                    if (!resolveNativeCoverCacheHit(nativePath)) {
+                        if (album.location === "FEDERATED") {
+                            if (
+                                await tryProxyFederatedAlbumCover(
+                                    req,
+                                    res,
+                                    album,
+                                )
+                            ) {
+                                return;
+                            }
+                            return sendRouteError(
+                                res,
+                                404,
+                                "Cover art not found",
+                            );
+                        }
+
+                        try {
+                            const healedCover =
+                                await tryHealMissingNativeAlbumCover(
+                                    nativePath,
+                                );
+                            if (healedCover) {
+                                return res.redirect(healedCover);
+                            }
+                        } catch (error) {
+                            logger.error(
+                                `[COVER-ART] Failed to heal missing native cover ${nativePath}:`,
+                                error,
+                            );
+                        }
+                        return sendRouteError(res, 404, "Cover art not found");
+                    }
+                }
+
                 const redirectUrl = album.coverUrl.startsWith("native:")
                     ? `/api/library/cover-art?url=${encodeURIComponent(album.coverUrl)}`
                     : album.coverUrl;
                 return res.redirect(redirectUrl);
+            }
+
+            if (album.location === "FEDERATED") {
+                if (await tryProxyFederatedAlbumCover(req, res, album)) {
+                    return;
+                }
+                return sendRouteError(res, 404, "Cover art not found");
             }
 
             // On-demand fetch: try to find cover art now
@@ -364,7 +441,8 @@ export async function handleGetCoverArt(
             const validRgMbid =
                 typeof album.rgMbid === "string" &&
                 album.rgMbid.length > 0 &&
-                !album.rgMbid.startsWith("temp-")
+                !album.rgMbid.startsWith("temp-") &&
+                !album.rgMbid.startsWith("federation:")
                     ? album.rgMbid
                     : null;
 
@@ -408,25 +486,6 @@ export async function handleGetCoverArt(
                 );
                 coverUrl = fetchedCoverUrl;
             } else {
-                if (
-                    config.features.federation &&
-                    album.remoteId &&
-                    album.federationPeer?.outboundStatus === "ACTIVE" &&
-                    album.federationPeer.baseUrl &&
-                    album.federationPeer.outboundToken
-                ) {
-                    try {
-                        const proxied = await proxyFederatedCover({
-                            req,
-                            res,
-                            peer: album.federationPeer,
-                            remoteId: album.remoteId,
-                        });
-                        if (proxied) return;
-                    } catch (error: unknown) {
-                        logger.warn("Federated cover proxy failed", { error });
-                    }
-                }
                 return sendRouteError(res, 404, "Cover art not found");
             }
         }

@@ -465,6 +465,7 @@ async function enrichAlbumCovers(
             where: {
                 artistId,
                 OR: [{ coverUrl: null }, { coverUrl: "" }],
+                location: { not: "FEDERATED" },
             },
             select: {
                 id: true,
@@ -491,7 +492,12 @@ async function enrichAlbumCovers(
 
             await Promise.all(
                 batch.map(async (album) => {
-                    if (!album.rgMbid) return;
+                    if (
+                        !album.rgMbid ||
+                        album.rgMbid.startsWith("federation:")
+                    ) {
+                        return;
+                    }
 
                     try {
                         const coverUrl = await coverArtService.getCoverArt(

@@ -24,6 +24,7 @@ jest.mock("../imageProvider", () => ({
 }));
 
 jest.mock("../musicbrainz", () => ({
+    ...jest.requireActual("../musicbrainz"),
     musicBrainzService: {
         getReleaseGroup: jest.fn(),
         extractPrimaryArtist: jest.fn(),
@@ -1424,7 +1425,7 @@ describe("deezerService", () => {
         });
 
         await expect(
-            coverArtService.getCoverArt("rg-redis-warn"),
+            coverArtService.getCoverArt("11111111-1111-4111-8111-111111111111"),
         ).resolves.toBe("https://img/caa-front.jpg");
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "Redis get error:",
@@ -1447,10 +1448,10 @@ describe("deezerService", () => {
         );
 
         await expect(
-            coverArtService.getCoverArt("rg-no-image"),
+            coverArtService.getCoverArt("22222222-2222-4222-8222-222222222222"),
         ).resolves.toBeNull();
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "caa:rg-no-image",
+            "caa:22222222-2222-4222-8222-222222222222",
             30 * 24 * 60 * 60,
             "NOT_FOUND",
         );
@@ -1467,10 +1468,10 @@ describe("deezerService", () => {
         );
 
         await expect(
-            coverArtService.getCoverArt("rg-mb-fail"),
+            coverArtService.getCoverArt("33333333-3333-4333-8333-333333333333"),
         ).resolves.toBeNull();
         expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "[CoverArt] Failed to resolve release-group metadata for rg-mb-fail:",
+            "[CoverArt] Failed to resolve release-group metadata for 33333333-3333-4333-8333-333333333333:",
             expect.any(Error),
         );
     });
@@ -1493,7 +1494,7 @@ describe("deezerService", () => {
         );
 
         await expect(
-            coverArtService.getCoverArt("rg-provider-fail"),
+            coverArtService.getCoverArt("44444444-4444-4444-8444-444444444444"),
         ).resolves.toBeNull();
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "[CoverArt] Fallback providers failed for Provider Artist - Provider Album:",
@@ -1510,7 +1511,7 @@ describe("deezerService", () => {
         mockRedisSetEx.mockRejectedValueOnce(new Error("redis write failed"));
 
         await expect(
-            coverArtService.getCoverArt("rg-cache-write-fail"),
+            coverArtService.getCoverArt("55555555-5555-4555-8555-555555555555"),
         ).resolves.toBe("https://img/caa-cache.jpg");
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "Redis set error:",
@@ -1521,9 +1522,15 @@ describe("deezerService", () => {
     it("clears stale NOT_FOUND cache entries for release groups", async () => {
         mockRedisGet.mockResolvedValueOnce("NOT_FOUND");
 
-        await coverArtService.clearNotFoundCache("  rg-clear-cache  ");
+        await coverArtService.clearNotFoundCache(
+            "  66666666-6666-4666-8666-666666666666  ",
+        );
 
-        expect(mockRedisGet).toHaveBeenCalledWith("caa:rg-clear-cache");
-        expect(mockRedisDel).toHaveBeenCalledWith("caa:rg-clear-cache");
+        expect(mockRedisGet).toHaveBeenCalledWith(
+            "caa:66666666-6666-4666-8666-666666666666",
+        );
+        expect(mockRedisDel).toHaveBeenCalledWith(
+            "caa:66666666-6666-4666-8666-666666666666",
+        );
     });
 });

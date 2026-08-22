@@ -486,6 +486,34 @@ describe("artistEnrichment runtime", () => {
         expect(completed.data.genres).toEqual(["rock"]);
     });
 
+    it("excludes federated albums with real release-group MBIDs from cover enrichment", async () => {
+        const runtime = setupRuntime();
+
+        runtime.prisma.album.findMany.mockResolvedValueOnce([]);
+
+        const artist = {
+            id: "federated-artist",
+            name: "Federated Artist",
+            mbid: "66666666-6666-4666-8666-666666666666",
+        } as any;
+        await runtime.enrichSimilarArtist(artist);
+
+        expect(runtime.prisma.album.findMany).toHaveBeenCalledWith({
+            where: {
+                artistId: "federated-artist",
+                OR: [{ coverUrl: null }, { coverUrl: "" }],
+                location: { not: "FEDERATED" },
+            },
+            select: {
+                id: true,
+                rgMbid: true,
+                title: true,
+            },
+        });
+        expect(runtime.coverArtService.getCoverArt).not.toHaveBeenCalled();
+        expect(runtime.prisma.album.update).not.toHaveBeenCalled();
+    });
+
     it("continues when hero cache write fails after successful enrichment", async () => {
         const runtime = setupRuntime();
 

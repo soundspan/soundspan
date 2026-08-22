@@ -5,9 +5,11 @@ import { safeResolvePath } from "../utils/safeResolvePath";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import { buildFederatedCoverProxyPath } from "../utils/federationCover";
 import { coverArtService } from "./coverArt";
 import { imageProviderService } from "./imageProvider";
 import { deezerService } from "./deezer";
+import { isValidMbid } from "./musicbrainz";
 import { normalizeExternalImageUrl } from "./imageProxy";
 import { downloadAndStoreImage } from "./imageStorage";
 
@@ -106,6 +108,7 @@ export const tryHealMissingNativeAlbumCover = async (
                 title: true,
                 rgMbid: true,
                 coverUrl: true,
+                location: true,
                 artist: {
                     select: {
                         name: true,
@@ -143,6 +146,28 @@ export const tryHealMissingNativeAlbumCover = async (
             }
         }
 
+        if (album.location === "FEDERATED") {
+            const persistedExternalCover =
+                album.coverUrl?.startsWith("http://") ||
+                album.coverUrl?.startsWith("https://")
+                    ? normalizeExternalImageUrl(album.coverUrl)
+                    : null;
+            if (persistedExternalCover) {
+                return persistedExternalCover;
+            }
+
+            if (existingNativeCover?.startsWith("native:")) {
+                await prisma.album.updateMany({
+                    where: {
+                        id: album.id,
+                        coverUrl: existingNativeCover,
+                    },
+                    data: { coverUrl: null },
+                });
+            }
+            return buildFederatedCoverProxyPath(album.id);
+        }
+
         const candidateUrls = new Set<string>();
         const addCandidateUrl = (candidate: string | null | undefined) => {
             if (!candidate) return;
@@ -160,12 +185,7 @@ export const tryHealMissingNativeAlbumCover = async (
             addCandidateUrl(album.coverUrl);
         }
 
-        const validRgMbid =
-            typeof album.rgMbid === "string" &&
-            album.rgMbid.length > 0 &&
-            !album.rgMbid.startsWith("temp-")
-                ? album.rgMbid
-                : null;
+        const validRgMbid = isValidMbid(album.rgMbid) ? album.rgMbid : null;
 
         if (validRgMbid) {
             try {
@@ -180,19 +200,21 @@ export const tryHealMissingNativeAlbumCover = async (
             }
         }
 
-        try {
-            const providerCover = await imageProviderService.getAlbumCover(
-                album.artist.name,
-                album.title,
-                validRgMbid ?? undefined,
-                { timeout: NATIVE_COVER_HEAL_TIMEOUT_MS },
-            );
-            addCandidateUrl(providerCover?.url);
-        } catch (error) {
-            logger.warn(
-                `[COVER-ART] Provider-chain recovery failed for ${album.artist.name} - ${album.title}:`,
-                error,
-            );
+        if (validRgMbid) {
+            try {
+                const providerCover = await imageProviderService.getAlbumCover(
+                    album.artist.name,
+                    album.title,
+                    validRgMbid,
+                    { timeout: NATIVE_COVER_HEAL_TIMEOUT_MS },
+                );
+                addCandidateUrl(providerCover?.url);
+            } catch (error) {
+                logger.warn(
+                    `[COVER-ART] Provider-chain recovery failed for ${album.artist.name} - ${album.title}:`,
+                    error,
+                );
+            }
         }
 
         try {

@@ -13,6 +13,7 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { buildFederatedCoverProxyPath } from "../utils/federationCover";
 import { fanartService } from "./fanart";
 import { deezerService } from "./deezer";
 import { lastFmService } from "./lastfm";
@@ -94,11 +95,14 @@ class DataCacheService {
         try {
             const album = await prisma.album.findUnique({
                 where: { id: albumId },
-                select: { coverUrl: true },
+                select: { coverUrl: true, location: true },
             });
             if (album?.coverUrl) {
                 this.setRedisCache(cacheKey, album.coverUrl, ALBUM_COVER_TTL);
                 return album.coverUrl;
+            }
+            if (album?.location === "FEDERATED") {
+                return buildFederatedCoverProxyPath(albumId);
             }
         } catch (err) {
             logger.warn("[DataCache] DB lookup failed for album:", albumId);

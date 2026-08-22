@@ -1040,6 +1040,35 @@ describe("handleGetCoverArt", () => {
         );
     });
 
+    it("falls back to the owning peer when a federated native cover is missing", async () => {
+        mockAlbumFindFirst
+            .mockResolvedValueOnce({
+                coverUrl: "native:album/missing-federated.png",
+            })
+            .mockResolvedValueOnce({
+                remoteId: "remote-album-1",
+                federationPeer: {
+                    id: "peer-1",
+                    baseUrl: "https://peer.example",
+                    outboundToken: "encrypted-token",
+                    outboundStatus: "ACTIVE",
+                },
+            });
+        jest.spyOn(fs, "existsSync").mockReturnValue(false);
+        const req = buildReq({ id: "al-federated-missing-native" });
+        const res = buildRes();
+
+        await handleGetCoverArt(req, res);
+
+        expect(mockProxyFederatedCover).toHaveBeenCalledWith({
+            req,
+            res,
+            peer: expect.objectContaining({ id: "peer-1" }),
+            remoteId: "remote-album-1",
+        });
+        expect(mockSendError).not.toHaveBeenCalled();
+    });
+
     it("returns not found when cover url is not public", async () => {
         mockAlbumFindFirst.mockResolvedValue({
             coverUrl: "file:///etc/passwd",

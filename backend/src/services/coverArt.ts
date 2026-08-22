@@ -2,7 +2,7 @@ import axios from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { imageProviderService } from "./imageProvider";
-import { musicBrainzService } from "./musicbrainz";
+import { isValidMbid, musicBrainzService } from "./musicbrainz";
 import { rateLimiter } from "./rateLimiter";
 
 const COVER_ART_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60;
@@ -28,15 +28,7 @@ class CoverArtService {
 
     async getCoverArt(rgMbid: string): Promise<string | null> {
         const normalizedMbid = rgMbid.trim();
-        if (!normalizedMbid) return null;
-        if (normalizedMbid.toLowerCase().startsWith("temp-")) {
-            // Temporary IDs are local placeholders, not real MusicBrainz IDs.
-            return null;
-        }
-        if (normalizedMbid.toLowerCase().startsWith("remote:")) {
-            // Synthetic IDs for remote-only albums — not real MusicBrainz IDs.
-            return null;
-        }
+        if (!isValidMbid(normalizedMbid)) return null;
         const cacheKey = `caa:${normalizedMbid}`;
 
         try {

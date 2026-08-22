@@ -234,6 +234,7 @@ const playQueueTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
             title: true,
             year: true,
             coverUrl: true,
+            location: true,
             genres: true,
             userGenres: true,
             ...SONG_LOUDNESS_ALBUM_SELECT,

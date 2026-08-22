@@ -206,6 +206,7 @@ const albumListSelect = Prisma.validator<Prisma.AlbumSelect>()({
     year: true,
     lastSynced: true,
     coverUrl: true,
+    location: true,
     genres: true,
     userGenres: true,
     artist: {
@@ -261,6 +262,7 @@ function mapAlbumsForSubsonic(
                 year: album.year,
                 lastSynced: album.lastSynced,
                 coverUrl: album.coverUrl,
+                location: album.location,
                 genres: album.genres,
                 userGenres: album.userGenres,
                 artist: album.artist,
@@ -639,6 +641,7 @@ function formatAlbumForSubsonic(
         year: number | null;
         lastSynced: Date;
         coverUrl: string | null;
+        location: "LIBRARY" | "DISCOVER" | "REMOTE" | "FEDERATED";
         genres?: unknown;
         userGenres?: unknown;
         artist: {
@@ -669,7 +672,7 @@ function formatAlbumForSubsonic(
         formatted.year = album.year;
     }
 
-    if (album.coverUrl) {
+    if (album.coverUrl || album.location === "FEDERATED") {
         formatted.coverArt = toSubsonicId("album", album.id);
     }
 
@@ -701,6 +704,7 @@ type SongForSubsonicInput = {
         title: string;
         year: number | null;
         coverUrl: string | null;
+        location: "LIBRARY" | "DISCOVER" | "REMOTE" | "FEDERATED";
         genres?: unknown;
         userGenres?: unknown;
         albumLoudnessLufs?: number | null;
@@ -748,7 +752,7 @@ function formatSongForSubsonic(
         formatted.bitRate = bitRate;
     }
 
-    if (song.album.coverUrl) {
+    if (song.album.coverUrl || song.album.location === "FEDERATED") {
         formatted.coverArt = toSubsonicId("album", song.album.id);
     }
 
@@ -881,6 +885,7 @@ const bookmarkTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
             title: true,
             year: true,
             coverUrl: true,
+            location: true,
             genres: true,
             userGenres: true,
             ...SONG_LOUDNESS_ALBUM_SELECT,

@@ -91,6 +91,7 @@ export async function handleGetNowPlaying(
                         title: true,
                         year: true,
                         coverUrl: true,
+                        location: true,
                         genres: true,
                         userGenres: true,
                         ...SONG_LOUDNESS_ALBUM_SELECT,
