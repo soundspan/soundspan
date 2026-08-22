@@ -61,3 +61,11 @@ class YtDownloadRequest(BaseModel):
     # Bulk source type ("channel" | "playlist"). Only channels are collapsed to
     # a single artist on import; playlists keep each track's native metadata.
     source_kind: str | None = None
+
+
+class YtAlbumDownloadRequest(BaseModel):
+    """Server-rooted YouTube Music album download request."""
+
+    browse_id: str
+    format: Literal["mp3", "opus", "flac", "m4a"] = "mp3"
+    quality: Literal["LOW", "MEDIUM", "HIGH", "LOSSLESS"] = "HIGH"

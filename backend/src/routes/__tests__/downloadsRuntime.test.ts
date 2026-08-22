@@ -53,6 +53,16 @@ jest.mock("../../services/tidal", () => ({
     },
 }));
 
+jest.mock("../../services/youtubeDownload", () => ({
+    youtubeDownloadService: {
+        isAvailable: jest.fn(),
+    },
+}));
+
+jest.mock("../../services/youtubeLibraryDownload", () => ({
+    processYoutubeDownload: jest.fn(),
+}));
+
 jest.mock("../../services/musicbrainz", () => ({
     musicBrainzService: {
         getArtist: jest.fn(),
@@ -112,6 +122,8 @@ import { getSystemSettings } from "../../utils/systemSettings";
 import { lidarrService } from "../../services/lidarr";
 import { soulseekService } from "../../services/soulseek";
 import { tidalService } from "../../services/tidal";
+import { youtubeDownloadService } from "../../services/youtubeDownload";
+import { processYoutubeDownload } from "../../services/youtubeLibraryDownload";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { lastFmService } from "../../services/lastfm";
 import { simpleDownloadManager } from "../../services/simpleDownloadManager";
@@ -129,6 +141,8 @@ const mockSoulseekAvailable = soulseekService.isAvailable as jest.Mock;
 const mockTidalAvailable = tidalService.isAvailable as jest.Mock;
 const mockTidalFindAlbum = tidalService.findAlbum as jest.Mock;
 const mockTidalDownloadAlbum = tidalService.downloadAlbum as jest.Mock;
+const mockYoutubeAvailable = youtubeDownloadService.isAvailable as jest.Mock;
+const mockProcessYoutubeDownload = processYoutubeDownload as jest.Mock;
 
 const mockGetArtist = musicBrainzService.getArtist as jest.Mock;
 const mockGetReleaseGroups = musicBrainzService.getReleaseGroups as jest.Mock;
@@ -254,6 +268,8 @@ describe("downloads routes runtime", () => {
 
         mockSoulseekAvailable.mockResolvedValue(true);
         mockTidalAvailable.mockResolvedValue(false);
+        mockYoutubeAvailable.mockResolvedValue(false);
+        mockProcessYoutubeDownload.mockResolvedValue(undefined);
         mockTidalFindAlbum.mockResolvedValue(null);
         mockTidalDownloadAlbum.mockResolvedValue({
             downloaded: 0,
@@ -310,6 +326,7 @@ describe("downloads routes runtime", () => {
         mockLidarrIsEnabled.mockResolvedValue(false);
         mockSoulseekAvailable.mockResolvedValue(true);
         mockTidalAvailable.mockResolvedValue(false);
+        mockYoutubeAvailable.mockResolvedValue(true);
 
         const req = {} as any;
         const res = createRes();
@@ -322,6 +339,7 @@ describe("downloads routes runtime", () => {
             lidarr: false,
             soulseek: true,
             tidal: false,
+            youtube: true,
         });
     });
 
@@ -494,6 +512,7 @@ describe("downloads routes runtime", () => {
         mockLidarrIsEnabled.mockResolvedValue(false);
         mockSoulseekAvailable.mockResolvedValue(false);
         mockTidalAvailable.mockResolvedValue(false);
+        mockYoutubeAvailable.mockResolvedValue(false);
 
         const req = {
             body: { type: "album", mbid: "rg-1", subject: "Artist - Album" },
@@ -505,8 +524,106 @@ describe("downloads routes runtime", () => {
 
         expect(res.statusCode).toBe(400);
         expect(res.body).toEqual({
-            error: "No download service configured. Please set up Lidarr, Soulseek, or TIDAL.",
+            error: "No download service configured. Please set up Lidarr, Soulseek, TIDAL, or YouTube Music.",
         });
+    });
+
+    it("dispatches an available configured youtube source", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "youtube",
+            primaryFailureFallback: "none",
+            ytMusicEnabled: true,
+        });
+        mockYoutubeAvailable.mockResolvedValue(true);
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-youtube",
+                subject: "Artist - Album",
+                artistName: "Artist",
+                albumTitle: "Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        expect(mockProcessYoutubeDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "user-1",
+        );
+        expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+
+    it("uses youtube as an available fallback source", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "tidal",
+            primaryFailureFallback: "youtube",
+            ytMusicEnabled: true,
+        });
+        mockTidalAvailable.mockResolvedValue(false);
+        mockYoutubeAvailable.mockResolvedValue(true);
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-youtube-fallback",
+                subject: "Artist - Album",
+                artistName: "Artist",
+                albumTitle: "Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        expect(mockProcessYoutubeDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "user-1",
+        );
+    });
+
+    it("falls back from unavailable youtube to soulseek", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "youtube",
+            primaryFailureFallback: "soulseek",
+            ytMusicEnabled: true,
+        });
+        mockYoutubeAvailable.mockResolvedValue(false);
+        mockSoulseekAvailable.mockResolvedValue(true);
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-youtube-primary",
+                subject: "Artist - Album",
+                artistName: "Artist",
+                albumTitle: "Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        expect(mockStartDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "rg-youtube-primary",
+            "user-1",
+        );
+        expect(mockProcessYoutubeDownload).not.toHaveBeenCalled();
     });
 
     it("returns duplicate details when album job already exists in transaction", async () => {

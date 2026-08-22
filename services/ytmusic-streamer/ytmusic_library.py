@@ -405,6 +405,13 @@ def _format_album_response(browse_id: str, album: JsonObject) -> JsonObject:
     }
 
 
+async def get_public_album_metadata(browse_id: str) -> JsonObject:
+    """Fetch and normalize an album through the public browse client."""
+    yt = _get_public_ytmusic("native")
+    album = await _browse_public_bounded(yt.get_album, browse_id)
+    return _format_album_response(browse_id, album)
+
+
 @app.get("/album/{browse_id}")
 async def get_album(browse_id: str, user_id: str = Query(...)) -> JsonObject:
     """Get album details and track listing from YouTube Music.
@@ -413,15 +420,13 @@ async def get_album(browse_id: str, user_id: str = Query(...)) -> JsonObject:
     """
     try:
         if user_id == "__public__":
-            yt = _get_public_ytmusic("native")
-            album = await _browse_public_bounded(yt.get_album, browse_id)
-        else:
-            album = await asyncio.to_thread(
-                _run_ytmusic_with_auth_retry,
-                user_id,
-                operation=f"get_album({browse_id})",
-                func=lambda yt: yt.get_album(browse_id),
-            )
+            return await get_public_album_metadata(browse_id)
+        album = await asyncio.to_thread(
+            _run_ytmusic_with_auth_retry,
+            user_id,
+            operation=f"get_album({browse_id})",
+            func=lambda yt: yt.get_album(browse_id),
+        )
         return _format_album_response(browse_id, album)
     except HTTPException:
         raise

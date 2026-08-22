@@ -420,6 +420,29 @@ describe("systemSettings runtime routes", () => {
         expect(upsertArg.update.transcodeCacheMaxGb).toBe(12);
     });
 
+    it("accepts youtube as a download source and fallback", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                downloadSource: "youtube",
+                primaryFailureFallback: "youtube",
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    downloadSource: "youtube",
+                    primaryFailureFallback: "youtube",
+                }),
+            }),
+        );
+    });
+
     it("env sync and webhook config use stored secrets when the form round-trips empty strings", async () => {
         mockSystemSettingsUpsert.mockResolvedValueOnce({
             id: "default",

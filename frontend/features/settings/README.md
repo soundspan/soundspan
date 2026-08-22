@@ -22,6 +22,7 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/AudiobookshelfSection.tsx` | components |
 | `components/sections/CacheSection.tsx` | components |
 | `components/sections/DownloadPreferencesSection.tsx` | components |
+| `components/sections/downloadSourceConfig.ts` | components |
 | `components/sections/DownloadServicesSection.tsx` | components |
 | `components/sections/FederationSection.tsx` | components |
 | `components/sections/FederationHealthPanel.tsx` | components |

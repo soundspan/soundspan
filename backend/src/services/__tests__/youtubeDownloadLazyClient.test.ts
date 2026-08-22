@@ -99,4 +99,86 @@ describe("youtubeDownloadService lazy client", () => {
             }),
         );
     });
+
+    it("searches albums with encoded parameters and maps the sidecar response", async () => {
+        jest.resetModules();
+        const get = jest.fn(async () => ({
+            data: {
+                albums: [
+                    {
+                        browse_id: "MPRE123",
+                        title: "Album",
+                        artists: ["Artist", "Guest"],
+                    },
+                ],
+            },
+        }));
+        jest.doMock("axios", () => ({
+            __esModule: true,
+            default: { create: jest.fn(() => ({ get })) },
+        }));
+        jest.doMock("../../config", () => ({
+            config: { ytmusicStreamer: { url: "http://sidecar:8586" } },
+        }));
+        jest.doMock("../../utils/logger", () => ({
+            logger: {
+                debug: jest.fn(),
+                info: jest.fn(),
+                warn: jest.fn(),
+                error: jest.fn(),
+            },
+        }));
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { youtubeDownloadService } = require("../youtubeDownload");
+
+        await expect(
+            youtubeDownloadService.searchAlbums("Artist & Album", 25),
+        ).resolves.toEqual([
+            {
+                browseId: "MPRE123",
+                title: "Album",
+                artists: ["Artist", "Guest"],
+            },
+        ]);
+        expect(get).toHaveBeenCalledWith(
+            "/yt/album-search?query=Artist%20%26%20Album&limit=25",
+        );
+    });
+
+    it("requires the enabled setting and a healthy sidecar for availability", async () => {
+        jest.resetModules();
+        const get = jest.fn(async () => ({ data: { status: "ok" } }));
+        const getSystemSettings = jest
+            .fn()
+            .mockResolvedValue({ ytMusicEnabled: true });
+        jest.doMock("axios", () => ({
+            __esModule: true,
+            default: { create: jest.fn(() => ({ get })) },
+        }));
+        jest.doMock("../../config", () => ({
+            config: { ytmusicStreamer: { url: "http://sidecar:8586" } },
+        }));
+        jest.doMock("../../utils/systemSettings", () => ({
+            getSystemSettings,
+        }));
+        jest.doMock("../../utils/logger", () => ({
+            logger: {
+                debug: jest.fn(),
+                info: jest.fn(),
+                warn: jest.fn(),
+                error: jest.fn(),
+            },
+        }));
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { youtubeDownloadService } = require("../youtubeDownload");
+
+        await expect(youtubeDownloadService.isAvailable()).resolves.toBe(true);
+        expect(get).toHaveBeenCalledWith("/health", { timeout: 5_000 });
+
+        getSystemSettings.mockResolvedValueOnce({ ytMusicEnabled: false });
+        await expect(youtubeDownloadService.isAvailable()).resolves.toBe(false);
+        expect(get).toHaveBeenCalledTimes(1);
+    });
 });

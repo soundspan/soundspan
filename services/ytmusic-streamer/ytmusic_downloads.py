@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -11,9 +10,8 @@ from typing import Any
 from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException
 from yt_download import (
-    PROXY_AUDIO_FORMAT_SELECTORS,
-    YT_PLAYER_CLIENTS,
-    build_tag_rewrite_command,
+    _stamp_audio_tags,
+    build_audio_download_opts,
     bulk_album_metadata,
     find_active_download_job,
     find_existing_download,
@@ -36,44 +34,6 @@ _yt_download_executor = ThreadPoolExecutor(
     thread_name_prefix="yt-download",
 )
 TERMINAL_DOWNLOAD_STATUSES = ("completed", "failed", "cancelled")
-
-
-def _safe_remove(path: str) -> None:
-    """Remove a file if it exists, swallowing OS errors."""
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
-
-
-def _stamp_audio_tags(filepath: str, tags: dict[str, str]) -> None:
-    """
-    Rewrite audio tags on a downloaded file via ffmpeg (stream copy, no
-    re-encode), covering the opus/flac/ogg/mp3/m4a containers the /yt/
-    downloader produces. ffmpeg-written tags stay readable by the backend
-    scanner's music-metadata parser; mutagen-written Vorbis tags silently break
-    it. Best effort — never raises into the download flow.
-    """
-    if not tags:
-        return
-    root, ext = os.path.splitext(filepath)
-    tmp_path = f"{root}.tagtmp{ext}"
-    cmd = build_tag_rewrite_command(filepath, tags, tmp_path)
-    try:
-        result = subprocess.run(  # noqa: S603 -- argv comes from a code-owned ffmpeg command builder
-            cmd, capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0:
-            log.warning(
-                f"ffmpeg tag stamp failed for {filepath}: {(result.stderr or '').strip()[:300]}"
-            )
-            _safe_remove(tmp_path)
-            return
-        os.replace(tmp_path, filepath)
-    except Exception as e:
-        log.warning(f"Failed to stamp audio tags on {filepath}: {e}")
-        _safe_remove(tmp_path)
 
 
 def _prune_yt_download_jobs() -> None:
@@ -159,41 +119,18 @@ def _build_yt_download_opts(
 ) -> JsonObject:
     """Build yt-dlp options for a bounded audio download."""
     outtmpl = os.path.join(output_dir, "%(title)s [%(id)s].%(ext)s")
-    postprocessors = [
-        {
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": audio_format,
-            "preferredquality": "320" if audio_format == "mp3" else "0",
-        },
-        {"key": "FFmpegMetadata"},
-        {"key": "EmbedThumbnail"},
-    ]
-
-    fmt = PROXY_AUDIO_FORMAT_SELECTORS.get(quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"])
 
     def _progress_hook(update: JsonObject) -> None:
         _update_yt_download_progress(job, update, download_cancelled)
 
-    return {
-        "format": fmt,
-        "outtmpl": outtmpl,
-        "postprocessors": postprocessors,
-        "writethumbnail": True,
-        "quiet": True,
-        "no_warnings": True,
-        "progress_hooks": [_progress_hook],
-        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
-        "http_headers": {
-            "User-Agent": _USER_AGENT,
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.youtube.com/",
-        },
-        "extractor_args": {
-            "youtube": {
-                "player_client": YT_PLAYER_CLIENTS,
-            },
-        },
-    }
+    return build_audio_download_opts(
+        outtmpl,
+        audio_format,
+        quality,
+        _USER_AGENT,
+        YTDLP_SOCKET_TIMEOUT,
+        _progress_hook,
+    )
 
 
 def _complete_yt_download(
@@ -209,7 +146,7 @@ def _complete_yt_download(
 
     bulk_tags = bulk_album_metadata(job.get("source"), job.get("source_kind"))
     if bulk_tags:
-        _stamp_audio_tags(filepath, bulk_tags)
+        _stamp_audio_tags(filepath, bulk_tags, log)
 
     job["file_path"] = filepath
     job["title"] = info.get("title", "")

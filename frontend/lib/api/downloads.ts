@@ -57,6 +57,7 @@ export function WithDownloads<TBase extends ApiClientConstructor>(Base: TBase) {
                 lidarr: boolean;
                 soulseek: boolean;
                 tidal: boolean;
+                youtube: boolean;
             }>("/downloads/availability");
         }
 

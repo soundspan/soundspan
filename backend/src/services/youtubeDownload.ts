@@ -12,6 +12,7 @@ import http from "node:http";
 import https from "node:https";
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { getSystemSettings } from "../utils/systemSettings";
 
 const SIDECAR_AGENT_OPTIONS = {
     keepAlive: true,
@@ -90,6 +91,36 @@ export interface YtDownloadJobStatus {
     createdAt: number | null;
 }
 
+/** Status snapshot for an album library-download job. */
+export interface YtAlbumDownloadJobStatus {
+    jobId: string;
+    browseId: string;
+    status: YtDownloadJobState;
+    progressPct: number;
+    albumTitle: string;
+    albumArtist: string;
+    totalTracks: number;
+    downloaded: number;
+    failed: number;
+    errors: Array<{ videoId: string; title: string; error: string }>;
+    error: string | null;
+    createdAt: number | null;
+}
+
+/** Public YouTube Music album candidate returned by the download sidecar. */
+export interface YtAlbumSearchResult {
+    browseId: string;
+    title: string;
+    artists: string[];
+}
+
+/** Minimal job fields consumed by the shared terminal watcher. */
+export interface YtDownloadStatusSnapshot {
+    status: YtDownloadJobState;
+    error: string | null;
+    progressPct: number;
+}
+
 /** Terminal outcome of a server-side download-job watch. */
 export type YtDownloadWatchOutcome =
     | "completed"
@@ -105,6 +136,8 @@ export interface YtDownloadWatchOptions {
     timeoutMs?: number;
     /** Injectable delay, for tests. */
     sleep?: (ms: number) => Promise<void>;
+    /** Observe each fetched status without adding another sidecar poll. */
+    onStatus?: (status: YtDownloadStatusSnapshot) => void | Promise<void>;
 }
 
 const DEFAULT_WATCH_INTERVAL_MS = 5_000;
@@ -124,26 +157,19 @@ const defaultSleep = (ms: number) =>
  */
 export async function watchYouTubeDownloadJobUntilTerminal(
     jobId: string,
-    getStatus: (jobId: string) => Promise<YtDownloadJobStatus>,
+    getStatus: (jobId: string) => Promise<YtDownloadStatusSnapshot>,
     options: YtDownloadWatchOptions = {},
 ): Promise<YtDownloadWatchOutcome> {
     const intervalMs = options.intervalMs ?? DEFAULT_WATCH_INTERVAL_MS;
     const timeoutMs = options.timeoutMs ?? DEFAULT_WATCH_TIMEOUT_MS;
     const sleep = options.sleep ?? defaultSleep;
+    const onStatus = options.onStatus;
 
     let elapsedMs = 0;
     while (elapsedMs < timeoutMs) {
+        let status: YtDownloadStatusSnapshot;
         try {
-            const status = await getStatus(jobId);
-            if (status.status === "completed") {
-                return "completed";
-            }
-            if (status.status === "failed") {
-                logger.warn(
-                    `[YouTube Download] Watched job ${jobId} failed: ${status.error ?? "unknown error"}`,
-                );
-                return "failed";
-            }
+            status = await getStatus(jobId);
         } catch (err: any) {
             if (err.response?.status === 404) {
                 logger.warn(
@@ -154,6 +180,19 @@ export async function watchYouTubeDownloadJobUntilTerminal(
             logger.debug(
                 `[YouTube Download] Transient status error while watching job ${jobId}: ${err.message}`,
             );
+            await sleep(intervalMs);
+            elapsedMs += intervalMs;
+            continue;
+        }
+        if (onStatus) await onStatus(status);
+        if (status.status === "completed") {
+            return "completed";
+        }
+        if (status.status === "failed" || status.status === "cancelled") {
+            logger.warn(
+                `[YouTube Download] Watched job ${jobId} failed: ${status.error ?? "unknown error"}`,
+            );
+            return "failed";
         }
         await sleep(intervalMs);
         elapsedMs += intervalMs;
@@ -195,6 +234,29 @@ class YouTubeDownloadService {
             });
         }
         return this._client;
+    }
+
+    /** Check whether the public YouTube sidecar is reachable. */
+    async isSidecarHealthy(): Promise<boolean> {
+        try {
+            const response = await this.client.get("/health", {
+                timeout: 5_000,
+            });
+            return response.data?.status === "ok";
+        } catch {
+            return false;
+        }
+    }
+
+    /** YouTube library downloads require the enabled setting and a healthy sidecar. */
+    async isAvailable(): Promise<boolean> {
+        try {
+            const settings = await getSystemSettings();
+            if (settings?.ytMusicEnabled !== true) return false;
+            return this.isSidecarHealthy();
+        } catch {
+            return false;
+        }
     }
 
     /**
@@ -282,6 +344,49 @@ class YouTubeDownloadService {
         };
     }
 
+    /** Start a server-rooted YouTube Music album download. */
+    async startAlbumDownload(
+        browseId: string,
+        format: string = "mp3",
+        quality: string = "HIGH",
+    ): Promise<YtDownloadJobStart> {
+        const response = await this.client.post("/yt/download/album", {
+            browse_id: browseId,
+            format,
+            quality,
+        });
+        return {
+            jobId: response.data.job_id,
+            status: response.data.status,
+        };
+    }
+
+    /** Search public YouTube Music albums for a library download candidate. */
+    async searchAlbums(
+        query: string,
+        limit: number = 10,
+    ): Promise<YtAlbumSearchResult[]> {
+        const encodedQuery = encodeURIComponent(query);
+        const encodedLimit = encodeURIComponent(String(limit));
+        const response = await this.client.get(
+            `/yt/album-search?query=${encodedQuery}&limit=${encodedLimit}`,
+        );
+        const albums = Array.isArray(response.data?.albums)
+            ? response.data.albums
+            : [];
+        return albums.map(mapAlbumSearchResult);
+    }
+
+    /** Fetch an isolated YouTube Music album job status. */
+    async getAlbumDownloadJobStatus(
+        jobId: string,
+    ): Promise<YtAlbumDownloadJobStatus> {
+        const response = await this.client.get(
+            `/yt/download/album/${encodeURIComponent(jobId)}`,
+        );
+        return mapAlbumDownloadJob(response.data);
+    }
+
     /**
      * Fetch the status of a download job started via startDownload().
      * Throws an axios error with response status 404 when the job is
@@ -330,6 +435,41 @@ function mapDownloadJob(data: any): YtDownloadJobStatus {
         alreadyExisted: Boolean(data.already_existed),
         source: data.source ?? null,
         createdAt: data.created_at ?? null,
+    };
+}
+
+/** Map a sidecar album-job payload to the backend shape. */
+function mapAlbumDownloadJob(data: any): YtAlbumDownloadJobStatus {
+    const errors = Array.isArray(data.errors) ? data.errors : [];
+    return {
+        jobId: data.job_id,
+        browseId: data.browse_id,
+        status: data.status,
+        progressPct: data.progress_pct ?? 0,
+        albumTitle: data.album_title ?? "",
+        albumArtist: data.album_artist ?? "",
+        totalTracks: data.total_tracks ?? 0,
+        downloaded: data.downloaded ?? 0,
+        failed: data.failed ?? 0,
+        errors: errors.map((entry: any) => ({
+            videoId: entry.video_id ?? "",
+            title: entry.title ?? "",
+            error: entry.error ?? "Track download failed",
+        })),
+        error: data.error ?? null,
+        createdAt: data.created_at ?? null,
+    };
+}
+
+/** Map a sidecar album-search payload to the backend shape. */
+function mapAlbumSearchResult(data: any): YtAlbumSearchResult {
+    const artists = Array.isArray(data.artists) ? data.artists : [];
+    return {
+        browseId: typeof data.browse_id === "string" ? data.browse_id : "",
+        title: typeof data.title === "string" ? data.title : "",
+        artists: artists.filter(
+            (artist: unknown): artist is string => typeof artist === "string",
+        ),
     };
 }
 

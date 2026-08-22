@@ -8,6 +8,13 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
 import { soulseekService } from "../services/soulseek";
 import { tidalService } from "../services/tidal";
+import { processTidalDownload } from "../services/tidalLibraryDownload";
+import { youtubeDownloadService } from "../services/youtubeDownload";
+import { processYoutubeDownload } from "../services/youtubeLibraryDownload";
+import {
+    type DownloadSource,
+    resolveDownloadSource,
+} from "../services/downloadSourcePolicy";
 import { musicBrainzService } from "../services/musicbrainz";
 import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
@@ -29,7 +36,7 @@ router.use(requireAuthOrToken);
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Availability status for each download service (Lidarr, Soulseek, TIDAL)
+ *         description: Availability status for each download service (Lidarr, Soulseek, TIDAL, YouTube Music)
  *       401:
  *         description: Not authenticated
  */
@@ -40,18 +47,28 @@ router.use(requireAuthOrToken);
  */
 router.get("/availability", async (req, res) => {
     try {
-        const [lidarrEnabled, soulseekAvailable, tidalAvailable] =
-            await Promise.all([
-                lidarrService.isEnabled(),
-                soulseekService.isAvailable(),
-                tidalService.isAvailable(),
-            ]);
+        const [
+            lidarrEnabled,
+            soulseekAvailable,
+            tidalAvailable,
+            youtubeAvailable,
+        ] = await Promise.all([
+            lidarrService.isEnabled(),
+            soulseekService.isAvailable(),
+            tidalService.isAvailable(),
+            youtubeDownloadService.isAvailable(),
+        ]);
 
         res.json({
-            enabled: lidarrEnabled || soulseekAvailable || tidalAvailable,
+            enabled:
+                lidarrEnabled ||
+                soulseekAvailable ||
+                tidalAvailable ||
+                youtubeAvailable,
             lidarr: lidarrEnabled,
             soulseek: soulseekAvailable,
             tidal: tidalAvailable,
+            youtube: youtubeAvailable,
         });
     } catch (error: any) {
         logger.error("Download availability check error:", error.message);
@@ -207,16 +224,26 @@ router.post("/", requireAdmin, async (req, res) => {
 
         // Check if at least one download service is available
         const settings = await getSystemSettings();
-        const [lidarrEnabled, soulseekAvailable, tidalAvailable] =
-            await Promise.all([
-                lidarrService.isEnabled(),
-                soulseekService.isAvailable(),
-                tidalService.isAvailable(),
-            ]);
+        const [
+            lidarrEnabled,
+            soulseekAvailable,
+            tidalAvailable,
+            youtubeAvailable,
+        ] = await Promise.all([
+            lidarrService.isEnabled(),
+            soulseekService.isAvailable(),
+            tidalService.isAvailable(),
+            youtubeDownloadService.isAvailable(),
+        ]);
 
-        if (!lidarrEnabled && !soulseekAvailable && !tidalAvailable) {
+        if (
+            !lidarrEnabled &&
+            !soulseekAvailable &&
+            !tidalAvailable &&
+            !youtubeAvailable
+        ) {
             return res.status(400).json({
-                error: "No download service configured. Please set up Lidarr, Soulseek, or TIDAL.",
+                error: "No download service configured. Please set up Lidarr, Soulseek, TIDAL, or YouTube Music.",
             });
         }
 
@@ -675,84 +702,39 @@ async function processDownload(
 
         // Check configured download source and service availability
         const settings = await getSystemSettings();
-        const configuredSource = settings?.downloadSource || "soulseek";
+        const configuredSource = (settings?.downloadSource ||
+            "soulseek") as DownloadSource;
 
-        const [tidalAvail, lidarrAvail, soulseekAvail] = await Promise.all([
-            tidalService.isAvailable(),
-            lidarrService.isEnabled(),
-            soulseekService.isAvailable(),
-        ]);
-        const availability: Record<string, boolean> = {
+        const [tidalAvail, lidarrAvail, soulseekAvail, youtubeAvail] =
+            await Promise.all([
+                tidalService.isAvailable(),
+                lidarrService.isEnabled(),
+                soulseekService.isAvailable(),
+                youtubeDownloadService.isAvailable(),
+            ]);
+        const availability = {
             tidal: tidalAvail,
             lidarr: lidarrAvail,
             soulseek: soulseekAvail,
+            youtube: youtubeAvail,
         };
 
-        // Determine effective download source. When the configured primary
-        // is unavailable, the user's "When primary source fails" setting
-        // decides what happens: "none" (Skip) fails the job outright, an
-        // explicit fallback source is used only if it is itself available,
-        // and only legacy rows with no stored preference keep the old
-        // auto-detect rerouting.
-        let effectiveSource = configuredSource;
-        if (!availability[configuredSource]) {
-            const fallback = settings?.primaryFailureFallback;
-
-            if (fallback === "none" || fallback === configuredSource) {
-                // A fallback equal to the (unavailable) primary cannot rescue
-                // the job either — same outcome as Skip, but say so honestly.
-                const reason =
-                    fallback === "none"
-                        ? `${configuredSource} is unavailable and "When primary source fails" is set to Skip`
-                        : `${configuredSource} is unavailable and the configured fallback is also ${configuredSource}`;
-                await failJobWithoutDispatch(
-                    jobId,
-                    job.metadata,
-                    configuredSource,
-                    reason,
-                    `${configuredSource} unavailable — skipped`,
-                );
-                return;
-            }
-
-            if (
-                fallback === "tidal" ||
-                fallback === "lidarr" ||
-                fallback === "soulseek"
-            ) {
-                if (!availability[fallback]) {
-                    await failJobWithoutDispatch(
-                        jobId,
-                        job.metadata,
-                        configuredSource,
-                        `${configuredSource} is unavailable and the configured fallback (${fallback}) is also unavailable`,
-                        `${configuredSource} and fallback ${fallback} unavailable`,
-                    );
-                    return;
-                }
-                effectiveSource = fallback;
-            } else if (configuredSource === "tidal") {
-                // Legacy auto-detect (no stored fallback preference):
-                // TIDAL is down, so prefer Soulseek, then Lidarr
-                effectiveSource = soulseekAvail
-                    ? "soulseek"
-                    : lidarrAvail
-                      ? "lidarr"
-                      : "soulseek";
-            } else if (configuredSource === "soulseek") {
-                effectiveSource = tidalAvail
-                    ? "tidal"
-                    : lidarrAvail
-                      ? "lidarr"
-                      : "soulseek";
-            } else {
-                effectiveSource = tidalAvail
-                    ? "tidal"
-                    : soulseekAvail
-                      ? "soulseek"
-                      : "lidarr";
-            }
+        const resolution = resolveDownloadSource({
+            configuredSource,
+            fallback: settings?.primaryFailureFallback,
+            availability,
+        });
+        if (resolution.kind === "fail") {
+            await failJobWithoutDispatch(
+                jobId,
+                job.metadata,
+                configuredSource,
+                resolution.error,
+                resolution.statusText,
+            );
+            return;
         }
+        const effectiveSource = resolution.source;
 
         logger.debug(
             `Download source: configured=${configuredSource}, effective=${effectiveSource}`,
@@ -760,6 +742,13 @@ async function processDownload(
 
         if (effectiveSource === "tidal" && tidalAvail) {
             await processTidalDownload(
+                jobId,
+                parsedArtist,
+                parsedAlbum,
+                job.userId,
+            );
+        } else if (effectiveSource === "youtube" && youtubeAvail) {
+            await processYoutubeDownload(
                 jobId,
                 parsedArtist,
                 parsedAlbum,
@@ -782,170 +771,6 @@ async function processDownload(
                 logger.error(`Failed to start download: ${result.error}`);
             }
         }
-    }
-}
-
-/**
- * Process a TIDAL download: search → download album → update job → trigger scan
- */
-async function processTidalDownload(
-    jobId: string,
-    artistName: string,
-    albumTitle: string,
-    userId: string,
-) {
-    const existingJob = await prisma.downloadJob.findUnique({
-        where: { id: jobId },
-        select: { metadata: true },
-    });
-    const existingMetadata = (existingJob?.metadata as any) || {};
-
-    try {
-        // Mark job as processing with TIDAL source
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                status: "processing",
-                metadata: {
-                    ...existingMetadata,
-                    currentSource: "tidal",
-                    statusText: "Searching TIDAL...",
-                },
-            },
-        });
-
-        // Search TIDAL for the album
-        const match = await tidalService.findAlbum(artistName, albumTitle);
-        if (!match) {
-            // TIDAL search failed — check for fallback
-            const settings = await getSystemSettings();
-            const fallback = settings?.primaryFailureFallback;
-
-            if (fallback && fallback !== "none" && fallback !== "tidal") {
-                logger.debug(
-                    `[TIDAL] Album not found, falling back to ${fallback}`,
-                );
-                await prisma.downloadJob.update({
-                    where: { id: jobId },
-                    data: {
-                        metadata: {
-                            ...existingMetadata,
-                            currentSource: fallback,
-                            statusText: `TIDAL not found → ${fallback}`,
-                        },
-                    },
-                });
-
-                if (fallback === "lidarr" || fallback === "soulseek") {
-                    const result = await simpleDownloadManager.startDownload(
-                        jobId,
-                        artistName,
-                        albumTitle,
-                        existingMetadata.albumMbid || "",
-                        userId,
-                    );
-                    if (!result.success) {
-                        logger.error(
-                            `Fallback ${fallback} failed: ${result.error}`,
-                        );
-                    }
-                    return;
-                }
-            }
-
-            throw new Error(
-                `Album not found on TIDAL: ${artistName} - ${albumTitle}`,
-            );
-        }
-
-        logger.debug(
-            `[TIDAL] Found album: "${match.title}" by ${match.artist} (ID: ${match.albumId}, ${match.numberOfTracks} tracks)`,
-        );
-
-        // Update status before download
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                metadata: {
-                    ...existingMetadata,
-                    currentSource: "tidal",
-                    statusText: `Downloading ${match.numberOfTracks} tracks...`,
-                    tidalAlbumId: match.albumId,
-                },
-            },
-        });
-
-        // Download the album — files go directly to /music
-        const result = await tidalService.downloadAlbum(match.albumId);
-
-        logger.debug(
-            `[TIDAL] Download complete: ${result.downloaded}/${result.total_tracks} tracks`,
-        );
-
-        if (result.downloaded === 0) {
-            throw new Error(
-                `All ${result.total_tracks} tracks failed to download`,
-            );
-        }
-
-        // Mark job as completed
-        const statusText =
-            result.failed > 0
-                ? `${result.downloaded}/${result.total_tracks} tracks (${result.failed} failed)`
-                : `${result.downloaded} tracks`;
-
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                status: "completed",
-                completedAt: new Date(),
-                metadata: {
-                    ...existingMetadata,
-                    currentSource: "tidal",
-                    statusText: `TIDAL ✓ ${statusText}`,
-                    tidalAlbumId: match.albumId,
-                    tidalResult: {
-                        downloaded: result.downloaded,
-                        failed: result.failed,
-                        totalTracks: result.total_tracks,
-                    },
-                },
-            },
-        });
-
-        // Trigger a library scan so the backend picks up the new files
-        const { scanQueue } = await import("../workers/queues");
-        await scanQueue.add("scan", {
-            userId,
-            source: "tidal-download",
-            artistName: result.artist,
-            albumTitle: result.album_title,
-        });
-
-        logger.debug(
-            `[TIDAL] Scan queued for: ${result.artist} - ${result.album_title}`,
-        );
-    } catch (error: unknown) {
-        logger.error(
-            `[TIDAL] Download failed for job ${jobId}:`,
-            error instanceof Error ? error.message : error,
-        );
-
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                status: "failed",
-                // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
-                error: "TIDAL download failed",
-                completedAt: new Date(),
-                metadata: {
-                    ...existingMetadata,
-                    currentSource: "tidal",
-                    statusText: "TIDAL failed",
-                    failedAt: new Date().toISOString(),
-                },
-            },
-        });
     }
 }
 

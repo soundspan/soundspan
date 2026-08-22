@@ -150,12 +150,12 @@ const systemSettingsSchema = z.object({
     transcodeCacheMaxGb: z.number().optional(),
     soulseekConcurrentDownloads: z.number().min(1).max(10).optional(),
 
-    // Download Preferences
-    downloadSource: z.enum(["soulseek", "lidarr", "tidal"]).optional(),
-    primaryFailureFallback: z
-        .enum(["none", "lidarr", "soulseek", "tidal"])
+    downloadSource: z
+        .enum(["soulseek", "lidarr", "tidal", "youtube"])
         .optional(),
-
+    primaryFailureFallback: z
+        .enum(["none", "lidarr", "soulseek", "tidal", "youtube"])
+        .optional(),
     // TIDAL — credential fields (tidalAccessToken, tidalRefreshToken,
     // tidalUserId) are deliberately absent: they are managed exclusively
     // by the /tidal-auth device flow. Accepting them here let a stale

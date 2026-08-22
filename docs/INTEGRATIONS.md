@@ -212,6 +212,35 @@ Main-channel image:
 docker pull ghcr.io/soundspan/soundspan-tidal-downloader:main
 ```
 
+## YouTube Music Downloads
+
+Use YouTube Music as a download source for albums, the same way TIDAL works.
+
+> Disclaimer: Uses unofficial libraries (`ytmusicapi`, `yt-dlp`). Intended for personal use.
+
+### Setup
+
+1. Ensure the `ytmusic-streamer` sidecar is running
+2. Open **Admin** → **YouTube Music** and enable YouTube Music
+3. Open **Admin** → **Download Preferences**
+4. Choose **YouTube Music (Albums)** as the primary source, or pick **Try YouTube Music** as the fallback for another source
+5. Save
+
+No account link is needed for downloads — the sidecar uses public album pages.
+
+### How it works
+
+When a download job runs, soundspan searches YouTube Music for the album, then the sidecar downloads each track and files it under your music folder as `Artist/Album/01. Title.mp3`. The library scanner picks the album up automatically when the job finishes.
+
+If the album is not found on YouTube Music, the job follows your **When Primary Source Fails** setting — it can hand off to Soulseek, Lidarr, or TIDAL, or skip.
+
+### Sidecar environment values
+
+| Variable                        | Default  | Description                              |
+| ------------------------------- | -------- | ---------------------------------------- |
+| `MUSIC_PATH`                    | `/music` | Path for downloaded music                |
+| `YT_ALBUM_DOWNLOAD_CONCURRENCY` | `1`      | Album download jobs processed at once    |
+
 ## Podcasts
 
 Podcast discovery and subscriptions require no credentials. Search uses the

@@ -149,8 +149,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/spotifyImport/matching.ts": 2,
     "backend/src/services/spotifyImport/preview.ts": 2,
     "backend/src/services/spotifyImport/state.ts": 6,
-    // youtubeDownload.ts remaining 1: sidecar status mapping data.error (~L329); job-state plumbing, frozen under the slice-J scope guard.
-    "backend/src/services/youtubeDownload.ts": 1,
+    // youtubeDownload.ts remaining 4: sidecar job-state plumbing — data.error in the per-video mapper (~L433), and data.errors / entry.error / data.error in the album-job mapper (~L443-459). The sidecar sanitizes these to code-owned generic strings ("Track download failed", "Album download failed") before they enter any payload; frozen under the slice-J scope guard.
+    "backend/src/services/youtubeDownload.ts": 4,
     // queueCleaner.ts remaining 2: Prisma/retry error classification used only to decide whether the internal cleanup job retries.
     "backend/src/jobs/queueCleaner.ts": 2,
     // errorHandler.ts remaining 5: typed AppError fields plus development-only unknown-error detail; this is an existing transport-boundary policy exception frozen as the middleware root enters the ratchet.

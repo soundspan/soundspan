@@ -20,6 +20,7 @@ INTERNAL_API_SECRET = "test-internal-secret-value"
 APP_MODULES = (
     "app",
     "ytmusic_auth",
+    "ytmusic_album_downloads",
     "ytmusic_browse",
     "ytmusic_client",
     "ytmusic_downloads",

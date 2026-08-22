@@ -62,8 +62,9 @@ export interface YouTubeDownloadJob {
 /**
  * A YouTube job rendered as an activity-panel download row. Structurally a
  * superset-compatible subset of DownloadHistoryItem (the shared list shape),
- * tagged `currentSource: "youtube"` so the tab can color it and route cancel
- * to the YouTube endpoint.
+ * tagged `currentSource: "youtube"` so the tab can color it. `ytSidecarJob`
+ * routes cancel to the sidecar endpoint — library DownloadJob rows also carry
+ * `currentSource: "youtube"` but cancel through the regular downloads API.
  */
 export interface YouTubeDownloadListItem {
     id: string;
@@ -74,6 +75,7 @@ export interface YouTubeDownloadListItem {
     updatedAt: string;
     metadata: {
         currentSource: "youtube";
+        ytSidecarJob: true;
         statusText: string;
         progressPct: number;
         ytSource: string | null;
@@ -102,6 +104,7 @@ export function youtubeJobToDownloadItem(
         updatedAt: createdAt,
         metadata: {
             currentSource: "youtube",
+            ytSidecarJob: true,
             statusText: job.source ? `${pct}% · ${job.source}` : `${pct}%`,
             progressPct: pct,
             ytSource: job.source,

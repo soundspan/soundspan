@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- YouTube Music is now a selectable library download source alongside Soulseek, Lidarr, and TIDAL. Pick **YouTube Music (Albums)** in Admin → Download Preferences (or as the "When Primary Source Fails" fallback) and album download jobs dispatch through the `ytmusic-streamer` sidecar the same way TIDAL jobs do: public album search, per-track downloads with TIDAL-style `Artist/Album/NN. Title` naming and scanner-compatible tags under the shared music volume, live progress on the job row, and an automatic library scan on completion. New sidecar env values `MUSIC_PATH` (default `/music`) and `YT_ALBUM_DOWNLOAD_CONCURRENCY` (default `1`). (#701)
+
 ### Changed
 
 ### Fixed

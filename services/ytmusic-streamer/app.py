@@ -26,6 +26,7 @@ SERVICES_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICES_ROOT) not in sys.path:
     sys.path.append(str(SERVICES_ROOT))
 
+import ytmusic_album_downloads as _album_downloads
 import ytmusic_auth as _auth
 import ytmusic_browse as _browse
 import ytmusic_client as _client
@@ -48,6 +49,7 @@ _MODULES = (
     _stream,
     _library,
     _downloads,
+    _album_downloads,
     _browse,
     _lifecycle,
 )

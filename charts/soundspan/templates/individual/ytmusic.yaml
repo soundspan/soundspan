@@ -41,7 +41,7 @@ spec:
               containerPort: {{ .Values.ytmusicStreamer.port }}
               protocol: TCP
           {{- $ytmusicEnv := .Values.ytmusicStreamer.env | default (dict) }}
-          {{- $ytmusicExplicitEnvKeys := dict "DATA_PATH" true "TZ" true "YT_DOWNLOAD_DIR" true "INTERNAL_API_SECRET" true }}
+          {{- $ytmusicExplicitEnvKeys := dict "DATA_PATH" true "MUSIC_PATH" true "TZ" true "YT_DOWNLOAD_DIR" true "INTERNAL_API_SECRET" true }}
           env:
             {{- if hasKey $ytmusicEnv "DATA_PATH" }}
             - name: DATA_PATH
@@ -63,6 +63,13 @@ spec:
             {{- else }}
             - name: YT_DOWNLOAD_DIR
               value: /music/YouTube Downloads
+            {{- end }}
+            {{- if hasKey $ytmusicEnv "MUSIC_PATH" }}
+            - name: MUSIC_PATH
+              value: {{ index $ytmusicEnv "MUSIC_PATH" | quote }}
+            {{- else }}
+            - name: MUSIC_PATH
+              value: /music
             {{- end }}
             {{- if hasKey $ytmusicEnv "INTERNAL_API_SECRET" }}
             - name: INTERNAL_API_SECRET

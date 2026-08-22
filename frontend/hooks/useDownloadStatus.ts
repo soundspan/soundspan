@@ -19,7 +19,7 @@ export interface DownloadJob {
     error?: string;
     metadata?: {
         statusText?: string;
-        currentSource?: "lidarr" | "soulseek" | "tidal";
+        currentSource?: "lidarr" | "soulseek" | "tidal" | "youtube";
         lidarrAttempts?: number;
         soulseekAttempts?: number;
     };

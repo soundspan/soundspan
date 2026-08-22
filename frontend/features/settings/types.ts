@@ -5,6 +5,12 @@
 
 export type Tab = "user" | "account" | "system";
 
+/** Library download sources selectable as the primary preference. */
+export type DownloadSource = "soulseek" | "lidarr" | "tidal" | "youtube";
+
+/** Fallback behavior when the primary download source is unavailable. */
+export type DownloadFallback = "none" | DownloadSource;
+
 export interface UserSettings {
     displayName?: string | null;
     hasProfilePicture?: boolean;
@@ -64,8 +70,8 @@ export interface SystemSettings {
     audioAnalyzerWorkers: number;
     soulseekConcurrentDownloads: number;
     // Download Preferences
-    downloadSource: "soulseek" | "lidarr" | "tidal";
-    primaryFailureFallback: "none" | "lidarr" | "soulseek" | "tidal";
+    downloadSource: DownloadSource;
+    primaryFailureFallback: DownloadFallback;
     // YouTube Music streaming (admin toggle + OAuth app credentials)
     ytMusicEnabled: boolean;
     ytMusicClientId: string;

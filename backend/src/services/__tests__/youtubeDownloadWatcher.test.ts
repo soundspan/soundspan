@@ -82,6 +82,41 @@ describe("watchYouTubeDownloadJobUntilTerminal", () => {
         expect(outcome).toBe("failed");
     });
 
+    it("treats cancellation as a terminal failed outcome", async () => {
+        const getStatus = jest
+            .fn()
+            .mockResolvedValue(jobStatus({ status: "cancelled", error: null }));
+
+        const outcome = await watchYouTubeDownloadJobUntilTerminal(
+            "job-1",
+            getStatus,
+            { intervalMs: 1, sleep: immediateSleep },
+        );
+
+        expect(outcome).toBe("failed");
+        expect(getStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not swallow progress-observer failures as fetch retries", async () => {
+        const getStatus = jest
+            .fn()
+            .mockResolvedValue(
+                jobStatus({ status: "downloading", progressPct: 25 }),
+            );
+        const observerError = new Error("progress persistence failed");
+
+        await expect(
+            watchYouTubeDownloadJobUntilTerminal("job-1", getStatus, {
+                intervalMs: 1,
+                sleep: immediateSleep,
+                onStatus: async () => {
+                    throw observerError;
+                },
+            }),
+        ).rejects.toBe(observerError);
+        expect(getStatus).toHaveBeenCalledTimes(1);
+    });
+
     it("resolves 'gone' when the sidecar no longer knows the job", async () => {
         const getStatus = jest.fn().mockRejectedValue(sidecarError(404));
 

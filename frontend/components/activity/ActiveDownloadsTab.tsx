@@ -37,10 +37,12 @@ export function ActiveDownloadsTab({
     const [cancelling, setCancelling] = useState<Set<string>>(new Set());
 
     // YouTube bulk-download jobs live in the sidecar and cancel through a
-    // different endpoint than the Soulseek/Lidarr download manager.
+    // different endpoint than the library download manager. Library jobs with
+    // the YouTube source are regular DownloadJob rows, so the routing keys on
+    // the sidecar-row marker rather than currentSource.
     const cancelById = async (id: string) => {
         const download = downloads.find((d) => d.id === id);
-        if (download?.metadata?.currentSource === "youtube") {
+        if (download?.metadata?.ytSidecarJob === true) {
             await api.cancelYouTubeDownload(id);
         } else {
             await api.deleteDownload(id);

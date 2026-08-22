@@ -2,7 +2,14 @@
 
 import { useEffect } from "react";
 import { SettingsSection, SettingsRow, SettingsSelect } from "../ui";
-import { SystemSettings } from "../../types";
+import { DownloadFallback, DownloadSource, SystemSettings } from "../../types";
+import {
+    countConfiguredSources,
+    getConfiguredSources,
+    getFallbackOptions,
+    getSourceOptions,
+    pickAutoSource,
+} from "./downloadSourceConfig";
 
 interface DownloadPreferencesSectionProps {
     settings: SystemSettings;
@@ -16,84 +23,17 @@ export function DownloadPreferencesSection({
     settings,
     onUpdate,
 }: DownloadPreferencesSectionProps) {
-    // Service configuration detection
-    const isLidarrConfigured =
-        settings.lidarrEnabled === true &&
-        settings.lidarrUrl.trim() !== "" &&
-        settings.lidarrApiKey.trim() !== "";
-
-    const isSoulseekConfigured =
-        settings.soulseekUsername.trim() !== "" &&
-        settings.soulseekPassword.trim() !== "";
-
-    const isTidalConfigured =
-        settings.tidalEnabled === true && settings.tidalConnected === true;
-
-    const configuredCount = [
-        isLidarrConfigured,
-        isSoulseekConfigured,
-        isTidalConfigured,
-    ].filter(Boolean).length;
+    const configured = getConfiguredSources(settings);
+    const configuredCount = countConfiguredSources(configured);
     const isDisabled = configuredCount === 0;
+    const autoSource = pickAutoSource(configured);
 
     // Auto-select the only configured service as the download source
     useEffect(() => {
-        if (configuredCount === 1) {
-            const autoSource = isTidalConfigured
-                ? "tidal"
-                : isLidarrConfigured
-                  ? "lidarr"
-                  : "soulseek";
-            if (settings.downloadSource !== autoSource) {
-                onUpdate({
-                    downloadSource: autoSource as
-                        | "soulseek"
-                        | "lidarr"
-                        | "tidal",
-                });
-            }
+        if (autoSource !== null && settings.downloadSource !== autoSource) {
+            onUpdate({ downloadSource: autoSource });
         }
-    }, [
-        configuredCount,
-        isTidalConfigured,
-        isLidarrConfigured,
-        isSoulseekConfigured,
-        settings.downloadSource,
-        onUpdate,
-    ]);
-
-    // Build primary source options based on what's configured
-    const getSourceOptions = () => {
-        const options = [];
-        if (isSoulseekConfigured)
-            options.push({ value: "soulseek", label: "Soulseek (Per-track)" });
-        if (isLidarrConfigured)
-            options.push({ value: "lidarr", label: "Lidarr (Full albums)" });
-        if (isTidalConfigured)
-            options.push({
-                value: "tidal",
-                label: "TIDAL (Per-track / album)",
-            });
-        if (options.length === 0) {
-            options.push({ value: "soulseek", label: "Soulseek (Per-track)" });
-        }
-        return options;
-    };
-
-    // Dynamic fallback options based on primary source
-    const getFallbackOptions = () => {
-        const options = [{ value: "none", label: "Skip" }];
-        if (settings.downloadSource !== "soulseek" && isSoulseekConfigured) {
-            options.push({ value: "soulseek", label: "Try Soulseek" });
-        }
-        if (settings.downloadSource !== "lidarr" && isLidarrConfigured) {
-            options.push({ value: "lidarr", label: "Try Lidarr" });
-        }
-        if (settings.downloadSource !== "tidal" && isTidalConfigured) {
-            options.push({ value: "tidal", label: "Try TIDAL" });
-        }
-        return options;
-    };
+    }, [autoSource, settings.downloadSource, onUpdate]);
 
     return (
         <SettingsSection
@@ -113,14 +53,11 @@ export function DownloadPreferencesSection({
                     value={settings.downloadSource || "soulseek"}
                     onChange={(v) =>
                         onUpdate({
-                            downloadSource: v as
-                                | "soulseek"
-                                | "lidarr"
-                                | "tidal",
+                            downloadSource: v as DownloadSource,
                             primaryFailureFallback: "none",
                         })
                     }
-                    options={getSourceOptions()}
+                    options={getSourceOptions(configured)}
                     disabled={isDisabled}
                 />
             </SettingsRow>
@@ -137,14 +74,13 @@ export function DownloadPreferencesSection({
                     value={settings.primaryFailureFallback || "none"}
                     onChange={(v) =>
                         onUpdate({
-                            primaryFailureFallback: v as
-                                | "none"
-                                | "lidarr"
-                                | "soulseek"
-                                | "tidal",
+                            primaryFailureFallback: v as DownloadFallback,
                         })
                     }
-                    options={getFallbackOptions()}
+                    options={getFallbackOptions(
+                        configured,
+                        settings.downloadSource,
+                    )}
                     disabled={isDisabled}
                 />
             </SettingsRow>
@@ -174,7 +110,7 @@ export function DownloadPreferencesSection({
                         { value: "9", label: "9" },
                         { value: "10", label: "10" },
                     ]}
-                    disabled={!isSoulseekConfigured}
+                    disabled={!configured.soulseek}
                 />
             </SettingsRow>
         </SettingsSection>

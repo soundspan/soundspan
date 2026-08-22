@@ -11,7 +11,10 @@ the final output path from a yt-dlp info dict.
 import glob
 import os
 import re
-from typing import Any
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, Protocol
 
 # Audio file extensions produced by the download postprocessors (plus raw
 # bestaudio containers in case postprocessing is skipped).
@@ -60,6 +63,134 @@ PROXY_AUDIO_FORMAT_SELECTORS = {
 # NOTE: this is the regular-YouTube client. The authenticated
 # music.youtube.com stream path keeps its own ["android_music"] context.
 YT_PLAYER_CLIENTS = ["android_vr", "android_music"]
+
+
+class _WarningLogger(Protocol):
+    """Minimal logger surface used by the shared tag-stamping helper."""
+
+    def warning(self, message: str) -> None: ...
+
+
+def _sanitize_path_component(name: str) -> str:
+    """Replace filesystem-reserved characters and trim unsafe suffixes."""
+    for char in '<>:"/\\|?*':
+        name = name.replace(char, "_")
+    return name.strip(". ")
+
+
+def _sanitize_download_relative_path(rendered_path: str) -> Path:
+    """Validate and sanitize every component of a relative download path."""
+    sanitized_parts: list[str] = []
+    for component in rendered_path.split("/"):
+        sanitized = _sanitize_path_component(component)
+        if not sanitized or sanitized in {".", ".."} or Path(sanitized).is_absolute():
+            raise ValueError("Invalid output template path component")
+        sanitized_parts.append(sanitized)
+    return Path(*sanitized_parts)
+
+
+def _require_contained_download_path(path: Path, destination_root: Path) -> Path:
+    """Resolve a path and reject targets outside the configured music root."""
+    resolved_path = path.resolve()
+    try:
+        resolved_path.relative_to(destination_root.resolve())
+    except ValueError:
+        raise ValueError("Download path resolves outside MUSIC_PATH") from None
+    return resolved_path
+
+
+def build_album_track_paths(
+    music_path: Path,
+    album_artist: str,
+    album_title: str,
+    track_number: int,
+    track_title: str,
+    audio_format: str,
+) -> tuple[Path, Path, Path]:
+    """Build deterministic contained paths for one album track and its temp file."""
+    if track_number < 1:
+        raise ValueError("Track number must be positive")
+    components = (
+        _sanitize_path_component(album_artist),
+        _sanitize_path_component(album_title),
+        _sanitize_path_component(f"{track_number:02d}. {track_title}"),
+    )
+    relative_stem = _sanitize_download_relative_path("/".join(components))
+    extension = audio_format.lstrip(".")
+    relative_path = relative_stem.parent / f"{relative_stem.name}.{extension}"
+    destination_root = music_path.resolve()
+    final_path = _require_contained_download_path(
+        destination_root / relative_path, destination_root
+    )
+    tmp_path = final_path.with_name(f"{final_path.stem}.tmp{final_path.suffix}")
+    return relative_path, final_path, _require_contained_download_path(tmp_path, destination_root)
+
+
+def build_audio_download_opts(
+    outtmpl: str,
+    audio_format: str,
+    quality: str,
+    user_agent: str,
+    socket_timeout: float,
+    progress_hook: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Build shared yt-dlp options for bounded audio extraction."""
+    options: dict[str, Any] = {
+        "format": PROXY_AUDIO_FORMAT_SELECTORS.get(quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"]),
+        "outtmpl": outtmpl,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": audio_format,
+                "preferredquality": "320" if audio_format == "mp3" else "0",
+            },
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
+        ],
+        "writethumbnail": True,
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": socket_timeout,
+        "http_headers": {
+            "User-Agent": user_agent,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.youtube.com/",
+        },
+        "extractor_args": {"youtube": {"player_client": YT_PLAYER_CLIENTS}},
+    }
+    if progress_hook is not None:
+        options["progress_hooks"] = [progress_hook]
+    return options
+
+
+def _safe_remove(path: str) -> None:
+    """Remove a file if it exists, swallowing cleanup-only OS errors."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _stamp_audio_tags(filepath: str, tags: dict[str, str], logger: _WarningLogger) -> None:
+    """Best-effort stream-copy tag rewrite compatible with the library scanner."""
+    if not tags:
+        return
+    root, ext = os.path.splitext(filepath)
+    tmp_path = f"{root}.tagtmp{ext}"
+    command = build_tag_rewrite_command(filepath, tags, tmp_path)
+    try:
+        result = subprocess.run(  # noqa: S603 -- argv is built from code-owned ffmpeg options
+            command, capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            os.replace(tmp_path, filepath)
+            return
+        logger.warning(f"ffmpeg tag stamp failed for {filepath}: {(result.stderr or '')[:300]}")
+    except Exception as error:
+        logger.warning(f"Failed to stamp audio tags on {filepath}: {error}")
+    _safe_remove(tmp_path)
+
 
 _VIDEO_ID_PATTERNS = [
     r"(?:youtube\.com|m\.youtube\.com)/watch\?.*?v=([a-zA-Z0-9_-]{11})",

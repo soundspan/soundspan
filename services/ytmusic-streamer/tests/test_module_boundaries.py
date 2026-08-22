@@ -13,6 +13,7 @@ from httpx import AsyncClient
 def test_entrypoint_assembles_routes_from_each_boundary_module() -> None:
     """The entrypoint exposes one app assembled from every route boundary."""
     import app
+    import ytmusic_album_downloads
     import ytmusic_auth
     import ytmusic_browse
     import ytmusic_downloads
@@ -28,6 +29,8 @@ def test_entrypoint_assembles_routes_from_each_boundary_module() -> None:
         "/album/{browse_id}": ytmusic_library.__name__,
         "/stream/{video_id}": ytmusic_stream.__name__,
         "/yt/download": ytmusic_downloads.__name__,
+        "/yt/download/album": ytmusic_album_downloads.__name__,
+        "/yt/album-search": ytmusic_album_downloads.__name__,
         "/home": ytmusic_browse.__name__,
     }
     endpoints = {
