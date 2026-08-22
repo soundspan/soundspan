@@ -8,12 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `FEDERATION_ALLOW_PROXY` administrator opt-in restores `HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` handling on federation egress for deployments behind a mandatory proxy, which the 2.4.0 DNS-pinning hardening had disabled unconditionally (federation egress is HTTPS-only, so `HTTP_PROXY` never applies). Per-attempt peer address resolution and private-range validation still run and fail closed; only connection pinning is relinquished — proxied requests are connected by the proxy, and `NO_PROXY`-exempt requests connect directly without a pin. Default behavior is unchanged (#673).
-
 ### Changed
 
 ### Fixed
 
+### Security
+
+## [2.4.1] - 2026-08-22
+
+### Fixed
+
+- Deployments behind a mandatory egress proxy can restore federation proxy support with the new `FEDERATION_ALLOW_PROXY` administrator opt-in; the 2.4.0 DNS-pinning hardening had disabled `HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` handling on federation egress unconditionally (federation egress is HTTPS-only, so `HTTP_PROXY` never applies). Per-attempt peer address resolution and private-range validation still run and fail closed; only connection pinning is relinquished — proxied requests are connected by the proxy, and `NO_PROXY`-exempt requests connect directly without a pin. Default behavior is unchanged (#673).
 - OpenSubsonic full-library searches now load per-user play counts and latest-play timestamps in bounded query chunks, preventing large `search3` syncs from exceeding PostgreSQL's bind-parameter limit and returning a protocol-level error.
 - The web client no longer fails successful API calls that return `204 No Content` or an otherwise empty body. The shared request path parsed every success response as JSON, so endpoints such as federation peer deletion reported a parse error ("The string did not match the expected pattern" on Safari/WebKit, "Unexpected end of JSON input" on Chromium) even though the server had completed the operation. Empty bodies now resolve as successful void results.
 - The Library Enrichment failures view no longer disagrees with the summary tiles: stale failure-log rows whose track, artist, audio analysis, or vibe embedding has since recovered (for example after a bulk re-queue or an embedding-space migration) are now reconciled against live state when the failures dialog opens, after "Retry all", and at the start of every full enrichment run, so the "View Failures" count converges to what is actually failed. Failure rows also show a sanitized error summary and error code again instead of "Unknown error" (the 2.4.0 sanitization had stripped the detail the dialog rendered), an unfinished enrichment stage no longer rounds up to a misleading "100%", and the dialog's header, tabs, and action bars keep their size instead of being crushed by a long failure list.
