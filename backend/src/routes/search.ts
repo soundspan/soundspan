@@ -12,6 +12,10 @@ import axios from "axios";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
 import { LIBRARY_ORIGIN_VALUES } from "../utils/librarySorting";
+import {
+    loadRemoteOwnedTracksForUser,
+    toLibraryRemoteTrack,
+} from "../services/remoteOwnedLibrary";
 
 const router = Router();
 
@@ -219,6 +223,49 @@ function transformSearchResults(serviceResults: SearchResults) {
     };
 }
 
+async function transformSearchResultsForUser(
+    serviceResults: SearchResults,
+    options: {
+        userId?: string;
+        query: string;
+        type: string;
+        limit: number;
+        source: string;
+    },
+) {
+    const transformed = transformSearchResults(serviceResults);
+
+    if (
+        !options.userId ||
+        options.source !== "all" ||
+        (options.type !== "all" && options.type !== "tracks")
+    ) {
+        return transformed;
+    }
+
+    const remoteTracks = (
+        await loadRemoteOwnedTracksForUser(options.userId, {
+            query: options.query,
+            take: options.limit,
+            sort: "asc",
+            match: "any",
+        })
+    ).map(toLibraryRemoteTrack);
+
+    // Prefer explicit user-owned provider results, then retain the normal
+    // ranked library results without duplicating an identical canonical ID.
+    const seen = new Set(remoteTracks.map((track) => track.id));
+    const tracks = [
+        ...remoteTracks,
+        ...transformed.tracks.filter((track) => !seen.has(track.id)),
+    ].slice(0, options.limit);
+
+    return {
+        ...transformed,
+        tracks,
+    };
+}
+
 router.use(requireAuth);
 
 /**
@@ -331,7 +378,15 @@ router.get("/", async (req, res) => {
                 ...sourceOption,
             });
 
-            return res.json(transformSearchResults(serviceResults));
+            return res.json(
+                await transformSearchResultsForUser(serviceResults, {
+                    userId: req.user?.id,
+                    query,
+                    type,
+                    limit: searchLimit,
+                    source,
+                }),
+            );
         }
 
         // Single-type search (service handles caching)
@@ -343,7 +398,15 @@ router.get("/", async (req, res) => {
             ...sourceOption,
         });
 
-        res.json(transformSearchResults(serviceResults));
+        res.json(
+            await transformSearchResultsForUser(serviceResults, {
+                userId: req.user?.id,
+                query,
+                type,
+                limit: searchLimit,
+                source,
+            }),
+        );
     } catch (error) {
         logger.error("Search error:", error);
         res.status(500).json({ error: "Search failed" });

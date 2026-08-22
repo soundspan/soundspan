@@ -46,6 +46,7 @@ import {
 } from "../../utils/libraryDeletion";
 import { findRouteNameMatch } from "../artistRouteName";
 import { deleteArtistCatalogEntry } from "../../services/artistCatalogDeletion";
+import { addRemoteOwnedArtists } from "../../services/remoteOwnedLibrary";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -174,7 +175,6 @@ export async function handleGetArtists(req: Request, res: Response) {
                 where: { countsLastUpdated: { not: null } },
             })) > 0;
 
-        // Build WHERE clause
         const where: Prisma.ArtistWhereInput = {};
 
         if (origin === "peers") {
@@ -268,7 +268,8 @@ export async function handleGetArtists(req: Request, res: Response) {
             }
         }
 
-        // Add search query if provided
+        addRemoteOwnedArtists(where, req.user?.id, origin, filter);
+
         if (query) {
             where.name = { contains: query as string, mode: "insensitive" };
         }

@@ -38,6 +38,11 @@ import {
     normalizeTidalTrack,
     normalizeYtMusicTrack,
 } from "../../services/unifiedTrackResponse";
+import {
+    countRemoteOwnedTracksForUser,
+    loadRemoteOwnedTracksForUser,
+    toLibraryRemoteTrack,
+} from "../../services/remoteOwnedLibrary";
 import { proxyFederatedTrackStream } from "../../services/federationStreamProxy";
 import {
     buildFederatedAudioInfo,
@@ -188,6 +193,11 @@ export async function handleGetTracks(req: Request, res: Response) {
         MAX_LIMIT,
     );
     const offset = parseInt(offsetParam as string, 10) || 0;
+    const userId = req.user?.id;
+    const includeRemoteOwned = !albumId && origin === "all" && Boolean(userId);
+    const remoteSort = sortBy === "name-desc" ? "desc" : "asc";
+    const persistedSkip = includeRemoteOwned ? 0 : offset;
+    const persistedTake = includeRemoteOwned ? offset + limit : limit;
 
     let orderBy:
         | Prisma.TrackOrderByWithRelationInput
@@ -208,33 +218,43 @@ export async function handleGetTracks(req: Request, res: Response) {
         where.albumId = albumId as string;
     }
 
-    const [tracksData, total] = await Promise.all([
-        prisma.track.findMany({
-            where,
-            skip: offset,
-            take: limit,
-            orderBy,
-            include: {
-                album: {
-                    include: {
-                        artist: {
-                            select: {
-                                id: true,
-                                name: true,
+    const [tracksData, persistedTotal, remoteOwnedTracks, remoteOwnedTotal] =
+        await Promise.all([
+            prisma.track.findMany({
+                where,
+                skip: persistedSkip,
+                take: persistedTake,
+                orderBy,
+                include: {
+                    album: {
+                        include: {
+                            artist: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                },
                             },
                         },
                     },
+                    federationPeer: {
+                        select: { id: true, name: true, outboundStatus: true },
+                    },
                 },
-                federationPeer: {
-                    select: { id: true, name: true, outboundStatus: true },
-                },
-            },
-        }),
-        prisma.track.count({ where }),
-    ]);
+            }),
+            prisma.track.count({ where }),
+            includeRemoteOwned && userId
+                ? loadRemoteOwnedTracksForUser(userId, {
+                      take: offset + limit,
+                      sort: remoteSort,
+                  })
+                : Promise.resolve([]),
+            includeRemoteOwned && userId
+                ? countRemoteOwnedTracksForUser(userId)
+                : Promise.resolve(0),
+        ]);
 
     // Add coverArt field to albums
-    const tracks = tracksData.map(({ federationPeer, ...track }) => ({
+    const localTracks = tracksData.map(({ federationPeer, ...track }) => ({
         ...track,
         source: track.origin === "FEDERATED" ? "federated" : "local",
         peer: federationPeer
@@ -249,6 +269,22 @@ export async function handleGetTracks(req: Request, res: Response) {
             coverArt: track.album.coverUrl,
         },
     }));
+
+    let total = persistedTotal;
+
+    const tracks = includeRemoteOwned
+        ? [...localTracks, ...remoteOwnedTracks.map(toLibraryRemoteTrack)]
+              .sort((left, right) =>
+                  remoteSort === "desc"
+                      ? right.title.localeCompare(left.title)
+                      : left.title.localeCompare(right.title),
+              )
+              .slice(offset, offset + limit)
+        : localTracks;
+
+    if (includeRemoteOwned) {
+        total += remoteOwnedTotal;
+    }
 
     res.json({ tracks, total, offset, limit });
 }
