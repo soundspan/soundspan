@@ -385,39 +385,16 @@ export async function handleGetCoverArt(
 
             // If album already has a cover URL, redirect to it
             if (album.coverUrl) {
-                if (album.coverUrl.startsWith("native:")) {
+                if (
+                    album.location === "FEDERATED" &&
+                    album.coverUrl.startsWith("native:")
+                ) {
                     const nativePath = album.coverUrl.slice("native:".length);
                     if (!resolveNativeCoverCacheHit(nativePath)) {
-                        if (album.location === "FEDERATED") {
-                            if (
-                                await tryProxyFederatedAlbumCover(
-                                    req,
-                                    res,
-                                    album,
-                                )
-                            ) {
-                                return;
-                            }
-                            return sendRouteError(
-                                res,
-                                404,
-                                "Cover art not found",
-                            );
-                        }
-
-                        try {
-                            const healedCover =
-                                await tryHealMissingNativeAlbumCover(
-                                    nativePath,
-                                );
-                            if (healedCover) {
-                                return res.redirect(healedCover);
-                            }
-                        } catch (error) {
-                            logger.error(
-                                `[COVER-ART] Failed to heal missing native cover ${nativePath}:`,
-                                error,
-                            );
+                        if (
+                            await tryProxyFederatedAlbumCover(req, res, album)
+                        ) {
+                            return;
                         }
                         return sendRouteError(res, 404, "Cover art not found");
                     }

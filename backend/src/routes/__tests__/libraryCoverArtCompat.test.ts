@@ -114,6 +114,11 @@ jest.mock("../../services/imageProvider", () => ({
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
+    isValidMbid: (value: unknown) =>
+        typeof value === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            value,
+        ),
     musicBrainzService: {},
 }));
 
@@ -761,6 +766,7 @@ describe("library cover-art proxy compatibility", () => {
                 title: true,
                 rgMbid: true,
                 coverUrl: true,
+                location: true,
                 artist: {
                     select: {
                         name: true,
@@ -793,11 +799,11 @@ describe("library cover-art proxy compatibility", () => {
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-456",
             title: "Fallback Album",
-            rgMbid: "rg-456",
+            rgMbid: "44444444-4444-4444-8444-444444444444",
             artist: { name: "Fallback Artist" },
         });
         mockCoverArtGetCoverArt.mockResolvedValue(
-            "https://coverartarchive.org/release-group/rg-456/front.jpg",
+            "https://coverartarchive.org/release-group/44444444-4444-4444-8444-444444444444/front.jpg",
         );
         mockDeezerCover.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(
@@ -813,9 +819,11 @@ describe("library cover-art proxy compatibility", () => {
 
         await coverArtHandler(req, res);
 
-        expect(mockCoverArtGetCoverArt).toHaveBeenCalledWith("rg-456");
+        expect(mockCoverArtGetCoverArt).toHaveBeenCalledWith(
+            "44444444-4444-4444-8444-444444444444",
+        );
         expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
-            "https://coverartarchive.org/release-group/rg-456/front.jpg",
+            "https://coverartarchive.org/release-group/44444444-4444-4444-8444-444444444444/front.jpg",
             "album-456",
             "album",
         );
@@ -1009,6 +1017,7 @@ describe("library cover-art proxy compatibility", () => {
                 title: true,
                 rgMbid: true,
                 coverUrl: true,
+                location: true,
                 artist: {
                     select: {
                         name: true,
@@ -1674,13 +1683,6 @@ describe("library cover-art proxy compatibility", () => {
             coverUrl: "native:albums/stale-native.jpg",
             artist: { name: "Stale Artist" },
         });
-        mockDeezerCover.mockResolvedValueOnce(
-            "https://cdn.deezer.com/stale-native.jpg",
-        );
-        mockDownloadAndStoreImage.mockResolvedValueOnce(
-            "native:albums/album-stale-native.jpg",
-        );
-
         const req = {
             query: { url: "native:albums/album-stale-native.jpg" },
             params: {},
