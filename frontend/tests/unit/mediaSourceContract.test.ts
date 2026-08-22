@@ -34,6 +34,7 @@ void _sBad;
 test("CANONICAL_MEDIA_SOURCE_VALUES lists every canonical media source", () => {
     assert.deepEqual(CANONICAL_MEDIA_SOURCE_VALUES, [
         "local",
+        "peer",
         "tidal",
         "youtube",
         "youtube-direct",

@@ -170,7 +170,11 @@ function buildRes(): Response {
         setHeader: jest.fn(),
         status: jest.fn(),
         send: jest.fn(),
+        end: jest.fn(),
+        destroy: jest.fn(),
         headersSent: false,
+        writableEnded: false,
+        destroyed: false,
     };
     (res.status as jest.Mock).mockReturnValue(res);
     return res as Response;

@@ -90,7 +90,7 @@ export async function applyLibraryPeerFallback(input: {
         });
         if (result.status === "served") return null;
         if (result.status !== "failed") continue;
-        log.warn("Mapped peer fallback failed", { error: result.error });
+        log.warn("Mapped peer fallback failed", { error: result.failure });
         if (isMappedProviderResponseUnusable(result.responseState)) {
             if (
                 !result.responseState.destroyed &&

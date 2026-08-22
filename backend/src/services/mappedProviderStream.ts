@@ -22,7 +22,7 @@ export type MappedProviderStreamResult =
     | { status: "unavailable" }
     | {
           status: "failed";
-          error: unknown;
+          failure: unknown;
           responseState: MappedProviderResponseState;
       };
 
@@ -97,7 +97,7 @@ export async function serveMappedProviderStream(input: {
     } catch (error) {
         return {
             status: "failed",
-            error,
+            failure: error,
             responseState: mappedProviderResponseState(input.res),
         };
     }

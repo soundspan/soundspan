@@ -7,7 +7,7 @@ import {
 import { config } from "../../config";
 import { safeResolvePath } from "../../utils/safeResolvePath";
 import { logger } from "../../utils/logger";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
 
 const log = logger.child("LibraryNativeTrackStream");
 
@@ -86,7 +86,7 @@ export async function serveNativeLibraryTrack(input: {
         });
     } catch (error) {
         log.error("Native streaming failed", { error });
-        return input.res.status(500).json({ error: "Failed to stream track" });
+        return sendInternalRouteError(input.res, "Failed to stream track");
     } finally {
         service.destroy();
     }
