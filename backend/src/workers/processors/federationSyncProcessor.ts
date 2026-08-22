@@ -26,12 +26,7 @@ import {
     NoActiveEmbeddingSpaceError,
     type ActiveEmbeddingSpace,
 } from "../../services/embeddingSpaces";
-import {
-    decideFederationEmbeddingPage,
-    decideScopedEmbeddingPage,
-    type FederationEmbeddingPageOutcome,
-    type ParsedFederationEmbeddingSpaceIdentity,
-} from "../../services/federationEmbeddingSpace";
+import { type ParsedFederationEmbeddingSpaceIdentity } from "../../services/federationEmbeddingSpace";
 import {
     createFederationPageState,
     groupFederationPage,
@@ -49,6 +44,11 @@ import {
     type TrackEnvelope,
 } from "./federationSyncPage";
 import { recordAppliedFederationEmbeddingOutcome } from "./federationEmbeddingPageMetrics";
+import {
+    decideFederationSyncEmbeddingPage,
+    mergeFederationEmbeddingOutcome,
+    type FederationEmbeddingOutcome,
+} from "./federationSyncEmbeddingOutcome";
 
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
@@ -83,6 +83,7 @@ interface SyncContext {
     skippedUnknownTombstones: number;
     localEmbeddingSpace: ActiveEmbeddingSpace | null;
     embeddingWarningEmitted: boolean;
+    lastEmbeddingOutcome: FederationEmbeddingOutcome;
 }
 /** Bounded summary of one completed peer sync. */
 export interface FederationSyncResult extends SyncCounts {
@@ -124,6 +125,7 @@ function newSyncContext(
         skippedUnknownTombstones: 0,
         localEmbeddingSpace,
         embeddingWarningEmitted: localEmbeddingSpace === null,
+        lastEmbeddingOutcome: null,
     };
 }
 async function resolveLocalEmbeddingSpace(
@@ -964,24 +966,6 @@ async function applyAudiobooks(
     }
 }
 
-function decidePageEmbeddingOutcome(
-    context: SyncContext,
-    grouped: GroupedPage,
-    pageTuple: ParsedFederationEmbeddingSpaceIdentity | undefined,
-): FederationEmbeddingPageOutcome | null {
-    return decideScopedEmbeddingPage({
-        scopes: context.scopes,
-        peerId: context.peerId,
-        localEmbeddingSpace: context.localEmbeddingSpace,
-        warnings: context,
-        pageCarriesEmbeddings: grouped.tracks.some(
-            (item) => item.attributes.embedding !== undefined,
-        ),
-        pageTuple,
-        warn: (message, details) => log.warn(message, details),
-    });
-}
-
 async function applyChanges(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
@@ -990,10 +974,11 @@ async function applyChanges(
     pageEmbeddingSpace?: ParsedFederationEmbeddingSpaceIdentity,
 ): Promise<void> {
     const grouped = groupFederationPage(items);
-    const embeddingOutcome = decidePageEmbeddingOutcome(
+    const embeddingOutcome = decideFederationSyncEmbeddingPage(
         context,
-        grouped,
+        grouped.tracks.some((item) => item.attributes.embedding !== undefined),
         pageEmbeddingSpace,
+        (message, details) => log.warn(message, details),
     );
     const state = await loadPageState(context, grouped);
     await applyArtists(context, state, grouped.artists, remember);
@@ -1019,6 +1004,10 @@ async function applyChanges(
     await applyPodcasts(context, grouped.podcasts, remember);
     await applyAudiobooks(context, grouped.audiobooks, remember);
     recordAppliedFederationEmbeddingOutcome(embeddingOutcome, validTracks);
+    context.lastEmbeddingOutcome = mergeFederationEmbeddingOutcome(
+        context.lastEmbeddingOutcome,
+        embeddingOutcome,
+    );
 }
 
 const fullProgressSchema = z.strictObject({
@@ -1292,6 +1281,9 @@ async function finishSync(
                 completedAtMs - context.startedAtMs,
             ),
             outboundStatus: "ACTIVE",
+            ...(context.lastEmbeddingOutcome === null
+                ? {}
+                : { lastEmbeddingOutcome: context.lastEmbeddingOutcome }),
         },
     });
     log.info(

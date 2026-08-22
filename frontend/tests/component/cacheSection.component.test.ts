@@ -86,6 +86,7 @@ const settings: SystemSettings = {
     audioAnalyzerWorkers: 2,
     soulseekConcurrentDownloads: 4,
     downloadSource: "soulseek",
+    federationInstanceName: null,
     primaryFailureFallback: "none",
     ytMusicEnabled: false,
     ytMusicClientId: "",

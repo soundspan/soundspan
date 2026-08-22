@@ -1533,6 +1533,11 @@ describe("federation sync processor", () => {
         expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
             "stored",
         );
+        const outcomeWrites = prisma.federationPeer.update.mock.calls.filter(
+            ([args]) => args.data.lastEmbeddingOutcome !== undefined,
+        );
+        expect(outcomeWrites).toHaveLength(1);
+        expect(outcomeWrites[0][0].data.lastEmbeddingOutcome).toBe("active");
     });
 
     it("rejects a present tuple without preprocessingHash and warns once", async () => {
@@ -1637,6 +1642,13 @@ describe("federation sync processor", () => {
             "skipped_mismatch",
         );
         expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledTimes(1);
+        const outcomeWrites = prisma.federationPeer.update.mock.calls.filter(
+            ([args]) => args.data.lastEmbeddingOutcome !== undefined,
+        );
+        expect(outcomeWrites).toHaveLength(1);
+        expect(outcomeWrites[0][0].data.lastEmbeddingOutcome).toBe(
+            "skipped_mismatch",
+        );
     });
 
     it("stores a legacy page only while the canonical space is active", async () => {
@@ -1787,5 +1799,12 @@ describe("federation sync processor", () => {
 
         await processFederationSync(job());
         expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(prisma.federationPeer.update).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    lastEmbeddingOutcome: expect.anything(),
+                }),
+            }),
+        );
     });
 });

@@ -3,6 +3,7 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import type { FederationHealthErrorClass } from "./federationErrorClassifier";
 
 const MAX_HEALTH_PEERS = 500;
 const LEASE_QUERY_BATCH_SIZE = 25;
@@ -72,6 +73,8 @@ export interface FederationPeerHealth {
     maxConcurrentStreams: number | null;
     lastError: string | null;
     lastErrorAt: Date | null;
+    lastErrorClass: FederationHealthErrorClass | null;
+    lastEmbeddingOutcome: "active" | "skipped_mismatch" | null;
     health: FederationHealthState;
 }
 
@@ -290,6 +293,8 @@ async function listHealthPeerRows() {
             maxConcurrentStreams: true,
             lastError: true,
             lastErrorAt: true,
+            lastErrorClass: true,
+            lastEmbeddingOutcome: true,
         },
     });
 }
@@ -297,6 +302,26 @@ async function listHealthPeerRows() {
 function syncLagSeconds(lastSync: Date | null, nowMs: number): number | null {
     if (!lastSync) return null;
     return Math.max(0, Math.floor((nowMs - lastSync.getTime()) / 1_000));
+}
+
+function healthErrorClass(
+    value: string | null,
+): FederationHealthErrorClass | null {
+    if (
+        value === "unreachable" ||
+        value === "tls" ||
+        value === "unauthorized" ||
+        value === "peer_invalid"
+    ) {
+        return value;
+    }
+    return null;
+}
+
+function embeddingOutcome(
+    value: string | null,
+): FederationPeerHealth["lastEmbeddingOutcome"] {
+    return value === "active" || value === "skipped_mismatch" ? value : null;
 }
 
 /** Loads the bounded administrator federation-health read model. */
@@ -318,6 +343,8 @@ export async function listFederationPeerHealth(): Promise<
         const lag = syncLagSeconds(peer.lastSyncSuccessAt, now.getTime());
         return {
             ...peer,
+            lastErrorClass: healthErrorClass(peer.lastErrorClass),
+            lastEmbeddingOutcome: embeddingOutcome(peer.lastEmbeddingOutcome),
             syncLagSeconds: lag,
             catalog: catalogs.get(peer.id) ?? emptyCatalogCounts(),
             activeStreamLeases: leaseByPeer.get(peer.id) ?? 0,

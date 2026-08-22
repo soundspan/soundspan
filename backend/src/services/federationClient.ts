@@ -229,8 +229,8 @@ const pairedScopesSchema = z
             !scopes.includes("embeddings:read") ||
             scopes.includes("library:read"),
     );
-const pairedPeerSchema = z.strictObject({
-    peer: z.strictObject({
+const pairedPeerSchema = z.object({
+    peer: z.object({
         id: z.string().min(1).max(128),
         name: z.string().min(1).max(120),
         direction: z.enum(["HOST", "CONSUMER", "BOTH"]),
@@ -250,8 +250,6 @@ const pairedPeerSchema = z.strictObject({
     }),
     token: z.string().min(1).max(4_096),
     capabilities: federationCapabilitiesSchema,
-    reciprocalPeerId: z.string().min(1).max(128).optional(),
-    warning: z.string().min(1).max(500).optional(),
 });
 
 export type FederationManifest = z.infer<typeof federationManifestSchema>;
@@ -353,16 +351,27 @@ function reportUnknownTrackAttributeKeysForValue(
 
 /** Peer returned a valid HTTP response outside the accepted status set. */
 export class FederationHttpError extends Error {
+    readonly peerCode?: string;
+    readonly transportCode?: string;
+
     constructor(
         public readonly status: number | null,
         public readonly transient: boolean,
+        options: {
+            peerCode?: string;
+            transportCode?: string;
+            cause?: unknown;
+        } = {},
     ) {
         super(
             status === null
                 ? "Federation request failed"
                 : `Federation peer returned ${status}`,
+            options.cause === undefined ? undefined : { cause: options.cause },
         );
         this.name = "FederationHttpError";
+        this.peerCode = options.peerCode;
+        this.transportCode = options.transportCode;
     }
 }
 
@@ -457,8 +466,21 @@ function isTransientNetworkError(error: unknown): boolean {
     ].includes(code);
 }
 
-function federationTransportError(transient: boolean): FederationHttpError {
-    return new FederationHttpError(null, transient);
+function transportCode(error: unknown): string | undefined {
+    if (!error || typeof error !== "object" || !("code" in error)) {
+        return undefined;
+    }
+    return typeof error.code === "string" ? error.code : undefined;
+}
+
+function federationTransportError(
+    transient: boolean,
+    cause?: unknown,
+): FederationHttpError {
+    return new FederationHttpError(null, transient, {
+        cause,
+        transportCode: transportCode(cause),
+    });
 }
 
 function peerNetworkHostname(destination: URL): string {
@@ -484,7 +506,7 @@ async function resolvePeerAddresses(
         return addresses;
     } catch (error) {
         if (error instanceof FederationHttpError) throw error;
-        throw federationTransportError(isTransientNetworkError(error));
+        throw federationTransportError(isTransientNetworkError(error), error);
     }
 }
 
@@ -714,7 +736,7 @@ class FederationClient {
                 if (!retryable || attempt + 1 === this.attempts) {
                     if (error instanceof FederationHttpError) throw error;
                     if (axios.isAxiosError(error))
-                        throw new FederationHttpError(null, transient);
+                        throw federationTransportError(transient, error);
                     throw error;
                 }
             }
@@ -990,7 +1012,7 @@ async function requestPairWithRetry(
             if (!retryable || attempt + 1 === attempts) {
                 if (error instanceof FederationHttpError) throw error;
                 if (axios.isAxiosError(error))
-                    throw new FederationHttpError(null, transient);
+                    throw federationTransportError(transient, error);
                 throw error;
             }
         }
@@ -999,14 +1021,18 @@ async function requestPairWithRetry(
     throw new FederationHttpError(null, true);
 }
 
+function peerErrorCode(value: unknown): string | undefined {
+    if (!value || typeof value !== "object" || !("code" in value)) {
+        return undefined;
+    }
+    return typeof value.code === "string" ? value.code : undefined;
+}
+
 /** Exchanges a short pairing code through the same bounded transport policy. */
 export async function pairFederationPeer(input: {
     baseUrl: string;
     code: string;
     name: string;
-    consumerBaseUrl?: string;
-    reciprocalPairingCode?: string;
-    reciprocalScopes?: FederationScope[];
     requestedScopes?: FederationScope[];
     options?: FederationClientOptions;
 }): Promise<z.infer<typeof pairedPeerSchema>> {
@@ -1023,15 +1049,6 @@ export async function pairFederationPeer(input: {
                 code: input.code,
                 name: input.name,
                 capabilities: [...FEDERATION_CAPABILITY_VALUES],
-                ...(input.consumerBaseUrl
-                    ? { baseUrl: input.consumerBaseUrl }
-                    : {}),
-                ...(input.reciprocalPairingCode
-                    ? {
-                          reciprocalPairingCode: input.reciprocalPairingCode,
-                          reciprocalScopes: input.reciprocalScopes,
-                      }
-                    : {}),
                 ...(input.requestedScopes
                     ? { requestedScopes: input.requestedScopes }
                     : {}),
@@ -1041,7 +1058,9 @@ export async function pairFederationPeer(input: {
         baseUrl,
     );
     if (response.status < 200 || response.status >= 300) {
-        throw new FederationHttpError(response.status, response.status >= 500);
+        throw new FederationHttpError(response.status, response.status >= 500, {
+            peerCode: peerErrorCode(response.data),
+        });
     }
     return parseResponse(pairedPeerSchema, response.data);
 }

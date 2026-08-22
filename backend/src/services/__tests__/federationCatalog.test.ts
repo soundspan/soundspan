@@ -169,6 +169,7 @@ describe("federation catalog exports", () => {
         prisma.systemSettings.updateMany.mockResolvedValue({ count: 0 });
         prisma.systemSettings.findUnique.mockResolvedValue({
             federationInstanceId: "instance-1",
+            federationInstanceName: "Living Room Library",
             catalogEpoch: "epoch-1",
         });
         (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([]);
@@ -184,7 +185,7 @@ describe("federation catalog exports", () => {
 
         await expect(getFederationManifest(true, at)).resolves.toEqual({
             instanceId: "instance-1",
-            name: "soundspan-host",
+            name: "Living Room Library",
             version: "2.0.2-test",
             catalogEpoch: "epoch-1",
             mediaTypes: ["artist", "album", "track", "podcast", "audiobook"],

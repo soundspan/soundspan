@@ -100,10 +100,15 @@ function hasScopes(peer: AuthPeer, required: FederationScope[]): boolean {
 }
 
 function rejectedPeerReason(
+    req: Request,
     token: string | null,
     peer: AuthPeer | null,
 ): FederationAuthFailureReason | null {
-    if (!token) return "no_token";
+    if (!token) {
+        return req.headers.authorization?.startsWith("Bearer ")
+            ? "malformed_token"
+            : "no_token";
+    }
     if (!peer) return "unknown_credential";
     if (!["HOST", "BOTH"].includes(peer.direction)) return "wrong_direction";
     if (peer.inboundStatus !== "ACTIVE") return "inactive";
@@ -117,7 +122,7 @@ export function requireFederationPeer(
     return async (req: Request, res: Response, next: NextFunction) => {
         const token = bearerToken(req);
         const peer = token ? await resolvePeer(token) : null;
-        const rejection = rejectedPeerReason(token, peer);
+        const rejection = rejectedPeerReason(req, token, peer);
         if (!peer || rejection) {
             recordFederationAuthFailure(
                 "unknown",

@@ -192,6 +192,24 @@ describe("requireFederationPeer", () => {
         );
     });
 
+    it("records malformed bearer tokens separately from missing tokens", async () => {
+        const req = {
+            headers: { authorization: "Bearer not-a-valid-token" },
+        } as Request;
+
+        await requireFederationPeer("library:read")(
+            req,
+            createResponse() as unknown as Response,
+            jest.fn(),
+        );
+
+        expect(recordFederationAuthFailure).toHaveBeenCalledWith(
+            "unknown",
+            "malformed_token",
+        );
+        expect(mockFindUnique).not.toHaveBeenCalled();
+    });
+
     it("treats malformed persisted scopes as invalid credentials", async () => {
         mockFindUnique.mockResolvedValue(peer({ scopes: ["unknown:scope"] }));
         const req = {

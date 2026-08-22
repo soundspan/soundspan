@@ -331,7 +331,12 @@ export default function AdminPage() {
 
                 <UserManagementSection />
 
-                {federation && <FederationSection />}
+                {federation && (
+                    <FederationSection
+                        settings={systemSettings}
+                        onUpdateSettings={updateSystemSettings}
+                    />
+                )}
 
                 {/* Save Button - Fixed at bottom */}
                 <div className="sticky bottom-0 pt-8 pb-8">

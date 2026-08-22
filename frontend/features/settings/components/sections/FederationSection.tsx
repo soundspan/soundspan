@@ -1,17 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-    ArrowLeftRight,
+    ArrowDownToLine,
+    ArrowUpFromLine,
     Clipboard,
     KeyRound,
-    Link as LinkIcon,
     Loader2,
-    Network,
-    Plus,
     RefreshCw,
     RotateCw,
-    Server,
     Trash2,
     Unlink,
 } from "lucide-react";
@@ -19,72 +16,25 @@ import { api } from "@/lib/api";
 import type {
     FederationPeer,
     FederationPeerStatus,
-    FederationScope,
-    LinkFederationPeerInput,
-    PairFederationPeerInput,
 } from "@/lib/api/federation";
+import type { SystemSettings } from "../../types";
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { SettingsSection } from "../ui";
+import { SettingsSection, SettingsRow } from "../ui";
 import { PeerDedupList, PeerSettingsPanel } from "./federationPeerSettings";
 import { FederationHealthPanel } from "./FederationHealthPanel";
+import {
+    DEFAULT_SCOPES,
+    FederationAddPanel,
+    federationErrorMessage,
+    buildLinkPeerInput,
+    buildPairPeerInput,
+} from "./federationPairing";
 
-type AddMode = "host" | "link" | "pair";
-
-export interface LinkDirectionOptions {
-    twoWay: boolean;
-    embeddings: boolean;
-}
-
-const DEFAULT_SCOPES: FederationScope[] = ["library:read", "stream:read"];
-
-function linkScopes(options: LinkDirectionOptions): FederationScope[] {
-    return options.embeddings
-        ? [...DEFAULT_SCOPES, "embeddings:read"]
-        : DEFAULT_SCOPES;
-}
-
-/** Maps the add-peer form's direction options onto the link request body. */
-export function buildLinkPeerInput(
-    name: string,
-    baseUrl: string,
-    token: string,
-    options: LinkDirectionOptions,
-): LinkFederationPeerInput {
-    return {
-        baseUrl,
-        token,
-        ...(name.trim() ? { name: name.trim() } : {}),
-        ...(options.twoWay
-            ? { direction: "BOTH" as const, scopes: linkScopes(options) }
-            : {}),
-    };
-}
-
-/** Maps the add-peer form's direction options onto the pair request body. */
-export function buildPairPeerInput(
-    name: string,
-    baseUrl: string,
-    code: string,
-    options: LinkDirectionOptions,
-): PairFederationPeerInput {
-    return {
-        name,
-        baseUrl,
-        code,
-        ...(options.twoWay
-            ? { direction: "BOTH" as const, scopes: linkScopes(options) }
-            : {}),
-    };
-}
 const inputClassName =
     "w-full rounded-lg border border-white/10 bg-surface px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-white/30 focus:outline-none";
 const secondaryButtonClassName =
     "inline-flex items-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium text-white hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-50";
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : "Federation request failed";
-}
 
 function formatLastSeen(value: string | null): string {
     if (!value) return "Never seen";
@@ -207,45 +157,27 @@ function PeerCard({
         <div className="rounded-lg border border-white/[0.06] bg-surface-hover p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-highlight">
-                        {peer.direction === "BOTH" ? (
-                            <ArrowLeftRight className="h-4 w-4" />
-                        ) : peer.direction === "HOST" ? (
-                            <Server className="h-4 w-4" />
-                        ) : (
-                            <Network className="h-4 w-4" />
-                        )}
-                    </div>
                     <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                             <h3 className="truncate text-sm font-medium text-white">
                                 {peer.name}
                             </h3>
-                            {peer.direction === "BOTH" ? (
-                                <>
-                                    <StatusChip
-                                        status={peer.inboundStatus}
-                                        label="IN"
-                                    />
-                                    <StatusChip
-                                        status={peer.outboundStatus}
-                                        label="OUT"
-                                    />
-                                </>
-                            ) : (
-                                <StatusChip
-                                    status={
-                                        hasInbound(peer)
-                                            ? peer.inboundStatus
-                                            : peer.outboundStatus
-                                    }
-                                />
+                        </div>
+                        <div className="mt-2 space-y-1">
+                            {hasInbound(peer) && (
+                                <div className="flex items-center gap-2 text-xs text-gray-300">
+                                    <ArrowUpFromLine className="h-3.5 w-3.5 text-gray-500" />
+                                    <span>Sharing to them</span>
+                                    <StatusChip status={peer.inboundStatus} />
+                                </div>
                             )}
-                            <span className="text-[10px] uppercase text-gray-500">
-                                {peer.direction === "BOTH"
-                                    ? "TWO-WAY"
-                                    : peer.direction}
-                            </span>
+                            {hasOutbound(peer) && (
+                                <div className="flex items-center gap-2 text-xs text-gray-300">
+                                    <ArrowDownToLine className="h-3.5 w-3.5 text-gray-500" />
+                                    <span>Consuming from them</span>
+                                    <StatusChip status={peer.outboundStatus} />
+                                </div>
+                            )}
                         </div>
                         <p className="mt-1 truncate text-xs text-gray-400">
                             {peer.baseUrl ?? "This instance hosts the library"}
@@ -441,232 +373,6 @@ export function OneTimeCredentialDialog({
     );
 }
 
-function AddPeerPanel({
-    onHost,
-    onLink,
-    onPair,
-    busy,
-}: {
-    onHost: (name: string, scopes: FederationScope[]) => Promise<void>;
-    onLink: (
-        name: string,
-        baseUrl: string,
-        token: string,
-        options: LinkDirectionOptions,
-    ) => Promise<void>;
-    onPair: (
-        name: string,
-        baseUrl: string,
-        code: string,
-        options: LinkDirectionOptions,
-    ) => Promise<void>;
-    busy: boolean;
-}) {
-    const [mode, setMode] = useState<AddMode>("link");
-    return (
-        <div className="rounded-lg border border-white/[0.06] bg-surface-hover p-4">
-            <div className="mb-4 flex flex-wrap gap-2">
-                <ModeButton mode="link" active={mode} onSelect={setMode}>
-                    Link with token
-                </ModeButton>
-                <ModeButton mode="pair" active={mode} onSelect={setMode}>
-                    Pair with code
-                </ModeButton>
-                <ModeButton mode="host" active={mode} onSelect={setMode}>
-                    Issue host credential
-                </ModeButton>
-            </div>
-            {mode === "host" ? (
-                <HostCredentialForm onSubmit={onHost} busy={busy} />
-            ) : (
-                <ConsumerLinkForm
-                    mode={mode}
-                    onLink={onLink}
-                    onPair={onPair}
-                    busy={busy}
-                />
-            )}
-        </div>
-    );
-}
-
-function ModeButton({
-    mode,
-    active,
-    onSelect,
-    children,
-}: {
-    mode: AddMode;
-    active: AddMode;
-    onSelect: (mode: AddMode) => void;
-    children: React.ReactNode;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={() => onSelect(mode)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium ${active === mode ? "bg-white text-black" : "bg-white/5 text-gray-300 hover:bg-white/10"}`}
-        >
-            {children}
-        </button>
-    );
-}
-
-function HostCredentialForm({
-    onSubmit,
-    busy,
-}: {
-    onSubmit: (name: string, scopes: FederationScope[]) => Promise<void>;
-    busy: boolean;
-}) {
-    const [name, setName] = useState("");
-    const [embeddings, setEmbeddings] = useState(false);
-    const submit = async (event: FormEvent) => {
-        event.preventDefault();
-        const scopes: FederationScope[] = embeddings
-            ? [...DEFAULT_SCOPES, "embeddings:read"]
-            : DEFAULT_SCOPES;
-        await onSubmit(name, scopes);
-        setName("");
-    };
-    return (
-        <form onSubmit={(event) => void submit(event)} className="space-y-3">
-            <label className="block text-xs text-gray-300">
-                Peer name
-                <input
-                    required
-                    maxLength={120}
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    className={`${inputClassName} mt-1`}
-                    placeholder="Family server"
-                />
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-300">
-                <input
-                    type="checkbox"
-                    checked={embeddings}
-                    onChange={(event) => setEmbeddings(event.target.checked)}
-                />
-                Share embeddings (opt-in)
-            </label>
-            <SubmitButton busy={busy} label="Issue credential" />
-        </form>
-    );
-}
-
-function ConsumerLinkForm({
-    mode,
-    onLink,
-    onPair,
-    busy,
-}: {
-    mode: Exclude<AddMode, "host">;
-    onLink: (
-        name: string,
-        baseUrl: string,
-        token: string,
-        options: LinkDirectionOptions,
-    ) => Promise<void>;
-    onPair: (
-        name: string,
-        baseUrl: string,
-        code: string,
-        options: LinkDirectionOptions,
-    ) => Promise<void>;
-    busy: boolean;
-}) {
-    const [name, setName] = useState("");
-    const [baseUrl, setBaseUrl] = useState("");
-    const [secret, setSecret] = useState("");
-    const [twoWay, setTwoWay] = useState(false);
-    const [embeddings, setEmbeddings] = useState(false);
-    const submit = async (event: FormEvent) => {
-        event.preventDefault();
-        const options: LinkDirectionOptions = { twoWay, embeddings };
-        if (mode === "link") await onLink(name, baseUrl, secret, options);
-        else await onPair(name, baseUrl, secret, options);
-        setSecret("");
-    };
-    return (
-        <form onSubmit={(event) => void submit(event)} className="space-y-3">
-            <label className="block text-xs text-gray-300">
-                Peer name
-                <input
-                    required={mode === "pair"}
-                    maxLength={120}
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    className={`${inputClassName} mt-1`}
-                    placeholder="Friend's server"
-                />
-            </label>
-            <label className="block text-xs text-gray-300">
-                Peer URL
-                <input
-                    required
-                    type="url"
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                    className={`${inputClassName} mt-1`}
-                    placeholder="https://soundspan.example"
-                />
-            </label>
-            <label className="block text-xs text-gray-300">
-                {mode === "link" ? "Token" : "Pairing code"}
-                <input
-                    required
-                    value={secret}
-                    onChange={(event) => setSecret(event.target.value)}
-                    className={`${inputClassName} mt-1`}
-                    autoComplete="off"
-                />
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-300">
-                <input
-                    type="checkbox"
-                    checked={twoWay}
-                    onChange={(event) => setTwoWay(event.target.checked)}
-                />
-                Two-way — also share this library back with the peer
-            </label>
-            {twoWay && (
-                <label className="ml-6 flex items-center gap-2 text-xs text-gray-300">
-                    <input
-                        type="checkbox"
-                        checked={embeddings}
-                        onChange={(event) =>
-                            setEmbeddings(event.target.checked)
-                        }
-                    />
-                    Share embeddings (opt-in)
-                </label>
-            )}
-            <SubmitButton
-                busy={busy}
-                label={mode === "link" ? "Link peer" : "Pair peer"}
-            />
-        </form>
-    );
-}
-
-function SubmitButton({ busy, label }: { busy: boolean; label: string }) {
-    return (
-        <button
-            type="submit"
-            disabled={busy}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
-        >
-            {busy ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-                <Plus className="h-3.5 w-3.5" />
-            )}
-            {label}
-        </button>
-    );
-}
-
 type RunPeerAction = (
     peer: FederationPeer,
     action: () => Promise<void>,
@@ -719,34 +425,6 @@ function PeerManagementPanel(props: {
     );
 }
 
-function PairingCodeControl(props: {
-    busy: boolean;
-    pairingCode: string | null;
-    onCreate: () => void;
-}) {
-    return (
-        <>
-            <button
-                type="button"
-                onClick={props.onCreate}
-                disabled={props.busy}
-                className={secondaryButtonClassName}
-            >
-                <LinkIcon className="h-3.5 w-3.5" />
-                Create pairing code
-            </button>
-            {props.pairingCode && (
-                <p className="text-sm text-gray-300">
-                    Pairing code:{" "}
-                    <code className="rounded bg-black/30 px-2 py-1 text-white">
-                        {props.pairingCode}
-                    </code>
-                </p>
-            )}
-        </>
-    );
-}
-
 function FederationAddControls(props: {
     busy: boolean;
     pairingCode: string | null;
@@ -759,53 +437,49 @@ function FederationAddControls(props: {
     const run = (action: () => Promise<void>) =>
         withAddAction(props.setBusy, props.setError, action);
     return (
-        <>
-            <AddPeerPanel
-                busy={props.busy}
-                onHost={(name, scopes) =>
-                    run(async () => {
-                        const result = await api.createFederationPeer({
-                            name,
-                            scopes,
-                        });
-                        props.setCredential({
-                            peerName: result.peer.name,
-                            token: result.token,
-                        });
-                        await props.loadPeers();
-                    })
-                }
-                onLink={(name, baseUrl, token, options) =>
-                    run(async () => {
-                        await api.linkFederationPeer(
-                            buildLinkPeerInput(name, baseUrl, token, options),
-                        );
-                        await props.loadPeers();
-                    })
-                }
-                onPair={(name, baseUrl, code, options) =>
-                    run(async () => {
-                        await api.pairFederationPeer(
-                            buildPairPeerInput(name, baseUrl, code, options),
-                        );
-                        await props.loadPeers();
-                    })
-                }
-            />
-            <PairingCodeControl
-                busy={props.busy}
-                pairingCode={props.pairingCode}
-                onCreate={() =>
-                    void run(async () => {
-                        const result =
-                            await api.createFederationPairingCode(
-                                DEFAULT_SCOPES,
-                            );
-                        props.setPairingCode(result.code);
-                    })
-                }
-            />
-        </>
+        <FederationAddPanel
+            busy={props.busy}
+            pairingCode={props.pairingCode}
+            onHost={(name, scopes) =>
+                run(async () => {
+                    const result = await api.createFederationPeer({
+                        name,
+                        scopes,
+                    });
+                    props.setCredential({
+                        peerName: result.peer.name,
+                        token: result.token,
+                    });
+                    await props.loadPeers();
+                })
+            }
+            onLink={(name, baseUrl, token) =>
+                run(async () => {
+                    await api.linkFederationPeer(
+                        buildLinkPeerInput(name, baseUrl, token),
+                    );
+                    await props.loadPeers();
+                })
+            }
+            onPair={(name, baseUrl, code, options) =>
+                run(async () => {
+                    await api.pairFederationPeer(
+                        buildPairPeerInput(name, baseUrl, code, options),
+                    );
+                    await props.loadPeers();
+                })
+            }
+            onCreateCode={(options) =>
+                void run(async () => {
+                    const scopes = options.embeddings
+                        ? [...DEFAULT_SCOPES, "embeddings:read" as const]
+                        : DEFAULT_SCOPES;
+                    const result =
+                        await api.createFederationPairingCode(scopes);
+                    props.setPairingCode(result.code);
+                })
+            }
+        />
     );
 }
 
@@ -857,7 +531,7 @@ function useFederationPeers(federation: boolean) {
             setPeers(response.peers);
             setError(null);
         } catch (caught: unknown) {
-            setError(errorMessage(caught));
+            setError(federationErrorMessage(caught));
         } finally {
             setLoading(false);
         }
@@ -880,7 +554,7 @@ function usePeerAction(
             await action();
             await loadPeers();
         } catch (caught: unknown) {
-            setError(errorMessage(caught));
+            setError(federationErrorMessage(caught));
         } finally {
             setBusyPeerId(null);
         }
@@ -902,6 +576,35 @@ interface FederationSettingsContentProps {
     setError: (error: string | null) => void;
     setPairingCode: (code: string) => void;
     loadPeers: () => Promise<void>;
+    settings?: SystemSettings;
+    onUpdateSettings?: (updates: Partial<SystemSettings>) => void;
+}
+
+function FederationInstanceNameRow(props: {
+    settings: SystemSettings;
+    onUpdateSettings: (updates: Partial<SystemSettings>) => void;
+}) {
+    return (
+        <SettingsRow
+            label="Instance display name"
+            description="How this instance introduces itself to peers. Leave empty to use the server's hostname."
+        >
+            <input
+                maxLength={100}
+                value={props.settings.federationInstanceName ?? ""}
+                onChange={(event) =>
+                    props.onUpdateSettings({
+                        federationInstanceName:
+                            event.target.value.trim() === ""
+                                ? null
+                                : event.target.value,
+                    })
+                }
+                className={inputClassName}
+                placeholder="My music server"
+            />
+        </SettingsRow>
+    );
 }
 
 function FederationSettingsContent(props: FederationSettingsContentProps) {
@@ -914,6 +617,12 @@ function FederationSettingsContent(props: FederationSettingsContentProps) {
                 >
                     {props.error}
                 </p>
+            )}
+            {props.settings && props.onUpdateSettings && (
+                <FederationInstanceNameRow
+                    settings={props.settings}
+                    onUpdateSettings={props.onUpdateSettings}
+                />
             )}
             <PeerManagementPanel
                 loading={props.loading}
@@ -939,7 +648,10 @@ function FederationSettingsContent(props: FederationSettingsContentProps) {
 }
 
 /** Admin settings surface for federation peer lifecycle management. */
-export function FederationSection() {
+export function FederationSection(props: {
+    settings?: SystemSettings;
+    onUpdateSettings?: (updates: Partial<SystemSettings>) => void;
+}) {
     const { federation } = useFeatures();
     const { peers, loading, error, setError, loadPeers } =
         useFederationPeers(federation);
@@ -973,6 +685,8 @@ export function FederationSection() {
                 setError={setError}
                 setPairingCode={setPairingCode}
                 loadPeers={loadPeers}
+                settings={props.settings}
+                onUpdateSettings={props.onUpdateSettings}
             />
             <FederationDialogs
                 credential={credential}
@@ -995,7 +709,7 @@ async function withAddAction(
     try {
         await action();
     } catch (caught: unknown) {
-        setError(errorMessage(caught));
+        setError(federationErrorMessage(caught));
     } finally {
         setBusy(false);
     }

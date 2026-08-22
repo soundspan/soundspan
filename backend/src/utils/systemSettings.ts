@@ -7,6 +7,7 @@ const CACHE_TTL_MS = 60 * 1000;
 
 let cachedSettings: any | null = null;
 let cacheExpiry = 0;
+let cacheGeneration = 0;
 
 // Re-export encryptField for backwards compatibility
 export { encryptField };
@@ -15,6 +16,7 @@ export { encryptField };
  * Executes invalidateSystemSettingsCache.
  */
 export function invalidateSystemSettingsCache() {
+    cacheGeneration += 1;
     cachedSettings = null;
     cacheExpiry = 0;
 }
@@ -50,14 +52,17 @@ export async function getSystemSettings(forceRefresh = false) {
     if (!forceRefresh && cachedSettings && cacheExpiry > now) {
         return { ...cachedSettings };
     }
+    const loadGeneration = cacheGeneration;
 
     const settings = await prisma.systemSettings.findUnique({
         where: { id: "default" },
     });
 
     if (!settings) {
-        cachedSettings = null;
-        cacheExpiry = 0;
+        if (loadGeneration === cacheGeneration) {
+            cachedSettings = null;
+            cacheExpiry = 0;
+        }
         return null;
     }
 
@@ -86,8 +91,10 @@ export async function getSystemSettings(forceRefresh = false) {
         ),
     };
 
-    cachedSettings = decrypted;
-    cacheExpiry = now + CACHE_TTL_MS;
+    if (loadGeneration === cacheGeneration) {
+        cachedSettings = decrypted;
+        cacheExpiry = now + CACHE_TTL_MS;
+    }
     return { ...decrypted };
 }
 

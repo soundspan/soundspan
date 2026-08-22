@@ -153,6 +153,30 @@ describe("systemSettings utilities", () => {
         expect(mockFindUnique).toHaveBeenCalledTimes(2);
     });
 
+    it("does not let a pre-invalidation load repopulate the cache", async () => {
+        let resolveStaleLoad: ((value: unknown) => void) | undefined;
+        const staleLoad = new Promise((resolve) => {
+            resolveStaleLoad = resolve;
+        });
+        mockFindUnique
+            .mockReturnValueOnce(staleLoad)
+            .mockResolvedValueOnce(makeSettings({ lidarrApiKey: "fresh" }));
+        const { getSystemSettings, invalidateSystemSettingsCache } =
+            await loadModule();
+
+        const inFlight = getSystemSettings();
+        invalidateSystemSettingsCache();
+        const fresh = await getSystemSettings();
+        resolveStaleLoad?.(makeSettings({ lidarrApiKey: "stale" }));
+        const stale = await inFlight;
+        const cached = await getSystemSettings();
+
+        expect(stale.lidarrApiKey).toBe("dec:stale");
+        expect(fresh.lidarrApiKey).toBe("dec:fresh");
+        expect(cached.lidarrApiKey).toBe("dec:fresh");
+        expect(mockFindUnique).toHaveBeenCalledTimes(2);
+    });
+
     it("re-exports encryptField from encryption", async () => {
         const { encryptField } = await loadModule();
 

@@ -71,6 +71,8 @@ export interface SystemSettings {
     soulseekConcurrentDownloads: number;
     // Download Preferences
     downloadSource: DownloadSource;
+    // Federation identity
+    federationInstanceName: string | null;
     primaryFailureFallback: DownloadFallback;
     // YouTube Music streaming (admin toggle + OAuth app credentials)
     ytMusicEnabled: boolean;

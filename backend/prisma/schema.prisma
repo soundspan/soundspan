@@ -269,6 +269,7 @@ model SystemSettings {
   discNoBackfillDone          Boolean  @default(false)
   showVersion                 Boolean  @default(false)
   federationInstanceId        String?
+  federationInstanceName      String?
   catalogEpoch                String?
 }
 
@@ -511,6 +512,8 @@ model FederationPeer {
   lastSyncDurationMs Int?
   lastErrorAt    DateTime?
   lastError      String?
+  lastErrorClass String?
+  lastEmbeddingOutcome String?
   lastSyncCursor String?
   catalogEpoch   String?
   showDedupedCopies Boolean @default(false)

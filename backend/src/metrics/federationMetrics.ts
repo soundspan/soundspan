@@ -51,6 +51,7 @@ export type FederationStreamOutcome =
 export type FederationAuthFailureReason =
     | "scope"
     | "no_token"
+    | "malformed_token"
     | "unknown_credential"
     | "wrong_direction"
     | "inactive";

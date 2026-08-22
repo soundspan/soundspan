@@ -181,6 +181,11 @@ local library rows, so content received from another peer is never re-exported.
 The consumer periodically materializes peer metadata in its own database. Its
 browse and search reads therefore stay available when a peer is offline.
 
+Pairing is directional and explicit. A host administrator issues a 30-minute
+code, and a client administrator redeems it against that host. Reverse sharing
+requires a separate pairing; the host never performs a reciprocal callback.
+Existing `BOTH` rows remain supported by authentication, health, and sync reads.
+
 The browser never receives an instance credential. Federated cover and stream
 requests use the consumer's ordinary authenticated routes; the consumer backend
 decrypts its outbound token and proxies the request to the owning peer. Audio

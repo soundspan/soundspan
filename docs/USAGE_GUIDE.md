@@ -80,6 +80,56 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 
 Technical admin configuration and security notes are in [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md).
 
+### Sharing libraries between servers (Federation)
+
+Federation lets two soundspan servers share their music libraries. Sharing is read-only: a connected server can browse and stream your library, but it can never change it.
+
+Every connection has two separate roles:
+
+- **Share my library** — you give another server access to your library.
+- **Connect to a library** — you get access to another server's library.
+
+Each direction is set up on its own. There is no single "two-way" switch. This is deliberate: each step tells you clearly whether it worked, so a connection can never half-succeed without you knowing.
+
+Both controls live on the `Admin` page under `Federation`. Federation must be enabled on both servers. The server that shares its library must be reachable from the other server over HTTPS; for two-way sharing that means both servers need an HTTPS address the other can reach.
+
+#### Share your library with a friend
+
+1. Open `Admin -> Federation -> Share my library`.
+2. Click `Generate pairing code`.
+3. Send the 8-character code to the other admin. The code works once and expires after 30 minutes.
+4. The other admin enters your server's URL and the code on their side. Your server then shows them under `Sharing to them`.
+
+If a code expires before it is used, generate a new one. You can have up to five unused codes at a time; creating more than five removes the oldest ones.
+
+If you prefer a long-lived credential instead of a code, use `Host credential`. The credential is shown once — copy it before closing the dialog.
+
+#### Connect to a friend's library
+
+1. Ask the other admin for a pairing code (or a host credential).
+2. Open `Admin -> Federation -> Connect to a library`.
+3. Enter a name for their server, their server URL, and the code or token.
+4. Click `Connect`. Their library appears in your search and browse surfaces after the first sync.
+
+If the connection fails, the error tells you why: the code expired, the code was already used, the server was unreachable, or its certificate failed validation. Each of these has a different fix, so read the message before retrying.
+
+#### Two-way sharing
+
+Two-way sharing means both servers do both steps:
+
+1. You share your library (generate a code) and connect to theirs (redeem their code).
+2. The other admin does the same: they share their library and connect to yours.
+
+That is four steps across the two servers. Each peer's card shows the two directions separately — `Sharing to them` and `Consuming from them` — so you can always see exactly which halves are active, offline, or revoked.
+
+#### Instance display name
+
+By default your server introduces itself to peers using its hostname, which in container deployments can look like `soundspan-backend-84975bdf86-h27qt`. Set a friendly name in `Admin -> Federation -> Instance display name` before pairing so the other side sees something readable.
+
+#### Health and diagnostics
+
+The federation health panel shows per-peer sync freshness, stream usage, and the class of the last failure (unreachable, TLS, authentication, or invalid response). It also shows whether vibe embeddings are federating with each peer; if the peers run different embedding spaces, the panel says so and the fix is upgrading the out-of-date server.
+
 ---
 
 ## See also

@@ -57,6 +57,13 @@ export interface FederationPeerHealth {
     maxConcurrentStreams: number | null;
     lastError: string | null;
     lastErrorAt: string | null;
+    lastErrorClass:
+        | "unreachable"
+        | "tls"
+        | "unauthorized"
+        | "peer_invalid"
+        | null;
+    lastEmbeddingOutcome: "active" | "skipped_mismatch" | null;
     health: FederationHealthState;
 }
 
@@ -86,27 +93,25 @@ export type FederationDedupActionInput =
     | { action: "unlink" }
     | { action: "reset" };
 
+/** Host-side input: issue a credential another instance can redeem. */
 export interface CreateFederationPeerInput {
     name: string;
     scopes: FederationScope[];
     baseUrl?: string;
-    direction?: "HOST" | "BOTH";
-    token?: string;
 }
 
+/** Client-side input: consume a host token to read their library. */
 export interface LinkFederationPeerInput {
     baseUrl: string;
     token: string;
     name?: string;
-    direction?: "CONSUMER" | "BOTH";
-    scopes?: FederationScope[];
 }
 
+/** Client-side input: redeem a pairing code against a host instance. */
 export interface PairFederationPeerInput {
     baseUrl: string;
     code: string;
     name: string;
-    direction?: "CONSUMER" | "BOTH";
     scopes?: FederationScope[];
 }
 

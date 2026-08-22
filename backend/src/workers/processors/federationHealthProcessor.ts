@@ -4,6 +4,7 @@ import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { safeFederationErrorMessage } from "../../services/federationPeerHealth";
+import { classifyFederationHealthError } from "../../services/federationErrorClassifier";
 
 const log = logger.child("FederationHealthProcessor");
 const MAX_CONSUMER_PEERS = 500;
@@ -27,6 +28,9 @@ async function markPeerActive(
             outboundStatus: "ACTIVE",
             lastSeenAt: new Date(),
             capabilities: [...capabilities],
+            lastError: null,
+            lastErrorAt: null,
+            lastErrorClass: null,
         },
     });
     if (peer.outboundStatus !== "ACTIVE") {
@@ -46,6 +50,7 @@ async function markPeerOffline(
             outboundStatus: "OFFLINE",
             lastError: safeFederationErrorMessage(error),
             lastErrorAt: new Date(),
+            lastErrorClass: classifyFederationHealthError(error),
         },
     });
     if (peer.outboundStatus !== "OFFLINE") {

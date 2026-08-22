@@ -22,6 +22,7 @@ import {
     type FederationEmbeddingSpaceIdentity,
 } from "./federationEmbeddingSpace";
 import { encodeFederationEmbeddingSpaceHeader } from "./federationEmbeddingSpaceHeader";
+import { resolveFederationInstanceName } from "./federationInstanceName";
 
 const log = logger.child("FederationCatalog");
 const LEGACY_EXPORT_WARNING_INTERVAL_MS = 60_000;
@@ -638,6 +639,7 @@ export async function getFederationManifest(
     now: Date = new Date(),
 ) {
     const identity = await ensureFederationIdentity();
+    const instanceName = await resolveFederationInstanceName();
     const [artists, albums, tracks, podcasts, audiobooks] = await Promise.all([
         prisma.artist.count({ where: EXPORTED_ARTIST_WHERE }),
         prisma.album.count({ where: EXPORTED_ALBUM_WHERE }),
@@ -647,7 +649,7 @@ export async function getFederationManifest(
     ]);
     return {
         instanceId: identity.federationInstanceId,
-        name: config.federation.instanceName,
+        name: instanceName,
         version: config.appVersion,
         catalogEpoch: identity.catalogEpoch,
         mediaTypes: [

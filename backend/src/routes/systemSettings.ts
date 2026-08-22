@@ -12,6 +12,7 @@ import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
 import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import { config } from "../config";
+import { federationInstanceNameSchema } from "./systemSettingsFederationSchema";
 
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
@@ -156,6 +157,8 @@ const systemSettingsSchema = z.object({
     primaryFailureFallback: z
         .enum(["none", "lidarr", "soulseek", "tidal", "youtube"])
         .optional(),
+
+    federationInstanceName: federationInstanceNameSchema,
     // TIDAL — credential fields (tidalAccessToken, tidalRefreshToken,
     // tidalUserId) are deliberately absent: they are managed exclusively
     // by the /tidal-auth device flow. Accepting them here let a stale
@@ -315,16 +318,12 @@ router.get("/", async (req, res) => {
  *           schema:
  *             type: object
  *             description: >
- *               Partial system settings to update (Lidarr, OpenAI, Fanart,
- *               Last.fm, Audiobookshelf, Soulseek, TIDAL, paths,
- *               feature flags, etc.). Secret fields (API keys, passwords,
- *               client secrets) are write-only with explicit semantics:
- *               a non-empty string replaces the stored secret, an empty
- *               string leaves it unchanged (a form round-trip can never
- *               wipe a credential), and null explicitly clears it. TIDAL
- *               credential fields (tidalAccessToken, tidalRefreshToken,
- *               tidalUserId) are ignored entirely — the admin TIDAL
- *               connection is managed only via the /tidal-auth endpoints.
+ *               Partial settings update, including the federation display
+ *               name. Non-empty secrets replace stored values, empty secrets
+ *               remain unchanged, and null clears them. TIDAL credentials are
+ *               managed only through the TIDAL authentication endpoints.
+ *             properties:
+ *               federationInstanceName: { type: string, nullable: true, maxLength: 100, description: Empty or whitespace-only values clear the name }
  *     responses:
  *       200:
  *         description: Settings saved successfully

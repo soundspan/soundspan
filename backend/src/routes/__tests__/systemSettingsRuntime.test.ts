@@ -263,6 +263,7 @@ describe("systemSettings runtime routes", () => {
             tidalAccessToken: "tidal-access",
             tidalRefreshToken: "tidal-refresh",
             ytMusicClientSecret: "yt-secret",
+            federationInstanceName: "Living Room Library",
         } as any);
         mockSystemSettingsCreate.mockResolvedValue({
             id: "default",
@@ -339,6 +340,83 @@ describe("systemSettings runtime routes", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.lidarrApiKey).toBe("dec:lidarr-api");
         expect(res.body.fanartApiKey).toBeNull();
+        expect(res.body.federationInstanceName).toBe("Living Room Library");
+    });
+
+    it("persists a trimmed federation instance name", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { federationInstanceName: "  Living Room Library  " },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    federationInstanceName: "Living Room Library",
+                }),
+                update: expect.objectContaining({
+                    federationInstanceName: "Living Room Library",
+                }),
+            }),
+        );
+        expect(mockInvalidateSystemSettingsCache).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["", "   ", null])(
+        "clears a federation instance name with %p",
+        async (federationInstanceName) => {
+            const req = {
+                user: { id: "admin-1" },
+                body: { federationInstanceName },
+            } as any;
+            const res = createRes();
+
+            await postSettingsHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    update: expect.objectContaining({
+                        federationInstanceName: null,
+                    }),
+                }),
+            );
+        },
+    );
+
+    it("persists a 100-character federation instance name", async () => {
+        const federationInstanceName = "x".repeat(100);
+        const req = {
+            user: { id: "admin-1" },
+            body: { federationInstanceName },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({ federationInstanceName }),
+            }),
+        );
+    });
+
+    it("rejects a federation instance name longer than 100 characters", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { federationInstanceName: "x".repeat(101) },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(mockSystemSettingsUpsert).not.toHaveBeenCalled();
     });
 
     it("never returns TIDAL token material and reports tidalConnected instead", async () => {

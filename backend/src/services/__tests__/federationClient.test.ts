@@ -1039,15 +1039,15 @@ describe("federation HTTP client", () => {
         expect(axiosRequest).toHaveBeenCalledTimes(1);
     });
 
-    it("sends and validates reciprocal pairing fields", async () => {
+    it("sends only one-way pairing fields and tolerates old response extras", async () => {
         axiosRequest.mockResolvedValueOnce({
             status: 201,
             data: {
                 peer: {
                     id: "peer-2",
                     name: "Peer Two",
-                    direction: "BOTH",
-                    baseUrl: "https://consumer.example",
+                    direction: "HOST",
+                    baseUrl: null,
                     scopes: ["library:read", "stream:read"],
                     inboundStatus: "ACTIVE",
                     outboundStatus: "ACTIVE",
@@ -1059,8 +1059,49 @@ describe("federation HTTP client", () => {
                 },
                 token: "paired-token",
                 reciprocalPeerId: "peer-3",
+                warning: "legacy warning",
                 capabilities: ["track-attrs-loudness", "future-capability"],
             },
+        });
+
+        const paired = await pairFederationPeer({
+            baseUrl: "https://peer.example",
+            code: "ABCDEFGH",
+            name: "Consumer",
+            requestedScopes: ["library:read", "stream:read"],
+            options: { retryDelayMs: 0 },
+        });
+
+        expect(paired).toEqual(
+            expect.objectContaining({
+                capabilities: ["track-attrs-loudness"],
+            }),
+        );
+        expect(paired).not.toHaveProperty("reciprocalPeerId");
+        expect(paired).not.toHaveProperty("warning");
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                proxy: false,
+                httpsAgent: expect.any(Object),
+                data: expect.objectContaining({
+                    capabilities: ["track-attrs-loudness"],
+                    requestedScopes: ["library:read", "stream:read"],
+                }),
+            }),
+        );
+        expect(axiosRequest.mock.calls[0][0].data).not.toHaveProperty(
+            "reciprocalPairingCode",
+        );
+        expect(dnsLookup).toHaveBeenCalledWith("peer.example", {
+            all: true,
+            verbatim: true,
+        });
+    });
+
+    it("preserves a peer pairing error code for route classification", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 400,
+            data: { code: "FEDERATION_CODE_EXPIRED" },
         });
 
         await expect(
@@ -1068,31 +1109,11 @@ describe("federation HTTP client", () => {
                 baseUrl: "https://peer.example",
                 code: "ABCDEFGH",
                 name: "Consumer",
-                consumerBaseUrl: "https://consumer.example",
-                reciprocalPairingCode: "HGFEDCBA",
-                reciprocalScopes: ["library:read", "stream:read"],
                 options: { retryDelayMs: 0 },
             }),
-        ).resolves.toEqual(
-            expect.objectContaining({
-                reciprocalPeerId: "peer-3",
-                capabilities: ["track-attrs-loudness"],
-            }),
-        );
-        expect(axiosRequest).toHaveBeenCalledWith(
-            expect.objectContaining({
-                proxy: false,
-                httpsAgent: expect.any(Object),
-                data: expect.objectContaining({
-                    capabilities: ["track-attrs-loudness"],
-                    reciprocalPairingCode: "HGFEDCBA",
-                    reciprocalScopes: ["library:read", "stream:read"],
-                }),
-            }),
-        );
-        expect(dnsLookup).toHaveBeenCalledWith("peer.example", {
-            all: true,
-            verbatim: true,
+        ).rejects.toMatchObject({
+            status: 400,
+            peerCode: "FEDERATION_CODE_EXPIRED",
         });
     });
 
@@ -1107,7 +1128,6 @@ describe("federation HTTP client", () => {
                 baseUrl: "https://peer.example",
                 code: "ABCDEFGH",
                 name: "Consumer",
-                consumerBaseUrl: "https://consumer.example",
                 options: { retryDelayMs: 0 },
             }),
         ).rejects.toBeInstanceOf(FederationResponseError);

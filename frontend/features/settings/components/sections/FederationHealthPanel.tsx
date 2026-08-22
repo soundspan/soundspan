@@ -36,12 +36,37 @@ function leaseUsage(peer: FederationPeerHealth): string {
         : `${peer.activeStreamLeases} / ${peer.maxConcurrentStreams} active streams`;
 }
 
+const errorClassLabels: Record<
+    NonNullable<FederationPeerHealth["lastErrorClass"]>,
+    string
+> = {
+    unreachable: "Unreachable",
+    tls: "TLS validation failed",
+    unauthorized: "Authentication rejected",
+    peer_invalid: "Invalid peer response",
+};
+
 function lastErrorDetail(peer: FederationPeerHealth): string {
-    if (!peer.lastError) return "";
-    if (!peer.lastErrorAt) return peer.lastError;
+    const classLabel = peer.lastErrorClass
+        ? `${errorClassLabels[peer.lastErrorClass]} — `
+        : "";
+    if (!peer.lastError) return classLabel.replace(/ — $/, "");
+    if (!peer.lastErrorAt) return `${classLabel}${peer.lastError}`;
     const timestamp = new Date(peer.lastErrorAt);
-    if (!Number.isFinite(timestamp.getTime())) return peer.lastError;
-    return `${timestamp.toLocaleString()}: ${peer.lastError}`;
+    if (!Number.isFinite(timestamp.getTime())) {
+        return `${classLabel}${peer.lastError}`;
+    }
+    return `${classLabel}${timestamp.toLocaleString()}: ${peer.lastError}`;
+}
+
+function embeddingStateLabel(
+    outcome: FederationPeerHealth["lastEmbeddingOutcome"],
+): string | null {
+    if (outcome === "active") return "Embeddings: federating";
+    if (outcome === "skipped_mismatch") {
+        return "Embeddings: not federating — embedding space mismatch (peer needs upgrade)";
+    }
+    return null;
 }
 
 function HealthStateChip({ state }: { state: FederationHealthState }) {
@@ -87,7 +112,11 @@ function FederationHealthCard({
                         {peer.name}
                     </h4>
                     <p className="mt-0.5 text-xs text-gray-500">
-                        {peer.direction}
+                        {peer.direction === "BOTH"
+                            ? "Sharing and consuming"
+                            : peer.direction === "HOST"
+                              ? "Sharing to them"
+                              : "Consuming from them"}
                     </p>
                 </div>
                 <HealthStateChip state={peer.health} />
@@ -106,6 +135,12 @@ function FederationHealthCard({
                 {hostsStreams && (
                     <p className="text-xs text-gray-400">{leaseUsage(peer)}</p>
                 )}
+                {consumesCatalog &&
+                    embeddingStateLabel(peer.lastEmbeddingOutcome) && (
+                        <p className="text-xs text-gray-400">
+                            {embeddingStateLabel(peer.lastEmbeddingOutcome)}
+                        </p>
+                    )}
                 {peer.lastError && (
                     <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-2 text-xs text-amber-200">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />

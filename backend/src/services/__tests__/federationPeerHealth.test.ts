@@ -199,6 +199,8 @@ describe("federation peer health", () => {
                 maxConcurrentStreams: 2,
                 lastError: null,
                 lastErrorAt: null,
+                lastErrorClass: "unauthorized",
+                lastEmbeddingOutcome: "skipped_mismatch",
             },
         ]);
 
@@ -209,6 +211,8 @@ describe("federation peer health", () => {
             expect.objectContaining({
                 id: "peer-revoked",
                 health: "revoked",
+                lastErrorClass: "unauthorized",
+                lastEmbeddingOutcome: "skipped_mismatch",
             }),
         );
     });

@@ -3,7 +3,6 @@ import request from "supertest";
 
 const service = {
     createHostFederationPeer: jest.fn(),
-    createBothFederationPeer: jest.fn(),
     listFederationPeers: jest.fn(),
     rotateFederationPeerCredential: jest.fn(),
     revokeFederationPeer: jest.fn(),
@@ -63,10 +62,6 @@ describe("federation admin routes", () => {
         service.createHostFederationPeer.mockResolvedValue({
             peer: { id: "peer-1" },
             token: "token-once",
-        });
-        service.createBothFederationPeer.mockResolvedValue({
-            peer: { id: "both-peer-1", direction: "BOTH" },
-            token: "both-token-once",
         });
         service.rotateFederationPeerCredential.mockResolvedValue({
             peer: { id: "peer-1" },
@@ -149,43 +144,47 @@ describe("federation admin routes", () => {
         expect(service.createHostFederationPeer).not.toHaveBeenCalled();
     });
 
-    it("accepts BOTH through create and manual link with both credentials", async () => {
-        const host = await request(app)
-            .post("/api/federation/admin/peers")
-            .set("Authorization", "Bearer admin")
-            .send({
+    it.each([
+        [
+            "/peers",
+            {
                 direction: "BOTH",
                 name: "Peer",
                 scopes: ["library:read"],
                 baseUrl: "https://peer.example",
                 token: "peer-token",
-            });
-        const consumer = await request(app)
-            .post("/api/federation/admin/peers/link")
-            .set("Authorization", "Bearer admin")
-            .send({
+            },
+        ],
+        [
+            "/peers/link",
+            {
                 direction: "BOTH",
                 baseUrl: "https://peer.example",
                 token: "peer-token",
                 scopes: ["library:read"],
-            });
+            },
+        ],
+        [
+            "/peers/link/pair",
+            {
+                direction: "BOTH",
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Peer",
+            },
+        ],
+    ])("rejects removed BOTH input on %s", async (path, body) => {
+        const response = await request(app)
+            .post(`/api/federation/admin${path}`)
+            .set("Authorization", "Bearer admin")
+            .send(body);
 
-        expect(host.status).toBe(201);
-        expect(consumer.status).toBe(201);
-        expect(service.createBothFederationPeer).toHaveBeenNthCalledWith(1, {
-            name: "Peer",
-            scopes: ["library:read"],
-            baseUrl: "https://peer.example",
-            outboundToken: "peer-token",
-            createdById: "admin-1",
-        });
-        expect(service.createBothFederationPeer).toHaveBeenNthCalledWith(2, {
-            baseUrl: "https://peer.example",
-            outboundToken: "peer-token",
-            name: undefined,
-            scopes: ["library:read"],
-            createdById: "admin-1",
-        });
+        expect(response.status).toBe(400);
+        expect(service.createHostFederationPeer).not.toHaveBeenCalled();
+        expect(service.linkConsumerFederationPeer).not.toHaveBeenCalled();
+        expect(
+            service.pairAndLinkConsumerFederationPeer,
+        ).not.toHaveBeenCalled();
     });
 
     it("lists peers without credential material", async () => {
@@ -317,7 +316,7 @@ describe("federation admin routes", () => {
 
         expect(response.status).toBe(502);
         expect(response.body).toEqual({
-            error: "Peer manifest validation failed",
+            error: "Federation peer response is invalid",
             code: "FEDERATION_PEER_INVALID",
         });
         expect(JSON.stringify(response.body)).not.toContain("peer-token");
@@ -355,7 +354,6 @@ describe("federation admin routes", () => {
 
         expect(response.status).toBe(201);
         expect(service.pairAndLinkConsumerFederationPeer).toHaveBeenCalledWith({
-            direction: "CONSUMER",
             baseUrl: "https://peer.example",
             code: "ABCDEFGH",
             name: "Paired Library",
@@ -364,58 +362,138 @@ describe("federation admin routes", () => {
         });
     });
 
-    it("threads the BOTH opt-in through pairing", async () => {
-        const response = await request(app)
-            .post("/api/federation/admin/peers/link/pair")
-            .set("Authorization", "Bearer admin")
-            .send({
-                direction: "BOTH",
-                baseUrl: "https://peer.example",
-                code: "ABCDEFGH",
-                name: "Paired Library",
-            });
-
-        expect(response.status).toBe(201);
-        expect(service.pairAndLinkConsumerFederationPeer).toHaveBeenCalledWith(
-            expect.objectContaining({ direction: "BOTH" }),
-        );
-    });
-
-    it.each(["/peers/link", "/peers/link/pair"])(
-        "maps a scope mismatch from %s to 422",
-        async (path) => {
-            const { FederationScopeMismatchError } = jest.requireMock(
-                "../../services/federationPeers",
-            );
-            const target = path.endsWith("/pair")
-                ? service.pairAndLinkConsumerFederationPeer
-                : service.createBothFederationPeer;
-            target.mockRejectedValueOnce(new FederationScopeMismatchError());
-            const payload = path.endsWith("/pair")
-                ? {
-                      direction: "BOTH",
-                      baseUrl: "https://peer.example",
-                      code: "ABCDEFGH",
-                      name: "Paired Library",
-                      scopes: ["stream:read"],
-                  }
-                : {
-                      direction: "BOTH",
-                      baseUrl: "https://peer.example",
-                      token: "peer-token",
-                      scopes: ["stream:read"],
-                  };
-
-            const response = await request(app)
-                .post(`/api/federation/admin${path}`)
-                .set("Authorization", "Bearer admin")
-                .send(payload);
-
-            expect(response.status).toBe(422);
-            expect(response.body).toEqual({
+    it.each([
+        [
+            "scope mismatch",
+            "FederationScopeMismatchError",
+            422,
+            {
                 error: "Federation peer scopes do not overlap",
                 code: "FEDERATION_SCOPE_MISMATCH",
-            });
+            },
+        ],
+        [
+            "duplicate peer",
+            "FederationPeerConflictError",
+            409,
+            {
+                error: "Federation consumer peer already exists",
+                code: "FEDERATION_PEER_CONFLICT",
+            },
+        ],
+    ])(
+        "returns the exact pair-route body for %s",
+        async (_label, errorName, status, body) => {
+            const PeerError = jest.requireMock(
+                "../../services/federationPeers",
+            )[errorName];
+            service.pairAndLinkConsumerFederationPeer.mockRejectedValueOnce(
+                new PeerError(),
+            );
+
+            const response = await request(app)
+                .post("/api/federation/admin/peers/link/pair")
+                .set("Authorization", "Bearer admin")
+                .send({
+                    baseUrl: "https://peer.example",
+                    code: "ABCDEFGH",
+                    name: "Peer",
+                });
+
+            expect(response.status).toBe(status);
+            expect(response.body).toEqual(body);
+        },
+    );
+
+    it.each([
+        [
+            "unreachable",
+            { isAxiosError: true, code: "ECONNREFUSED" },
+            502,
+            "FEDERATION_PEER_UNREACHABLE",
+        ],
+        [
+            "tls",
+            { isAxiosError: true, code: "CERT_HAS_EXPIRED" },
+            502,
+            "FEDERATION_PEER_TLS",
+        ],
+        [
+            "unauthorized",
+            { isAxiosError: true, response: { status: 401 } },
+            502,
+            "FEDERATION_PEER_UNAUTHORIZED",
+        ],
+        [
+            "peer invalid",
+            {
+                isAxiosError: true,
+                response: { status: 400, data: { error: "Invalid" } },
+            },
+            502,
+            "FEDERATION_PEER_INVALID",
+        ],
+        [
+            "used code",
+            {
+                isAxiosError: true,
+                response: {
+                    status: 400,
+                    data: { code: "FEDERATION_CODE_USED" },
+                },
+            },
+            400,
+            "FEDERATION_CODE_USED",
+        ],
+        [
+            "expired code",
+            {
+                isAxiosError: true,
+                response: {
+                    status: 400,
+                    data: { code: "FEDERATION_CODE_EXPIRED" },
+                },
+            },
+            400,
+            "FEDERATION_CODE_EXPIRED",
+        ],
+        [
+            "scope mismatch",
+            {
+                isAxiosError: true,
+                response: {
+                    status: 400,
+                    data: { code: "FEDERATION_SCOPE_MISMATCH" },
+                },
+            },
+            422,
+            "FEDERATION_SCOPE_MISMATCH",
+        ],
+    ])(
+        "maps %s outbound failures on both link routes",
+        async (_label, shape, status, code) => {
+            for (const path of ["/peers/link", "/peers/link/pair"]) {
+                const target = path.endsWith("/pair")
+                    ? service.pairAndLinkConsumerFederationPeer
+                    : service.linkConsumerFederationPeer;
+                target.mockRejectedValueOnce(
+                    Object.assign(new Error("outbound failure"), shape),
+                );
+                const payload = path.endsWith("/pair")
+                    ? {
+                          baseUrl: "https://peer.example",
+                          code: "ABCDEFGH",
+                          name: "Peer",
+                      }
+                    : { baseUrl: "https://peer.example", token: "peer-token" };
+                const response = await request(app)
+                    .post(`/api/federation/admin${path}`)
+                    .set("Authorization", "Bearer admin")
+                    .send(payload);
+
+                expect(response.status).toBe(status);
+                expect(response.body.code).toBe(code);
+            }
         },
     );
 

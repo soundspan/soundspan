@@ -82,25 +82,18 @@ const pairingScopesSchema = z
     .min(1)
     .max(FEDERATION_SCOPE_VALUES.length)
     .refine((values) => new Set(values).size === values.length);
-const pairingSchema = z
-    .strictObject({
-        code: pairingCodeValueSchema,
-        name: z.string().trim().min(1).max(120),
-        baseUrl: z
-            .url()
-            .refine((value) => new URL(value).protocol === "https:")
-            .optional(),
-        reciprocalPairingCode: pairingCodeValueSchema.optional(),
-        reciprocalScopes: pairingScopesSchema.optional(),
-        requestedScopes: pairingScopesSchema.optional(),
-        capabilities: federationCapabilitiesSchema,
-    })
-    .refine(
-        (value) =>
-            Boolean(value.reciprocalPairingCode) ===
-                Boolean(value.reciprocalScopes) &&
-            (!value.reciprocalPairingCode || Boolean(value.baseUrl)),
-    );
+const pairingSchema = z.strictObject({
+    code: pairingCodeValueSchema,
+    name: z.string().trim().min(1).max(120),
+    baseUrl: z
+        .url()
+        .refine((value) => new URL(value).protocol === "https:")
+        .optional(),
+    reciprocalPairingCode: pairingCodeValueSchema.optional(),
+    reciprocalScopes: pairingScopesSchema.optional(),
+    requestedScopes: pairingScopesSchema.optional(),
+    capabilities: federationCapabilitiesSchema,
+});
 const streamQuerySchema = z.strictObject({
     quality: z.enum(["original", "high", "medium", "low"]).default("original"),
 });
@@ -108,6 +101,33 @@ const emptyQuerySchema = z.strictObject({});
 
 function validationError(res: Response): Response {
     return sendRouteError(res, 400, "Invalid federation request");
+}
+
+function pairingFailure(
+    res: Response,
+    reason: "not_found" | "used" | "expired" | "scope_mismatch" | "invalid",
+): Response {
+    if (reason === "used") {
+        return sendRouteError(res, 400, "Pairing code has already been used", {
+            code: "FEDERATION_CODE_USED",
+        });
+    }
+    if (reason === "expired") {
+        return sendRouteError(res, 400, "Pairing code has expired", {
+            code: "FEDERATION_CODE_EXPIRED",
+        });
+    }
+    if (reason === "scope_mismatch") {
+        return sendRouteError(
+            res,
+            400,
+            "Requested federation scopes are not granted",
+            {
+                code: "FEDERATION_SCOPE_MISMATCH",
+            },
+        );
+    }
+    return sendRouteError(res, 400, "Invalid or expired pairing code");
 }
 
 function includesEmbeddingScope(req: Request): boolean {
@@ -143,11 +163,11 @@ function sendCatalogResponse(
 /** @openapi
  * /api/federation/v1/pair:
  *   post:
- *     summary: Consume a federation pairing code with optional reciprocal callback
+ *     summary: Consume a federation pairing code for one host link
  *     tags: [Federation]
  *     responses:
  *       201: { description: Peer credential issued once }
- *       400: { description: Invalid or expired pairing code }
+ *       400: { description: Invalid pairing input, FEDERATION_CODE_USED, FEDERATION_CODE_EXPIRED, or FEDERATION_SCOPE_MISMATCH }
  *       429: { description: Pairing rate limit exceeded }
  */
 router.post(
@@ -158,10 +178,10 @@ router.post(
         const query = emptyQuerySchema.safeParse(req.query);
         if (!parsed.success || !query.success) return validationError(res);
         const result = await consumeFederationPairingRequest(parsed.data);
-        if (!result)
-            return sendRouteError(res, 400, "Invalid or expired pairing code");
+        if (!result.ok) return pairingFailure(res, result.reason);
         return res.status(201).json({
-            ...result,
+            peer: result.peer,
+            token: result.token,
             capabilities: [...FEDERATION_CAPABILITY_VALUES],
         });
     }),

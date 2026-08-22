@@ -2,8 +2,11 @@ import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { hashApiKey } from "../utils/apiKeyHash";
+import {
+    acquireUserScopedLock,
+    USER_LOCK_NAMESPACES,
+} from "../utils/advisoryLocks";
 import { prisma } from "../utils/db";
-import { logger } from "../utils/logger";
 import {
     FEDERATION_SCOPE_VALUES,
     parseFederationScopes,
@@ -20,6 +23,7 @@ import {
     encryptFederationOutboundToken,
 } from "./federationCredentialCipher";
 import type { FederationCapability } from "./federationCapabilities";
+import { resolveFederationInstanceName } from "./federationInstanceName";
 import { removeReplacementCacheFiles } from "./trackReplacement";
 
 export { FEDERATION_SCOPE_VALUES } from "../utils/federationScopes";
@@ -28,11 +32,9 @@ export type { FederationScope } from "../utils/federationScopes";
 const PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PAIRING_CODE_LENGTH = 8;
 const PAIRING_CODE_ATTEMPTS = 10;
-const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
+const PAIRING_CODE_TTL_MS = 30 * 60 * 1000;
+const MAX_LIVE_PAIRING_CODES = 5;
 const PEER_LIST_LIMIT = 500;
-const RECIPROCAL_WARNING =
-    "Reciprocal pairing failed; the one-directional link remains active";
-const log = logger.child("FederationPeers");
 
 const publicPeerSelect = {
     id: true,
@@ -110,24 +112,25 @@ export interface LinkConsumerPeerInput {
     token: string;
     name?: string;
     createdById: string;
-    upgradePeerId?: string;
     scopes?: FederationScope[];
 }
 
-/** Validated values used to establish both directions with manual tokens. */
-export interface CreateBothPeerInput {
-    baseUrl: string;
-    outboundToken: string;
-    name?: string;
-    createdById: string;
-    scopes: FederationScope[];
-}
-
-/** Validated optional request for a host to establish the reverse direction. */
-export interface ReciprocalPairingInput extends PairingConsumeInput {
-    reciprocalPairingCode?: string;
-    reciprocalScopes?: FederationScope[];
-}
+/**
+ * Result of claiming a public federation pairing code.
+ * Missing rows and lost claim races map to `not_found`; corrupt persisted
+ * scopes map to `invalid`. Used, expired, and scope failures remain distinct.
+ */
+export type PairingConsumeResult =
+    | { ok: true; peer: PublicFederationPeer; token: string }
+    | {
+          ok: false;
+          reason:
+              | "not_found"
+              | "used"
+              | "expired"
+              | "scope_mismatch"
+              | "invalid";
+      };
 
 function newCredential(): { token: string; credentialHash: string } {
     const token = randomBytes(32).toString("hex");
@@ -291,28 +294,6 @@ function consumerScopes(embeddingsAvailable: boolean): FederationScope[] {
         : ["library:read", "stream:read"];
 }
 
-function httpsCallbackOrigin(): string | undefined {
-    const callbackUrl = new URL(config.soundspanCallbackUrl);
-    return callbackUrl.protocol === "https:" ? callbackUrl.origin : undefined;
-}
-
-async function findReciprocalUpgrade(
-    peerId: string | undefined,
-    baseUrl: string,
-): Promise<{ id: string } | null> {
-    if (!peerId) return null;
-    return prisma.federationPeer.findFirst({
-        where: {
-            id: peerId,
-            baseUrl,
-            direction: "HOST",
-            inboundStatus: { not: "REVOKED" },
-            credentialHash: { not: null },
-        },
-        select: { id: true },
-    });
-}
-
 async function findDuplicateConsumerPeer(
     baseUrl: string,
 ): Promise<{ id: string } | null> {
@@ -332,7 +313,6 @@ async function persistConsumerLink(
     outboundToken: string,
     manifest: FederationManifest,
 ): Promise<PublicFederationPeer> {
-    const upgrade = await findReciprocalUpgrade(input.upgradePeerId, baseUrl);
     const scopes = input.scopes ?? consumerScopes(manifest.embeddingsAvailable);
     const shared = {
         name: input.name?.trim() || manifest.name,
@@ -344,16 +324,6 @@ async function persistConsumerLink(
         catalogEpoch: manifest.catalogEpoch,
         capabilities: manifest.capabilities,
     };
-    if (upgrade) {
-        return prisma.federationPeer.update({
-            where: { id: upgrade.id },
-            data: { ...shared, direction: "BOTH" },
-            select: publicPeerSelect,
-        });
-    }
-    if (input.upgradePeerId && (await findDuplicateConsumerPeer(baseUrl))) {
-        throw new FederationPeerConflictError();
-    }
     return prisma.federationPeer.create({
         data: {
             ...shared,
@@ -370,9 +340,7 @@ export async function linkConsumerFederationPeer(
     input: LinkConsumerPeerInput,
 ): Promise<PublicFederationPeer> {
     const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
-    const duplicate = input.upgradePeerId
-        ? null
-        : await findDuplicateConsumerPeer(baseUrl);
+    const duplicate = await findDuplicateConsumerPeer(baseUrl);
     if (duplicate) throw new FederationPeerConflictError();
     const outboundToken = encryptFederationOutboundToken(input.token);
     const manifest = await createFederationClient(
@@ -382,89 +350,27 @@ export async function linkConsumerFederationPeer(
     return persistConsumerLink(input, baseUrl, outboundToken, manifest);
 }
 
-/** Creates one peer row with independent inbound and outbound credentials. */
-export async function createBothFederationPeer(
-    input: CreateBothPeerInput,
-): Promise<{ peer: PublicFederationPeer; token: string }> {
-    const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
-    const duplicate = await prisma.federationPeer.findFirst({
-        where: {
-            baseUrl,
-            direction: { in: ["CONSUMER", "BOTH"] },
-            outboundStatus: { not: "REVOKED" },
-        },
-        select: { id: true },
-    });
-    if (duplicate) throw new FederationPeerConflictError();
-    const encryptedToken = encryptFederationOutboundToken(input.outboundToken);
-    const manifest = await createFederationClient(
-        { id: "pending-link", baseUrl, outboundToken: encryptedToken },
-        outboundClientOptions(),
-    ).getManifest();
-    const outboundScopes = consumerScopes(manifest.embeddingsAvailable);
-    const scopes = input.scopes.filter((scope) =>
-        outboundScopes.includes(scope),
-    );
-    if (scopes.length === 0) throw new FederationScopeMismatchError();
-    const credential = newCredential();
-    await ensureFederationIdentity();
-    const peer = await prisma.federationPeer.create({
-        data: {
-            name: input.name?.trim() || manifest.name,
-            direction: "BOTH",
-            baseUrl,
-            credentialHash: credential.credentialHash,
-            outboundToken: encryptedToken,
-            scopes,
-            inboundStatus: "ACTIVE",
-            outboundStatus: "ACTIVE",
-            lastSeenAt: new Date(),
-            catalogEpoch: manifest.catalogEpoch,
-            capabilities: manifest.capabilities,
-            createdById: input.createdById,
-        },
-        select: publicPeerSelect,
-    });
-    return { peer, token: credential.token };
-}
-
 /** Exchanges a short code, then links the resulting token through manifest validation. */
 export async function pairAndLinkConsumerFederationPeer(input: {
-    direction?: "CONSUMER" | "BOTH";
     baseUrl: string;
     code: string;
     name: string;
     createdById: string;
     scopes?: FederationScope[];
-}): Promise<{ peer: PublicFederationPeer; warning?: string }> {
+}): Promise<{ peer: PublicFederationPeer }> {
     const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
-    const reciprocalRequested = input.direction === "BOTH";
-    const consumerBaseUrl = reciprocalRequested
-        ? httpsCallbackOrigin()
-        : undefined;
+    const duplicate = await findDuplicateConsumerPeer(baseUrl);
+    if (duplicate) throw new FederationPeerConflictError();
     const scopes = input.scopes ?? ["library:read", "stream:read"];
-    const reciprocal = consumerBaseUrl
-        ? await createFederationPairingCode({
-              createdById: input.createdById,
-              scopes,
-          })
-        : null;
+    const instanceName = await resolveFederationInstanceName();
     const paired = await pairFederationPeer({
         baseUrl,
         code: input.code,
-        name: input.name,
-        ...(consumerBaseUrl ? { consumerBaseUrl } : {}),
-        ...(reciprocal
-            ? {
-                  reciprocalPairingCode: reciprocal.code,
-                  reciprocalScopes: scopes,
-              }
-            : {}),
+        name: instanceName,
+        requestedScopes: scopes,
         options: outboundClientOptions(),
     });
-    const linkedScopes = paired.reciprocalPeerId
-        ? mutualScopes(paired.peer.scopes, scopes)
-        : paired.peer.scopes;
+    const linkedScopes = mutualScopes(paired.peer.scopes, scopes);
     if (linkedScopes.length === 0) {
         throw new FederationScopeMismatchError();
     }
@@ -473,15 +379,9 @@ export async function pairAndLinkConsumerFederationPeer(input: {
         token: paired.token,
         name: input.name,
         createdById: input.createdById,
-        upgradePeerId: paired.reciprocalPeerId,
         scopes: linkedScopes,
     });
-    const warning =
-        paired.warning ??
-        (reciprocalRequested && !consumerBaseUrl
-            ? RECIPROCAL_WARNING
-            : undefined);
-    return warning ? { peer, warning } : { peer };
+    return { peer };
 }
 
 /** Loads and decrypts a consumer credential for internal-only peer calls. */
@@ -530,10 +430,12 @@ function generatePairingCodeValue(): string {
     return code;
 }
 
-async function findAvailablePairingCode(): Promise<string> {
+async function findAvailablePairingCode(
+    transaction: Prisma.TransactionClient,
+): Promise<string> {
     for (let attempt = 0; attempt < PAIRING_CODE_ATTEMPTS; attempt += 1) {
         const code = generatePairingCodeValue();
-        const existing = await prisma.federationPairingCode.findUnique({
+        const existing = await transaction.federationPairingCode.findUnique({
             where: { code },
             select: { id: true },
         });
@@ -542,45 +444,76 @@ async function findAvailablePairingCode(): Promise<string> {
     throw new Error("Federation pairing code generation exhausted");
 }
 
+async function prunePairingCodes(
+    transaction: Prisma.TransactionClient,
+    createdById: string,
+    now: Date,
+): Promise<void> {
+    await transaction.federationPairingCode.deleteMany({
+        where: { createdById, expiresAt: { lte: now } },
+    });
+    const retained = await transaction.federationPairingCode.findMany({
+        where: { createdById, usedAt: null, expiresAt: { gt: now } },
+        orderBy: { createdAt: "desc" },
+        take: MAX_LIVE_PAIRING_CODES - 1,
+        select: { id: true },
+    });
+    await transaction.federationPairingCode.deleteMany({
+        where: {
+            createdById,
+            usedAt: null,
+            expiresAt: { gt: now },
+            id: { notIn: retained.map(({ id }) => id) },
+        },
+    });
+}
+
 /** Creates one short-lived pairing code for an administrator-approved scope set. */
 export async function createFederationPairingCode(input: {
     createdById: string;
     scopes: FederationScope[];
 }): Promise<{ code: string; expiresAt: Date }> {
     const now = new Date();
-    await prisma.federationPairingCode.deleteMany({
-        where: { createdById: input.createdById, usedAt: null },
-    });
-    const code = await findAvailablePairingCode();
     const expiresAt = new Date(now.getTime() + PAIRING_CODE_TTL_MS);
-    await prisma.federationPairingCode.create({
-        data: {
-            code,
-            expiresAt,
-            createdById: input.createdById,
-            scopes: input.scopes,
-        },
+    return prisma.$transaction(async (transaction) => {
+        await acquireUserScopedLock(
+            transaction,
+            USER_LOCK_NAMESPACES.federationPairingCodeCreate,
+            input.createdById,
+        );
+        await prunePairingCodes(transaction, input.createdById, now);
+        const code = await findAvailablePairingCode(transaction);
+        await transaction.federationPairingCode.create({
+            data: {
+                code,
+                expiresAt,
+                createdById: input.createdById,
+                scopes: input.scopes,
+            },
+        });
+        return { code, expiresAt };
     });
-    return { code, expiresAt };
 }
 
 /** Atomically consumes a valid code and returns the newly issued credential once. */
 export async function consumePairingCode(
     input: PairingConsumeInput,
     now: Date = new Date(),
-): Promise<{ peer: PublicFederationPeer; token: string } | null> {
+): Promise<PairingConsumeResult> {
     const code = await prisma.federationPairingCode.findUnique({
         where: { code: input.code.toUpperCase() },
     });
-    if (!code || code.usedAt || code.expiresAt <= now) return null;
+    if (!code) return { ok: false, reason: "not_found" };
+    if (code.usedAt) return { ok: false, reason: "used" };
+    if (code.expiresAt <= now) return { ok: false, reason: "expired" };
     const grantedScopes = parseFederationScopes(code.scopes);
-    if (!grantedScopes) return null;
+    if (!grantedScopes) return { ok: false, reason: "invalid" };
     const requestedScopes = input.requestedScopes;
     if (
         requestedScopes &&
         !requestedScopes.every((scope) => grantedScopes.includes(scope))
     ) {
-        return null;
+        return { ok: false, reason: "scope_mismatch" };
     }
     const scopes = requestedScopes ?? grantedScopes;
     await ensureFederationIdentity();
@@ -589,14 +522,17 @@ export async function consumePairingCode(
             where: { id: code.id, usedAt: null, expiresAt: { gt: now } },
             data: { usedAt: now },
         });
-        if (claimed.count !== 1) return null;
-        return createPeerWithClient(transaction, {
+        if (claimed.count !== 1) {
+            return { ok: false as const, reason: "not_found" as const };
+        }
+        const created = await createPeerWithClient(transaction, {
             name: input.name,
             baseUrl: input.baseUrl,
             createdById: code.createdById,
             scopes,
             capabilities: input.capabilities,
         });
+        return { ok: true as const, ...created };
     });
 }
 
@@ -607,67 +543,9 @@ function mutualScopes(
     return reciprocal.filter((scope) => granted.includes(scope));
 }
 
-async function upgradeReciprocalPeer(input: {
-    peerId: string;
-    baseUrl: string;
-    token: string;
-    scopes: FederationScope[];
-}): Promise<PublicFederationPeer> {
-    return prisma.federationPeer.update({
-        where: { id: input.peerId },
-        data: {
-            direction: "BOTH",
-            baseUrl: normalizeConsumerBaseUrl(input.baseUrl),
-            outboundToken: encryptFederationOutboundToken(input.token),
-            outboundStatus: "ACTIVE",
-            scopes: input.scopes,
-            lastSeenAt: new Date(),
-        },
-        select: publicPeerSelect,
-    });
-}
-
-/** Consumes a code and degrades safely if the optional reverse pairing fails. */
+/** Consumes one code and ignores legacy reciprocal callback fields. */
 export async function consumeFederationPairingRequest(
-    input: ReciprocalPairingInput,
-): Promise<{
-    peer: PublicFederationPeer;
-    token: string;
-    reciprocalPeerId?: string;
-    warning?: string;
-} | null> {
-    const initial = await consumePairingCode(input);
-    if (!initial) return null;
-    const reciprocalCode = input.reciprocalPairingCode;
-    const reciprocalRequested = input.reciprocalScopes;
-    if (!reciprocalCode || !reciprocalRequested || !input.baseUrl) {
-        return initial;
-    }
-    const scopes = mutualScopes(initial.peer.scopes, reciprocalRequested);
-    const consumerBaseUrl = httpsCallbackOrigin();
-    if (scopes.length === 0 || !consumerBaseUrl) {
-        return { ...initial, warning: RECIPROCAL_WARNING };
-    }
-    let reciprocalPeerId: string | undefined;
-    try {
-        const paired = await pairFederationPeer({
-            baseUrl: input.baseUrl,
-            code: reciprocalCode,
-            name: config.federation.instanceName,
-            consumerBaseUrl,
-            requestedScopes: scopes,
-            options: outboundClientOptions(),
-        });
-        reciprocalPeerId = paired.peer.id;
-        const peer = await upgradeReciprocalPeer({
-            peerId: initial.peer.id,
-            baseUrl: input.baseUrl,
-            token: paired.token,
-            scopes,
-        });
-        return { peer, token: initial.token, reciprocalPeerId };
-    } catch (_error: unknown) {
-        log.warn("Reciprocal federation pairing failed");
-        return { ...initial, reciprocalPeerId, warning: RECIPROCAL_WARNING };
-    }
+    input: PairingConsumeInput,
+): Promise<PairingConsumeResult> {
+    return consumePairingCode(input);
 }

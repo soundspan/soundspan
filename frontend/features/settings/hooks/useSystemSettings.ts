@@ -40,6 +40,7 @@ const defaultSystemSettings: SystemSettings = {
     soulseekConcurrentDownloads: 4,
     // Download preferences
     downloadSource: "soulseek",
+    federationInstanceName: null,
     primaryFailureFallback: "none",
     // YouTube Music streaming
     ytMusicEnabled: false,
