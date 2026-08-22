@@ -39,7 +39,7 @@
         "generate:vocabulary": "tsx scripts/generateVibeVocabulary.ts"
     },
     "dependencies": {
-        "@bull-board/api": "^8.6.1",
+        "@bull-board/api": "^9.3.1",
         "@bull-board/express": "^8.6.1",
         "@prisma/adapter-pg": "^7.9.1",
         "@prisma/client": "^7.9.1",
