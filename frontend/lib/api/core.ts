@@ -709,8 +709,16 @@ export abstract class ApiClientCore {
                 throw requestError;
             }
 
-            const data = await response.json();
-            return data;
+            // 204/205 and other empty bodies have nothing to parse; WebKit
+            // rejects response.json() on them even when the request succeeded.
+            if (response.status === 204 || response.status === 205) {
+                return undefined as T;
+            }
+            const rawBody = await response.text();
+            if (rawBody === "") {
+                return undefined as T;
+            }
+            return JSON.parse(rawBody) as T;
         };
 
         if (!inFlightGetKey) {

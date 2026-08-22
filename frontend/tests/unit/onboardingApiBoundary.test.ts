@@ -9,14 +9,10 @@ test("getOnboardingStatus requests the onboarding status endpoint", async () => 
 
     globalThis.fetch = (async (input: string | URL | Request) => {
         calledUrl = String(input);
-        return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-                needsOnboarding: false,
-                hasAccount: true,
-            }),
-        } as Response;
+        return Response.json({
+            needsOnboarding: false,
+            hasAccount: true,
+        });
     }) as typeof fetch;
 
     try {
