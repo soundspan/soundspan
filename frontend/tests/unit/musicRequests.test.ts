@@ -6,6 +6,7 @@ import {
     canReviewRequest,
     filterRequestRows,
     isOpenRequestStatus,
+    isRequestableMbid,
     requestStatusBadgeVariant,
     requestStatusLabel,
     toMusicRequestStatus,
@@ -70,6 +71,23 @@ test("isOpenRequestStatus treats pending and approved as open", () => {
     assert.equal(isOpenRequestStatus("fulfilled"), false);
     assert.equal(isOpenRequestStatus("denied"), false);
     assert.equal(isOpenRequestStatus("cancelled"), false);
+});
+
+test("isRequestableMbid accepts real MBIDs and rejects synthetic ids", () => {
+    assert.equal(
+        isRequestableMbid("0befee0f-2b0b-4b52-9d41-38f0f1f74ea5"),
+        true,
+    );
+    assert.equal(
+        isRequestableMbid("0BEFEE0F-2B0B-4B52-9D41-38F0F1F74EA5"),
+        true,
+    );
+    assert.equal(isRequestableMbid("temp-1724448000-0.123"), false);
+    assert.equal(isRequestableMbid("remote:generated-hash"), false);
+    assert.equal(isRequestableMbid("federation:peer:album"), false);
+    assert.equal(isRequestableMbid(""), false);
+    assert.equal(isRequestableMbid(null), false);
+    assert.equal(isRequestableMbid(undefined), false);
 });
 
 test("filter options start with all and cover the reviewable states", () => {

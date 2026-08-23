@@ -20,6 +20,7 @@ import { resolvePreferenceTrackId } from "@/lib/trackRef";
 
 // Hooks
 import { useArtistData } from "@/features/artist/hooks/useArtistData";
+import { useArtistAlbumRequests } from "@/features/artist/hooks/useArtistAlbumRequests";
 import { useArtistActions } from "@/features/artist/hooks/useArtistActions";
 import { useDownloadActions } from "@/features/artist/hooks/useDownloadActions";
 import { useYtMusicTopTracks } from "@/features/artist/hooks/useYtMusicTopTracks";
@@ -103,6 +104,15 @@ export default function ArtistPage() {
         setSortBy,
         reloadArtist,
     } = useArtistData();
+
+    const artistAlbumRequests = useArtistAlbumRequests(artist?.name || "");
+    const albumRequestControls = {
+        enabled: artistAlbumRequests.requestsEnabled,
+        isRequestable: artistAlbumRequests.isRequestableAlbum,
+        isRequested: artistAlbumRequests.isRequestedAlbum,
+        isSubmitting: artistAlbumRequests.isSubmittingRequest,
+        request: (album: Album) => void artistAlbumRequests.requestAlbum(album),
+    };
 
     // Action hooks
     const {
@@ -461,6 +471,7 @@ export default function ArtistPage() {
                             onSearchAlbum={handleSearchAlbum}
                             isPendingDownload={isPendingByMbid}
                             downloadsEnabled={downloadsEnabled}
+                            requestControls={albumRequestControls}
                         />
                     ) : (
                         showProgressivePlaceholders && (

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Non-admin users now see per-album Request badges on artist pages (mirroring the admin download badge), with a Requested state for albums they've already asked for. (#663)
 - Music requests: non-admin users get a Request button on albums and Release Radar entries they can't download. Admins review the queue on a new Requests page (avatar menu), approve to start the download through the normal path, or decline; requesters get notifications when their request is approved, declined, fulfilled, or fails. One open request per album per user, with a daily per-user cap (`REQUESTS_PER_USER_PER_DAY`, default 10) and a feature switch (`FEATURE_REQUESTS`). (#663)
 - Local users can browse active peers' public playlists on demand, follow them with live availability, and copy resolvable tracks into caller-owned local playlists. Peer playlist export uses the existing `social:read` scope; it shares the owner's display name for attribution and never exposes private playlists, account ids, or emails.
 - Federation peers can receive privacy-filtered online presence through the new `social:read` scope. Phase 0 deliberately requires `library:read` with `social:read` because social exchange piggybacks on catalog sync; social-only peering is out of scope. Users must enable online presence before they appear to peers, and peer snapshots expire automatically when syncs stop.

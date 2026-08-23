@@ -343,6 +343,18 @@ mock.module("@/features/album/components/SimilarAlbums", {
     },
 });
 
+mock.module("@/features/artist/hooks/useArtistAlbumRequests", {
+    exports: {
+        useArtistAlbumRequests: () => ({
+            requestsEnabled: false,
+            isRequestableAlbum: () => false,
+            isRequestedAlbum: () => false,
+            isSubmittingRequest: false,
+            requestAlbum: async () => undefined,
+        }),
+    },
+});
+
 mock.module("@/features/artist/hooks/useArtistData", {
     exports: {
         useArtistData: () => ({

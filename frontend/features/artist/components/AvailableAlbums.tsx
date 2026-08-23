@@ -8,6 +8,15 @@ import { Disc3 } from "lucide-react";
 import { api } from "@/lib/api";
 import { PeerBadge } from "@/components/ui/PeerBadge";
 
+/** Request-flow controls threaded into the album grids for non-admins. */
+export interface AlbumRequestControls {
+    enabled: boolean;
+    isRequestable: (album: Album) => boolean;
+    isRequested: (album: Album) => boolean;
+    isSubmitting: boolean;
+    request: (album: Album) => void;
+}
+
 interface AvailableAlbumsProps {
     albums: Album[];
     artistName: string;
@@ -17,6 +26,7 @@ interface AvailableAlbumsProps {
     onSearchAlbum?: (album: Album, e: React.MouseEvent) => void;
     isPendingDownload: (mbid: string) => boolean;
     downloadsEnabled?: boolean;
+    requestControls?: AlbumRequestControls;
 }
 
 const COVER_PREFETCH_ROOT_MARGIN = "320px 0px";
@@ -44,6 +54,7 @@ function LazyAlbumCard({
     isPendingDownload,
     index,
     downloadsEnabled = true,
+    requestControls,
 }: {
     album: Album;
     source: ArtistSource;
@@ -53,6 +64,7 @@ function LazyAlbumCard({
     isPendingDownload: (mbid: string) => boolean;
     index: number;
     downloadsEnabled?: boolean;
+    requestControls?: AlbumRequestControls;
 }) {
     const [coverArt, setCoverArt] = useState<string | null>(() =>
         resolveAlbumCoverUrl(album, source),
@@ -157,15 +169,28 @@ function LazyAlbumCard({
                         />
                     ) : downloadsEnabled ? (
                         "download"
+                    ) : requestControls?.enabled &&
+                      requestControls.isRequestable(album) ? (
+                        requestControls.isRequested(album) ? (
+                            "requested"
+                        ) : (
+                            "request"
+                        )
                     ) : null
                 }
                 showPlayButton={false}
                 colors={colors}
                 isDownloading={isPendingDownload(albumMbid)}
+                isRequesting={requestControls?.isSubmitting ?? false}
                 onDownload={
                     album.provenanceSource === "federated"
                         ? undefined
                         : (e) => onDownloadAlbum(album, e)
+                }
+                onRequest={
+                    requestControls
+                        ? () => requestControls.request(album)
+                        : undefined
                 }
                 onSearch={
                     onSearchAlbum ? (e) => onSearchAlbum(album, e) : undefined
@@ -184,6 +209,7 @@ function AlbumGrid({
     onSearchAlbum,
     isPendingDownload,
     downloadsEnabled,
+    requestControls,
 }: Omit<AvailableAlbumsProps, "artistName">) {
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -198,6 +224,7 @@ function AlbumGrid({
                     isPendingDownload={isPendingDownload}
                     index={index}
                     downloadsEnabled={downloadsEnabled}
+                    requestControls={requestControls}
                 />
             ))}
         </div>
@@ -216,6 +243,7 @@ export function AvailableAlbums({
     onSearchAlbum,
     isPendingDownload,
     downloadsEnabled = true,
+    requestControls,
 }: AvailableAlbumsProps) {
     if (!albums || albums.length === 0) {
         return null;
@@ -244,6 +272,7 @@ export function AvailableAlbums({
                             onSearchAlbum={onSearchAlbum}
                             isPendingDownload={isPendingDownload}
                             downloadsEnabled={downloadsEnabled}
+                            requestControls={requestControls}
                         />
                     </div>
                 </section>
@@ -262,6 +291,7 @@ export function AvailableAlbums({
                             onSearchAlbum={onSearchAlbum}
                             isPendingDownload={isPendingDownload}
                             downloadsEnabled={downloadsEnabled}
+                            requestControls={requestControls}
                         />
                     </div>
                 </section>

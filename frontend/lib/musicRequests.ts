@@ -110,3 +110,15 @@ export function canReviewRequest(
 export function isOpenRequestStatus(status: string): boolean {
     return status === "pending" || status === "approved";
 }
+
+const MBID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Only real MusicBrainz release-group ids are requestable; the scanner's
+ * synthetic ids (temp-*, remote:*, federation:*) would be rejected by the
+ * API's MBID validation.
+ */
+export function isRequestableMbid(value: string | null | undefined): boolean {
+    return Boolean(value && MBID_PATTERN.test(value));
+}

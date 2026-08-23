@@ -2,7 +2,15 @@
 
 import { ReactNode, memo, useMemo } from "react";
 import Link from "next/link";
-import { Play, Pause, Check, Download, Loader2, Search } from "lucide-react";
+import {
+    Play,
+    Pause,
+    Check,
+    Download,
+    Loader2,
+    Search,
+    Send,
+} from "lucide-react";
 import { Card, CardProps } from "./Card";
 import { cn } from "@/utils/cn";
 import type { ColorPalette } from "@/hooks/useImageColor";
@@ -22,10 +30,12 @@ export interface PlayableCardProps extends Omit<CardProps, "onPlay"> {
     onPlay?: (e: React.MouseEvent) => void;
     onDownload?: (e: React.MouseEvent) => void;
     onSearch?: (e: React.MouseEvent) => void;
+    onRequest?: (e: React.MouseEvent) => void;
     showPlayButton?: boolean;
     circular?: boolean;
-    badge?: "owned" | "download" | ReactNode | null;
+    badge?: "owned" | "download" | "request" | "requested" | ReactNode | null;
     isDownloading?: boolean;
+    isRequesting?: boolean;
     colors?: ColorPalette | null;
     tvCardIndex?: number;
 }
@@ -40,10 +50,12 @@ const PlayableCard = memo(function PlayableCard({
     onPlay,
     onDownload,
     onSearch,
+    onRequest,
     showPlayButton = true,
     circular = false,
     badge = null,
     isDownloading = false,
+    isRequesting = false,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     colors = null,
     className,
@@ -191,6 +203,50 @@ const PlayableCard = memo(function PlayableCard({
                                     Search
                                 </button>
                             )}
+                        </span>
+                    )}
+                    {badge === "request" && (
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.nativeEvent.stopImmediatePropagation();
+                                if (!isRequesting && onRequest) {
+                                    onRequest(e);
+                                }
+                            }}
+                            onMouseDown={(e) => {
+                                e.stopPropagation();
+                            }}
+                            disabled={isRequesting}
+                            className={cn(
+                                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors",
+                                isRequesting
+                                    ? "bg-gray-500/20 border border-gray-500/30 text-gray-400 cursor-not-allowed"
+                                    : "bg-brand/20 hover:bg-brand/30 border border-brand/30 hover:border-brand/50 text-brand",
+                            )}
+                            title={
+                                isRequesting
+                                    ? "Requesting..."
+                                    : "Ask an admin to add this album"
+                            }
+                        >
+                            <Send
+                                className={cn(
+                                    "w-3 h-3",
+                                    isRequesting && "animate-pulse",
+                                )}
+                            />
+                            {isRequesting ? "Requesting..." : "Request"}
+                        </button>
+                    )}
+                    {badge === "requested" && (
+                        <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-brand/10 border border-brand/20 rounded-full text-xs font-medium text-brand/80"
+                            title="You already have an open request for this album"
+                        >
+                            <Check className="w-3 h-3" />
+                            Requested
                         </span>
                     )}
                     {typeof badge !== "string" && badge}
