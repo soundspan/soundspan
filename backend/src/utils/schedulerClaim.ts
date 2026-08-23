@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type Redis from "ioredis";
+import { config } from "../config";
 import { createIORedisClient } from "./ioredis";
 import { logger } from "./logger";
 
@@ -7,19 +8,10 @@ const claimLog = logger.child("WorkerScheduler").child("SchedulerClaim");
 const claimObservabilityLog = claimLog.child("Observability");
 const SCHEDULER_CLAIM_RETRY_ATTEMPTS = 3;
 const OBSERVABILITY_LOG_EVERY = 25;
-const DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD = 3;
-const parsedSchedulerSkipWarnThreshold = Number.parseInt(
-    process.env.SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD ||
-        `${DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD}`,
-    10,
-);
+// Optional access keeps partial config mocks in tests from failing at import.
 const SCHEDULER_SKIP_WARN_THRESHOLD =
-    Number.isFinite(parsedSchedulerSkipWarnThreshold) &&
-    parsedSchedulerSkipWarnThreshold > 0
-        ? parsedSchedulerSkipWarnThreshold
-        : DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD;
-const jestLazyConnectOverride =
-    process.env.JEST_WORKER_ID !== undefined ? { lazyConnect: true } : {};
+    config.workers?.schedulerClaimSkipWarnThreshold ?? 3;
+const jestLazyConnectOverride = config.underJest ? { lazyConnect: true } : {};
 
 /** Shared scheduler-claim key for full and incremental audiobook syncs. */
 export const AUDIOBOOK_SYNC_CLAIM_KEY = "scheduler-claim:audiobook-auto-sync";

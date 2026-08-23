@@ -24,6 +24,7 @@ const mockRequireAuthOrToken = jest.fn(
 jest.mock("../middleware/auth", () => ({
     requireAuthOrToken: (req: any, res: any, next: any) =>
         mockRequireAuthOrToken(req, res, next),
+    requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 
 jest.mock("../middleware/rateLimiter", () => ({

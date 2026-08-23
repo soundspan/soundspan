@@ -632,6 +632,8 @@ export const config = {
         30_000,
     ),
     nodeEnv: process.env.NODE_ENV || "development",
+    // Jest worker detection for code that must skip live connections in tests.
+    underJest: process.env.JEST_WORKER_ID !== undefined,
     get appVersion(): string {
         return process.env.npm_package_version || "unknown";
     },
@@ -996,6 +998,12 @@ export const config = {
         trackRemovalRetentionDays,
         federationTombstoneRetentionDays,
         federationSyncIntervalMinutes,
+        get schedulerClaimSkipWarnThreshold(): number {
+            return positiveIntEnvOr(
+                process.env.SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD,
+                3,
+            );
+        },
         get moodBucketClaimTtlMs(): number {
             return positiveIntEnvOr(
                 process.env.MOOD_BUCKET_CLAIM_TTL_MS,

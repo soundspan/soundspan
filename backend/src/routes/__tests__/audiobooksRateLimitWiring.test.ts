@@ -38,6 +38,13 @@ jest.mock("../../middleware/auth", () => ({
         req.user = { id: "user-1", username: "test" } as Request["user"];
         next();
     },
+    requireAdmin: function requireAdmin(
+        _req: Request,
+        _res: Response,
+        next: NextFunction,
+    ) {
+        next();
+    },
 }));
 
 jest.mock("../../middleware/rateLimiter", () => ({

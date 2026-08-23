@@ -250,6 +250,8 @@ describe("workers runtime behavior", () => {
             config: {
                 vibeProviderUrl,
                 vibeEmbedConcurrency: 1,
+                underJest: true,
+                workers: { schedulerClaimSkipWarnThreshold: 3 },
                 features: {
                     audioAnalysis: true,
                     discovery: true,

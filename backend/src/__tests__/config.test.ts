@@ -1046,6 +1046,7 @@ describe("config module", () => {
         expect(config.playlistLogDir).toBe("/tmp/playlist-logs");
         expect(config.workers).toEqual({
             moodBucketClaimTtlMs: 120_001,
+            schedulerClaimSkipWarnThreshold: 3,
             enrichmentClaimTtlMs: 900_001,
             trackReconciliationMaxRows: 10_001,
             trackReconciliationTimeoutMs: 600_001,
@@ -1093,6 +1094,7 @@ describe("config module", () => {
         expect(config.playlistLogDir).toBeUndefined();
         expect(config.workers).toEqual({
             moodBucketClaimTtlMs: 120_000,
+            schedulerClaimSkipWarnThreshold: 3,
             enrichmentClaimTtlMs: 900_000,
             trackReconciliationMaxRows: 10_000,
             trackReconciliationTimeoutMs: 10 * 60 * 1000,
