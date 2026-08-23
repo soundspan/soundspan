@@ -1,9 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import type {
-    Audiobook,
-    AudiobookProgress,
-    FederationPeer,
-} from "@prisma/client";
+import type { Audiobook } from "@prisma/client";
 import { z } from "zod";
 import { logger } from "../utils/logger";
 import { audiobookshelfService } from "../services/audiobookshelf";
@@ -36,6 +32,11 @@ import {
     type AudiobookSections,
 } from "../services/audiobookSections";
 import { findRouteNameMatch } from "./routeParamName";
+import {
+    audiobookListResponse,
+    federatedSource,
+    type AudiobookRow,
+} from "./audiobookRouteResponses";
 
 const router = Router();
 const audiobookSyncAuth = [requireAuthOrToken, requireAdmin] as const;
@@ -64,68 +65,6 @@ const audiobookProgressMetadataSelect = {
     localCoverPath: true,
     peerId: true,
 } as const;
-
-type AudiobookRow = Audiobook & {
-    federationPeer?: Pick<
-        FederationPeer,
-        "id" | "name" | "outboundStatus" | "baseUrl" | "outboundToken"
-    > | null;
-};
-
-type ProgressRow = Pick<
-    AudiobookProgress,
-    "currentTime" | "duration" | "isFinished" | "lastPlayedAt"
->;
-
-function federatedSource(book: AudiobookRow) {
-    if (!book.peerId || !book.federationPeer) return {};
-    return {
-        source: "federated" as const,
-        peer: {
-            id: book.federationPeer.id,
-            name: book.federationPeer.name,
-            online: book.federationPeer.outboundStatus === "ACTIVE",
-        },
-    };
-}
-
-function progressResponse(progress: ProgressRow | null | undefined) {
-    if (!progress) return null;
-    return {
-        currentTime: progress.currentTime,
-        progress:
-            progress.duration > 0
-                ? (progress.currentTime / progress.duration) * 100
-                : 0,
-        isFinished: progress.isFinished,
-        lastPlayedAt: progress.lastPlayedAt,
-    };
-}
-
-function audiobookListResponse(
-    book: AudiobookRow,
-    progress: ProgressRow | null | undefined,
-) {
-    return {
-        id: book.id,
-        title: book.title,
-        author: book.author || "Unknown Author",
-        narrator: book.narrator,
-        description: book.description,
-        coverUrl:
-            book.localCoverPath || book.coverUrl
-                ? `/audiobooks/${book.id}/cover`
-                : null,
-        duration: book.duration || 0,
-        libraryId: book.libraryId,
-        series: book.series
-            ? { name: book.series, sequence: book.seriesSequence || "1" }
-            : null,
-        genres: book.genres || [],
-        progress: progressResponse(progress),
-        ...federatedSource(book),
-    };
-}
 
 function sectionsArePlayable(cachedSections: AudiobookSections): boolean {
     return cachedSections.kind !== "none";

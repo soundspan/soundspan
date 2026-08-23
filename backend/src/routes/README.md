@@ -99,6 +99,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/podcasts.ts`           | `/api/podcasts`                                                                                       |
 | `backend/src/routes/recommendations.ts`    | `/api/recommendations`                                                                                |
 | `backend/src/routes/releases.ts`           | `/api/releases`                                                                                       |
+| `backend/src/routes/audiobookRouteResponses.ts` | Audiobook response serializers; not a router                                                          |
 | `backend/src/routes/routeErrorResponse.ts` | Shared response helper; not a router                                                                  |
 | `backend/src/routes/search.ts`             | `/api/search`                                                                                         |
 | `backend/src/routes/settings.ts`           | `/api/settings`                                                                                       |
