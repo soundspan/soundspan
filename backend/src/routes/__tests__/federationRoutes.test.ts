@@ -12,7 +12,6 @@ const catalog = {
     findExportedFederationAudiobook: jest.fn(),
     decodeFederationDeltaCursor: jest.fn(),
 };
-const peers = { consumeFederationPairingRequest: jest.fn() };
 const presence = { getFederationPresenceExport: jest.fn() };
 const playlistExport = {
     getFederationPlaylistPage: jest.fn(),
@@ -30,15 +29,6 @@ const streamAudiobook = jest.fn();
 const redisEval = jest.fn();
 
 jest.mock("../../services/federationCatalog", () => catalog);
-jest.mock("../../services/federationPeers", () => ({
-    ...peers,
-    FEDERATION_SCOPE_VALUES: [
-        "library:read",
-        "stream:read",
-        "embeddings:read",
-        "social:read",
-    ],
-}));
 jest.mock("../../services/federationPresence", () => presence);
 jest.mock("../../services/federationPlaylistExport", () => playlistExport);
 jest.mock("../../metrics", () => ({
@@ -79,11 +69,6 @@ jest.mock("../../middleware/federationAuth", () => ({
 }));
 jest.mock("../../middleware/rateLimiter", () => ({
     federationPeerLimiter: (
-        _req: Request,
-        _res: Response,
-        next: NextFunction,
-    ) => next(),
-    federationPairingLimiter: (
         _req: Request,
         _res: Response,
         next: NextFunction,
@@ -160,6 +145,14 @@ describe("federation host routes", () => {
             nextOffset: null,
         });
         playlistExport.getFederationPlaylistDetail.mockResolvedValue(null);
+    });
+
+    it("returns 404 for the removed pairing endpoint", async () => {
+        const response = await request(app)
+            .post("/api/federation/v1/pair")
+            .send({ code: "ABCDEFGH", name: "Peer" });
+
+        expect(response.status).toBe(404);
     });
 
     it.each([
@@ -277,6 +270,16 @@ describe("federation host routes", () => {
                 .set("x-test-scopes", scopes);
         const response = await call;
         expect(response.status).toBe(status);
+    });
+
+    it("advertises scope-derived manifest availability", async () => {
+        const response = await request(app)
+            .get("/api/federation/v1/manifest")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "library:read,embeddings:read,social:read");
+
+        expect(response.status).toBe(200);
+        expect(catalog.getFederationManifest).toHaveBeenCalledWith(true, true);
     });
 
     it.each([
@@ -474,118 +477,6 @@ describe("federation host routes", () => {
             currentEpoch: "epoch-1",
         });
     });
-
-    it("consumes validated pairing input without peer authentication", async () => {
-        peers.consumeFederationPairingRequest.mockResolvedValueOnce({
-            ok: true,
-            peer: { id: "peer-1" },
-            token: "token-once",
-        });
-        const response = await request(app)
-            .post("/api/federation/v1/pair")
-            .send({
-                code: "ABCDEFGH",
-                name: "Peer",
-                baseUrl: "https://peer.example",
-                capabilities: ["track-attrs-loudness", "future-capability"],
-            });
-
-        expect(response.status).toBe(201);
-        expect(response.body).toEqual({
-            peer: { id: "peer-1" },
-            token: "token-once",
-            capabilities: ["track-attrs-loudness"],
-        });
-        expect(peers.consumeFederationPairingRequest).toHaveBeenCalledWith({
-            code: "ABCDEFGH",
-            name: "Peer",
-            baseUrl: "https://peer.example",
-            capabilities: ["track-attrs-loudness"],
-        });
-    });
-
-    it("accepts legacy reciprocal fields without coupling them", async () => {
-        peers.consumeFederationPairingRequest.mockResolvedValueOnce({
-            ok: true,
-            peer: { id: "peer-1", direction: "HOST" },
-            token: "token-once",
-        });
-
-        const response = await request(app)
-            .post("/api/federation/v1/pair")
-            .send({
-                code: "ABCDEFGH",
-                name: "Peer",
-                baseUrl: "https://peer.example",
-                reciprocalPairingCode: "HGFEDCBA",
-            });
-
-        expect(response.status).toBe(201);
-        expect(peers.consumeFederationPairingRequest).toHaveBeenCalledWith(
-            expect.objectContaining({
-                reciprocalPairingCode: "HGFEDCBA",
-            }),
-        );
-        expect(response.body.peer.direction).toBe("HOST");
-    });
-
-    it.each(["requestedScopes", "reciprocalScopes"])(
-        "rejects social access without library access in %s",
-        async (field) => {
-            const response = await request(app)
-                .post("/api/federation/v1/pair")
-                .send({
-                    code: "ABCDEFGH",
-                    name: "Peer",
-                    [field]: ["social:read"],
-                });
-
-            expect(response.status).toBe(400);
-            expect(
-                peers.consumeFederationPairingRequest,
-            ).not.toHaveBeenCalled();
-        },
-    );
-
-    it.each([
-        ["used", 400, "FEDERATION_CODE_USED"],
-        ["expired", 400, "FEDERATION_CODE_EXPIRED"],
-        ["scope_mismatch", 400, "FEDERATION_SCOPE_MISMATCH"],
-    ])(
-        "maps %s pairing failures to a public code",
-        async (reason, status, code) => {
-            peers.consumeFederationPairingRequest.mockResolvedValueOnce({
-                ok: false,
-                reason,
-            });
-
-            const response = await request(app)
-                .post("/api/federation/v1/pair")
-                .send({ code: "ABCDEFGH", name: "Peer" });
-
-            expect(response.status).toBe(status);
-            expect(response.body.code).toBe(code);
-        },
-    );
-
-    it.each(["not_found", "invalid"])(
-        "keeps %s pairing failures generic",
-        async (reason) => {
-            peers.consumeFederationPairingRequest.mockResolvedValueOnce({
-                ok: false,
-                reason,
-            });
-
-            const response = await request(app)
-                .post("/api/federation/v1/pair")
-                .send({ code: "ABCDEFGH", name: "Peer" });
-
-            expect(response.status).toBe(400);
-            expect(response.body).toEqual({
-                error: "Invalid or expired pairing code",
-            });
-        },
-    );
 
     it("serves only exported covers and rejects URL overrides", async () => {
         catalog.findExportedFederationAlbum.mockResolvedValue(true);

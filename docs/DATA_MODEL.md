@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (63 models, 1416 lines)
+Schema source: `backend/prisma/schema.prisma` (65 models, 1492 lines)
 
 ## Entity Relationship Overview
 
@@ -24,7 +24,6 @@ erDiagram
     User ||--o{ InviteCode : creates
     User ||--o| UserDiscoverConfig : configures
     User ||--o{ FederationPeer : creates
-    User ||--o{ FederationPairingCode : creates
 
     Artist ||--o{ Album : has
     Artist ||--o{ TrackTidal : "resolved from"
@@ -136,15 +135,13 @@ Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entitie
 | Entity                     | Purpose                                                                  | Key Fields                                                                                                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FederationPeer`           | One host, consumer, or bidirectional instance link                       | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `showDedupedCopies`, nullable `maxConcurrentStreams`/`maxStreamKbps`, sync cursors, `createdById` |
-| `FederationPairingCode`    | Short-lived, single-use admin pairing grant                              | unique `code`, `scopes`, `expiresAt`, `usedAt`, `createdById`                                                                                                                                                                                |
 | `FederationTombstone`      | Deleted host catalog identity retained for incremental peer deltas       | `entityType`, `entityId`, indexed `deletedAt`                                                                                                                                                                                                |
 | `FederationPodcastListing` | Lightweight peer podcast catalog row; never a native subscription mirror | `peerId`, `remoteId`, `feedUrl`, `title`, nullable `author`/`imageUrl`, `updatedAt`; unique `(peerId, remoteId)`, indexed `feedUrl`                                                                                                          |
 
 `FederationPeer.createdById` uses a restricted user relation, so an owning
 administrator cannot be deleted while the peer remains. Deleting a peer
 cascades to its mirrored artists, albums, tracks, audiobooks, and podcast
-listings. Pairing codes cascade
-with their creating user.
+listings.
 
 `inboundStatus` controls credentials presented by the peer and is populated for
 `HOST` and `BOTH`. `outboundStatus` controls sync, health, playback, and online

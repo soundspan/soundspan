@@ -1,20 +1,14 @@
-import { randomBytes, randomInt, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { hashApiKey } from "../utils/apiKeyHash";
-import {
-    acquireUserScopedLock,
-    USER_LOCK_NAMESPACES,
-} from "../utils/advisoryLocks";
 import { prisma } from "../utils/db";
 import {
     FEDERATION_SCOPE_VALUES,
-    parseFederationScopes,
     type FederationScope,
 } from "../utils/federationScopes";
 import {
     createFederationClient,
-    pairFederationPeer,
     resolveBaseUrl,
     type FederationManifest,
 } from "./federationClient";
@@ -23,17 +17,11 @@ import {
     encryptFederationOutboundToken,
 } from "./federationCredentialCipher";
 import type { FederationCapability } from "./federationCapabilities";
-import { resolveFederationInstanceName } from "./federationInstanceName";
 import { removeReplacementCacheFiles } from "./trackReplacement";
 
 export { FEDERATION_SCOPE_VALUES } from "../utils/federationScopes";
 export type { FederationScope } from "../utils/federationScopes";
 
-const PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const PAIRING_CODE_LENGTH = 8;
-const PAIRING_CODE_ATTEMPTS = 10;
-const PAIRING_CODE_TTL_MS = 30 * 60 * 1000;
-const MAX_LIVE_PAIRING_CODES = 5;
 const PEER_LIST_LIMIT = 500;
 
 const publicPeerSelect = {
@@ -79,30 +67,11 @@ export interface FederationPeerSettingsInput {
     maxStreamKbps?: number | null;
 }
 
-/** Validated public pairing request values. */
-export interface PairingConsumeInput {
-    code: string;
-    name: string;
-    baseUrl?: string;
-    requestedScopes?: FederationScope[];
-    capabilities?: FederationCapability[];
-}
-
 /** A normalized active consumer URL is already linked. */
 export class FederationPeerConflictError extends Error {
     constructor() {
         super("Federation consumer peer already exists");
         this.name = "FederationPeerConflictError";
-    }
-}
-
-/** Requested and granted federation scopes have no shared capability. */
-export class FederationScopeMismatchError extends Error {
-    readonly code = "FEDERATION_SCOPE_MISMATCH";
-
-    constructor() {
-        super("Federation peer scopes do not overlap");
-        this.name = "FederationScopeMismatchError";
     }
 }
 
@@ -114,23 +83,6 @@ export interface LinkConsumerPeerInput {
     createdById: string;
     scopes?: FederationScope[];
 }
-
-/**
- * Result of claiming a public federation pairing code.
- * Missing rows and lost claim races map to `not_found`; corrupt persisted
- * scopes map to `invalid`. Used, expired, and scope failures remain distinct.
- */
-export type PairingConsumeResult =
-    | { ok: true; peer: PublicFederationPeer; token: string }
-    | {
-          ok: false;
-          reason:
-              | "not_found"
-              | "used"
-              | "expired"
-              | "scope_mismatch"
-              | "invalid";
-      };
 
 function newCredential(): { token: string; credentialHash: string } {
     const token = randomBytes(32).toString("hex");
@@ -288,12 +240,14 @@ export function outboundClientOptions() {
     };
 }
 
-function consumerScopes(embeddingsAvailable: boolean): FederationScope[] {
-    // Phase 0 social exchange piggybacks on catalog sync. Legacy links infer
-    // catalog scopes only; social access must always come from an explicit grant.
-    return embeddingsAvailable
-        ? ["library:read", "stream:read", "embeddings:read"]
-        : ["library:read", "stream:read"];
+function consumerScopes(
+    embeddingsAvailable: boolean,
+    socialAvailable: boolean,
+): FederationScope[] {
+    const scopes: FederationScope[] = ["library:read", "stream:read"];
+    if (embeddingsAvailable) scopes.push("embeddings:read");
+    if (socialAvailable) scopes.push("social:read");
+    return scopes;
 }
 
 async function findDuplicateConsumerPeer(
@@ -315,7 +269,12 @@ async function persistConsumerLink(
     outboundToken: string,
     manifest: FederationManifest,
 ): Promise<PublicFederationPeer> {
-    const scopes = input.scopes ?? consumerScopes(manifest.embeddingsAvailable);
+    const scopes =
+        input.scopes ??
+        consumerScopes(
+            manifest.embeddingsAvailable,
+            manifest.socialAvailable === true,
+        );
     const shared = {
         name: input.name?.trim() || manifest.name,
         baseUrl,
@@ -352,42 +311,6 @@ export async function linkConsumerFederationPeer(
     return persistConsumerLink(input, baseUrl, outboundToken, manifest);
 }
 
-/** Exchanges a short code, then links the resulting token through manifest validation. */
-export async function pairAndLinkConsumerFederationPeer(input: {
-    baseUrl: string;
-    code: string;
-    name: string;
-    createdById: string;
-    scopes?: FederationScope[];
-}): Promise<{ peer: PublicFederationPeer }> {
-    const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
-    const duplicate = await findDuplicateConsumerPeer(baseUrl);
-    if (duplicate) throw new FederationPeerConflictError();
-    const scopes = input.scopes ?? ["library:read", "stream:read"];
-    const instanceName = await resolveFederationInstanceName();
-    const paired = await pairFederationPeer({
-        baseUrl,
-        code: input.code,
-        name: instanceName,
-        requestedScopes: scopes,
-        options: outboundClientOptions(),
-    });
-    const linkedScopes = parseFederationScopes(
-        mutualScopes(paired.peer.scopes, scopes),
-    );
-    if (!linkedScopes) {
-        throw new FederationScopeMismatchError();
-    }
-    const peer = await linkConsumerFederationPeer({
-        baseUrl,
-        token: paired.token,
-        name: input.name,
-        createdById: input.createdById,
-        scopes: linkedScopes,
-    });
-    return { peer };
-}
-
 /** Loads and decrypts a consumer credential for internal-only peer calls. */
 export async function getConsumerPeerConnection(peerId: string) {
     const peer = await prisma.federationPeer.findUnique({
@@ -422,134 +345,4 @@ export async function deleteFederationPeer(peerId: string): Promise<boolean> {
         );
     }
     return result.count === 1;
-}
-
-function generatePairingCodeValue(): string {
-    let code = "";
-    for (let index = 0; index < PAIRING_CODE_LENGTH; index += 1) {
-        code += PAIRING_CODE_ALPHABET.charAt(
-            randomInt(0, PAIRING_CODE_ALPHABET.length),
-        );
-    }
-    return code;
-}
-
-async function findAvailablePairingCode(
-    transaction: Prisma.TransactionClient,
-): Promise<string> {
-    for (let attempt = 0; attempt < PAIRING_CODE_ATTEMPTS; attempt += 1) {
-        const code = generatePairingCodeValue();
-        const existing = await transaction.federationPairingCode.findUnique({
-            where: { code },
-            select: { id: true },
-        });
-        if (!existing) return code;
-    }
-    throw new Error("Federation pairing code generation exhausted");
-}
-
-async function prunePairingCodes(
-    transaction: Prisma.TransactionClient,
-    createdById: string,
-    now: Date,
-): Promise<void> {
-    await transaction.federationPairingCode.deleteMany({
-        where: { createdById, expiresAt: { lte: now } },
-    });
-    const retained = await transaction.federationPairingCode.findMany({
-        where: { createdById, usedAt: null, expiresAt: { gt: now } },
-        orderBy: { createdAt: "desc" },
-        take: MAX_LIVE_PAIRING_CODES - 1,
-        select: { id: true },
-    });
-    await transaction.federationPairingCode.deleteMany({
-        where: {
-            createdById,
-            usedAt: null,
-            expiresAt: { gt: now },
-            id: { notIn: retained.map(({ id }) => id) },
-        },
-    });
-}
-
-/** Creates one short-lived pairing code for an administrator-approved scope set. */
-export async function createFederationPairingCode(input: {
-    createdById: string;
-    scopes: FederationScope[];
-}): Promise<{ code: string; expiresAt: Date }> {
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + PAIRING_CODE_TTL_MS);
-    return prisma.$transaction(async (transaction) => {
-        await acquireUserScopedLock(
-            transaction,
-            USER_LOCK_NAMESPACES.federationPairingCodeCreate,
-            input.createdById,
-        );
-        await prunePairingCodes(transaction, input.createdById, now);
-        const code = await findAvailablePairingCode(transaction);
-        await transaction.federationPairingCode.create({
-            data: {
-                code,
-                expiresAt,
-                createdById: input.createdById,
-                scopes: input.scopes,
-            },
-        });
-        return { code, expiresAt };
-    });
-}
-
-/** Atomically consumes a valid code and returns the newly issued credential once. */
-export async function consumePairingCode(
-    input: PairingConsumeInput,
-    now: Date = new Date(),
-): Promise<PairingConsumeResult> {
-    const code = await prisma.federationPairingCode.findUnique({
-        where: { code: input.code.toUpperCase() },
-    });
-    if (!code) return { ok: false, reason: "not_found" };
-    if (code.usedAt) return { ok: false, reason: "used" };
-    if (code.expiresAt <= now) return { ok: false, reason: "expired" };
-    const grantedScopes = parseFederationScopes(code.scopes);
-    if (!grantedScopes) return { ok: false, reason: "invalid" };
-    const requestedScopes = input.requestedScopes;
-    if (
-        requestedScopes &&
-        !requestedScopes.every((scope) => grantedScopes.includes(scope))
-    ) {
-        return { ok: false, reason: "scope_mismatch" };
-    }
-    const scopes = requestedScopes ?? grantedScopes;
-    await ensureFederationIdentity();
-    return prisma.$transaction(async (transaction) => {
-        const claimed = await transaction.federationPairingCode.updateMany({
-            where: { id: code.id, usedAt: null, expiresAt: { gt: now } },
-            data: { usedAt: now },
-        });
-        if (claimed.count !== 1) {
-            return { ok: false as const, reason: "not_found" as const };
-        }
-        const created = await createPeerWithClient(transaction, {
-            name: input.name,
-            baseUrl: input.baseUrl,
-            createdById: code.createdById,
-            scopes,
-            capabilities: input.capabilities,
-        });
-        return { ok: true as const, ...created };
-    });
-}
-
-function mutualScopes(
-    granted: readonly string[],
-    reciprocal: readonly FederationScope[],
-): FederationScope[] {
-    return reciprocal.filter((scope) => granted.includes(scope));
-}
-
-/** Consumes one code and ignores legacy reciprocal callback fields. */
-export async function consumeFederationPairingRequest(
-    input: PairingConsumeInput,
-): Promise<PairingConsumeResult> {
-    return consumePairingCode(input);
 }

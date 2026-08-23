@@ -3,15 +3,12 @@ import { z } from "zod";
 import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import {
-    createFederationPairingCode,
     createHostFederationPeer,
     deleteFederationPeer,
     FEDERATION_SCOPE_VALUES,
     FederationPeerConflictError,
-    FederationScopeMismatchError,
     linkConsumerFederationPeer,
     listFederationPeers,
-    pairAndLinkConsumerFederationPeer,
     revokeFederationPeer,
     rotateFederationPeerCredential,
     updateFederationPeerSettings,
@@ -50,13 +47,14 @@ const httpsUrlSchema = z
 const hostPeerSchema = z.strictObject({
     direction: z.literal("HOST").optional(),
     name: z.string().trim().min(1).max(120),
-    scopes: scopesSchema,
+    scopes: scopesSchema.default([
+        "library:read",
+        "stream:read",
+        "social:read",
+    ]),
     baseUrl: httpsUrlSchema.optional(),
 });
 const createPeerSchema = hostPeerSchema;
-const pairingCodeSchema = z.strictObject({
-    scopes: scopesSchema.default(["library:read", "stream:read"]),
-});
 const peerParamsSchema = z.strictObject({
     id: z.string().trim().min(1).max(128),
 });
@@ -67,16 +65,6 @@ const consumerOnlyLinkSchema = z.strictObject({
     name: z.string().trim().min(1).max(120).optional(),
 });
 const consumerLinkSchema = consumerOnlyLinkSchema;
-const consumerPairSchema = z.strictObject({
-    baseUrl: httpsUrlSchema,
-    code: z
-        .string()
-        .trim()
-        .toUpperCase()
-        .regex(/^[A-HJ-NP-Z2-9]{8}$/),
-    name: z.string().trim().min(1).max(120),
-    scopes: scopesSchema.default(["library:read", "stream:read"]),
-});
 const peerSettingsSchema = z.strictObject({
     showDedupedCopies: z.boolean().optional(),
     maxConcurrentStreams: z.number().int().min(1).max(64).nullable().optional(),
@@ -115,17 +103,6 @@ const outboundRouteErrors = {
         502,
         "Federation peer response is invalid",
         "FEDERATION_PEER_INVALID",
-    ],
-    code_used: [
-        400,
-        "Pairing code has already been used",
-        "FEDERATION_CODE_USED",
-    ],
-    code_expired: [400, "Pairing code has expired", "FEDERATION_CODE_EXPIRED"],
-    scope_mismatch: [
-        422,
-        "Federation peer scopes do not overlap",
-        "FEDERATION_SCOPE_MISMATCH",
     ],
 } as const satisfies Readonly<
     Record<FederationErrorClass, readonly [number, string, string]>
@@ -298,12 +275,12 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, scopes]
+ *             required: [name]
  *             properties:
  *               name: { type: string }
  *               scopes:
  *                 type: array
- *                 description: social:read and embeddings:read each require library:read
+ *                 description: Defaults to library:read, stream:read, and social:read; social:read and embeddings:read each require library:read
  *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
  *               baseUrl: { type: string, format: uri }
  *     responses:
@@ -348,8 +325,7 @@ router.post(
  *               name: { type: string }
  *     responses:
  *       201: { description: Consumer peer linked }
- *       400: { description: Invalid input or peer code rejected (FEDERATION_CODE_USED or FEDERATION_CODE_EXPIRED) }
- *       422: { description: Requested scopes do not overlap (FEDERATION_SCOPE_MISMATCH) }
+ *       400: { description: Invalid input }
  *       429: { description: Request rate limit exceeded }
  *       502: { description: Peer unreachable, TLS-invalid, unauthorized, or malformed (FEDERATION_PEER_UNREACHABLE, FEDERATION_PEER_TLS, FEDERATION_PEER_UNAUTHORIZED, or FEDERATION_PEER_INVALID) }
  */
@@ -373,70 +349,6 @@ router.post(
                     409,
                     "Federation consumer peer already exists",
                     { code: "FEDERATION_PEER_CONFLICT" },
-                );
-            }
-            return outboundRouteError(res, error);
-        }
-    }),
-);
-
-/** @openapi
- * /api/federation/admin/peers/link/pair:
- *   post:
- *     summary: Pair and link a consumer federation peer
- *     tags: [Federation Admin]
- *     security: [{ bearerAuth: [] }]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [baseUrl, code, name]
- *             properties:
- *               baseUrl: { type: string, format: uri }
- *               code: { type: string, pattern: '^[A-HJ-NP-Z2-9]{8}$' }
- *               name: { type: string }
- *               scopes:
- *                 type: array
- *                 description: social:read and embeddings:read each require library:read
- *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
- *     responses:
- *       201: { description: Consumer peer paired and linked }
- *       400: { description: Invalid input or peer code rejected (FEDERATION_CODE_USED or FEDERATION_CODE_EXPIRED) }
- *       409: { description: Consumer peer URL already exists (FEDERATION_PEER_CONFLICT) }
- *       422: { description: Requested scopes do not overlap (FEDERATION_SCOPE_MISMATCH) }
- *       429: { description: Request rate limit exceeded }
- *       502: { description: Peer unreachable, TLS-invalid, unauthorized, or malformed (FEDERATION_PEER_UNREACHABLE, FEDERATION_PEER_TLS, FEDERATION_PEER_UNAUTHORIZED, or FEDERATION_PEER_INVALID) }
- */
-router.post(
-    "/peers/link/pair",
-    asyncHandler(async (req, res) => {
-        const parsed = consumerPairSchema.safeParse(req.body);
-        if (!parsed.success || !req.user) {
-            return invalidRequest(res);
-        }
-        try {
-            const result = await pairAndLinkConsumerFederationPeer({
-                ...parsed.data,
-                createdById: req.user.id,
-            });
-            return res.status(201).json(result);
-        } catch (error: unknown) {
-            if (error instanceof FederationPeerConflictError) {
-                return sendRouteError(
-                    res,
-                    409,
-                    "Federation consumer peer already exists",
-                    { code: "FEDERATION_PEER_CONFLICT" },
-                );
-            }
-            if (error instanceof FederationScopeMismatchError) {
-                return sendRouteError(
-                    res,
-                    422,
-                    "Federation peer scopes do not overlap",
-                    { code: error.code },
                 );
             }
             return outboundRouteError(res, error);
@@ -531,41 +443,6 @@ router.delete(
             return sendRouteError(res, 404, "Federation peer not found");
         }
         return res.status(204).end();
-    }),
-);
-
-/** @openapi
- * /api/federation/admin/pairing-codes:
- *   post:
- *     summary: Create a short-lived federation pairing code
- *     tags: [Federation Admin]
- *     security: [{ bearerAuth: [] }]
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               scopes:
- *                 type: array
- *                 description: social:read and embeddings:read each require library:read
- *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
- *     responses:
- *       201: { description: Eight-character pairing code valid for 30 minutes }
- *       400: { description: Invalid scope input }
- *       429: { description: Request rate limit exceeded }
- */
-router.post(
-    "/pairing-codes",
-    asyncHandler(async (req, res) => {
-        const parsed = pairingCodeSchema.safeParse(req.body ?? {});
-        if (!parsed.success || !req.user) return invalidRequest(res);
-        const code = await createFederationPairingCode({
-            createdById: req.user.id,
-            scopes: parsed.data.scopes,
-        });
-        return res.status(201).json(code);
     }),
 );
 

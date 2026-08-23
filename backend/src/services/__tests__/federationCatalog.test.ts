@@ -183,7 +183,7 @@ describe("federation catalog exports", () => {
         prisma.podcast.count.mockResolvedValue(5);
         prisma.audiobook.count.mockResolvedValue(6);
 
-        await expect(getFederationManifest(true, at)).resolves.toEqual({
+        await expect(getFederationManifest(true, true, at)).resolves.toEqual({
             instanceId: "instance-1",
             name: "Living Room Library",
             version: "2.0.2-test",
@@ -197,6 +197,7 @@ describe("federation catalog exports", () => {
                 audiobooks: 6,
             },
             embeddingsAvailable: true,
+            socialAvailable: true,
             capabilities: ["track-attrs-loudness"],
             serverTime: at,
         });

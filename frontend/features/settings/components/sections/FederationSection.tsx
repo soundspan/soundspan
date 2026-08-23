@@ -24,11 +24,9 @@ import { SettingsSection, SettingsRow, SettingsToggle } from "../ui";
 import { PeerDedupList, PeerSettingsPanel } from "./federationPeerSettings";
 import { FederationHealthPanel } from "./FederationHealthPanel";
 import {
-    DEFAULT_SCOPES,
     FederationAddPanel,
     federationErrorMessage,
     buildLinkPeerInput,
-    buildPairPeerInput,
 } from "./federationPairing";
 
 const inputClassName =
@@ -180,7 +178,8 @@ function PeerCard({
                             )}
                         </div>
                         <p className="mt-1 truncate text-xs text-gray-400">
-                            {peer.baseUrl ?? "This instance hosts the library"}
+                            {peer.baseUrl ??
+                                "No remote URL — they connect to this server"}
                         </p>
                         <p className="mt-1 text-xs text-gray-500">
                             {formatLastSeen(peer.lastSeenAt)}
@@ -427,11 +426,9 @@ function PeerManagementPanel(props: {
 
 function FederationAddControls(props: {
     busy: boolean;
-    pairingCode: string | null;
     setBusy: (busy: boolean) => void;
     setError: (error: string | null) => void;
     setCredential: (value: { peerName: string; token: string }) => void;
-    setPairingCode: (code: string) => void;
     loadPeers: () => Promise<void>;
 }) {
     const run = (action: () => Promise<void>) =>
@@ -439,7 +436,6 @@ function FederationAddControls(props: {
     return (
         <FederationAddPanel
             busy={props.busy}
-            pairingCode={props.pairingCode}
             onHost={(name, scopes) =>
                 run(async () => {
                     const result = await api.createFederationPeer({
@@ -459,24 +455,6 @@ function FederationAddControls(props: {
                         buildLinkPeerInput(name, baseUrl, token),
                     );
                     await props.loadPeers();
-                })
-            }
-            onPair={(name, baseUrl, code, options) =>
-                run(async () => {
-                    await api.pairFederationPeer(
-                        buildPairPeerInput(name, baseUrl, code, options),
-                    );
-                    await props.loadPeers();
-                })
-            }
-            onCreateCode={(options) =>
-                void run(async () => {
-                    const scopes = options.embeddings
-                        ? [...DEFAULT_SCOPES, "embeddings:read" as const]
-                        : DEFAULT_SCOPES;
-                    const result =
-                        await api.createFederationPairingCode(scopes);
-                    props.setPairingCode(result.code);
                 })
             }
         />
@@ -568,13 +546,11 @@ interface FederationSettingsContentProps {
     peers: FederationPeer[];
     busyPeerId: string | null;
     addBusy: boolean;
-    pairingCode: string | null;
     runPeerAction: RunPeerAction;
     setCredential: (value: { peerName: string; token: string }) => void;
     setDeletePeer: (peer: FederationPeer) => void;
     setAddBusy: (busy: boolean) => void;
     setError: (error: string | null) => void;
-    setPairingCode: (code: string) => void;
     loadPeers: () => Promise<void>;
     settings?: SystemSettings;
     onUpdateSettings?: (updates: Partial<SystemSettings>) => void;
@@ -664,11 +640,9 @@ function FederationSettingsContent(props: FederationSettingsContentProps) {
             <FederationHealthPanel />
             <FederationAddControls
                 busy={props.addBusy}
-                pairingCode={props.pairingCode}
                 setBusy={props.setAddBusy}
                 setError={props.setError}
                 setCredential={props.setCredential}
-                setPairingCode={props.setPairingCode}
                 loadPeers={props.loadPeers}
             />
         </div>
@@ -690,7 +664,6 @@ export function FederationSection(props: {
         token: string;
     } | null>(null);
     const [deletePeer, setDeletePeer] = useState<FederationPeer | null>(null);
-    const [pairingCode, setPairingCode] = useState<string | null>(null);
 
     if (!federation) return null;
     return (
@@ -705,13 +678,11 @@ export function FederationSection(props: {
                 peers={peers}
                 busyPeerId={busyPeerId}
                 addBusy={addBusy}
-                pairingCode={pairingCode}
                 runPeerAction={runPeerAction}
                 setCredential={setCredential}
                 setDeletePeer={setDeletePeer}
                 setAddBusy={setAddBusy}
                 setError={setError}
-                setPairingCode={setPairingCode}
                 loadPeers={loadPeers}
                 settings={props.settings}
                 onUpdateSettings={props.onUpdateSettings}

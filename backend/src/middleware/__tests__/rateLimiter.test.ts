@@ -75,7 +75,7 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(19);
+        expect(mockRateLimit).toHaveBeenCalledTimes(18);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.adminSurfaceLimiter).toBeDefined();
         expect(mod.shareLinkLimiter).toBeDefined();
@@ -94,7 +94,6 @@ describe("rateLimiter middleware config", () => {
         expect(mod.ytMusicStreamLimiter).toBeDefined();
         expect(mod.webhookLimiter).toBeDefined();
         expect(mod.federationPeerLimiter).toBeDefined();
-        expect(mod.federationPairingLimiter).toBeDefined();
 
         const expectedConfigs = [
             { index: 0, windowMs: 60_000, max: 5000 },
@@ -115,7 +114,6 @@ describe("rateLimiter middleware config", () => {
             { index: 15, windowMs: 60_000, max: 20 },
             { index: 16, windowMs: 60_000, max: 60 },
             { index: 17, windowMs: 60_000, max: 1000 },
-            { index: 18, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -142,7 +140,6 @@ describe("rateLimiter middleware config", () => {
         ["streaming-surface", 10],
         ["webhook", 16],
         ["federation-peer", 17],
-        ["federation-pairing", 18],
     ])("uses the namespaced shared store for %s", async (name, index) => {
         await loadRateLimiterModule();
 
@@ -157,7 +154,6 @@ describe("rateLimiter middleware config", () => {
         "cover-art-surface",
         "streaming-surface",
         "webhook",
-        "federation-pairing",
     ])("uses the memory fallback for the %s credential guard", async (name) => {
         await loadRateLimiterModule();
 

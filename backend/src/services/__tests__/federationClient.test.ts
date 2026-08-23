@@ -37,7 +37,6 @@ import {
     FederationResponseError,
     FederationStaleCursorError,
     isDisallowedPeerHost,
-    pairFederationPeer,
     resolveBaseUrl,
 } from "../federationClient";
 
@@ -55,6 +54,7 @@ const manifest = {
     mediaTypes: ["artist", "album", "track"],
     counts: { artists: 1, albums: 2, tracks: 3 },
     embeddingsAvailable: false,
+    socialAvailable: true,
     capabilities: [],
     serverTime: "2026-08-15T12:00:00.000Z",
 };
@@ -480,6 +480,21 @@ describe("federation HTTP client", () => {
             mediaTypes: ["artist", "album", "track"],
             counts: { artists: 1, albums: 2, tracks: 3 },
         });
+    });
+
+    it("accepts the social grant signal and legacy manifests without it", async () => {
+        const { socialAvailable: _socialAvailable, ...legacyManifest } =
+            manifest;
+        axiosRequest
+            .mockResolvedValueOnce({ status: 200, data: manifest })
+            .mockResolvedValueOnce({ status: 200, data: legacyManifest });
+
+        await expect(
+            createFederationClient(peer).getManifest(),
+        ).resolves.toMatchObject({ socialAvailable: true });
+        await expect(
+            createFederationClient(peer).getManifest(),
+        ).resolves.not.toHaveProperty("socialAvailable");
     });
 
     it("round-trips known capabilities and ignores unknown capability names", async () => {
@@ -1176,132 +1191,5 @@ describe("federation HTTP client", () => {
             transient: false,
         });
         expect(axiosRequest).toHaveBeenCalledTimes(1);
-    });
-
-    it("sends only one-way pairing fields and tolerates old response extras", async () => {
-        axiosRequest.mockResolvedValueOnce({
-            status: 201,
-            data: {
-                peer: {
-                    id: "peer-2",
-                    name: "Peer Two",
-                    direction: "HOST",
-                    baseUrl: null,
-                    scopes: ["library:read", "stream:read"],
-                    inboundStatus: "ACTIVE",
-                    outboundStatus: "ACTIVE",
-                    lastSeenAt: null,
-                    lastSyncCursor: null,
-                    catalogEpoch: null,
-                    createdAt: "2026-08-15T12:00:00.000Z",
-                    updatedAt: "2026-08-15T12:00:00.000Z",
-                },
-                token: "paired-token",
-                reciprocalPeerId: "peer-3",
-                warning: "legacy warning",
-                capabilities: ["track-attrs-loudness", "future-capability"],
-            },
-        });
-
-        const paired = await pairFederationPeer({
-            baseUrl: "https://peer.example",
-            code: "ABCDEFGH",
-            name: "Consumer",
-            requestedScopes: ["library:read", "stream:read"],
-            options: { retryDelayMs: 0 },
-        });
-
-        expect(paired).toEqual(
-            expect.objectContaining({
-                capabilities: ["track-attrs-loudness"],
-            }),
-        );
-        expect(paired).not.toHaveProperty("reciprocalPeerId");
-        expect(paired).not.toHaveProperty("warning");
-        expect(axiosRequest).toHaveBeenCalledWith(
-            expect.objectContaining({
-                proxy: false,
-                httpsAgent: expect.any(Object),
-                data: expect.objectContaining({
-                    capabilities: ["track-attrs-loudness"],
-                    requestedScopes: ["library:read", "stream:read"],
-                }),
-            }),
-        );
-        expect(axiosRequest.mock.calls[0][0].data).not.toHaveProperty(
-            "reciprocalPairingCode",
-        );
-        expect(dnsLookup).toHaveBeenCalledWith("peer.example", {
-            all: true,
-            verbatim: true,
-        });
-    });
-
-    it("preserves a peer pairing error code for route classification", async () => {
-        axiosRequest.mockResolvedValueOnce({
-            status: 400,
-            data: { code: "FEDERATION_CODE_EXPIRED" },
-        });
-
-        await expect(
-            pairFederationPeer({
-                baseUrl: "https://peer.example",
-                code: "ABCDEFGH",
-                name: "Consumer",
-                options: { retryDelayMs: 0 },
-            }),
-        ).rejects.toMatchObject({
-            status: 400,
-            peerCode: "FEDERATION_CODE_EXPIRED",
-        });
-    });
-
-    it("rejects a pairing response that grants social access without library access", async () => {
-        axiosRequest.mockResolvedValueOnce({
-            status: 201,
-            data: {
-                peer: {
-                    id: "peer-2",
-                    name: "Peer Two",
-                    direction: "HOST",
-                    baseUrl: null,
-                    scopes: ["social:read"],
-                    inboundStatus: "ACTIVE",
-                    outboundStatus: null,
-                    lastSeenAt: null,
-                    lastSyncCursor: null,
-                    catalogEpoch: null,
-                    createdAt: "2026-08-15T12:00:00.000Z",
-                    updatedAt: "2026-08-15T12:00:00.000Z",
-                },
-                token: "paired-token",
-                capabilities: [],
-            },
-        });
-
-        await expect(
-            pairFederationPeer({
-                baseUrl: "https://peer.example",
-                code: "ABCDEFGH",
-                name: "Consumer",
-                options: { retryDelayMs: 0 },
-            }),
-        ).rejects.toBeInstanceOf(FederationResponseError);
-    });
-
-    it("rejects a malformed pairing response at the public trust boundary", async () => {
-        axiosRequest.mockResolvedValueOnce({
-            status: 201,
-            data: { token: "secret-without-peer" },
-        });
-
-        await expect(
-            pairFederationPeer({
-                baseUrl: "https://peer.example",
-                code: "ABCDEFGH",
-                name: "Consumer",
-                options: { retryDelayMs: 0 },
-            }),
-        ).rejects.toBeInstanceOf(FederationResponseError);
     });
 });

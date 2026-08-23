@@ -48,6 +48,8 @@ A multiplexing proxy in front of N instances would need to re-implement search r
 | Admin settings section pattern | `frontend/app/admin/page.tsx` + `features/settings/components/sections/` | Federation admin page |
 | Background workers/queues | `backend/src/workers/` (Bull) | Catalog sync + health checks |
 
+> **Superseded (2026-08-23):** Pairing codes were removed in favor of administrator-issued host credentials and one-time tokens.
+
 ## Architecture
 
 ```
@@ -75,7 +77,7 @@ Endpoints (all read-only, all peer-credential-authenticated):
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /manifest` | UUID instance identity and catalog epoch, `HOSTNAME`-based name, version, supported `mediaTypes`, local-only counts, embedding availability |
+| `GET /manifest` | UUID instance identity and catalog epoch, `HOSTNAME`-based name, version, supported `mediaTypes`, local-only counts, embedding availability, additive `socialAvailable` presence signal |
 | `GET /catalog/items?type=&cursor=` | Paged media items in a generic envelope (see below); `type` ∈ `artist \| album \| track \| podcast \| audiobook` |
 | `GET /catalog/delta?since=` | Changed/removed items since cursor, same envelope (drives incremental sync) |
 | `GET /cover/:itemId` | Cover art bytes (ETag) |
@@ -101,7 +103,7 @@ model FederationPeer {
   baseUrl       String?                     // consumer side: peer's URL
   credentialHash String?  @unique           // host side: hmac: HMAC-SHA256 of the token we issued
   outboundToken String?                     // consumer side: encrypted token we present (SETTINGS_ENCRYPTION_KEY, like tidal tokens)
-  scopes        String[]                    // library:read, stream:read, embeddings:read
+  scopes        String[]                    // library:read, stream:read, embeddings:read, social:read
   inboundStatus PeerStatus?                 // auth state for HOST | BOTH
   outboundStatus PeerStatus?                // health state for CONSUMER | BOTH
   lastSeenAt    DateTime?
@@ -116,6 +118,8 @@ model FederationPeer {
 - Issue/rotate/revoke via admin-only routes (`requireAuth` + `requireAdmin`, pattern of `routes/admin.ts`). Raw token shown once; stored as `hmac:` hash via `apiKeyHash.ts` helpers. No fixed lifetime; revocation is status change (auditable), not row delete.
 - Auth middleware `requireFederationPeer(scope)` hashes the bounded bearer token, resolves an active peer by `credentialHash`, and attaches **`req.federationPeer`, never `req.user`** — downstream `userId`-scoped queries fail safely instead of impersonating a user. Per-peer rate limiting.
 - Pairing uses an explicit host/client model. A host administrator generates a 30-minute code, and a client administrator enters the host URL plus that code to create one `HOST` link on the host and one `CONSUMER` link on the client. Pairing never mints a reciprocal code or calls back to the client. A second, separately authorized pairing is required to share in the reverse direction. The public endpoint accepts and ignores legacy reciprocal fields during rolling upgrades. Existing `BOTH` rows remain readable and operational, but admin write routes no longer create new ones.
+
+> **Superseded (2026-08-23):** The pairing-code route and wire contract were removed; host credentials and one-time tokens are the only supported link path.
 
 ### Layer 2 — Swarm layer (consumer side)
 
@@ -165,13 +169,15 @@ When a federated track matches an active local track, the consumer retains the f
 
 **Admin UI.** `FederationSection.tsx` under `features/settings/components/sections/` + sidebar entry in `app/admin/page.tsx`: list peers (`ConnectionCard` pattern with status/test), add peer (pairing code or URL+token), scope checkboxes, sync now / view last sync, revoke. Feature flag `FEDERATION_ENABLED` (default `false`) follows the existing coarse-flag pattern (`config.features.*` — routes unmounted and workers unregistered when off), surfaced to the frontend via `features-context.tsx`.
 
+> **Superseded (2026-08-23):** The pairing-code UI path was removed in favor of host credential and token entry.
+
 ### Security considerations
 
 - Peer tokens: 32-byte random, HMAC-hashed at rest (`apiKeyHash.ts`), shown once, revocable, scoped, never a user identity. Outbound tokens encrypted at rest like TIDAL OAuth material.
 - Read-only enforced structurally: the federation router simply has no mutating endpoints, and `req.federationPeer` (not `req.user`) means existing write routes can't be reached with a peer credential at all.
-- HTTPS is required for every peer `baseUrl` and is validated during manual linking and pairing.
+- HTTPS is required for every peer `baseUrl` and is validated during token linking. *(Pairing codes were removed 2026-08 — host credential + token is the only join path.)*
 - Per-peer rate limits protect catalog and stream endpoints.
-- No transitive re-export (only `LIBRARY` content is served). No user PII crosses the wire — catalog is media metadata only; plays/likes/playlists never leave the instance.
+- No transitive re-export (only `LIBRARY` content is served). Catalog sync is media metadata only; plays and likes never leave the instance. Since the phase-0 social surfaces (2026-08), two opt-in exceptions exist: presence export (username, display name, and coarse listening status for users who enable both presence-sharing settings) and public playlists of users who enable `sharePlaylistsToPeers`. Both are per-user opt-in, default off, and gated by the `social:read` scope.
 - Outbound requests from the sync worker follow Modern Coding Rules #4: timeouts, retry limits, backoff, bounded pagination.
 - Licensing note for docs: federation shares access to media between private instances; the admin enabling it is responsible for who they link with (same posture as share links today).
 

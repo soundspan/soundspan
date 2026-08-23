@@ -64,7 +64,6 @@ model User {
   inviteCodeUsed         InviteCodeUsage?      @relation("InviteCodeUsed")
   shareLinks             ShareLink[]
   federationPeersCreated FederationPeer[]
-  federationPairingCodes FederationPairingCode[]
   federationPlaylistFollows FederationPlaylistFollow[]
 }
 
@@ -574,20 +573,6 @@ model FederationTombstone {
 
   @@index([deletedAt])
   @@index([entityType, entityId])
-}
-
-model FederationPairingCode {
-  id          String    @id @default(cuid())
-  code        String    @unique
-  createdById String
-  scopes      String[]
-  expiresAt   DateTime
-  usedAt      DateTime?
-  createdAt   DateTime  @default(now())
-  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
-
-  @@index([code, expiresAt])
-  @@index([createdById])
 }
 
 model Bookmark {

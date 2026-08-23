@@ -633,9 +633,10 @@ export async function getFederationCatalogItem(input: {
     );
 }
 
-/** Builds instance identity and visible local-library counts for federation v1. */
+/** Builds instance identity, granted features, and visible local-library counts. */
 export async function getFederationManifest(
     embeddingsAvailable: boolean,
+    socialAvailable: boolean,
     now: Date = new Date(),
 ) {
     const identity = await ensureFederationIdentity();
@@ -661,6 +662,7 @@ export async function getFederationManifest(
         ] as FederationMediaType[],
         counts: { artists, albums, tracks, podcasts, audiobooks },
         embeddingsAvailable,
+        socialAvailable,
         capabilities: [...FEDERATION_CAPABILITY_VALUES],
         serverTime: now,
     };

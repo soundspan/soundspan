@@ -176,6 +176,28 @@ test("peer cards render only their own direction lines", async () => {
     );
     assert.match(consumerHtml, /Consuming from them/);
     assert.doesNotMatch(consumerHtml, /Sharing to them/);
+
+    const hostNoUrlHtml = renderToStaticMarkup(
+        React.createElement(FederationPeersList, {
+            peers: [
+                {
+                    ...basePeer,
+                    baseUrl: null,
+                    id: "host-no-url",
+                    name: "HostNoUrl",
+                    direction: "HOST" as const,
+                    inboundStatus: "ACTIVE" as const,
+                },
+            ],
+            busyPeerId: null,
+            onSync: noop,
+            onRotate: noop,
+            onRevoke: noop,
+            onDelete: noop,
+        }),
+    );
+    assert.match(hostNoUrlHtml, /No remote URL — they connect to this server/);
+    assert.doesNotMatch(hostNoUrlHtml, /This instance hosts the library/);
 });
 
 test("one-time credential dialog shows the token and irreversible warning", async () => {
@@ -193,8 +215,8 @@ test("one-time credential dialog shows the token and irreversible warning", asyn
     assert.match(html, /Copy token/);
 });
 
-test("connect builders map the explicit client-role payloads", async () => {
-    const { buildLinkPeerInput, buildPairPeerInput } =
+test("connect builder maps the explicit client-role payload", async () => {
+    const { buildLinkPeerInput } =
         await import("../../features/settings/components/sections/federationPairing");
 
     assert.deepEqual(
@@ -205,39 +227,59 @@ test("connect builders map the explicit client-role payloads", async () => {
         baseUrl: "https://peer.example",
         token: "tok",
     });
-    assert.deepEqual(
-        buildPairPeerInput("Friend", "https://peer.example", "CODE1234", {
-            embeddings: true,
+});
+
+test("host scope builder grants presence implicitly and embeddings on demand", async () => {
+    const { buildHostScopes } =
+        await import("../../features/settings/components/sections/federationPairing");
+
+    assert.deepEqual(buildHostScopes({ embeddings: false }), [
+        "library:read",
+        "stream:read",
+        "social:read",
+    ]);
+    assert.deepEqual(buildHostScopes({ embeddings: true }), [
+        "library:read",
+        "stream:read",
+        "social:read",
+        "embeddings:read",
+    ]);
+});
+
+test("host credential form keeps presence implicit with an explanatory note", async () => {
+    const { HostCredentialForm } =
+        await import("../../features/settings/components/sections/federationPairing");
+    const html = renderToStaticMarkup(
+        React.createElement(HostCredentialForm, {
+            onSubmit: async () => undefined,
+            busy: false,
         }),
-        {
-            name: "Friend",
-            baseUrl: "https://peer.example",
-            code: "CODE1234",
-            scopes: ["library:read", "stream:read", "embeddings:read"],
-        },
     );
-    assert.deepEqual(
-        buildPairPeerInput("Friend", "https://peer.example", "CODE1234", {
-            embeddings: false,
-        }),
-        { name: "Friend", baseUrl: "https://peer.example", code: "CODE1234" },
-    );
+    assert.match(html, /Also share embeddings/);
+    assert.match(html, /Share\s+presence with trusted peers/);
+    assert.doesNotMatch(html, /checkbox[^>]*>[^<]*online user status/);
 });
 
 test("federation error mapper prefers actionable code messages", async () => {
     const { federationErrorMessage } =
         await import("../../features/settings/components/sections/federationPairing");
 
-    const coded = Object.assign(new Error("Request failed"), {
-        data: { code: "FEDERATION_CODE_EXPIRED" },
-    });
-    assert.match(federationErrorMessage(coded), /expired/i);
-    assert.match(federationErrorMessage(coded), /30 minutes/);
-
     const unreachable = Object.assign(new Error("Request failed"), {
         data: { code: "FEDERATION_PEER_UNREACHABLE" },
     });
     assert.match(federationErrorMessage(unreachable), /Could not reach/);
+
+    const unauthorized = Object.assign(new Error("Request failed"), {
+        data: { code: "FEDERATION_PEER_UNAUTHORIZED" },
+    });
+    assert.match(federationErrorMessage(unauthorized), /revoked or rotated/);
+
+    // Pairing codes were removed: their error codes fall through to the
+    // raw message instead of a dedicated mapping.
+    const retiredCode = Object.assign(new Error("Request failed"), {
+        data: { code: "FEDERATION_CODE_EXPIRED" },
+    });
+    assert.equal(federationErrorMessage(retiredCode), "Request failed");
 
     assert.equal(
         federationErrorMessage(new Error("plain message")),
@@ -252,17 +294,15 @@ test("explicit pairing panel presents share and connect roles", async () => {
     const html = renderToStaticMarkup(
         React.createElement(FederationAddPanel, {
             busy: false,
-            pairingCode: "ABCD2345",
             onHost: async () => undefined,
             onLink: async () => undefined,
-            onPair: async () => undefined,
-            onCreateCode: noop,
         }),
     );
     assert.match(html, /Share my library/);
     assert.match(html, /Connect to a library/);
-    assert.match(html, /ABCD2345/);
-    assert.match(html, /valid for 30 minutes/);
+    assert.match(html, /Issue credential/);
+    assert.match(html, /Connect with token/);
     assert.match(html, /Two-way sharing is two deliberate steps/);
+    assert.doesNotMatch(html, /pairing code/i);
     assert.doesNotMatch(html, /also share this library back/i);
 });

@@ -8,10 +8,6 @@ import { z } from "zod";
 import { recordFederationSyncSkip } from "../metrics";
 import { logger } from "../utils/logger";
 import {
-    FEDERATION_SCOPE_VALUES,
-    type FederationScope,
-} from "../utils/federationScopes";
-import {
     federationPresenceSchema,
     type FederationPresence,
 } from "../utils/federationPresenceSchemas";
@@ -23,10 +19,7 @@ import {
 } from "../utils/federationPlaylistSchemas";
 import type { ParsedFederationEmbeddingSpaceIdentity } from "./federationEmbeddingSpace";
 import { decryptFederationOutboundToken } from "./federationCredentialCipher";
-import {
-    federationCapabilitiesSchema,
-    FEDERATION_CAPABILITY_VALUES,
-} from "./federationCapabilities";
+import { federationCapabilitiesSchema } from "./federationCapabilities";
 import {
     FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
     FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
@@ -205,6 +198,7 @@ export const federationManifestSchema = z.looseObject({
         audiobooks: z.number().int().nonnegative().optional(),
     }),
     embeddingsAvailable: z.boolean(),
+    socialAvailable: z.boolean().optional(),
     capabilities: federationCapabilitiesSchema,
     serverTime: dateTimeSchema.optional(),
 });
@@ -228,42 +222,6 @@ const deltaPageShapeSchema = z.strictObject({
 const epochMismatchSchema = z.object({
     code: z.enum(["FEDERATION_EPOCH_MISMATCH", "FEDERATION_STALE_CURSOR"]),
     currentEpoch: z.string().min(1).max(128),
-});
-const pairedScopesSchema = z
-    .array(z.enum(FEDERATION_SCOPE_VALUES))
-    .min(1)
-    .max(FEDERATION_SCOPE_VALUES.length)
-    .refine((scopes) => new Set(scopes).size === scopes.length)
-    .refine(
-        (scopes) =>
-            !scopes.includes("embeddings:read") ||
-            scopes.includes("library:read"),
-    )
-    .refine(
-        (scopes) =>
-            !scopes.includes("social:read") || scopes.includes("library:read"),
-    );
-const pairedPeerSchema = z.object({
-    peer: z.object({
-        id: z.string().min(1).max(128),
-        name: z.string().min(1).max(120),
-        direction: z.enum(["HOST", "CONSUMER", "BOTH"]),
-        baseUrl: z.string().nullable(),
-        scopes: pairedScopesSchema,
-        inboundStatus: z
-            .enum(["PENDING", "ACTIVE", "OFFLINE", "REVOKED"])
-            .nullable(),
-        outboundStatus: z
-            .enum(["PENDING", "ACTIVE", "OFFLINE", "REVOKED"])
-            .nullable(),
-        lastSeenAt: dateTimeSchema.nullable(),
-        lastSyncCursor: z.string().nullable(),
-        catalogEpoch: z.string().nullable(),
-        createdAt: dateTimeSchema,
-        updatedAt: dateTimeSchema,
-    }),
-    token: z.string().min(1).max(4_096),
-    capabilities: federationCapabilitiesSchema,
 });
 
 export type FederationManifest = z.infer<typeof federationManifestSchema>;
@@ -371,14 +329,12 @@ function reportUnknownTrackAttributeKeysForValue(
 
 /** Peer returned a valid HTTP response outside the accepted status set. */
 export class FederationHttpError extends Error {
-    readonly peerCode?: string;
     readonly transportCode?: string;
 
     constructor(
         public readonly status: number | null,
         public readonly transient: boolean,
         options: {
-            peerCode?: string;
             transportCode?: string;
             cause?: unknown;
         } = {},
@@ -390,7 +346,6 @@ export class FederationHttpError extends Error {
             options.cause === undefined ? undefined : { cause: options.cause },
         );
         this.name = "FederationHttpError";
-        this.peerCode = options.peerCode;
         this.transportCode = options.transportCode;
     }
 }
@@ -1019,98 +974,4 @@ export function createFederationClient(
     options: FederationClientOptions = {},
 ): FederationClient {
     return new FederationClient(peer, options);
-}
-
-async function requestPairWithRetry(
-    config: AxiosRequestConfig,
-    options: FederationClientOptions,
-    baseUrl: URL,
-): Promise<AxiosResponse> {
-    const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
-    const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-        try {
-            const response = await requestLimit(() =>
-                pinnedTransport(
-                    baseUrl,
-                    options.allowPrivatePeers ?? false,
-                    options.allowProxy ?? false,
-                ).then((transport) =>
-                    axios.request({
-                        ...config,
-                        ...transport,
-                        timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-                        maxRedirects: 0,
-                        validateStatus: () => true,
-                        maxContentLength: MAX_JSON_BODY_BYTES,
-                        maxBodyLength: MAX_JSON_BODY_BYTES,
-                    }),
-                ),
-            );
-            if (response.status < 500 || attempt + 1 === attempts) {
-                return response;
-            }
-        } catch (error) {
-            if (error instanceof FederationHttpError && !error.transient) {
-                throw error;
-            }
-            const transient = isTransientNetworkError(error);
-            const retryable =
-                error instanceof FederationHttpError
-                    ? error.transient
-                    : transient;
-            if (!retryable || attempt + 1 === attempts) {
-                if (error instanceof FederationHttpError) throw error;
-                if (axios.isAxiosError(error))
-                    throw federationTransportError(transient, error);
-                throw error;
-            }
-        }
-        await waitForRetry(retryDelayMs, attempt);
-    }
-    throw new FederationHttpError(null, true);
-}
-
-function peerErrorCode(value: unknown): string | undefined {
-    if (!value || typeof value !== "object" || !("code" in value)) {
-        return undefined;
-    }
-    return typeof value.code === "string" ? value.code : undefined;
-}
-
-/** Exchanges a short pairing code through the same bounded transport policy. */
-export async function pairFederationPeer(input: {
-    baseUrl: string;
-    code: string;
-    name: string;
-    requestedScopes?: FederationScope[];
-    options?: FederationClientOptions;
-}): Promise<z.infer<typeof pairedPeerSchema>> {
-    const options = input.options ?? {};
-    const baseUrl = resolveBaseUrl(
-        input.baseUrl,
-        options.allowPrivatePeers ?? false,
-    );
-    const response = await requestPairWithRetry(
-        {
-            method: "POST",
-            url: peerUrl(baseUrl, "/api/federation/v1/pair"),
-            data: {
-                code: input.code,
-                name: input.name,
-                capabilities: [...FEDERATION_CAPABILITY_VALUES],
-                ...(input.requestedScopes
-                    ? { requestedScopes: input.requestedScopes }
-                    : {}),
-            },
-        },
-        options,
-        baseUrl,
-    );
-    if (response.status < 200 || response.status >= 300) {
-        throw new FederationHttpError(response.status, response.status >= 500, {
-            peerCode: peerErrorCode(response.data),
-        });
-    }
-    return parseResponse(pairedPeerSchema, response.data);
 }

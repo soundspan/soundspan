@@ -4,7 +4,8 @@ import { type ApiClientConstructor } from "./core";
 export type FederationScope =
     | "library:read"
     | "stream:read"
-    | "embeddings:read";
+    | "embeddings:read"
+    | "social:read";
 
 export type FederationPeerDirection = "HOST" | "CONSUMER" | "BOTH";
 
@@ -107,14 +108,6 @@ export interface LinkFederationPeerInput {
     name?: string;
 }
 
-/** Client-side input: redeem a pairing code against a host instance. */
-export interface PairFederationPeerInput {
-    baseUrl: string;
-    code: string;
-    name: string;
-    scopes?: FederationScope[];
-}
-
 export interface FederationCredentialResponse {
     peer: FederationPeer;
     token: string;
@@ -157,15 +150,6 @@ export function WithFederation<TBase extends ApiClientConstructor>(
             );
         }
 
-        async pairFederationPeer(
-            input: PairFederationPeerInput,
-        ): Promise<{ peer: FederationPeer }> {
-            return this.request<{ peer: FederationPeer }>(
-                "/federation/admin/peers/link/pair",
-                { method: "POST", body: JSON.stringify(input) },
-            );
-        }
-
         async rotateFederationPeerCredential(
             peerId: string,
         ): Promise<FederationCredentialResponse> {
@@ -195,15 +179,6 @@ export function WithFederation<TBase extends ApiClientConstructor>(
             return this.request<{ queued: boolean }>(
                 `/federation/admin/peers/${encodeURIComponent(peerId)}/sync`,
                 { method: "POST" },
-            );
-        }
-
-        async createFederationPairingCode(
-            scopes: FederationScope[],
-        ): Promise<{ code: string; expiresAt: string }> {
-            return this.request<{ code: string; expiresAt: string }>(
-                "/federation/admin/pairing-codes",
-                { method: "POST", body: JSON.stringify({ scopes }) },
             );
         }
 

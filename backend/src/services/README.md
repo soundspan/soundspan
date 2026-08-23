@@ -65,7 +65,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/federationCoverProxy.ts` | Backpressured consumer proxy for peer album covers |
 | `backend/src/services/federationEmbeddingSpace.ts` | Federation embedding-space identity and compatibility decisions |
 | `backend/src/services/federationEmbeddingSpaceHeader.ts` | Federation embedding-space response-header encoding and tolerant parsing |
-| `backend/src/services/federationPeers.ts` | Encrypted peer credentials, identity, linking, and pairing lifecycle |
+| `backend/src/services/federationPeers.ts` | Encrypted peer credentials, identity, and linking lifecycle |
 | `backend/src/services/federationPlaylistExport.ts` | Privacy-filtered host export of public, owner-opted-in playlists |
 | `backend/src/services/federationPeerPlaylists.ts` | Bounded on-demand peer playlist browse, resolution, follow, and copy orchestration |
 | `backend/src/services/federationStreamProxy.ts` | Backpressured consumer proxy for peer audio streams |

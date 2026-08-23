@@ -10,7 +10,6 @@ const ROLE_GUARD_LOCK_KEY = 8_025_773_003_692_380_079n;
 export const USER_LOCK_NAMESPACES = {
     identityUnlink: "identity-unlink",
     appPasswordCreate: "app-password-create",
-    federationPairingCodeCreate: "federation-pairing-code-create",
 } as const;
 
 type UserLockNamespace =

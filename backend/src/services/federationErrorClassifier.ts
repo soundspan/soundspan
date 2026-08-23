@@ -10,10 +10,7 @@ export type FederationErrorClass =
     | "unreachable"
     | "tls"
     | "unauthorized"
-    | "peer_invalid"
-    | "code_used"
-    | "code_expired"
-    | "scope_mismatch";
+    | "peer_invalid";
 
 /** Failure classes persisted by recurring federation health probes. */
 export type FederationHealthErrorClass = Extract<
@@ -40,31 +37,6 @@ const TLS_CODES = new Set([
     "UNABLE_TO_GET_ISSUER_CERT",
     "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
 ]);
-const PEER_CODE_CLASSES = {
-    FEDERATION_CODE_USED: "code_used",
-    FEDERATION_CODE_EXPIRED: "code_expired",
-    FEDERATION_SCOPE_MISMATCH: "scope_mismatch",
-} as const satisfies Readonly<Record<string, FederationErrorClass>>;
-
-function axiosPeerCode(cause: unknown): string | undefined {
-    if (!axios.isAxiosError(cause)) return undefined;
-    const data: unknown = cause.response?.["data"];
-    if (!data || typeof data !== "object" || !("code" in data)) {
-        return undefined;
-    }
-    return typeof data.code === "string" ? data.code : undefined;
-}
-
-function peerCodeClass(cause: unknown): FederationErrorClass | undefined {
-    const code =
-        cause instanceof FederationHttpError
-            ? cause.peerCode
-            : axiosPeerCode(cause);
-    return code && code in PEER_CODE_CLASSES
-        ? PEER_CODE_CLASSES[code as keyof typeof PEER_CODE_CLASSES]
-        : undefined;
-}
-
 function errorCode(cause: unknown): string | undefined {
     if (cause instanceof FederationHttpError) return cause.transportCode;
     if (!axios.isAxiosError(cause)) return undefined;
@@ -78,8 +50,6 @@ function responseStatus(cause: unknown): number | undefined {
 
 /** Classifies one outbound federation failure without side effects. */
 export function classifyFederationError(cause: unknown): FederationErrorClass {
-    const peerClass = peerCodeClass(cause);
-    if (peerClass) return peerClass;
     const code = errorCode(cause);
     if (code && TLS_CODES.has(code)) return "tls";
     if (code && UNREACHABLE_CODES.has(code)) return "unreachable";
@@ -94,7 +64,7 @@ export function classifyFederationError(cause: unknown): FederationErrorClass {
     return "peer_invalid";
 }
 
-/** Classifies a health probe without exposing pairing-only error classes. */
+/** Classifies a federation health probe failure. */
 export function classifyFederationHealthError(
     cause: unknown,
 ): FederationHealthErrorClass {

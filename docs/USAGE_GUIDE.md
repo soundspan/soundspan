@@ -96,31 +96,31 @@ Both controls live on the `Admin` page under `Federation`. Federation must be en
 #### Share your library with a friend
 
 1. Open `Admin -> Federation -> Share my library`.
-2. Click `Generate pairing code`.
-3. Send the 8-character code to the other admin. The code works once and expires after 30 minutes.
-4. The other admin enters your server's URL and the code on their side. Your server then shows them under `Sharing to them`.
+2. Enter a name for the server you are sharing with. Tick the embeddings box if you also want to share the data behind vibe features.
+3. Click `Issue credential`. The token is shown once — copy it before closing the dialog.
+4. Send the token to the other admin, along with your server's URL. Once they connect, your server shows them under `Sharing to them`.
 
-If a code expires before it is used, generate a new one. You can have up to five unused codes at a time; creating more than five removes the oldest ones.
+Online-status sharing is built into every connection, but it is private by default. A user only appears in the other server's Social tab if they turn on both `Share online presence` and `Share presence with trusted peers` in their own Social settings. Remote users always show under a `From <server name>` heading, so it is clear they are on another instance.
 
-If you prefer a long-lived credential instead of a code, use `Host credential`. The credential is shown once — copy it before closing the dialog.
+If a token is lost or leaked, use `Rotate` on that peer's card to issue a fresh one, or `Revoke` to cut off access.
 
 #### Connect to a friend's library
 
-1. Ask the other admin for a pairing code (or a host credential).
+1. Ask the other admin to issue a credential for you and send you the token, plus their server URL.
 2. Open `Admin -> Federation -> Connect to a library`.
-3. Enter a name for their server, their server URL, and the code or token.
-4. Click `Connect`. Their library appears in your search and browse surfaces after the first sync.
+3. Enter a name for their server, their server URL, and the token.
+4. Click `Connect with token`. Their library appears in your search and browse surfaces after the first sync.
 
-If the connection fails, the error tells you why: the code expired, the code was already used, the server was unreachable, or its certificate failed validation. Each of these has a different fix, so read the message before retrying.
+If the connection fails, the error tells you why: the token was rejected, the server was unreachable, or its certificate failed validation. Each of these has a different fix, so read the message before retrying.
 
 #### Two-way sharing
 
 Two-way sharing means both servers do both steps:
 
-1. You share your library (generate a code) and connect to theirs (redeem their code).
-2. The other admin does the same: they share their library and connect to yours.
+1. You issue a credential for them, and connect to their server with the token they issued for you.
+2. The other admin does the same on their side.
 
-That is four steps across the two servers. Each peer's card shows the two directions separately — `Sharing to them` and `Consuming from them` — so you can always see exactly which halves are active, offline, or revoked.
+That is four steps across the two servers. Each peer's card shows the two directions separately — `Sharing to them` and `Consuming from them` — so you can always see exactly which halves are active, offline, or revoked. A peer card without a URL shows `No remote URL — they connect to this server`: that is a server you share to, so the connection always comes from their side.
 
 #### Instance display name
 
@@ -134,7 +134,7 @@ The federation health panel shows per-peer sync freshness, stream usage, and the
 
 If your server is federated with others, two social surfaces can cross between them. Both are off by default, and both need two switches: the person sharing must opt in, and nothing is shown unless the receiving side wants it.
 
-**Seeing friends on other servers.** When your admin turns on `Show user status from peers` (under `Admin -> Federation`), the Social tab gains sections like "From Family server" listing people on that server who chose to share. Peer status updates every few minutes — the tab shows how fresh each section is. To appear on other servers yourself, turn on `Share presence with trusted peers` in `Settings -> Social`. Your current track travels only if `Share listening status` is also on.
+**Seeing friends on other servers.** When your admin turns on `Show user status from peers` (under `Admin -> Federation`), the Social tab gains sections like "From Family server" listing people on that server who chose to share. Peer status updates every few minutes — the tab shows how fresh each section is. To appear on other servers yourself, turn on both `Share online presence` and `Share presence with trusted peers` in `Settings -> Social`. Your current track travels only if `Share listening status` is also on.
 
 **Playlists from other servers.** People on federated servers can share their public playlists. Turn on `Share public playlists with trusted peers` in `Settings -> Social` to share yours; private playlists never leave your server. Shared playlists from peers appear in a "From your peers" section on Home. Open one to play it, `Follow` it (it stays live and updates when the owner changes it), or `Save a copy` (a snapshot that becomes a normal playlist of yours). Tracks you also have locally play from your library; the rest stream from the peer, and anything the peer can no longer provide is shown dimmed.
 

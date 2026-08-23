@@ -55,7 +55,7 @@ graph TD
 | audio-analyzer           | PostgreSQL              | TCP (direct)                                                               | 5432                            | Connection string                                                                                                             | Analysis results write                                                                                |
 | audio-analyzer           | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | BRPOP job queue                                                                                       |
 | backend / backend-worker | vibe-provider-dclap     | HTTP                                                                       | 8092                            | `x-internal-secret` (`INTERNAL_API_SECRET`)                                                                                   | Provider space identity plus text and audio embedding                                                 |
-| backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`)                                               | 443                             | Scoped instance Bearer token                                                                                                  | Pairing, catalog sync, health checks, cover art, and audio streaming                                  |
+| backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`)                                               | 443                             | Scoped instance Bearer token                                                                                                  | Catalog sync, health checks, cover art, and audio streaming                                           |
 | backend                  | OIDC identity provider  | HTTPS                                                                      | 443                             | OIDC confidential client credentials                                                                                          | Provider discovery, authorization-code token exchange, and JWKS retrieval                             |
 | OpenSubsonic client      | backend (`/rest`)       | HTTP/HTTPS                                                                 | 3006, or frontend proxy on 3030 | Local password, revocable `ssap_` app password, token digest, or API key                                                      | OpenSubsonic-compatible browse, state, and media operations                                           |
 
@@ -175,16 +175,21 @@ sequenceDiagram
     Proxy-->>Browser: Same-origin streamed response
 ```
 
-The host mounts the read-only `/api/federation/v1` surface for pairing,
-manifest, catalog, delta, cover, and stream requests. It exports only visible
-local library rows, so content received from another peer is never re-exported.
-The consumer periodically materializes peer metadata in its own database. Its
+The host mounts the read-only `/api/federation/v1` surface for manifest,
+catalog, delta, cover, and stream requests. It exports only visible local
+library rows, so content received from another peer is never re-exported. The
+consumer periodically materializes peer metadata in its own database. Its
 browse and search reads therefore stay available when a peer is offline.
 
-Pairing is directional and explicit. A host administrator issues a 30-minute
-code, and a client administrator redeems it against that host. Reverse sharing
-requires a separate pairing; the host never performs a reciprocal callback.
-Existing `BOTH` rows remain supported by authentication, health, and sync reads.
+Pairing is directional and explicit. A host administrator creates a host peer
+and receives its token once. A client administrator enters the host URL and
+token to create a consumer link. Reverse sharing requires a separate host
+credential and token exchange. Existing `BOTH` rows remain supported by
+authentication, health, and sync reads.
+
+Presence capability is granted implicitly to library peers, but each user stays
+hidden unless they enable both **Share online presence** and **Share presence
+with trusted peers** in their Social settings.
 
 The browser never receives an instance credential. Federated cover and stream
 requests use the consumer's ordinary authenticated routes; the consumer backend

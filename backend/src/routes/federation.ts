@@ -5,10 +5,7 @@ import { z } from "zod";
 import { config } from "../config";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { requireFederationPeer } from "../middleware/federationAuth";
-import {
-    federationPairingLimiter,
-    federationPeerLimiter,
-} from "../middleware/rateLimiter";
+import { federationPeerLimiter } from "../middleware/rateLimiter";
 import {
     AudioStreamingService,
     type Quality,
@@ -29,15 +26,8 @@ import {
     FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
     FEDERATION_EMBEDDING_SPACE_HEADER,
 } from "../services/federationEmbeddingSpaceHeader";
-import {
-    federationCapabilitiesSchema,
-    FEDERATION_CAPABILITY_VALUES,
-} from "../services/federationCapabilities";
+import { federationCapabilitiesSchema } from "../services/federationCapabilities";
 import { audiobookshelfService } from "../services/audiobookshelf";
-import {
-    consumeFederationPairingRequest,
-    FEDERATION_SCOPE_VALUES,
-} from "../services/federationPeers";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { handleGetCoverArt } from "./library/coverArt";
 import { sendRouteError } from "./routeErrorResponse";
@@ -78,37 +68,6 @@ const deltaQuerySchema = z.strictObject({
     cursor: z.string().trim().min(1).max(512).optional(),
     limit: pageLimitSchema,
 });
-const pairingCodeValueSchema = z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-HJ-NP-Z2-9]{8}$/);
-const pairingScopesSchema = z
-    .array(z.enum(FEDERATION_SCOPE_VALUES))
-    .min(1)
-    .max(FEDERATION_SCOPE_VALUES.length)
-    .refine((values) => new Set(values).size === values.length)
-    .refine(
-        (values) =>
-            !values.includes("embeddings:read") ||
-            values.includes("library:read"),
-    )
-    .refine(
-        (values) =>
-            !values.includes("social:read") || values.includes("library:read"),
-    );
-const pairingSchema = z.strictObject({
-    code: pairingCodeValueSchema,
-    name: z.string().trim().min(1).max(120),
-    baseUrl: z
-        .url()
-        .refine((value) => new URL(value).protocol === "https:")
-        .optional(),
-    reciprocalPairingCode: pairingCodeValueSchema.optional(),
-    reciprocalScopes: pairingScopesSchema.optional(),
-    requestedScopes: pairingScopesSchema.optional(),
-    capabilities: federationCapabilitiesSchema,
-});
 const streamQuerySchema = z.strictObject({
     quality: z.enum(["original", "high", "medium", "low"]).default("original"),
 });
@@ -125,35 +84,12 @@ function validationError(res: Response): Response {
     return sendRouteError(res, 400, "Invalid federation request");
 }
 
-function pairingFailure(
-    res: Response,
-    reason: "not_found" | "used" | "expired" | "scope_mismatch" | "invalid",
-): Response {
-    if (reason === "used") {
-        return sendRouteError(res, 400, "Pairing code has already been used", {
-            code: "FEDERATION_CODE_USED",
-        });
-    }
-    if (reason === "expired") {
-        return sendRouteError(res, 400, "Pairing code has expired", {
-            code: "FEDERATION_CODE_EXPIRED",
-        });
-    }
-    if (reason === "scope_mismatch") {
-        return sendRouteError(
-            res,
-            400,
-            "Requested federation scopes are not granted",
-            {
-                code: "FEDERATION_SCOPE_MISMATCH",
-            },
-        );
-    }
-    return sendRouteError(res, 400, "Invalid or expired pairing code");
-}
-
 function includesEmbeddingScope(req: Request): boolean {
     return req.federationPeer?.scopes.includes("embeddings:read") ?? false;
+}
+
+function includesSocialScope(req: Request): boolean {
+    return req.federationPeer?.scopes.includes("social:read") ?? false;
 }
 
 function embeddingExportRequest(req: Request) {
@@ -183,52 +119,6 @@ function sendCatalogResponse(
 }
 
 /** @openapi
- * /api/federation/v1/pair:
- *   post:
- *     summary: Consume a federation pairing code for one host link
- *     tags: [Federation]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [code, name]
- *             properties:
- *               code: { type: string, pattern: '^[A-HJ-NP-Z2-9]{8}$' }
- *               name: { type: string }
- *               requestedScopes:
- *                 type: array
- *                 description: social:read and embeddings:read each require library:read
- *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
- *               reciprocalScopes:
- *                 type: array
- *                 deprecated: true
- *                 description: Legacy field; social:read and embeddings:read each require library:read
- *                 items: { type: string, enum: [library:read, stream:read, embeddings:read, social:read] }
- *     responses:
- *       201: { description: Peer credential issued once }
- *       400: { description: Invalid pairing input, FEDERATION_CODE_USED, FEDERATION_CODE_EXPIRED, or FEDERATION_SCOPE_MISMATCH }
- *       429: { description: Pairing rate limit exceeded }
- */
-router.post(
-    "/pair",
-    federationPairingLimiter,
-    asyncHandler(async (req, res) => {
-        const parsed = pairingSchema.safeParse(req.body);
-        const query = emptyQuerySchema.safeParse(req.query);
-        if (!parsed.success || !query.success) return validationError(res);
-        const result = await consumeFederationPairingRequest(parsed.data);
-        if (!result.ok) return pairingFailure(res, result.reason);
-        return res.status(201).json({
-            peer: result.peer,
-            token: result.token,
-            capabilities: [...FEDERATION_CAPABILITY_VALUES],
-        });
-    }),
-);
-
-/** @openapi
  * /api/federation/v1/manifest:
  *   get:
  *     summary: Get the host federation manifest
@@ -254,7 +144,10 @@ router.get(
         const query = emptyQuerySchema.safeParse(req.query);
         if (!query.success) return validationError(res);
         return res.json(
-            await getFederationManifest(includesEmbeddingScope(req)),
+            await getFederationManifest(
+                includesEmbeddingScope(req),
+                includesSocialScope(req),
+            ),
         );
     }),
 );

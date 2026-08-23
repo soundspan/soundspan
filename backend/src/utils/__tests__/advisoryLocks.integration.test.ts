@@ -75,14 +75,4 @@ describeWithDatabase("PostgreSQL advisory locks", () => {
             ),
         );
     });
-
-    it("serializes federation pairing-code creation per administrator", async () => {
-        await expectTransactionSerialization((tx) =>
-            acquireUserScopedLock(
-                tx,
-                USER_LOCK_NAMESPACES.federationPairingCodeCreate,
-                "integration-admin",
-            ),
-        );
-    });
 });

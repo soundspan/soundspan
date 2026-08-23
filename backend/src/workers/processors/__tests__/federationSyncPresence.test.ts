@@ -30,6 +30,55 @@ describe("federation sync presence", () => {
         jest.useRealTimers();
     });
 
+    it("skips peers without the social scope", async () => {
+        const getPresence = jest.fn();
+
+        await expect(
+            refreshFederationPresence(
+                {
+                    id: "peer-1",
+                    name: "Remote",
+                    scopes: ["library:read"],
+                },
+                { getPresence },
+            ),
+        ).resolves.toBeUndefined();
+
+        expect(getPresence).not.toHaveBeenCalled();
+        expect(storeFederationPeerPresenceSnapshot).not.toHaveBeenCalled();
+        expect(recordFederationPresenceFetch).not.toHaveBeenCalled();
+        expect(mockLog.debug).not.toHaveBeenCalled();
+    });
+
+    it("records and contains a legacy host 403", async () => {
+        const forbidden = Object.assign(
+            new Error("Federation peer returned 403"),
+            { status: 403, transient: false },
+        );
+        const getPresence = jest.fn().mockRejectedValue(forbidden);
+
+        await expect(
+            refreshFederationPresence(
+                {
+                    id: "peer-1",
+                    name: "Remote",
+                    scopes: ["library:read", "social:read"],
+                },
+                { getPresence },
+            ),
+        ).resolves.toBeUndefined();
+
+        expect(storeFederationPeerPresenceSnapshot).not.toHaveBeenCalled();
+        expect(recordFederationPresenceFetch).toHaveBeenCalledWith(
+            "peer-1",
+            "failure",
+        );
+        expect(mockLog.debug).toHaveBeenCalledWith(
+            "Federation peer presence fetch failed",
+            { peerId: "peer-1", cause: forbidden },
+        );
+    });
+
     it("records failure and completes when the presence fetch never settles", async () => {
         const getPresence = jest.fn(() => new Promise<never>(() => undefined));
         const refresh = refreshFederationPresence(

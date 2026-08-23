@@ -304,16 +304,3 @@ export const federationPeerLimiter = rateLimit({
     ...createRedisRateLimitOptions("federation-peer"),
     ...trustProxyValidation,
 });
-
-// Pairing is unauthenticated until a valid single-use code is consumed.
-export const federationPairingLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 20,
-    message: "Too many federation pairing attempts. Please try again later.",
-    standardHeaders: true,
-    legacyHeaders: false,
-    ...createRedisRateLimitOptions("federation-pairing", {
-        fallback: "memory",
-    }),
-    ...trustProxyValidation,
-});

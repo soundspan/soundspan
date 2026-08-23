@@ -40,18 +40,6 @@ describe("federation outbound error classification", () => {
         },
     );
 
-    it.each([
-        ["FEDERATION_CODE_USED", "code_used"],
-        ["FEDERATION_CODE_EXPIRED", "code_expired"],
-        ["FEDERATION_SCOPE_MISMATCH", "scope_mismatch"],
-    ] as const)("maps peer code %s to %s", (peerCode, expected) => {
-        expect(
-            classifyFederationError(
-                new FederationHttpError(400, false, { peerCode }),
-            ),
-        ).toBe(expected);
-    });
-
     it("maps an old host's generic 400 response to peer_invalid", () => {
         expect(
             classifyFederationError(new FederationHttpError(400, false)),

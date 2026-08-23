@@ -19,7 +19,6 @@ const ANONYMOUS_OPERATIONS = [
     ["/api/onboarding/status", "get"],
     ["/api/device-link/verify", "post"],
     ["/api/device-link/status/{code}", "get"],
-    ["/api/federation/v1/pair", "post"],
     ["/api/share-links/access/{token}", "get"],
     ["/api/share-links/access/{token}/stream/{trackId}", "get"],
     ["/api/share-links/access/{token}/zip", "get"],
