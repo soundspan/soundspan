@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Discover Weekly no longer downloads albums for non-admin users; legacy-mode acquisition is admin-only. (#663)
 - Federation sync positional dedup no longer generates a per-track Album self-join that could exhaust database memory on large sync pages (#713).
 - Admin-only full audiobook syncs now prune only stable, proven-complete Audiobookshelf listings, stop at cooperative lease deadlines, serialize against incremental syncs through the scheduler claim, protect federated and cover-filename ID collisions, and remove absent local books with their cached covers and listening state (#712).
 - Newly added Audiobookshelf books are now discovered automatically after the initial SoundSpan cache has been populated; a lightweight five-minute sync imports only missing local ABS books instead of reprocessing the full audiobook library (#710).

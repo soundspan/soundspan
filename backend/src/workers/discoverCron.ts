@@ -31,6 +31,9 @@ export async function processDiscoverCronTick(): Promise<void> {
     const configs = await prisma.userDiscoverConfig.findMany({
         where: {
             enabled: true,
+            ...(config.discover.mode === "legacy"
+                ? { user: { role: "admin" } }
+                : {}),
         },
         select: {
             userId: true,

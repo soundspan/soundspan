@@ -2,7 +2,10 @@ import type { Request, Response } from "express";
 import { prisma } from "../../../utils/db";
 import { logger } from "../../../utils/logger";
 import { discoverQueue } from "../../../workers/queues";
-import { sendInternalRouteError } from "../../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../routeErrorResponse";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
@@ -12,6 +15,14 @@ export async function handleLegacyGenerate(
     res: Response,
 ): Promise<Response | void> {
     try {
+        if (req.user?.role !== "admin") {
+            return sendRouteError(
+                res,
+                403,
+                "Discover Weekly downloads are admin-only on this server",
+            );
+        }
+
         const userId = req.user!.id;
         // Check for existing active batch
         const existingBatch = await prisma.discoveryBatch.findFirst({

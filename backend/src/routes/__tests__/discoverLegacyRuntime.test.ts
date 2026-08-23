@@ -1,6 +1,18 @@
 import { Request, Response } from "express";
 import fs from "fs";
 
+jest.mock("@prisma/client", () => ({
+    Prisma: {
+        PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {},
+        PrismaClientRustPanicError: class PrismaClientRustPanicError extends Error {},
+        PrismaClientUnknownRequestError: class PrismaClientUnknownRequestError extends Error {},
+        sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+            strings,
+            values,
+        }),
+    },
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
@@ -376,7 +388,7 @@ describe("discover legacy-mode runtime behavior", () => {
             status: "scanning",
         });
 
-        const req = { user: { id: "user-1" } } as any;
+        const req = { user: { id: "user-1", role: "admin" } } as any;
         const res = createRes();
         await generateHandler(req, res);
 
@@ -393,7 +405,7 @@ describe("discover legacy-mode runtime behavior", () => {
             new Error("discovery unavailable"),
         );
 
-        const req = { user: { id: "user-1" } } as any;
+        const req = { user: { id: "user-1", role: "admin" } } as any;
         const res = createRes();
         await generateHandler(req, res);
 
@@ -409,7 +421,7 @@ describe("discover legacy-mode runtime behavior", () => {
         );
         discoverQueue.add.mockResolvedValueOnce({ id: "job-legacy-77" });
 
-        const req = { user: { id: "user-1" } } as any;
+        const req = { user: { id: "user-1", role: "admin" } } as any;
         const res = createRes();
         await generateHandler(req, res);
 
@@ -419,6 +431,20 @@ describe("discover legacy-mode runtime behavior", () => {
             message: "Discover Weekly generation started",
             jobId: "job-legacy-77",
         });
+    });
+
+    it("forbids non-admin legacy generation before lookup or queueing", async () => {
+        const req = { user: { id: "user-1", role: "user" } } as any;
+        const res = createRes();
+
+        await generateHandler(req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({
+            error: "Discover Weekly downloads are admin-only on this server",
+        });
+        expect(prisma.discoveryBatch.findFirst).not.toHaveBeenCalled();
+        expect(discoverQueue.add).not.toHaveBeenCalled();
     });
 
     it("returns empty current-week legacy playlist when no discovery data exists", async () => {

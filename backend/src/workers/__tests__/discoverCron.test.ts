@@ -8,7 +8,7 @@ describe("discoverCron worker", () => {
         jest.clearAllMocks();
     });
 
-    function loadDiscoverCron() {
+    function loadDiscoverCron(mode = "recommendation") {
         process.env = { ...originalEnv };
 
         const logger = {
@@ -30,7 +30,7 @@ describe("discoverCron worker", () => {
         jest.doMock("../../utils/db", () => ({ prisma }));
         jest.doMock("../queues", () => ({ discoverQueue }));
         jest.doMock("../../config", () => ({
-            config: { discover: { mode: "strict" } },
+            config: { discover: { mode } },
         }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -65,6 +65,32 @@ describe("discoverCron worker", () => {
         expect(discoverQueue.add.mock.calls[0][2]).toEqual({
             jobId: "discover:cron:2026-02-16:u1",
         });
+    });
+
+    it("selects only admin users for legacy discover generation", async () => {
+        const { module, prisma, discoverQueue } = loadDiscoverCron("legacy");
+        prisma.userDiscoverConfig.findMany.mockResolvedValueOnce([
+            { userId: "admin-1", playlistSize: 25 },
+        ]);
+        discoverQueue.add.mockResolvedValue(undefined);
+
+        await module.processDiscoverCronTick();
+
+        expect(prisma.userDiscoverConfig.findMany).toHaveBeenCalledWith({
+            where: {
+                enabled: true,
+                user: { role: "admin" },
+            },
+            select: { userId: true, playlistSize: true },
+        });
+        expect(discoverQueue.add).toHaveBeenCalledTimes(1);
+        expect(discoverQueue.add).toHaveBeenCalledWith(
+            "discover-recommendation",
+            { userId: "admin-1" },
+            expect.objectContaining({
+                jobId: expect.stringContaining(":admin-1"),
+            }),
+        );
     });
 
     it("registers and removes repeatable cron scheduler with success/failure logging", async () => {

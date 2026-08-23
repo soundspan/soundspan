@@ -62,6 +62,9 @@ describe("discover weekly runtime behavior", () => {
                 }
                 return arg;
             }),
+            user: {
+                findUnique: jest.fn(async () => ({ role: "admin" })),
+            },
             discoveryBatch: {
                 findMany: jest.fn(async () => []),
                 findUnique: jest.fn(async () => null),
@@ -421,6 +424,31 @@ describe("discover weekly runtime behavior", () => {
         expect(discoveryLogger.end).toHaveBeenCalledWith(false, "Not enabled");
     });
 
+    it("rejects non-admin generation before creating a batch or acquiring albums", async () => {
+        const { prisma, tx, acquisitionService } = setupDiscoverWeeklyMocks();
+        (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce({
+            role: "user",
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { discoverWeeklyService } = require("../discoverWeekly");
+
+        await expect(
+            discoverWeeklyService.generatePlaylist("user-1"),
+        ).rejects.toThrow(
+            "Discover Weekly downloads are admin-only on this server",
+        );
+
+        expect(prisma.user.findUnique).toHaveBeenCalledWith({
+            where: { id: "user-1" },
+            select: { role: true },
+        });
+        expect(prisma.userDiscoverConfig.findUnique).not.toHaveBeenCalled();
+        expect(tx.discoveryBatch.create).not.toHaveBeenCalled();
+        expect(tx.downloadJob.create).not.toHaveBeenCalled();
+        expect(acquisitionService.acquireAlbum).not.toHaveBeenCalled();
+    });
+
     it("returns early when buildFinalPlaylist receives a missing batch id", async () => {
         const { prisma } = setupDiscoverWeeklyMocks();
         (prisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValueOnce(
@@ -603,8 +631,13 @@ describe("discover weekly runtime behavior", () => {
 
         const result = await discoverWeeklyService.generatePlaylist("user-1");
 
+        expect(prisma.user.findUnique).toHaveBeenCalledWith({
+            where: { id: "user-1" },
+            select: { role: true },
+        });
         expect(tx.discoveryBatch.create).toHaveBeenCalledTimes(1);
         expect(tx.downloadJob.create).toHaveBeenCalledTimes(2);
+        expect(acquisitionService.acquireAlbum).toHaveBeenCalledTimes(2);
         expect(prisma.downloadJob.update).toHaveBeenCalledTimes(2);
         expect(discoveryBatchLogger.info).toHaveBeenCalledWith(
             expect.any(String),

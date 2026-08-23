@@ -29,6 +29,14 @@ import type { SeedArtist } from "./types";
 
 /** Represents the DiscoverWeeklyService class. */
 export class DiscoverWeeklyService extends BatchLifecycleService {
+    private async resolveCanAcquire(userId: string): Promise<boolean> {
+        const user = await discoverWeeklyPrisma.user.findUnique({
+            where: { id: userId },
+            select: { role: true },
+        });
+        return user?.role === "admin";
+    }
+
     /**
      * Main entry: Generate Discovery Weekly
      */
@@ -38,6 +46,12 @@ export class DiscoverWeeklyService extends BatchLifecycleService {
         discoveryLogger.info(`Log file: ${logPath}`);
 
         try {
+            if (!(await this.resolveCanAcquire(userId))) {
+                throw new Error(
+                    "Discover Weekly downloads are admin-only on this server",
+                );
+            }
+
             discoveryLogger.section("CONFIGURATION CHECK");
             const settings = await getSystemSettings();
 

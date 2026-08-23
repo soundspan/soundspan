@@ -76,6 +76,8 @@ router.get(
  *         description: Generation already in progress
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Legacy-mode generation is restricted to administrators
  */
 router.post(
     "/generate",
