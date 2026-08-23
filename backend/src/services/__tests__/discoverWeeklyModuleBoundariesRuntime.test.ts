@@ -32,6 +32,7 @@ const prisma = {
     },
     play: { findMany: jest.fn(async () => []) },
     track: { findMany: jest.fn(async () => []) },
+    user: { findUnique: jest.fn(async () => ({ role: "admin" })) },
     userDiscoverConfig: { findUnique: jest.fn(async () => null) },
 };
 
