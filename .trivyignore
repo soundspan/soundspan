@@ -49,3 +49,19 @@
 #
 # Syntax: one CVE-ID / GHSA-ID per line, optional trailing comment. See
 # https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#trivyignore
+
+# --- Reviewed ML dependency deferrals (2026-08-23, #671 / #717) -----------
+# keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
+CVE-2025-12060
+# keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
+CVE-2025-9906
+# keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
+CVE-2026-1462
+# keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
+CVE-2026-11816
+# keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
+CVE-2026-12481
+# keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
+CVE-2026-12484
+# protobuf 4.25.9: the fix requires 5.29.6+, outside TF 2.15's protobuf<5 constraint; defer the companion dependency upgrade from #671 to #717.
+CVE-2026-0994

@@ -69,7 +69,8 @@ RUN mkdir -p /app/cache /app/logs && \
     chown -R node:node /app/cache /app/logs && \
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
-    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true
+    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
+    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 USER node
 
@@ -77,7 +78,7 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "dist/worker.js"]
 
 # Stage: prune to prod deps but keep a working Prisma CLI for the entrypoint's
-# `npx prisma migrate deploy`. Prisma 7's prisma.config.ts imports
+# `./node_modules/.bin/prisma migrate deploy`. Prisma 7's prisma.config.ts imports
 # "prisma/config", which must resolve from the app's own node_modules, so the
 # CLI is reinstalled locally after prune (a global CLI cannot satisfy it).
 FROM build AS api-deps
@@ -116,7 +117,8 @@ RUN mkdir -p /app/cache/covers /app/cache/transcodes /app/logs && \
     chmod +x /usr/local/bin/docker-entrypoint.sh && \
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
-    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true
+    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
+    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 USER node
 

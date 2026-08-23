@@ -4,6 +4,7 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
 
 ### Added
@@ -26,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Newly added Audiobookshelf books are now discovered automatically after the initial SoundSpan cache has been populated; a lightweight five-minute sync imports only missing local ABS books instead of reprocessing the full audiobook library (#710).
 
 ### Security
+
+- Removed npm, npx, and corepack from all Node runtime images to eliminate package-installer and npm-vendored CVE exposure, limited Trivy SARIF uploads to CRITICAL/HIGH findings, and documented the reviewed keras/protobuf deferrals pending the companion dependency upgrade (#671, #717).
 
 ## [2.4.1] - 2026-08-22
 

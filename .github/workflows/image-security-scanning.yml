@@ -90,6 +90,7 @@ jobs:
           image-ref: ${{ steps.check.outputs.image_ref }}
           scanners: vuln
           severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
           ignore-unfixed: true
           trivyignores: .trivyignore
           exit-code: "0"

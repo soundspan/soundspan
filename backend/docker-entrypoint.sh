@@ -79,7 +79,7 @@ run_prisma_migrations_with_retry() {
     echo "[DB] Running database migrations (attempt ${attempt}/${max_attempts})..."
 
     set +e
-    migrate_output=$(npx prisma migrate deploy 2>&1)
+    migrate_output=$(./node_modules/.bin/prisma migrate deploy 2>&1)
     migrate_exit_code=$?
     set -e
 
@@ -124,7 +124,7 @@ fi
 # Runtime images already include generated clients from build stage.
 if [ "${PRISMA_GENERATE_ON_STARTUP:-false}" = "true" ]; then
   echo "[DB] Generating Prisma client..."
-  npx prisma generate
+  ./node_modules/.bin/prisma generate
 else
   echo "[DB] Skipping Prisma client generation (PRISMA_GENERATE_ON_STARTUP=false)"
 fi

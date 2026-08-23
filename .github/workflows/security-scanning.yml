@@ -49,6 +49,7 @@ jobs:
           scan-ref: .
           scanners: vuln # secret scanning is owned by the dedicated gitleaks job below
           severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
           ignore-unfixed: true
           trivyignores: .trivyignore
           exit-code: "0"

@@ -69,13 +69,14 @@ COPY --chown=node:node healthcheck.js ./
 COPY docker-entrypoint.sh /usr/local/bin/
 
 # Fix line endings, set entrypoint permissions, then remove dangerous tools
-# NOTE: We keep /bin/sh because npm requires it to spawn processes
+# NOTE: We keep /bin/sh because the runtime entrypoint script requires it
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh && \
     # Remove download/network utilities (prevents downloading malware)
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
-    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true
+    rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
+    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 USER node
 
@@ -87,4 +88,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Use tini for proper signal handling, with entrypoint script
 ENTRYPOINT ["/usr/bin/tini", "--", "docker-entrypoint.sh"]
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

@@ -63,6 +63,8 @@ const baseImageFamilyBinaries = [
 ];
 
 const probeNames = ["livenessProbe", "readinessProbe"];
+const npmToolchainRemovalPattern =
+    /rm -rf\s+\/usr\/local\/lib\/node_modules\s+\/usr\/local\/bin\/npm\s+\/usr\/local\/bin\/npx\s+\/usr\/local\/bin\/corepack\b/;
 
 function readRepoFile(relativePath) {
     return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -279,7 +281,24 @@ function stageRunsPrisma(stage) {
         .split(/\r?\n/)
         .filter((line) => !line.trimStart().startsWith("#"))
         .join("\n");
-    return /\bnpx\s+prisma\s+(?:generate|migrate)\b/i.test(commands);
+    return /(?:^|\s)\.\/node_modules\/\.bin\/prisma\s+(?:generate|migrate)\b/i.test(
+        commands,
+    );
+}
+
+function runtimeCommandLinesAfterToolchainRemoval(stage) {
+    const removalIndex = stage.search(npmToolchainRemovalPattern);
+    assert.notEqual(
+        removalIndex,
+        -1,
+        "runtime stage must remove npm toolchain",
+    );
+
+    return stage
+        .slice(removalIndex)
+        .split(/\r?\n/)
+        .filter((line) => /^\s*(?:CMD|ENTRYPOINT)\b|^\s*command=/i.test(line))
+        .join("\n");
 }
 
 function effectiveStageCopies(stages) {
@@ -730,4 +749,40 @@ test("14. sidecar images copy every top-level Python module", () => {
         [],
         `Dockerfile COPY instructions omit top-level sidecar modules:\n${missingFiles.join("\n")}`,
     );
+});
+
+test("15. final Node runtime stages remove npm tooling", () => {
+    const backendStages = dockerfileStages(readRepoFile("backend/Dockerfile"));
+    const frontendStages = dockerfileStages(
+        readRepoFile("frontend/Dockerfile"),
+    );
+    const runtimeStages = [
+        [
+            "backend/Dockerfile worker-runtime",
+            backendStages.find((stage) => stage.name === "worker-runtime"),
+        ],
+        [
+            "backend/Dockerfile api-runtime",
+            backendStages.find((stage) => stage.name === "api-runtime"),
+        ],
+        ["frontend/Dockerfile final stage", frontendStages.at(-1)],
+        [
+            "Dockerfile AIO stage",
+            dockerfileStages(readRepoFile("Dockerfile")).at(-1),
+        ],
+    ];
+
+    for (const [label, stage] of runtimeStages) {
+        assert.ok(stage, `${label}: runtime stage must exist`);
+        assert.match(
+            stage.text,
+            npmToolchainRemovalPattern,
+            `${label}: npm toolchain must be removed`,
+        );
+        assert.doesNotMatch(
+            runtimeCommandLinesAfterToolchainRemoval(stage.text),
+            /\b(?:npm|npx)(?=["'\s,])/i,
+            `${label}: runtime commands must not invoke npm or npx`,
+        );
+    }
 });

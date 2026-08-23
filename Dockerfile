@@ -227,7 +227,7 @@ RUN npm run build
 
 # Prune backend dev dependencies after build (typescript, jest, tsx, etc.),
 # then reinstall the prisma CLI locally: the startup script needs
-# `npx prisma migrate deploy`, and Prisma 7's prisma.config.ts imports
+# `./node_modules/.bin/prisma migrate deploy`, and Prisma 7's prisma.config.ts imports
 # "prisma/config", which must resolve from the app's own node_modules —
 # a globally-installed CLI cannot satisfy that import after prune.
 RUN PRISMA_VERSION=$(node -p "require('./node_modules/prisma/package.json').version") && \
@@ -284,7 +284,8 @@ RUN apt-get purge -y --auto-remove build-essential python3-dev 2>/dev/null || tr
     rm -f /usr/bin/curl /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
     rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 # ============================================
 # CONFIGURATION
@@ -343,7 +344,7 @@ directory=/app/backend
 priority=30
 
 [program:frontend]
-command=/bin/bash -c "cd /app/frontend && npm start"
+command=/bin/bash -c "cd /app/frontend && node server.js"
 user=soundspan
 autostart=true
 autorestart=true
@@ -606,7 +607,7 @@ fi
 if [ "$MIGRATIONS_EXIST" = "t" ]; then
     # Normal migration flow - migrations table exists
     echo "Migration history found, running migrate deploy..."
-    if ! npx prisma migrate deploy 2>&1; then
+    if ! ./node_modules/.bin/prisma migrate deploy 2>&1; then
         echo "FATAL: Database migration failed! Check logs above."
         exit 1
     fi
@@ -615,16 +616,16 @@ elif [ "$USER_TABLE_EXIST" = "t" ]; then
     echo "Existing database detected without migration history."
     echo "Creating baseline from current schema..."
     # Mark the init migration as already applied (baseline)
-    npx prisma migrate resolve --applied 20241130000000_init 2>&1 || true
+    ./node_modules/.bin/prisma migrate resolve --applied 20241130000000_init 2>&1 || true
     # Now run any subsequent migrations
-    if ! npx prisma migrate deploy 2>&1; then
+    if ! ./node_modules/.bin/prisma migrate deploy 2>&1; then
         echo "FATAL: Migration after baseline failed!"
         exit 1
     fi
 else
     # Fresh database - run migrations normally
     echo "Fresh database detected, running initial migrations..."
-    if ! npx prisma migrate deploy 2>&1; then
+    if ! ./node_modules/.bin/prisma migrate deploy 2>&1; then
         echo "FATAL: Initial migration failed. Check database connection and schema."
         exit 1
     fi
