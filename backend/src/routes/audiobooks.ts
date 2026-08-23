@@ -24,7 +24,7 @@ import {
     MAX_EXTERNAL_IMAGE_BYTES,
     readResponseBodyWithByteCap,
 } from "../services/imageProxy";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 import { config } from "../config";
 import {
@@ -250,11 +250,12 @@ router.post("/sync", apiLimiter, ...audiobookSyncAuth, async (req, res) => {
             result,
         });
     } catch (error: any) {
-        const syncError = error.message;
         logger.error("Audiobook sync failed:", error);
-        res.status(500).json({
-            error: syncError === SYNC_RUNNING_ERROR ? syncError : "Sync failed",
-        });
+        if (error.message === SYNC_RUNNING_ERROR) {
+            sendRouteError(res, 409, SYNC_RUNNING_ERROR);
+            return;
+        }
+        sendInternalRouteError(res, "Sync failed");
     }
 });
 

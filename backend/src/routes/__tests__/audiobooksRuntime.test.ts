@@ -353,7 +353,7 @@ describe("audiobooks route runtime", () => {
         });
     });
 
-    it("surfaces an already-running audiobook sync error", async () => {
+    it("surfaces an already-running audiobook sync as a conflict", async () => {
         audiobookCacheService.syncAll.mockRejectedValueOnce(
             new Error("audiobook sync already running"),
         );
@@ -362,7 +362,7 @@ describe("audiobooks route runtime", () => {
         const res = createRes();
         await syncHandler(req, res);
 
-        expect(res.statusCode).toBe(500);
+        expect(res.statusCode).toBe(409);
         expect(res.body).toEqual({
             error: "audiobook sync already running",
         });
