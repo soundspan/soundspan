@@ -8,7 +8,8 @@ const mockNotifyRequestDenied = jest.fn();
 const mockNotifyRequestFulfilled = jest.fn();
 
 const prisma = {
-    album: { findFirst: jest.fn() },
+    album: { findFirst: jest.fn(), findMany: jest.fn() },
+    artist: { findMany: jest.fn() },
     downloadJob: { findFirst: jest.fn() },
     musicRequest: {
         count: jest.fn(),
@@ -71,6 +72,8 @@ import {
     cancelOwnRequest,
     createRequest,
     denyRequest,
+    listAllRequests,
+    listRequestsForUser,
     MusicRequestServiceError,
 } from "../musicRequestService";
 
@@ -104,6 +107,8 @@ describe("musicRequestService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         prisma.album.findFirst.mockResolvedValue(null);
+        prisma.album.findMany.mockResolvedValue([]);
+        prisma.artist.findMany.mockResolvedValue([]);
         prisma.musicRequest.findFirst.mockResolvedValue(null);
         prisma.downloadJob.findFirst.mockResolvedValue(null);
         prisma.musicRequest.count.mockResolvedValue(0);
@@ -213,6 +218,87 @@ describe("musicRequestService", () => {
         );
     });
 
+    it("batches album links and prefers the library row", async () => {
+        const secondRequest = { ...pendingRequest, id: "request-2" };
+        prisma.musicRequest.findMany.mockResolvedValueOnce([
+            pendingRequest,
+            secondRequest,
+        ]);
+        prisma.album.findMany.mockResolvedValueOnce([
+            {
+                id: "album-discovery",
+                rgMbid: input.rgMbid,
+                location: "DISCOVER",
+                artistId: "artist-discovery",
+            },
+            {
+                id: "album-library",
+                rgMbid: input.rgMbid,
+                location: "LIBRARY",
+                artistId: "artist-library",
+            },
+        ]);
+
+        const result = await listRequestsForUser("user-1");
+
+        expect(result).toEqual([
+            {
+                ...pendingRequest,
+                albumId: "album-library",
+                artistId: "artist-library",
+            },
+            {
+                ...secondRequest,
+                albumId: "album-library",
+                artistId: "artist-library",
+            },
+        ]);
+        expect(prisma.album.findMany).toHaveBeenCalledTimes(1);
+        expect(prisma.album.findMany).toHaveBeenCalledWith({
+            where: { rgMbid: { in: [input.rgMbid] } },
+            select: {
+                id: true,
+                rgMbid: true,
+                location: true,
+                artistId: true,
+            },
+        });
+        expect(prisma.artist.findMany).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the artist MBID for administrator request rows", async () => {
+        const adminRequest = {
+            ...pendingRequest,
+            user: { id: "user-1", username: "listener" },
+        };
+        prisma.musicRequest.findMany.mockResolvedValueOnce([adminRequest]);
+        prisma.artist.findMany.mockResolvedValueOnce([
+            { id: "artist-local", mbid: input.artistMbid },
+        ]);
+
+        const result = await listAllRequests("pending");
+
+        expect(result).toEqual([
+            {
+                ...adminRequest,
+                albumId: null,
+                artistId: "artist-local",
+            },
+        ]);
+        expect(prisma.artist.findMany).toHaveBeenCalledWith({
+            where: { mbid: { in: [input.artistMbid] } },
+            select: { id: true, mbid: true },
+        });
+    });
+
+    it("returns null links when neither album nor artist resolves", async () => {
+        prisma.musicRequest.findMany.mockResolvedValueOnce([pendingRequest]);
+
+        await expect(listRequestsForUser("user-1")).resolves.toEqual([
+            { ...pendingRequest, albumId: null, artistId: null },
+        ]);
+    });
+
     it("does not reveal another user's request during cancellation", async () => {
         prisma.musicRequest.updateMany.mockResolvedValueOnce({ count: 0 });
         prisma.musicRequest.findFirst.mockResolvedValueOnce(null);
@@ -259,6 +345,28 @@ describe("musicRequestService", () => {
             kind: "conflict",
         });
         expect(mockCreateAlbumDownloadJob).not.toHaveBeenCalled();
+    });
+
+    it("creates the approval job for the admin and notifies the requester", async () => {
+        await approveRequest("admin-1", "request-1");
+
+        expect(mockCreateAlbumDownloadJob).toHaveBeenCalledWith(
+            {
+                userId: "admin-1",
+                mbid: input.rgMbid,
+                subject: `${input.artistName} - ${input.albumTitle}`,
+                artistName: input.artistName,
+                albumTitle: input.albumTitle,
+                downloadType: "library",
+                rootFolderPath: "/library",
+            },
+            prisma,
+            input.artistName,
+        );
+        expect(mockNotifyRequestApproved).toHaveBeenCalledWith(
+            "user-1",
+            expect.objectContaining({ requestId: "request-1" }),
+        );
     });
 
     it("links an existing active job without producing dispatch work", async () => {

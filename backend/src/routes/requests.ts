@@ -245,7 +245,7 @@ router.post("/", asyncHandler(handleCreate));
  *     security:
  *       - apiKeyAuth: []
  *     responses:
- *       200: { description: Newest-first request history }
+ *       200: { description: Newest-first request history with nullable albumId and artistId local link fields }
  *       401: { description: Not authenticated }
  */
 router.get("/mine", asyncHandler(handleMine));
@@ -286,7 +286,7 @@ router.delete("/:id", asyncHandler(handleCancel));
  *           type: string
  *           enum: [pending, approved, denied, fulfilled, failed, cancelled]
  *     responses:
- *       200: { description: Bounded newest-first request list }
+ *       200: { description: Bounded newest-first request list with nullable albumId and artistId local link fields }
  *       400: { description: Invalid status filter }
  *       401: { description: Not authenticated }
  *       403: { description: Admin access required }

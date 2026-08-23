@@ -26,6 +26,20 @@ import {
     useReviewMusicRequest,
 } from "@/hooks/useMusicRequests";
 
+/** Deep link for a request's artist: local page when resolved, search otherwise. */
+function requestArtistHref(request: MusicRequest): string {
+    if (request.artistId) return `/artist/${request.artistId}`;
+    return `/search?q=${encodeURIComponent(request.artistName)}`;
+}
+
+/** Deep link for a request's album: local page when resolved, search otherwise. */
+function requestAlbumHref(request: MusicRequest): string {
+    if (request.albumId) return `/album/${request.albumId}`;
+    return `/search?q=${encodeURIComponent(
+        `${request.artistName} ${request.albumTitle}`,
+    )}`;
+}
+
 function formatRequestDate(value: string): string {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return "";
@@ -108,7 +122,19 @@ function RequestRow(props: {
         <li className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
             <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">
-                    {request.artistName} — {request.albumTitle}
+                    <Link
+                        href={requestArtistHref(request)}
+                        className="hover:underline"
+                    >
+                        {request.artistName}
+                    </Link>{" "}
+                    —{" "}
+                    <Link
+                        href={requestAlbumHref(request)}
+                        className="hover:underline"
+                    >
+                        {request.albumTitle}
+                    </Link>
                 </p>
                 <p className="truncate text-xs text-gray-400">
                     {props.isAdmin && request.user

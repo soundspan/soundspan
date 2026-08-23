@@ -14,6 +14,8 @@ export interface MusicRequest {
     deniedReason: string | null;
     reviewedAt: string | null;
     downloadJobId: string | null;
+    albumId?: string | null;
+    artistId?: string | null;
     createdAt: string;
     updatedAt: string;
     user?: {

@@ -118,7 +118,8 @@ test("admin view lists requests with requester and review actions", async () => 
     const html = renderToStaticMarkup(React.createElement(RequestsPage));
 
     assert.match(html, />Requests</);
-    assert.match(html, /Boards of Canada — Geogaddi/);
+    assert.match(html, />Boards of Canada</);
+    assert.match(html, />Geogaddi</);
     assert.match(html, /Requested by alice/);
     assert.match(html, />Approve</);
     assert.match(html, />Decline</);
@@ -159,6 +160,37 @@ test("non-admin view shows own requests with cancel for pending", async () => {
     assert.match(html, />Declined</);
     assert.doesNotMatch(html, />Approve</);
     assert.doesNotMatch(html, /Requested by/);
+});
+
+test("request rows link to resolved artist and album pages", async () => {
+    state.auth = {
+        user: { id: "admin-1", role: "admin" },
+        isAuthenticated: true,
+        isLoading: false,
+    };
+    state.adminQuery = {
+        data: [requestRow({ artistId: "artist-9", albumId: "album-9" })],
+        isLoading: false,
+    };
+
+    const { default: RequestsPage } = await import("../../app/requests/page");
+    const html = renderToStaticMarkup(React.createElement(RequestsPage));
+
+    assert.match(html, /href="\/artist\/artist-9"/);
+    assert.match(html, /href="\/album\/album-9"/);
+});
+
+test("unresolved request rows fall back to search links", async () => {
+    state.adminQuery = {
+        data: [requestRow({ artistId: null, albumId: null })],
+        isLoading: false,
+    };
+
+    const { default: RequestsPage } = await import("../../app/requests/page");
+    const html = renderToStaticMarkup(React.createElement(RequestsPage));
+
+    assert.match(html, /href="\/search\?q=Boards%20of%20Canada"/);
+    assert.match(html, /href="\/search\?q=Boards%20of%20Canada%20Geogaddi"/);
 });
 
 test("empty state guides users toward the library", async () => {

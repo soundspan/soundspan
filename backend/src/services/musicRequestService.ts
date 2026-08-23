@@ -1,4 +1,4 @@
-import type { DownloadJob, MusicRequest } from "@prisma/client";
+import type { Album, DownloadJob, MusicRequest } from "@prisma/client";
 import { config } from "../config";
 import { recordMusicRequestAction } from "../metrics";
 import { prisma } from "../utils/db";
@@ -20,6 +20,13 @@ const MAX_ADMIN_NOTIFICATIONS = 200;
 const MAX_REQUEST_LIST_SIZE = 200;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_REQUEST_STATUSES = ["pending", "approved"] as const;
+
+type RequestLibraryLinks = {
+    albumId: string | null;
+    artistId: string | null;
+};
+type LinkableRequest = Pick<MusicRequest, "rgMbid" | "artistMbid">;
+type AlbumLink = Pick<Album, "id" | "rgMbid" | "location" | "artistId">;
 
 /** Stable persisted status vocabulary for the request queue. */
 export const MUSIC_REQUEST_STATUSES = [
@@ -246,15 +253,84 @@ export async function createRequest(
     return request;
 }
 
+function mapPreferredAlbums(albums: AlbumLink[]): Map<string, AlbumLink> {
+    const preferred = new Map<string, AlbumLink>();
+    for (const album of albums) {
+        const current = preferred.get(album.rgMbid);
+        if (
+            !current ||
+            (current.location !== "LIBRARY" && album.location === "LIBRARY")
+        ) {
+            preferred.set(album.rgMbid, album);
+        }
+    }
+    return preferred;
+}
+
+async function attachLibraryLinks<T extends LinkableRequest>(
+    rows: T[],
+): Promise<Array<T & RequestLibraryLinks>> {
+    if (rows.length === 0) return [];
+    const rgMbids = [...new Set(rows.map((row) => row.rgMbid))];
+    const albums = await prisma.album.findMany({
+        where: { rgMbid: { in: rgMbids } },
+        select: { id: true, rgMbid: true, location: true, artistId: true },
+    });
+    const albumsByMbid = mapPreferredAlbums(albums);
+    const artistsByMbid = await resolveFallbackArtists(rows, albumsByMbid);
+    return addLibraryLinks(rows, albumsByMbid, artistsByMbid);
+}
+
+async function resolveFallbackArtists<T extends LinkableRequest>(
+    rows: T[],
+    albumsByMbid: Map<string, AlbumLink>,
+): Promise<Map<string, string>> {
+    const fallbackMbids = [
+        ...new Set(
+            rows
+                .filter((row) => !albumsByMbid.has(row.rgMbid))
+                .map((row) => row.artistMbid)
+                .filter((mbid): mbid is string => mbid !== null),
+        ),
+    ];
+    const artists = fallbackMbids.length
+        ? await prisma.artist.findMany({
+              where: { mbid: { in: fallbackMbids } },
+              select: { id: true, mbid: true },
+          })
+        : [];
+    return new Map(artists.map((artist) => [artist.mbid, artist.id]));
+}
+
+function addLibraryLinks<T extends LinkableRequest>(
+    rows: T[],
+    albumsByMbid: Map<string, AlbumLink>,
+    artistsByMbid: Map<string, string>,
+): Array<T & RequestLibraryLinks> {
+    return rows.map((row) => {
+        const album = albumsByMbid.get(row.rgMbid);
+        return {
+            ...row,
+            albumId: album?.id ?? null,
+            artistId:
+                album?.artistId ??
+                (row.artistMbid
+                    ? (artistsByMbid.get(row.artistMbid) ?? null)
+                    : null),
+        };
+    });
+}
+
 /** List the caller's request history newest first. */
 export async function listRequestsForUser(
     userId: string,
-): Promise<MusicRequest[]> {
-    return prisma.musicRequest.findMany({
+): Promise<Array<MusicRequest & RequestLibraryLinks>> {
+    const rows = await prisma.musicRequest.findMany({
         where: { userId },
         orderBy: { createdAt: "desc" },
         take: MAX_REQUEST_LIST_SIZE,
     });
+    return attachLibraryLinks(rows);
 }
 
 /** Return current feature availability and the rolling 24-hour allowance. */
@@ -298,21 +374,28 @@ export async function cancelOwnRequest(
 /** List the bounded administrator queue with requester identity. */
 export async function listAllRequests(
     status?: MusicRequestStatus,
-): Promise<Array<MusicRequest & { user: { id: string; username: string } }>> {
-    return prisma.musicRequest.findMany({
+): Promise<
+    Array<
+        MusicRequest &
+            RequestLibraryLinks & { user: { id: string; username: string } }
+    >
+> {
+    const rows = await prisma.musicRequest.findMany({
         where: status ? { status } : undefined,
         include: { user: { select: { id: true, username: true } } },
         orderBy: { createdAt: "desc" },
         take: MAX_REQUEST_LIST_SIZE,
     });
+    return attachLibraryLinks(rows);
 }
 
 function approvalJobParams(
     request: MusicRequest,
+    adminId: string,
     rootFolderPath: string,
 ): CreateAlbumDownloadJobParams {
     return {
-        userId: request.userId,
+        userId: adminId,
         mbid: request.rgMbid,
         subject: `${request.artistName} - ${request.albumTitle}`,
         artistName: request.artistName,
@@ -353,7 +436,7 @@ async function approveWithJob(
         });
         if (changed.count === 0) return { kind: "conflict" } as const;
         const jobResult = await createAlbumDownloadJob(
-            approvalJobParams(request, rootFolderPath),
+            approvalJobParams(request, adminId, rootFolderPath),
             transaction,
             verifiedArtistName,
         );
