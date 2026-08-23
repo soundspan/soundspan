@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-23
+
 ### Added
 
 - Non-admin users now see per-album Request badges on artist pages (mirroring the admin download badge), with a Requested state for albums they've already asked for. (#663)

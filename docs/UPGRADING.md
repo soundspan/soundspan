@@ -34,7 +34,7 @@ data volume while the container is stopped.
 
 | Upgrading across | Action needed? |
 | ---------------- | -------------- |
-| **Unreleased (next release)** | None — the TIDAL sidecar is renamed to `tidal-streamer`, but every old reference keeps working: the old image name still receives new versions, and the old in-network hostname still resolves. See the section below if you want to move your pins to the new name. |
+| **2.5.0** | Usually none — plain rolling update; database migrations apply automatically. **Heads-up on two default changes:** users who share online presence become visible to federated peer servers too (and public playlists are shared with peers) — turning off **Share online presence** or making a playlist private restores local-only behavior; and the new music-request feature is on by default (`FEATURE_REQUESTS=false` to disable). Federation pairing codes are removed — new peer connections use the host-credential flow, and both servers must be on versions that support it. The TIDAL sidecar is also renamed to `tidal-streamer`, but every old reference keeps working; see the section below. |
 | **2.4.1** | None — plain rolling update; no database migrations. Fixes Subsonic full syncs of large libraries (Symfonium and similar clients importing nothing) and the Library Enrichment failures view. If your server must federate through an egress proxy, the new `FEDERATION_ALLOW_PROXY=true` opt-in restores proxy support that 2.4.0 disabled. |
 | **2.4.0** | Usually none — plain rolling update; all database migrations apply automatically. **Exception:** federation now resolves peer hostnames and rejects private, loopback, and link-local addresses whether configured literally or returned by DNS — if any peer lives on a LAN or VPN, set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading or that peer stops syncing. Federation traffic also no longer routes through `HTTP(S)_PROXY` egress proxies. Heads-up for very large libraries: two migrations do heavier work (track-mapping housekeeping and an album-ownership guard), so the first startup can take longer than usual. Also new: a daily cleanup removes stale, unliked, unplayable TIDAL/YouTube Music catalog rows after 30 days (`PROVIDER_TRACK_RETENTION_DAYS` to tune); liked, playlisted, recently played, and file-backed content is always kept. |
 | **2.3.3** | Usually none — plain rolling update; a small database change applies automatically. **Exception:** if a federation peer is configured by a literal private, loopback, or link-local IP address (LAN/VPN IPs, `127.x`, `169.254.x`) or by `localhost`, set `FEDERATION_ALLOW_PRIVATE_PEERS=true` first — outbound federation now rejects these by default (peers configured by a DNS hostname other than `localhost` are unaffected). If you are on 2.3.2, upgrade promptly: its audio-analyzer container could not start, so loudness measurement was paused until this release. |
@@ -49,7 +49,26 @@ Anything not listed: drop-in.
 
 ---
 
-## Unreleased (next release): TIDAL sidecar renamed to `tidal-streamer`
+## 2.5.0: sharing defaults, pairing codes, and the TIDAL sidecar rename
+
+**Sharing defaults.** After the upgrade, **Share online presence** controls a
+user's visibility everywhere, including federated peer servers, and every
+public playlist is visible to connected peers. The old per-user "share with
+trusted peers" toggles are gone. Users who want to stay local-only should turn
+off **Share online presence** or make the playlist private before or after the
+upgrade — nothing else is required.
+
+**Music requests.** Non-admin users get Request buttons and admins get a
+Requests page (avatar menu). The feature is on by default; set
+`FEATURE_REQUESTS=false` to turn it off, and `REQUESTS_PER_USER_PER_DAY`
+(default 10) to tune the per-user daily cap.
+
+**Pairing codes removed.** New federation connections are made with a host
+credential issued by the hosting server's admin. A peer running a version that
+only supports pairing codes must upgrade before it can pair. Established
+connections keep working.
+
+### TIDAL sidecar renamed to `tidal-streamer`
 
 The TIDAL sidecar now matches the YouTube sidecar's naming. It streams and
 downloads, so it is named for its primary role, like `ytmusic-streamer`.
