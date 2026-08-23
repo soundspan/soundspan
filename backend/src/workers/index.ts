@@ -2,7 +2,6 @@ import { logger } from "../utils/logger";
 import { randomUUID } from "crypto";
 import { trackJobStart, trackJobEnd } from "../services/workerEventLoopMonitor";
 import type Bull from "bull";
-import type Redis from "ioredis";
 import {
     scanQueue,
     discoverQueue,
@@ -49,7 +48,6 @@ import { runDataIntegrityCheck } from "./dataIntegrity";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { enrichmentStateService } from "../services/enrichmentState";
-import { createIORedisClient } from "../utils/ioredis";
 import { dataCacheService } from "../services/dataCache";
 import { genericImportJobRunner } from "../services/genericImportJobRunner";
 import type { ReconciliationCursor } from "../services/trackReconciliation";
@@ -66,67 +64,29 @@ import {
     ONE_MINUTE_MS,
     SCHEDULER_JOB_TYPES,
 } from "./schedulerJobRegistry";
+import {
+    AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+    runWithSchedulerClaim,
+    SCHEDULER_CLAIM_OWNER_ID,
+    shutdownSchedulerClaimRedis,
+    withSchedulerClaimRedisRetry,
+} from "../utils/schedulerClaim";
+import { withTimeout } from "../utils/withTimeout";
 
 const log = logger.child("WorkerScheduler");
-const claimLog = log.child("SchedulerClaim");
-const claimObservabilityLog = claimLog.child("Observability");
 const queueProcessorLog = log.child("QueueProcessor");
 const startupLog = log.child("Startup");
 
 const WORKER_PROCESSOR_ID = randomUUID();
-const jestLazyConnectOverride =
-    process.env.JEST_WORKER_ID !== undefined ? { lazyConnect: true } : {};
-let schedulerLockRedis: Redis = createIORedisClient(
-    "worker-scheduler-locks",
-    jestLazyConnectOverride,
-);
-const schedulerLockOwnerId = `${WORKER_PROCESSOR_ID}:scheduler-claims`;
 const TRACK_RECONCILIATION_CURSOR_KEY =
     "scheduler:cursor:track-mapping-reconcile";
 const MAX_RECONCILIATION_CURSOR_BYTES = 512;
-const SCHEDULER_CLAIM_RETRY_ATTEMPTS = 3;
 const OBSERVABILITY_LOG_EVERY = 25;
-const DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD = 3;
-const parsedSchedulerSkipWarnThreshold = Number.parseInt(
-    process.env.SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD ||
-        `${DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD}`,
-    10,
-);
-const SCHEDULER_SKIP_WARN_THRESHOLD =
-    Number.isFinite(parsedSchedulerSkipWarnThreshold) &&
-    parsedSchedulerSkipWarnThreshold > 0
-        ? parsedSchedulerSkipWarnThreshold
-        : DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD;
-const schedulerClaimSkipCounts = new Map<string, number>();
-const schedulerClaimCounters = {
-    acquired: 0,
-    skipped: 0,
-    failedAcquire: 0,
-    failedRelease: 0,
-    retryRecoveries: 0,
-};
 const queueProcessorCounters = {
     active: 0,
     completed: 0,
     failed: 0,
 };
-
-function logSchedulerClaimObservability(context: string): void {
-    claimObservabilityLog.info(
-        `context=${context} workerId=${WORKER_PROCESSOR_ID} owner=${schedulerLockOwnerId} acquired=${schedulerClaimCounters.acquired} skipped=${schedulerClaimCounters.skipped} failedAcquire=${schedulerClaimCounters.failedAcquire} failedRelease=${schedulerClaimCounters.failedRelease} retryRecoveries=${schedulerClaimCounters.retryRecoveries}`,
-    );
-}
-
-function maybeLogSchedulerClaimObservability(context: string): void {
-    const totalEvents =
-        schedulerClaimCounters.acquired +
-        schedulerClaimCounters.skipped +
-        schedulerClaimCounters.failedAcquire +
-        schedulerClaimCounters.failedRelease;
-    if (totalEvents > 0 && totalEvents % OBSERVABILITY_LOG_EVERY === 0) {
-        logSchedulerClaimObservability(context);
-    }
-}
 
 function recordQueueProcessorEvent(
     queueName: string,
@@ -164,58 +124,6 @@ function recordQueueProcessorEvent(
     }
 }
 
-function isRetryableSchedulerClaimError(error: unknown): boolean {
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Connection is closed") ||
-        message.includes("Connection is in closing state") ||
-        message.includes("ECONNRESET") ||
-        message.includes("ETIMEDOUT") ||
-        message.includes("EPIPE")
-    );
-}
-
-function recreateSchedulerLockRedisClient(): void {
-    try {
-        schedulerLockRedis.disconnect();
-    } catch {
-        // no-op
-    }
-
-    schedulerLockRedis = createIORedisClient(
-        "worker-scheduler-locks",
-        jestLazyConnectOverride,
-    );
-}
-
-async function withSchedulerClaimRedisRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            return await operation();
-        } catch (error) {
-            if (
-                !isRetryableSchedulerClaimError(error) ||
-                attempt === SCHEDULER_CLAIM_RETRY_ATTEMPTS
-            ) {
-                throw error;
-            }
-
-            claimLog.warn(
-                `${operationName} failed due to Redis connection closure (attempt ${attempt}/${SCHEDULER_CLAIM_RETRY_ATTEMPTS}); recreating client and retrying`,
-                error,
-            );
-            schedulerClaimCounters.retryRecoveries += 1;
-
-            recreateSchedulerLockRedisClient();
-            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        }
-    }
-}
-
 function parseReconciliationCursor(value: string): ReconciliationCursor | null {
     if (value.length > MAX_RECONCILIATION_CURSOR_BYTES) return null;
 
@@ -247,7 +155,7 @@ async function loadReconciliationCursor(): Promise<
 > {
     const stored = await withSchedulerClaimRedisRetry(
         "track reconciliation cursor load",
-        () => schedulerLockRedis.get(TRACK_RECONCILIATION_CURSOR_KEY),
+        (client) => client.get(TRACK_RECONCILIATION_CURSOR_KEY),
     );
     if (!stored) return undefined;
 
@@ -257,7 +165,7 @@ async function loadReconciliationCursor(): Promise<
     log.warn("Discarding invalid persisted track reconciliation cursor");
     await withSchedulerClaimRedisRetry(
         "invalid track reconciliation cursor removal",
-        () => schedulerLockRedis.del(TRACK_RECONCILIATION_CURSOR_KEY),
+        (client) => client.del(TRACK_RECONCILIATION_CURSOR_KEY),
     );
     return undefined;
 }
@@ -268,7 +176,7 @@ async function saveReconciliationCursor(
     if (!cursor) {
         await withSchedulerClaimRedisRetry(
             "track reconciliation cursor clear",
-            () => schedulerLockRedis.del(TRACK_RECONCILIATION_CURSOR_KEY),
+            (client) => client.del(TRACK_RECONCILIATION_CURSOR_KEY),
         );
         return;
     }
@@ -277,126 +185,10 @@ async function saveReconciliationCursor(
         id: cursor.id,
         createdAt: cursor.createdAt.toISOString(),
     });
-    await withSchedulerClaimRedisRetry("track reconciliation cursor save", () =>
-        schedulerLockRedis.set(TRACK_RECONCILIATION_CURSOR_KEY, stored),
+    await withSchedulerClaimRedisRetry(
+        "track reconciliation cursor save",
+        (client) => client.set(TRACK_RECONCILIATION_CURSOR_KEY, stored),
     );
-}
-
-async function runWithSchedulerClaim(
-    claimKey: string,
-    ttlMs: number,
-    operationName: string,
-    operation: () => Promise<void>,
-): Promise<void> {
-    const claimToken = `${schedulerLockOwnerId}:${Date.now()}:${Math.random()}`;
-    const ttlSeconds = Math.max(1, Math.ceil(ttlMs / 1000));
-
-    try {
-        const acquired = await withSchedulerClaimRedisRetry(
-            `claim acquire for ${operationName}`,
-            () =>
-                schedulerLockRedis.set(
-                    claimKey,
-                    claimToken,
-                    "EX",
-                    ttlSeconds,
-                    "NX",
-                ),
-        );
-
-        if (acquired !== "OK") {
-            const skippedCount =
-                (schedulerClaimSkipCounts.get(claimKey) ?? 0) + 1;
-            schedulerClaimSkipCounts.set(claimKey, skippedCount);
-
-            if (skippedCount >= SCHEDULER_SKIP_WARN_THRESHOLD) {
-                schedulerClaimCounters.skipped += 1;
-                claimLog.warn(
-                    `${operationName} skipped ${skippedCount} consecutive time(s); claim held by another worker (owner=${schedulerLockOwnerId}, workerId=${WORKER_PROCESSOR_ID})`,
-                );
-            } else {
-                schedulerClaimCounters.skipped += 1;
-                claimLog.debug(
-                    `Skipping ${operationName}; claim is held by another worker (owner=${schedulerLockOwnerId}, workerId=${WORKER_PROCESSOR_ID})`,
-                );
-            }
-            maybeLogSchedulerClaimObservability("skip");
-            return;
-        }
-
-        schedulerClaimSkipCounts.delete(claimKey);
-        schedulerClaimCounters.acquired += 1;
-        claimLog.debug(
-            `Acquired claim for ${operationName} (claimKey=${claimKey}, owner=${schedulerLockOwnerId}, workerId=${WORKER_PROCESSOR_ID})`,
-        );
-        maybeLogSchedulerClaimObservability("acquire");
-    } catch (err) {
-        schedulerClaimCounters.failedAcquire += 1;
-        claimLog.error(
-            `Failed to claim ${operationName}; skipping cycle (owner=${schedulerLockOwnerId}, workerId=${WORKER_PROCESSOR_ID})`,
-            err,
-        );
-        maybeLogSchedulerClaimObservability("failed-acquire");
-        return;
-    }
-
-    try {
-        await operation();
-    } finally {
-        try {
-            await withSchedulerClaimRedisRetry(
-                `claim release for ${operationName}`,
-                () =>
-                    schedulerLockRedis.eval(
-                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                        1,
-                        claimKey,
-                        claimToken,
-                    ),
-            );
-        } catch (err) {
-            schedulerClaimCounters.failedRelease += 1;
-            claimLog.warn(
-                `Failed to release claim for ${operationName} (owner=${schedulerLockOwnerId}, workerId=${WORKER_PROCESSOR_ID})`,
-                err,
-            );
-            maybeLogSchedulerClaimObservability("failed-release");
-        }
-    }
-}
-
-/**
- * Wrap an async operation with a timeout to prevent indefinite hangs
- * Returns undefined if the operation times out (does not throw)
- */
-async function withTimeout<T>(
-    operation: () => Promise<T>,
-    timeoutMs: number,
-    operationName: string,
-): Promise<T | undefined> {
-    let timeoutId: NodeJS.Timeout | undefined;
-    let timedOut = false;
-
-    const timeoutPromise = new Promise<undefined>((resolve) => {
-        timeoutId = setTimeout(() => {
-            timedOut = true;
-            log.warn(
-                `Operation timed out after ${timeoutMs}ms: ${operationName}`,
-            );
-            resolve(undefined);
-        }, timeoutMs);
-    });
-
-    try {
-        const result = await Promise.race([operation(), timeoutPromise]);
-        if (!timedOut && timeoutId) {
-            clearTimeout(timeoutId);
-        }
-        return result;
-    } catch (error) {
-        clearTimeout(timeoutId);
-        throw error;
-    }
 }
 
 async function processDataIntegrityJob(): Promise<void> {
@@ -551,62 +343,47 @@ let lastAudiobookRepeatFailureWarnAt = 0;
 async function processAudiobookAutoSyncJob(
     mode: "startup" | "repeat",
 ): Promise<void> {
-    await runWithSchedulerClaim(
-        "scheduler-claim:audiobook-auto-sync",
-        2 * ONE_HOUR_MS,
-        `${mode} audiobook auto-sync`,
-        async () => {
-            const { getSystemSettings } =
-                await import("../utils/systemSettings");
-            const settings = await getSystemSettings();
-            if (
-                !settings?.audiobookshelfEnabled ||
-                !settings?.audiobookshelfUrl
-            ) {
-                if (mode === "startup") {
-                    startupLog.debug(
-                        "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
-                    );
-                }
-                return;
-            }
-            const { audiobookCacheService } =
-                await import("../services/audiobookCache");
-            let result;
-            try {
-                result = await withTimeout(
-                    () => audiobookCacheService.syncMissing(),
-                    2 * ONE_HOUR_MS,
-                    "audiobookCacheService.syncMissing",
-                );
-            } catch (error) {
-                if (mode === "startup") {
-                    throw error;
-                }
-                const now = Date.now();
-                const message =
-                    "Repeat audiobook auto-sync failed; will retry on the next cycle";
-                if (
-                    now - lastAudiobookRepeatFailureWarnAt >=
-                    REPEAT_SYNC_FAILURE_WARN_INTERVAL_MS
-                ) {
-                    lastAudiobookRepeatFailureWarnAt = now;
-                    startupLog.warn(message, error);
-                } else {
-                    startupLog.debug(message, error);
-                }
-                return;
-            }
-            if (
-                result &&
-                (mode === "startup" || result.synced || result.failed)
-            ) {
-                startupLog.debug(
-                    `Audiobook auto-sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
-                );
-            }
-        },
-    );
+    const { getSystemSettings } = await import("../utils/systemSettings");
+    const settings = await getSystemSettings();
+    if (!settings?.audiobookshelfEnabled || !settings?.audiobookshelfUrl) {
+        if (mode === "startup") {
+            startupLog.debug(
+                "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
+            );
+        }
+        return;
+    }
+    const { audiobookCacheService } =
+        await import("../services/audiobookCache");
+    let result;
+    try {
+        result = await withTimeout(
+            () => audiobookCacheService.syncMissing(),
+            AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+            "audiobookCacheService.syncMissing",
+            log,
+        );
+    } catch (error) {
+        if (mode === "startup") throw error;
+        const now = Date.now();
+        const message =
+            "Repeat audiobook auto-sync failed; will retry on the next cycle";
+        if (
+            now - lastAudiobookRepeatFailureWarnAt >=
+            REPEAT_SYNC_FAILURE_WARN_INTERVAL_MS
+        ) {
+            lastAudiobookRepeatFailureWarnAt = now;
+            startupLog.warn(message, error);
+        } else {
+            startupLog.debug(message, error);
+        }
+        return;
+    }
+    if (result && (mode === "startup" || result.synced || result.failed)) {
+        startupLog.debug(
+            `Audiobook auto-sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
+        );
+    }
 }
 
 async function processDownloadQueueReconcileJob(): Promise<void> {
@@ -773,7 +550,7 @@ async function registerSchedulerJobs(): Promise<void> {
 
 // Register processors with named job types
 queueProcessorLog.info(
-    `workerId=${WORKER_PROCESSOR_ID} owner=${schedulerLockOwnerId} hostname=${process.env.HOSTNAME ?? "unknown"} pid=${process.pid}`,
+    `workerId=${WORKER_PROCESSOR_ID} owner=${SCHEDULER_CLAIM_OWNER_ID} hostname=${process.env.HOSTNAME ?? "unknown"} pid=${process.pid}`,
 );
 scanQueue.process("scan", processScan);
 if (config.features.discovery) {
@@ -1209,7 +986,7 @@ export async function shutdownWorkers(): Promise<void> {
 
     // Disconnect worker scheduler lock Redis connection
     try {
-        await schedulerLockRedis.quit();
+        await shutdownSchedulerClaimRedis();
         log.debug("Worker scheduler lock Redis disconnected");
     } catch (err) {
         log.error("Failed to disconnect worker scheduler lock Redis:", err);

@@ -7,8 +7,20 @@ jest.mock("dns/promises", () => ({
 }));
 
 jest.mock("../../middleware/auth", () => ({
-    requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
-        next(),
+    requireAuthOrToken: (req: Request, _res: Response, next: () => void) => {
+        req.user = {
+            id: "authenticated-user",
+            username: "authenticated-user",
+            role: req.headers["x-test-role"] === "admin" ? "admin" : "user",
+        };
+        next();
+    },
+    requireAdmin: (req: Request, res: Response, next: () => void) => {
+        if (req.user?.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
 }));
 
 jest.mock("../../middleware/rateLimiter", () => ({
@@ -93,6 +105,8 @@ jest.mock("../../utils/db", () => ({
 
 import router from "../audiobooks";
 
+const MAX_ROUTE_HANDLERS = 4;
+
 function getHandler(path: string, method: "get" | "post") {
     const layer = (router as any).stack.find(
         (entry: any) =>
@@ -102,6 +116,31 @@ function getHandler(path: string, method: "get" | "post") {
         throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     }
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+async function invokeRouteStack(
+    path: string,
+    method: "get" | "post",
+    req: any,
+    res: any,
+) {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === path && entry.route?.methods?.[method],
+    );
+    const stack = layer?.route?.stack ?? [];
+    if (stack.length > MAX_ROUTE_HANDLERS) {
+        throw new Error(`Too many route handlers: ${stack.length}`);
+    }
+    for (let index = 0; index < MAX_ROUTE_HANDLERS; index += 1) {
+        const entry = stack[index];
+        if (!entry) return;
+        let nextCalled = false;
+        await entry.handle(req, res, () => {
+            nextCalled = true;
+        });
+        if (!nextCalled) return;
+    }
 }
 
 function createRes() {
@@ -239,8 +278,26 @@ describe("audiobooks route runtime", () => {
         expect(audiobookCacheService.syncAll).not.toHaveBeenCalled();
     });
 
+    it("rejects an authenticated non-admin sync request", async () => {
+        const req = { headers: { "x-test-role": "user" } } as any;
+        const res = createRes();
+
+        await invokeRouteStack("/sync", "post", req, res);
+
+        expect(req.user).toEqual(expect.objectContaining({ role: "user" }));
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(audiobookCacheService.syncAll).not.toHaveBeenCalled();
+    });
+
     it("syncs audiobooks and notifies the current user", async () => {
-        audiobookCacheService.syncAll.mockResolvedValueOnce({ synced: 7 });
+        audiobookCacheService.syncAll.mockResolvedValueOnce({
+            synced: 7,
+            failed: 0,
+            skipped: 1,
+            deleted: 2,
+            errors: [],
+        });
         prisma.audiobook.count.mockResolvedValueOnce(3);
 
         const req = { user: { id: "user-42" } } as any;
@@ -250,7 +307,13 @@ describe("audiobooks route runtime", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             success: true,
-            result: { synced: 7 },
+            result: {
+                synced: 7,
+                failed: 0,
+                skipped: 1,
+                deleted: 2,
+                errors: [],
+            },
         });
         expect(notificationService.notifySystem).toHaveBeenCalledWith(
             "user-42",
@@ -290,6 +353,21 @@ describe("audiobooks route runtime", () => {
         });
     });
 
+    it("surfaces an already-running audiobook sync error", async () => {
+        audiobookCacheService.syncAll.mockRejectedValueOnce(
+            new Error("audiobook sync already running"),
+        );
+
+        const req = { user: { id: "user-1" } } as any;
+        const res = createRes();
+        await syncHandler(req, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({
+            error: "audiobook sync already running",
+        });
+    });
+
     it("rejects an unsafe cached ABS cover path before proxy fetch", async () => {
         const existsSpy = jest.spyOn(require("fs"), "existsSync");
         existsSpy.mockReturnValue(false);
@@ -312,6 +390,27 @@ describe("audiobooks route runtime", () => {
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({ error: "Cover not found" });
         expect(fetchMock).not.toHaveBeenCalled();
+        existsSpy.mockRestore();
+    });
+
+    it("does not probe a fallback cover filename for an unsafe local id", async () => {
+        const existsSpy = jest.spyOn(require("fs"), "existsSync");
+        existsSpy.mockReturnValue(true);
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            localCoverPath: null,
+            coverUrl: null,
+            peerId: null,
+        });
+
+        const req = { params: { id: "victim:cover" } } as any;
+        const res = createRes();
+
+        await coverHandler(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Cover not found" });
+        expect(existsSpy).not.toHaveBeenCalled();
+        expect(prisma.audiobook.update).not.toHaveBeenCalled();
         existsSpy.mockRestore();
     });
 

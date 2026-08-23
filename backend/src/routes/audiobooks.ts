@@ -9,14 +9,17 @@ import { logger } from "../utils/logger";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { audiobookCacheService } from "../services/audiobookCache";
 import { prisma } from "../utils/db";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import {
     apiLimiter,
     coverArtLimiter,
     streamingLimiter,
 } from "../middleware/rateLimiter";
 import { safeResolvePath } from "../utils/safeResolvePath";
-import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
+import {
+    buildSafeAudiobookCoverUrl,
+    safeCoverFilename,
+} from "../services/audiobookCoverProxy";
 import {
     MAX_EXTERNAL_IMAGE_BYTES,
     readResponseBodyWithByteCap,
@@ -35,6 +38,8 @@ import {
 import { findRouteNameMatch } from "./routeParamName";
 
 const router = Router();
+const audiobookSyncAuth = [requireAuthOrToken, requireAdmin] as const;
+const SYNC_RUNNING_ERROR = "audiobook sync already running";
 
 const federationPeerInclude = {
     federationPeer: {
@@ -202,23 +207,12 @@ router.get(
  * /api/audiobooks/sync:
  *   post:
  *     summary: Manually trigger audiobook sync from Audiobookshelf
+ *     description: Requires administrator access. Destructively reconciles the local audiobook cache with the complete Audiobookshelf listing, including deleting absent local books and related state.
  *     tags: [Audiobooks]
- *     security:
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: Sync completed successfully
- *       400:
- *         description: Audiobookshelf not enabled
- *       401:
- *         description: Not authenticated
+ *     security: [{ apiKeyAuth: [] }]
+ *     responses: { 200: { description: Sync completed successfully, content: { application/json: { schema: { type: object, required: [success, result], properties: { success: { type: boolean }, result: { type: object, required: [synced, failed, skipped, deleted, errors], properties: { synced: { type: integer }, failed: { type: integer }, skipped: { type: integer }, deleted: { type: integer }, errors: { type: array, items: { type: string } } } } } } } } }, 400: { description: Audiobookshelf not enabled }, 401: { description: Not authenticated }, 403: { description: Administrator access required } }
  */
-/**
- * POST /audiobooks/sync
- * Manually trigger audiobook sync from Audiobookshelf
- * Fetches all audiobooks and caches metadata + cover images locally
- */
-router.post("/sync", apiLimiter, requireAuthOrToken, async (req, res) => {
+router.post("/sync", apiLimiter, ...audiobookSyncAuth, async (req, res) => {
     try {
         const { getSystemSettings } = await import("../utils/systemSettings");
         const { notificationService } =
@@ -256,9 +250,10 @@ router.post("/sync", apiLimiter, requireAuthOrToken, async (req, res) => {
             result,
         });
     } catch (error: any) {
+        const syncError = error.message;
         logger.error("Audiobook sync failed:", error);
         res.status(500).json({
-            error: "Sync failed",
+            error: syncError === SYNC_RUNNING_ERROR ? syncError : "Sync failed",
         });
     }
 });
@@ -732,7 +727,12 @@ async function resolveAudiobookCoverPath(
 ): Promise<string | null | undefined> {
     if (storedPath) return storedPath;
     const fs = await import("fs");
-    const fallbackPath = safeResolvePath(coverDir, `${id}.jpg`);
+    const fallbackFilename = safeCoverFilename(id);
+    if (!fallbackFilename) {
+        logger.warn("Skipped unsafe audiobook cover id", { audiobookId: id });
+        return null;
+    }
+    const fallbackPath = safeResolvePath(coverDir, fallbackFilename);
     if (!fallbackPath || !fs.existsSync(fallbackPath)) return null;
     try {
         await prisma.audiobook.update({

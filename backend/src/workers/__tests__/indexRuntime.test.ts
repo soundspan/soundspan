@@ -476,6 +476,15 @@ describe("workers runtime behavior", () => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         require("../index");
         await flushPromises();
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const {
+            AUDIOBOOK_SYNC_CLAIM_TTL_MS,
+            AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+        } = require("../../utils/schedulerClaim");
+
+        expect(AUDIOBOOK_SYNC_WORK_TIMEOUT_MS).toBe(
+            AUDIOBOOK_SYNC_CLAIM_TTL_MS - 10 * 60_000,
+        );
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
             (call) => call[0] === "*",
@@ -779,6 +788,11 @@ describe("workers runtime behavior", () => {
         );
         expect(mocks.shutdownDiscoverProcessor).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerLockRedis.quit).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.schedulerLockRedis.quit.mock.invocationCallOrder[0],
+        ).toBeGreaterThan(
+            mocks.schedulerQueue.close.mock.invocationCallOrder[0],
+        );
     });
 
     it("executes scheduler wildcard data-integrity job when claim is acquired", async () => {
@@ -1826,6 +1840,11 @@ describe("workers runtime behavior", () => {
             name: "image-backfill-startup",
             data: { mode: "startup" },
         });
+
+        expect(setTimeoutSpy).toHaveBeenCalledWith(
+            expect.any(Function),
+            2 * 60 * 60 * 1000 - 10 * 60_000,
+        );
         setTimeoutSpy.mockRestore();
 
         expect(mocks.logger.debug).not.toHaveBeenCalledWith(

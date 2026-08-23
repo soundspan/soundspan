@@ -6,6 +6,18 @@
  * past the literal `..` check below.
  */
 const AUDIOBOOK_COVER_PATH_RE = /^items\/[A-Za-z0-9_\-./]+$/;
+const SAFE_COVER_FILENAME_ID_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
+/**
+ * Builds a cache filename only for conservative, non-hidden audiobook IDs.
+ * Slash, backslash, percent-encoded traversal prefixes, and leading dots are
+ * rejected so normalization cannot alias another audiobook's cover file.
+ */
+export function safeCoverFilename(audiobookId: string): string | null {
+    return SAFE_COVER_FILENAME_ID_RE.test(audiobookId)
+        ? `${audiobookId}.jpg`
+        : null;
+}
 
 /**
  * Returns true only when `coverPath` stays within the confined Audiobookshelf

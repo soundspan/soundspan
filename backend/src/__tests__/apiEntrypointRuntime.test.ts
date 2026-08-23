@@ -268,6 +268,7 @@ describe("api entrypoint runtime behavior", () => {
         const shutdownWorkers = jest.fn(
             shutdownWorkersImpl || (async () => undefined),
         );
+        const shutdownSchedulerClaimRedis = jest.fn(async () => undefined);
         const shutdownUmapProjection = jest.fn(async () => undefined);
 
         jest.doMock("express", () => expressFn);
@@ -346,6 +347,9 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../workers", () => ({
             shutdownWorkers,
         }));
+        jest.doMock("../utils/schedulerClaim", () => ({
+            shutdownSchedulerClaimRedis,
+        }));
         jest.doMock("../services/umapProjection", () => ({
             shutdownUmapProjection,
         }));
@@ -380,6 +384,7 @@ describe("api entrypoint runtime behavior", () => {
             requireAuth,
             requireAdmin,
             shutdownWorkers,
+            shutdownSchedulerClaimRedis,
             shutdownUmapProjection,
             compressionMiddleware,
             compressionFilter,
@@ -1176,6 +1181,35 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.logger.debug).toHaveBeenCalledWith(
             "Shutdown already in progress...",
         );
+    });
+
+    it("closes scheduler claim Redis during API-only shutdown", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+        const processOnSpy = jest
+            .spyOn(process, "on")
+            .mockImplementation(() => process as any);
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout,
+        );
+        process.exit = jest.fn() as any;
+        const mocks = setupApiEntrypointMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+        const sigtermHandler = getProcessHandler(processOnSpy, "SIGTERM");
+        await sigtermHandler();
+        await flushPromises();
+
+        expect(mocks.shutdownWorkers).not.toHaveBeenCalled();
+        expect(mocks.shutdownSchedulerClaimRedis).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.shutdownSchedulerClaimRedis.mock.invocationCallOrder[0],
+        ).toBeLessThan(mocks.redisClient.close.mock.invocationCallOrder[0]);
+        expect(process.exit).toHaveBeenCalledWith(0);
     });
 
     it("logs shutdown cleanup errors and exits non-zero", async () => {

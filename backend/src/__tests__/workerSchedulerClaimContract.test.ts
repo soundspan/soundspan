@@ -2,32 +2,6 @@ import fs from "fs";
 import path from "path";
 
 describe("worker scheduler claim contract", () => {
-    it("uses Redis-backed claim helper for recurring scheduler loops", () => {
-        const workersPath = path.resolve(__dirname, "../workers/index.ts");
-        const workersSource = fs.readFileSync(workersPath, "utf8");
-
-        expect(workersSource).toMatch(
-            /let schedulerLockRedis: Redis = createIORedisClient\(\s*"worker-scheduler-locks",\s*jestLazyConnectOverride,?\s*\)/,
-        );
-        expect(workersSource).toContain(
-            "async function runWithSchedulerClaim(",
-        );
-        expect(workersSource).toContain(
-            "async function withSchedulerClaimRedisRetry<",
-        );
-        expect(workersSource).toContain(
-            "failed due to Redis connection closure (attempt",
-        );
-        expect(workersSource).toContain(
-            '"scheduler-claim:reconciliation-cycle"',
-        );
-        expect(workersSource).toContain(
-            '"scheduler-claim:lidarr-cleanup-cycle"',
-        );
-        expect(workersSource).toContain('"scheduler-claim:data-integrity"');
-        expect(workersSource).toContain("SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD");
-    });
-
     it("registers queue-backed repeatable scheduler jobs", () => {
         const workersPath = path.resolve(__dirname, "../workers/index.ts");
         const workersSource = fs.readFileSync(workersPath, "utf8");

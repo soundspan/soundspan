@@ -773,6 +773,10 @@ async function gracefulShutdown(signal: string) {
         if (workersInitialized) {
             const { shutdownWorkers } = await import("./workers");
             await shutdownWorkers();
+        } else if (runApiRole) {
+            const { shutdownSchedulerClaimRedis } =
+                await import("./utils/schedulerClaim");
+            await shutdownSchedulerClaimRedis();
         }
 
         // Close Redis connection (node-redis v5+ replaced quit() with close())

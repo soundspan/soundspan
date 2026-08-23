@@ -11,7 +11,7 @@ describe("worker shutdown resilience contract", () => {
     const workersSource = fs.readFileSync(workersPath, "utf8");
     const unifiedSource = fs.readFileSync(unifiedPath, "utf8");
 
-    it("awaits enrichment worker stop and keeps queue processing alive until queue close", () => {
+    it("awaits enrichment worker stop and keeps enrichment state alive until queue close", () => {
         expect(workersSource).toContain("await stopUnifiedEnrichmentWorker()");
 
         const queueCloseIndex = workersSource.indexOf(
@@ -20,13 +20,9 @@ describe("worker shutdown resilience contract", () => {
         const enrichmentDisconnectIndex = workersSource.indexOf(
             "await enrichmentStateService.disconnect()",
         );
-        const schedulerLockDisconnectIndex = workersSource.indexOf(
-            "await schedulerLockRedis.quit()",
-        );
 
         expect(queueCloseIndex).toBeGreaterThan(-1);
         expect(enrichmentDisconnectIndex).toBeGreaterThan(queueCloseIndex);
-        expect(schedulerLockDisconnectIndex).toBeGreaterThan(queueCloseIndex);
     });
 
     it("waits for active enrichment cycle and updates state before local redis teardown", () => {

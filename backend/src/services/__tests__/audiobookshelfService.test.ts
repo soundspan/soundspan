@@ -236,6 +236,367 @@ describe("audiobookshelf service behavior", () => {
         );
     });
 
+    it("assembles every page from a paginated library response", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1" }],
+                    total: 2,
+                    limit: 1,
+                    page: 0,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-2" }],
+                    total: 2,
+                    limit: 1,
+                    page: 1,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1" }],
+                    total: 2,
+                    limit: 1,
+                    page: 0,
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getLibraryItems("book-lib"),
+        ).resolves.toEqual([{ id: "book-1" }, { id: "book-2" }]);
+        expect(client.get).toHaveBeenNthCalledWith(
+            1,
+            "/api/libraries/book-lib/items",
+            { params: { limit: 0 } },
+        );
+        expect(client.get).toHaveBeenNthCalledWith(
+            2,
+            "/api/libraries/book-lib/items",
+            { params: { limit: 1, page: 1 } },
+        );
+        expect(client.get).toHaveBeenNthCalledWith(
+            3,
+            "/api/libraries/book-lib/items",
+            { params: { limit: 1, page: 0 } },
+        );
+    });
+
+    it("marks a single-response limit=0 listing verified", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    libraries: [{ id: "book-lib", mediaType: "book" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 1,
+                    limit: 0,
+                    page: 0,
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getAudiobookListing(),
+        ).resolves.toEqual({
+            books: [{ id: "book-1", libraryId: "book-lib" }],
+            verifiedCompleteLibraryIds: new Set(["book-lib"]),
+        });
+        expect(client.get).toHaveBeenNthCalledWith(
+            2,
+            "/api/libraries/book-lib/items",
+            { params: { limit: 0 } },
+        );
+    });
+
+    it("marks a multi-page listing unverified when the stability total drifts", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    libraries: [{ id: "book-lib", mediaType: "book" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 0,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-2", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 1,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 3,
+                    limit: 1,
+                    page: 0,
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getAudiobookListing(),
+        ).resolves.toEqual({
+            books: [
+                { id: "book-1", libraryId: "book-lib" },
+                { id: "book-2", libraryId: "book-lib" },
+            ],
+            verifiedCompleteLibraryIds: new Set(),
+        });
+    });
+
+    it("marks a stable multi-page listing verified after rechecking page zero", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    libraries: [{ id: "book-lib", mediaType: "book" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 0,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-2", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 1,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 0,
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getAudiobookListing(),
+        ).resolves.toEqual({
+            books: [
+                { id: "book-1", libraryId: "book-lib" },
+                { id: "book-2", libraryId: "book-lib" },
+            ],
+            verifiedCompleteLibraryIds: new Set(["book-lib"]),
+        });
+        expect(client.get).toHaveBeenLastCalledWith(
+            "/api/libraries/book-lib/items",
+            { params: { limit: 1, page: 0 } },
+        );
+    });
+
+    it("rejects a library listing whose unique id count is below total", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    libraries: [{ id: "book-lib", mediaType: "book" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 10,
+                    page: 0,
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getAudiobookListing(),
+        ).rejects.toThrow(
+            "Audiobookshelf returned an incomplete library items response",
+        );
+    });
+
+    it("deduplicates page items by id and rejects when duplicates hide a missing item", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    libraries: [{ id: "book-lib", mediaType: "book" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 0,
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                    total: 2,
+                    limit: 1,
+                    page: 1,
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getAudiobookListing(),
+        ).rejects.toThrow(
+            "Audiobookshelf returned an incomplete library items response",
+        );
+    });
+
+    it("syncs an unpaginated listing without total but excludes it from pruning", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get
+            .mockResolvedValueOnce({
+                data: {
+                    libraries: [{ id: "book-lib", mediaType: "book" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    results: [{ id: "book-1", libraryId: "book-lib" }],
+                },
+            });
+
+        await expect(
+            audiobookshelfService.getAudiobookListing(),
+        ).resolves.toEqual({
+            books: [{ id: "book-1", libraryId: "book-lib" }],
+            verifiedCompleteLibraryIds: new Set(),
+        });
+    });
+
+    it("rejects an incomplete listing that has no usable page limit", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get.mockResolvedValueOnce({
+            data: {
+                results: [{ id: "book-1" }],
+                total: 2,
+                limit: 0,
+                page: 0,
+            },
+        });
+
+        await expect(
+            audiobookshelfService.getLibraryItems("book-lib"),
+        ).rejects.toThrow(
+            "Audiobookshelf returned an incomplete library items response",
+        );
+        expect(client.get).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a complete single-page library response unchanged", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get.mockResolvedValueOnce({
+            data: {
+                results: [{ id: "book-1" }],
+                total: 1,
+                limit: 10,
+                page: 0,
+            },
+        });
+
+        await expect(
+            audiobookshelfService.getLibraryItems("book-lib"),
+        ).resolves.toEqual([{ id: "book-1" }]);
+        expect(client.get).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a malformed libraries response", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get.mockResolvedValueOnce({ data: {} });
+
+        await expect(audiobookshelfService.getLibraries()).rejects.toThrow(
+            "Audiobookshelf returned a malformed libraries response",
+        );
+    });
+
+    it("rejects a malformed item response while aggregating book libraries", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        client.get.mockImplementation(async (url: string) => {
+            if (url === "/api/libraries") {
+                return {
+                    data: {
+                        libraries: [
+                            { id: "healthy-lib", mediaType: "book" },
+                            { id: "malformed-lib", mediaType: "book" },
+                        ],
+                    },
+                };
+            }
+            if (url === "/api/libraries/healthy-lib/items") {
+                return { data: { results: [{ id: "healthy-book" }] } };
+            }
+            return { data: {} };
+        });
+
+        await expect(audiobookshelfService.getAllAudiobooks()).rejects.toThrow(
+            "Audiobookshelf returned a malformed library items response",
+        );
+    });
+
     it("caches podcast responses and tolerates failed podcast libraries", async () => {
         const client = createClient();
         const svc = audiobookshelfService as any;

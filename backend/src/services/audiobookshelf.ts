@@ -18,6 +18,7 @@ const STREAM_HEADER_TIMEOUT_MS = 30_000;
 const AUDIOBOOK_STREAM_MAP_CACHE_TTL_MS = 15 * 60 * 1000;
 const AUDIOBOOK_STREAM_MAP_CACHE_MAX_ITEMS = 256;
 const MAX_AUDIOBOOK_TRACKS = 10_000;
+const MAX_LIBRARY_ITEM_PAGE_REQUESTS = 1_000;
 const UNSAFE_AUDIO_TRACK_URL_ERROR =
     "Audiobookshelf returned an unsafe audio track URL";
 
@@ -102,6 +103,136 @@ type StreamSlicesInput = Readonly<{
     signal: AbortSignal;
     detachDisconnect(): void;
 }>;
+
+type LibraryItemsPage = Readonly<{
+    items: any[];
+    total?: number;
+    limit?: number;
+    page?: number;
+}>;
+
+type LibraryItemListing = Readonly<{
+    items: any[];
+    verifiedComplete: boolean;
+}>;
+
+/** Audiobook items plus libraries whose listings were proven complete. */
+export type AudiobookListing = Readonly<{
+    books: any[];
+    verifiedCompleteLibraryIds: ReadonlySet<string>;
+}>;
+
+function hasNonEmptyItemId(item: any): item is { id: string } {
+    return typeof item?.id === "string" && item.id.trim().length > 0;
+}
+
+function deduplicateLibraryItems(items: any[]): Readonly<{
+    items: any[];
+    uniqueIdCount: number;
+    allHaveIds: boolean;
+}> {
+    const seenIds = new Set<string>();
+    const uniqueItems: any[] = [];
+    let allHaveIds = true;
+    for (const item of items) {
+        if (!hasNonEmptyItemId(item)) {
+            allHaveIds = false;
+            uniqueItems.push(item);
+            continue;
+        }
+        if (seenIds.has(item.id)) continue;
+        seenIds.add(item.id);
+        uniqueItems.push(item);
+    }
+    return {
+        items: uniqueItems,
+        uniqueIdCount: seenIds.size,
+        allHaveIds,
+    };
+}
+
+function completeLibraryItemListing(
+    items: any[],
+    total: number | undefined,
+): LibraryItemListing {
+    const deduplicated = deduplicateLibraryItems(items);
+    if (total !== undefined && deduplicated.uniqueIdCount !== total) {
+        throw incompleteLibraryItemsError();
+    }
+    return {
+        items: deduplicated.items,
+        verifiedComplete: total !== undefined && deduplicated.allHaveIds,
+    };
+}
+
+function parseLibraryItemsPage(payload: unknown): LibraryItemsPage {
+    const data = payload as Record<string, unknown> | null;
+    if (!data || !Array.isArray(data.results)) {
+        throw new Error(
+            "Audiobookshelf returned a malformed library items response",
+        );
+    }
+    return {
+        items: data.results,
+        ...(typeof data.total === "number" ? { total: data.total } : {}),
+        ...(typeof data.limit === "number" ? { limit: data.limit } : {}),
+        ...(typeof data.page === "number" ? { page: data.page } : {}),
+    };
+}
+
+function incompleteLibraryItemsError(): Error {
+    return new Error(
+        "Audiobookshelf returned an incomplete library items response",
+    );
+}
+
+function hasRemainingLibraryItemPages(firstPage: LibraryItemsPage): boolean {
+    if (firstPage.limit === undefined) {
+        if (firstPage.page !== undefined) throw incompleteLibraryItemsError();
+        return false;
+    }
+    const initialPage = firstPage.page ?? 0;
+    if (
+        !Number.isSafeInteger(firstPage.limit) ||
+        firstPage.limit <= 0 ||
+        !Number.isSafeInteger(initialPage) ||
+        initialPage !== 0
+    ) {
+        throw incompleteLibraryItemsError();
+    }
+    return Math.ceil((firstPage.total ?? 0) / firstPage.limit) > 1;
+}
+
+function libraryItemIdSet(items: any[]): Set<string> | null {
+    const ids = new Set<string>();
+    for (const item of items) {
+        if (!hasNonEmptyItemId(item) || ids.has(item.id)) return null;
+        ids.add(item.id);
+    }
+    return ids;
+}
+
+function pageZeroSampleIsStable(
+    firstPage: LibraryItemsPage,
+    recheckPage: LibraryItemsPage,
+    assembledItems: any[],
+): boolean {
+    if (
+        recheckPage.total !== firstPage.total ||
+        recheckPage.limit !== firstPage.limit ||
+        (recheckPage.page ?? 0) !== 0
+    ) {
+        return false;
+    }
+    const firstIds = libraryItemIdSet(firstPage.items);
+    const recheckIds = libraryItemIdSet(recheckPage.items);
+    const assembledIds = libraryItemIdSet(assembledItems);
+    if (!firstIds || !recheckIds || !assembledIds) return false;
+    if (firstIds.size !== recheckIds.size) return false;
+    return [...recheckIds].every(
+        (id) => firstIds.has(id) && assembledIds.has(id),
+    );
+}
 
 function resolveStreamContentPath(
     contentUrl: unknown,
@@ -432,32 +563,155 @@ class AudiobookshelfService {
     async getLibraries() {
         await this.ensureInitialized();
         const response = await this.client!.get("/api/libraries");
-        return response.data.libraries || [];
+        const libraries = response.data?.libraries;
+        if (!Array.isArray(libraries)) {
+            throw new Error(
+                "Audiobookshelf returned a malformed libraries response",
+            );
+        }
+        return libraries;
     }
 
     /**
      * Get all audiobooks from a specific library
      */
     async getLibraryItems(libraryId: string) {
+        const listing = await this.getLibraryItemListing(libraryId);
+        return listing.items;
+    }
+
+    private async getLibraryItemListing(
+        libraryId: string,
+    ): Promise<LibraryItemListing> {
         await this.ensureInitialized();
-        const response = await this.client!.get(
-            `/api/libraries/${libraryId}/items`,
+        const path = `/api/libraries/${libraryId}/items`;
+        const response = await this.client!.get(path, {
+            params: { limit: 0 },
+        });
+        const firstPage = parseLibraryItemsPage(response.data);
+        if (firstPage.total === undefined) {
+            if (firstPage.limit !== undefined || firstPage.page !== undefined) {
+                throw incompleteLibraryItemsError();
+            }
+            return completeLibraryItemListing(firstPage.items, undefined);
+        }
+        if (!Number.isSafeInteger(firstPage.total) || firstPage.total < 0) {
+            throw incompleteLibraryItemsError();
+        }
+        if (firstPage.items.length >= firstPage.total) {
+            return completeLibraryItemListing(firstPage.items, firstPage.total);
+        }
+        if (!hasRemainingLibraryItemPages(firstPage)) {
+            return completeLibraryItemListing(firstPage.items, firstPage.total);
+        }
+        return this.getRemainingLibraryItemPages(path, firstPage);
+    }
+
+    private async getRemainingLibraryItemPages(
+        path: string,
+        firstPage: LibraryItemsPage,
+    ): Promise<LibraryItemListing> {
+        const { total, limit } = firstPage;
+        const initialPage = firstPage.page ?? 0;
+        if (
+            total === undefined ||
+            limit === undefined ||
+            !Number.isSafeInteger(limit) ||
+            limit <= 0 ||
+            !Number.isSafeInteger(initialPage) ||
+            initialPage !== 0
+        ) {
+            throw incompleteLibraryItemsError();
+        }
+
+        const pageCount = Math.ceil(total / limit);
+        if (pageCount - 1 > MAX_LIBRARY_ITEM_PAGE_REQUESTS) {
+            throw incompleteLibraryItemsError();
+        }
+
+        const items = [...firstPage.items];
+        for (
+            let page = 1;
+            page <= MAX_LIBRARY_ITEM_PAGE_REQUESTS && page < pageCount;
+            page += 1
+        ) {
+            const response = await this.client!.get(path, {
+                params: { limit, page },
+            });
+            const nextPage = parseLibraryItemsPage(response.data);
+            if (nextPage.page !== undefined && nextPage.page !== page) {
+                throw incompleteLibraryItemsError();
+            }
+            if (nextPage.total !== undefined && nextPage.total !== total) {
+                throw incompleteLibraryItemsError();
+            }
+            items.push(...nextPage.items);
+        }
+        if (items.length < total) throw incompleteLibraryItemsError();
+        const listing = completeLibraryItemListing(items, total);
+        const stable = await this.recheckLibraryItemAssembly(
+            path,
+            firstPage,
+            listing.items,
         );
-        return response.data.results || [];
+        // Residual accepted window: an equal-total replacement outside page 0
+        // can still evade this multi-page check. The ABS book returns on the next
+        // incremental sync, but its local listening progress may have been lost.
+        return {
+            items: listing.items,
+            verifiedComplete: listing.verifiedComplete && stable,
+        };
+    }
+
+    private async recheckLibraryItemAssembly(
+        path: string,
+        firstPage: LibraryItemsPage,
+        assembledItems: any[],
+    ): Promise<boolean> {
+        try {
+            const response = await this.client!.get(path, {
+                params: { limit: firstPage.limit, page: 0 },
+            });
+            const recheckPage = parseLibraryItemsPage(response.data);
+            return pageZeroSampleIsStable(
+                firstPage,
+                recheckPage,
+                assembledItems,
+            );
+        } catch (error: unknown) {
+            logger.warn(
+                "Audiobookshelf library listing stability recheck failed; pruning is disabled for this library",
+                { error },
+            );
+            return false;
+        }
     }
 
     /**
      * Get all audiobooks from all libraries
      */
     async getAllAudiobooks() {
+        const listing = await this.getAudiobookListing();
+        return listing.books;
+    }
+
+    /**
+     * Get all audiobooks and record which per-library listings are complete.
+     */
+    async getAudiobookListing(): Promise<AudiobookListing> {
         await this.ensureInitialized();
         const libraries = await this.getLibraries();
 
         const allBooks: any[] = [];
+        const verifiedCompleteLibraryIds = new Set<string>();
         for (const library of libraries) {
             if (library.mediaType === "book") {
                 // Only get audiobook libraries
-                const items = await this.getLibraryItems(library.id);
+                const listing = await this.getLibraryItemListing(library.id);
+                const items = listing.items;
+                if (listing.verifiedComplete) {
+                    verifiedCompleteLibraryIds.add(library.id);
+                }
 
                 // DEBUG: Log the structure of the first item with series
                 if (items.length > 0) {
@@ -490,7 +744,7 @@ class AudiobookshelfService {
             }
         }
 
-        return allBooks;
+        return { books: allBooks, verifiedCompleteLibraryIds };
     }
 
     /**

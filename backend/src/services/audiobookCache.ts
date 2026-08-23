@@ -6,8 +6,19 @@ import path from "path";
 import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { buildCachePath, isPastStaleWindow } from "./cacheHelpers";
-import { buildSafeAudiobookCoverUrl } from "./audiobookCoverProxy";
+import { safeResolvePath } from "../utils/safeResolvePath";
+import {
+    buildSafeAudiobookCoverUrl,
+    safeCoverFilename,
+} from "./audiobookCoverProxy";
 import { buildSectionsWhenPresent } from "./audiobookSections";
+import {
+    AUDIOBOOK_SYNC_CLAIM_KEY,
+    AUDIOBOOK_SYNC_CLAIM_TTL_MS,
+    AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+    runWithSchedulerClaim,
+} from "../utils/schedulerClaim";
+import { withTimeout } from "../utils/withTimeout";
 import {
     MAX_EXTERNAL_IMAGE_BYTES,
     readResponseBodyWithByteCap,
@@ -23,10 +34,44 @@ interface SyncResult {
     synced: number;
     failed: number;
     skipped: number;
+    deleted: number;
     errors: string[];
 }
 
 const AUDIOBOOK_CACHE_STALE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const AUDIOBOOK_PRUNE_BATCH_SIZE = 100;
+const audiobookCacheLogger = logger.child("AudiobookCache");
+const AUDIOBOOK_SYNC_TIMEOUT_MESSAGE = `Full audiobook sync timed out after ${AUDIOBOOK_SYNC_WORK_TIMEOUT_MS}ms`;
+
+type LocalAudiobookRow = {
+    id: string;
+    localCoverPath: string | null;
+};
+
+function hasNonEmptyAudiobookId(book: any): boolean {
+    return typeof book?.id === "string" && book.id.trim().length > 0;
+}
+
+function createSyncResult(): SyncResult {
+    return {
+        synced: 0,
+        failed: 0,
+        skipped: 0,
+        deleted: 0,
+        errors: [],
+    };
+}
+
+class AudiobookSyncTimeoutError extends Error {
+    constructor() {
+        super(AUDIOBOOK_SYNC_TIMEOUT_MESSAGE);
+        this.name = "AudiobookSyncTimeoutError";
+    }
+}
+
+function throwIfSyncDeadlineExpired(deadlineMs: number): void {
+    if (Date.now() >= deadlineMs) throw new AudiobookSyncTimeoutError();
+}
 
 /**
  * Represents the AudiobookCacheService class.
@@ -66,46 +111,74 @@ export class AudiobookCacheService {
     }
 
     /**
-     * Sync all audiobooks from Audiobookshelf to our database
+     * Sync all Audiobookshelf books and destructively reconcile the local cache.
+     * Removes absent local rows, cached covers, progress, and playback references,
+     * and writes federation tombstones when enabled. Empty or malformed listings
+     * skip pruning.
      */
     async syncAll(): Promise<SyncResult> {
-        const result: SyncResult = {
-            synced: 0,
-            failed: 0,
-            skipped: 0,
-            errors: [],
-        };
-
         try {
-            logger.debug(" Starting audiobook sync from Audiobookshelf...");
-
-            // Try to ensure cover cache directory exists (non-fatal if it fails)
-            await this.ensureCoverCacheDir();
-
-            // Fetch all audiobooks from Audiobookshelf
-            const audiobooks = await audiobookshelfService.getAllAudiobooks();
-
-            logger.debug(
-                `[AUDIOBOOK] Found ${audiobooks.length} audiobooks in Audiobookshelf`,
+            const locked = await withTimeout(
+                () =>
+                    runWithSchedulerClaim(
+                        AUDIOBOOK_SYNC_CLAIM_KEY,
+                        AUDIOBOOK_SYNC_CLAIM_TTL_MS,
+                        "full audiobook sync",
+                        () =>
+                            this.syncAllLocked(
+                                Date.now() + AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+                            ),
+                    ),
+                AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+                "full audiobook sync",
+                audiobookCacheLogger,
             );
-
-            await this.syncBooks(audiobooks, result, { logEachBook: true });
-
-            logger.debug("\nSync Summary:");
-            logger.debug(`  Synced: ${result.synced}`);
-            logger.debug(`   Failed: ${result.failed}`);
-            logger.debug(`    Skipped: ${result.skipped}`);
-
-            if (result.errors.length > 0) {
-                logger.debug("\n[ERRORS]:");
-                result.errors.forEach((err) => logger.debug(`  - ${err}`));
+            if (!locked) throw new AudiobookSyncTimeoutError();
+            if (!locked.acquired) {
+                throw new Error("audiobook sync already running");
             }
-
-            return result;
+            return locked.value;
         } catch (error: any) {
             logger.error(" Audiobook sync failed:", error);
             throw error;
         }
+    }
+
+    private async syncAllLocked(deadlineMs: number): Promise<SyncResult> {
+        const result = createSyncResult();
+        logger.debug(" Starting audiobook sync from Audiobookshelf...");
+        await this.ensureCoverCacheDir();
+        const pruneCutoff = new Date();
+        const listing = await audiobookshelfService.getAudiobookListing();
+        const audiobooks = listing.books;
+        logger.debug(
+            `[AUDIOBOOK] Found ${audiobooks.length} audiobooks in Audiobookshelf`,
+        );
+        await this.syncBooks(
+            audiobooks,
+            result,
+            { logEachBook: true },
+            deadlineMs,
+        );
+        result.deleted = await this.pruneMissingAudiobooks(
+            audiobooks,
+            listing.verifiedCompleteLibraryIds,
+            pruneCutoff,
+            deadlineMs,
+        );
+        this.logSyncSummary(result);
+        return result;
+    }
+
+    private logSyncSummary(result: SyncResult): void {
+        logger.debug("\nSync Summary:");
+        logger.debug(`  Synced: ${result.synced}`);
+        logger.debug(`   Failed: ${result.failed}`);
+        logger.debug(`    Skipped: ${result.skipped}`);
+        logger.debug(`    Deleted: ${result.deleted}`);
+        if (result.errors.length === 0) return;
+        logger.debug("\n[ERRORS]:");
+        result.errors.forEach((error) => logger.debug(`  - ${error}`));
     }
 
     /**
@@ -114,60 +187,95 @@ export class AudiobookCacheService {
      * It is lighter than syncAll because cached books skip upserts and cover work.
      */
     async syncMissing(): Promise<SyncResult> {
-        const result: SyncResult = {
-            synced: 0,
-            failed: 0,
-            skipped: 0,
-            errors: [],
-        };
-
         try {
-            const audiobooks = await audiobookshelfService.getAllAudiobooks();
-
-            if (audiobooks.length === 0) {
-                return result;
+            const locked = await runWithSchedulerClaim(
+                AUDIOBOOK_SYNC_CLAIM_KEY,
+                AUDIOBOOK_SYNC_CLAIM_TTL_MS,
+                "incremental audiobook sync",
+                () =>
+                    this.syncMissingLocked(
+                        Date.now() + AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+                    ),
+            );
+            if (!locked.acquired) {
+                audiobookCacheLogger.debug(
+                    "Skipped incremental audiobook sync because another audiobook sync is running",
+                );
+                return createSyncResult();
             }
-
-            const cachedAudiobooks = await prisma.audiobook.findMany({
-                where: { peerId: null },
-                select: { id: true },
-            });
-            const cachedIds = new Set(
-                cachedAudiobooks.map((audiobook) => audiobook.id),
-            );
-            const missingAudiobooks = audiobooks.filter(
-                (audiobook) => !cachedIds.has(audiobook.id),
-            );
-
-            result.skipped = audiobooks.length - missingAudiobooks.length;
-
-            if (missingAudiobooks.length === 0) {
-                return result;
-            }
-
-            await this.ensureCoverCacheDir();
-
-            await this.syncBooks(missingAudiobooks, result, {
-                logEachBook: false,
-            });
-
-            logger.debug(
-                `[AUDIOBOOK] Incremental sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
-            );
-
-            return result;
+            return locked.value;
         } catch (error: any) {
             logger.error(" Audiobook incremental sync failed:", error);
             throw error;
         }
     }
 
+    private async syncMissingLocked(deadlineMs: number): Promise<SyncResult> {
+        const result = createSyncResult();
+        const audiobooks = await audiobookshelfService.getAllAudiobooks();
+        if (audiobooks.length === 0) return result;
+        const cachedAudiobooks = await prisma.audiobook.findMany({
+            where: { peerId: null },
+            select: { id: true },
+        });
+        const cachedIds = new Set(
+            cachedAudiobooks.map((audiobook) => audiobook.id),
+        );
+        const missingAudiobooks = audiobooks.filter(
+            (audiobook) => !cachedIds.has(audiobook.id),
+        );
+        result.skipped = audiobooks.length - missingAudiobooks.length;
+        if (missingAudiobooks.length === 0) return result;
+        await this.ensureCoverCacheDir();
+        await this.syncBooks(
+            missingAudiobooks,
+            result,
+            {
+                logEachBook: false,
+            },
+            deadlineMs,
+        );
+        logger.debug(
+            `[AUDIOBOOK] Incremental sync complete: ${result.synced} new, ${result.skipped} already cached or skipped, ${result.failed} failed`,
+        );
+        return result;
+    }
+
+    private async findFederatedCollisionIds(
+        books: any[],
+    ): Promise<Set<string>> {
+        const ids = books
+            .filter(hasNonEmptyAudiobookId)
+            .map((book) => book.id as string);
+        if (ids.length === 0) return new Set();
+        const rows = await prisma.audiobook.findMany({
+            where: {
+                id: { in: ids },
+                peerId: { not: null },
+            },
+            select: { id: true },
+        });
+        return new Set(rows.map((row) => row.id));
+    }
+
     private async syncBooks(
         books: any[],
         result: SyncResult,
         options: { logEachBook: boolean },
+        deadlineMs: number,
     ): Promise<void> {
+        const federatedCollisionIds =
+            await this.findFederatedCollisionIds(books);
         for (const book of books) {
+            throwIfSyncDeadlineExpired(deadlineMs);
+            if (federatedCollisionIds.has(book.id)) {
+                result.skipped++;
+                audiobookCacheLogger.warn(
+                    "Skipped ABS book whose id collides with a federated audiobook",
+                    { audiobookId: book.id },
+                );
+                continue;
+            }
             const metadata = book.media?.metadata || book;
             const title = metadata.title || book.title || "Unknown Title";
             const author =
@@ -189,6 +297,263 @@ export class AudiobookCacheService {
                 logger.error(` ${errorMsg}`, error);
             }
         }
+    }
+
+    private async pruneMissingAudiobooks(
+        books: any[],
+        verifiedCompleteLibraryIds: ReadonlySet<string>,
+        pruneCutoff: Date,
+        deadlineMs: number,
+    ): Promise<number> {
+        if (!books.every(hasNonEmptyAudiobookId)) {
+            audiobookCacheLogger.warn(
+                "Skipped pruning audiobooks because Audiobookshelf returned a malformed listing",
+            );
+            return 0;
+        }
+
+        const localRowCount = await prisma.audiobook.count({
+            where: {
+                peerId: null,
+                lastSyncedAt: { lt: pruneCutoff },
+            },
+        });
+
+        if (books.length === 0 && localRowCount > 0) {
+            audiobookCacheLogger.warn(
+                "Skipped pruning audiobooks because Audiobookshelf returned an empty listing; the configured library may be unavailable",
+            );
+            return 0;
+        }
+
+        const verifiedLibraryIds = await this.getPrunableLibraryIds(
+            books,
+            verifiedCompleteLibraryIds,
+        );
+        await this.logSkippedPruneRows(verifiedLibraryIds, pruneCutoff);
+        const localRows = await prisma.audiobook.findMany({
+            where: {
+                peerId: null,
+                libraryId: { in: verifiedLibraryIds },
+                lastSyncedAt: { lt: pruneCutoff },
+            },
+            select: { id: true, localCoverPath: true },
+        });
+        const listedIds = new Set(books.map((book) => book.id));
+        const staleRows = localRows.filter((row) => !listedIds.has(row.id));
+        return this.pruneAudiobookBatches(staleRows, pruneCutoff, deadlineMs);
+    }
+
+    private async getPrunableLibraryIds(
+        books: any[],
+        verifiedLibraryIds: ReadonlySet<string>,
+    ): Promise<string[]> {
+        const listedLibraryIds = new Set(
+            books
+                .map((book) => book.libraryId)
+                .filter(
+                    (libraryId): libraryId is string =>
+                        typeof libraryId === "string" && libraryId.length > 0,
+                ),
+        );
+        const prunableLibraryIds: string[] = [];
+        for (const libraryId of verifiedLibraryIds) {
+            if (listedLibraryIds.has(libraryId)) {
+                prunableLibraryIds.push(libraryId);
+                continue;
+            }
+            const localRowCount = await prisma.audiobook.count({
+                where: { peerId: null, libraryId },
+            });
+            if (localRowCount === 0) {
+                prunableLibraryIds.push(libraryId);
+                continue;
+            }
+            audiobookCacheLogger.warn(
+                `Skipped pruning audiobook library ${libraryId} because Audiobookshelf returned an empty listing while ${localRowCount} local rows exist`,
+            );
+        }
+        return prunableLibraryIds;
+    }
+
+    private async logSkippedPruneRows(
+        verifiedLibraryIds: string[],
+        pruneCutoff: Date,
+    ): Promise<void> {
+        const baseWhere = {
+            peerId: null,
+            lastSyncedAt: { lt: pruneCutoff },
+        } as const;
+        const [unknownLibraryCount, unverifiedLibraryCount] = await Promise.all(
+            [
+                prisma.audiobook.count({
+                    where: { ...baseWhere, libraryId: null },
+                }),
+                prisma.audiobook.count({
+                    where: {
+                        ...baseWhere,
+                        libraryId: {
+                            not: null,
+                            notIn: verifiedLibraryIds,
+                        },
+                    },
+                }),
+            ],
+        );
+        if (unknownLibraryCount > 0) {
+            audiobookCacheLogger.warn(
+                `skipped ${unknownLibraryCount} audiobooks with unknown library during prune`,
+            );
+        }
+        if (unverifiedLibraryCount > 0) {
+            audiobookCacheLogger.debug(
+                `Skipped ${unverifiedLibraryCount} audiobooks from libraries without verified-complete listings during prune`,
+            );
+        }
+    }
+
+    private async pruneAudiobookBatches(
+        staleRows: LocalAudiobookRow[],
+        pruneCutoff: Date,
+        deadlineMs: number,
+    ): Promise<number> {
+        let deleted = 0;
+        for (
+            let offset = 0;
+            offset < staleRows.length;
+            offset += AUDIOBOOK_PRUNE_BATCH_SIZE
+        ) {
+            throwIfSyncDeadlineExpired(deadlineMs);
+            const batch = staleRows.slice(
+                offset,
+                offset + AUDIOBOOK_PRUNE_BATCH_SIZE,
+            );
+            const deletedRows = await this.deleteAudiobookBatch(
+                batch,
+                pruneCutoff,
+            );
+            deleted += deletedRows.length;
+            await this.unlinkAudiobookCovers(deletedRows);
+        }
+        return deleted;
+    }
+
+    private async deleteAudiobookBatch(
+        batch: LocalAudiobookRow[],
+        pruneCutoff: Date,
+    ): Promise<LocalAudiobookRow[]> {
+        const ids = batch.map((row) => row.id);
+        return prisma.$transaction(async (transaction) => {
+            const result = await transaction.audiobook.deleteMany({
+                where: {
+                    id: { in: ids },
+                    peerId: null,
+                    lastSyncedAt: { lt: pruneCutoff },
+                },
+            });
+            const deletedRows = await this.resolveDeletedAudiobooks(
+                transaction,
+                batch,
+                result.count,
+            );
+            const deletedIds = deletedRows.map((row) => row.id);
+            await this.deleteAudiobookUserState(transaction, deletedIds);
+            await this.writeAudiobookTombstones(transaction, deletedIds);
+            return deletedRows;
+        });
+    }
+
+    private async resolveDeletedAudiobooks(
+        transaction: Prisma.TransactionClient,
+        selected: LocalAudiobookRow[],
+        deletedCount: number,
+    ): Promise<LocalAudiobookRow[]> {
+        if (deletedCount === selected.length) return selected;
+        const remaining = await transaction.audiobook.findMany({
+            where: { id: { in: selected.map((row) => row.id) } },
+            select: { id: true },
+        });
+        const remainingIds = new Set(remaining.map((row) => row.id));
+        const deletedRows = selected.filter((row) => !remainingIds.has(row.id));
+        if (deletedRows.length !== deletedCount) {
+            throw new Error(
+                "Audiobook deletion count changed during prune cleanup",
+            );
+        }
+        return deletedRows;
+    }
+
+    private async deleteAudiobookUserState(
+        transaction: Prisma.TransactionClient,
+        audiobookIds: string[],
+    ): Promise<void> {
+        if (audiobookIds.length === 0) return;
+        await transaction.audiobookProgress.deleteMany({
+            where: { audiobookshelfId: { in: audiobookIds } },
+        });
+        await transaction.playbackState.updateMany({
+            where: { audiobookId: { in: audiobookIds } },
+            data: { audiobookId: null },
+        });
+    }
+
+    private async writeAudiobookTombstones(
+        transaction: Prisma.TransactionClient,
+        audiobookIds: string[],
+    ): Promise<void> {
+        if (!config.features.federation || audiobookIds.length === 0) return;
+        await transaction.federationTombstone.createMany({
+            data: audiobookIds.map((entityId) => ({
+                entityType: "audiobook",
+                entityId,
+            })),
+        });
+    }
+
+    private async unlinkAudiobookCovers(
+        deletedRows: LocalAudiobookRow[],
+    ): Promise<void> {
+        for (const row of deletedRows) {
+            await this.unlinkAudiobookCover(row);
+        }
+    }
+
+    private async unlinkAudiobookCover(row: LocalAudiobookRow): Promise<void> {
+        const coverPath = this.resolveAudiobookCoverPath(row);
+        if (!coverPath) return;
+        try {
+            await fs.unlink(coverPath);
+        } catch (error: unknown) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+            audiobookCacheLogger.warn("Failed to delete audiobook cover", {
+                audiobookId: row.id,
+                coverPath,
+                error,
+            });
+        }
+    }
+
+    private resolveAudiobookCoverPath(row: LocalAudiobookRow): string | null {
+        const cacheDir = path.resolve(this.coverCacheDir);
+        const relativeCoverPath =
+            row.localCoverPath ?? safeCoverFilename(row.id);
+        if (!relativeCoverPath) {
+            this.warnUnsafeCoverId(row.id);
+            return null;
+        }
+        const coverPath = safeResolvePath(cacheDir, relativeCoverPath);
+        if (coverPath) return coverPath;
+        audiobookCacheLogger.warn("Skipped unsafe audiobook cover path", {
+            audiobookId: row.id,
+        });
+        return null;
+    }
+
+    private warnUnsafeCoverId(audiobookId: string): void {
+        audiobookCacheLogger.warn(
+            "Skipped audiobook cover operation for unsafe audiobook id",
+            { audiobookId },
+        );
     }
 
     /**
@@ -396,6 +761,11 @@ export class AudiobookCacheService {
         if (!this.coverCacheAvailable) {
             return null;
         }
+        const fileName = safeCoverFilename(audiobookId);
+        if (!fileName) {
+            this.warnUnsafeCoverId(audiobookId);
+            return null;
+        }
 
         try {
             // Get API key for authentication
@@ -428,7 +798,6 @@ export class AudiobookCacheService {
             if (!bodyResult.ok) {
                 return null;
             }
-            const fileName = `${audiobookId}.jpg`;
             const filePath = path.join(this.coverCacheDir, fileName);
 
             await fs.writeFile(filePath, bodyResult.buffer);
