@@ -14,7 +14,9 @@ describe("api entrypoint db resilience contract", () => {
             "PRISMA_MIGRATE_RETRY_DELAY_SECONDS",
         );
         expect(entrypointSource).toContain("too many clients already");
-        expect(entrypointSource).toContain("npx prisma migrate deploy");
+        expect(entrypointSource).toContain(
+            "./node_modules/.bin/prisma migrate deploy",
+        );
     });
 
     it("allows operators to disable startup migration/generate hooks explicitly", () => {
