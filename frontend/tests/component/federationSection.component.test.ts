@@ -256,7 +256,7 @@ test("host credential form keeps presence implicit with an explanatory note", as
         }),
     );
     assert.match(html, /Also share embeddings/);
-    assert.match(html, /Share\s+presence with trusted peers/);
+    assert.match(html, /Share\s+online presence/);
     assert.doesNotMatch(html, /checkbox[^>]*>[^<]*online user status/);
 });
 

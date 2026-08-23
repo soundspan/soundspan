@@ -29,7 +29,6 @@ type ExportUser = {
     displayName: string | null;
     settings: {
         shareOnlinePresence: boolean;
-        sharePresenceToPeers: boolean;
         shareListeningStatus: boolean;
     } | null;
     playbackStates: PlaybackState[];
@@ -120,10 +119,7 @@ function exportUser(
     heartbeatMs: number,
 ): FederationPresenceUser | null {
     const settings = user.settings;
-    if (
-        settings?.shareOnlinePresence !== true ||
-        settings.sharePresenceToPeers !== true
-    ) {
+    if (settings?.shareOnlinePresence !== true) {
         return null;
     }
     const state = user.playbackStates[0];
@@ -153,7 +149,6 @@ export async function getFederationPresenceExport(): Promise<FederationPresence>
             settings: {
                 is: {
                     shareOnlinePresence: true,
-                    sharePresenceToPeers: true,
                 },
             },
         },
@@ -164,7 +159,6 @@ export async function getFederationPresenceExport(): Promise<FederationPresence>
             settings: {
                 select: {
                     shareOnlinePresence: true,
-                    sharePresenceToPeers: true,
                     shareListeningStatus: true,
                 },
             },

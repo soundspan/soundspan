@@ -33,7 +33,7 @@ export function SocialSection({
 
             <SettingsRow
                 label="Share online presence"
-                description="Allow your account to appear in the Activity Social tab while you are online."
+                description="Allow your account to appear in the Activity Social tab while you are online. This includes servers federated with this one — remote viewers see you under a heading naming your server."
             >
                 <SettingsToggle
                     id="share-online-presence"
@@ -53,32 +53,6 @@ export function SocialSection({
                     checked={settings.shareListeningStatus}
                     onChange={(checked) =>
                         onUpdate({ shareListeningStatus: checked })
-                    }
-                />
-            </SettingsRow>
-
-            <SettingsRow
-                label="Share presence with trusted peers"
-                description="Also show your online status on servers federated with this one. Off by default; your listening status only travels if the toggle above is on too."
-            >
-                <SettingsToggle
-                    id="share-presence-to-peers"
-                    checked={settings.sharePresenceToPeers}
-                    onChange={(checked) =>
-                        onUpdate({ sharePresenceToPeers: checked })
-                    }
-                />
-            </SettingsRow>
-
-            <SettingsRow
-                label="Share public playlists with trusted peers"
-                description="Let people on federated servers browse and play your public playlists. Private playlists never leave this server."
-            >
-                <SettingsToggle
-                    id="share-playlists-to-peers"
-                    checked={settings.sharePlaylistsToPeers}
-                    onChange={(checked) =>
-                        onUpdate({ sharePlaylistsToPeers: checked })
                     }
                 />
             </SettingsRow>

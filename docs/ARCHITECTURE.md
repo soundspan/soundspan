@@ -188,8 +188,11 @@ credential and token exchange. Existing `BOTH` rows remain supported by
 authentication, health, and sync reads.
 
 Presence capability is granted implicitly to library peers, but each user stays
-hidden unless they enable both **Share online presence** and **Share presence
-with trusted peers** in their Social settings.
+hidden unless they enable **Share online presence** in their Social settings.
+That single setting controls visibility on the local instance and to federated
+peers. **Share listening status** independently controls whether track details
+are included. Every playlist marked public is available to peers with the
+`social:read` scope; users must make a playlist private to prevent peer export.
 
 The browser never receives an instance credential. Federated cover and stream
 requests use the consumer's ordinary authenticated routes; the consumer backend

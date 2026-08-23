@@ -5,7 +5,6 @@ const ANONYMOUS_OWNER_NAME = "Soundspan user";
 
 const exportEligibility = {
     isPublic: true,
-    user: { settings: { is: { sharePlaylistsToPeers: true } } },
 } as const;
 const exportedPlaylistItemWhere = {
     trackId: { not: null },
@@ -26,7 +25,7 @@ function displayName(value: string | null): string {
     return normalized ? normalized : ANONYMOUS_OWNER_NAME;
 }
 
-/** Lists one bounded offset page of public, owner-opted-in playlists. */
+/** Lists one bounded offset page of public playlists. */
 export async function getFederationPlaylistPage(input: {
     offset: number;
     limit: number;
@@ -60,7 +59,7 @@ export async function getFederationPlaylistPage(input: {
     };
 }
 
-/** Loads a bounded playlist detail after re-checking publication and owner opt-in. */
+/** Loads a bounded playlist detail after re-checking publication. */
 export async function getFederationPlaylistDetail(remoteId: string) {
     const row = await prisma.playlist.findFirst({
         where: { id: remoteId, ...exportEligibility },

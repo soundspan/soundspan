@@ -32,7 +32,6 @@ function presenceUser(overrides: Record<string, unknown> = {}) {
         displayName: "Alice",
         settings: {
             shareOnlinePresence: true,
-            sharePresenceToPeers: true,
             shareListeningStatus: true,
         },
         playbackStates: [
@@ -70,29 +69,17 @@ describe("federation presence export", () => {
 
     it.each([
         {
-            name: "peer export without online sharing",
+            name: "online sharing disabled",
             settings: {
                 shareOnlinePresence: false,
-                sharePresenceToPeers: true,
                 shareListeningStatus: true,
             },
             expected: [],
         },
         {
-            name: "online sharing without peer export",
+            name: "online sharing enabled with no other sharing flags",
             settings: {
                 shareOnlinePresence: true,
-                sharePresenceToPeers: false,
-                shareListeningStatus: true,
-            },
-            expected: [],
-        },
-        {
-            name: "peer export without track sharing",
-            settings: {
-                shareOnlinePresence: true,
-                sharePresenceToPeers: true,
-                shareListeningStatus: false,
             },
             expected: [
                 {
@@ -107,7 +94,6 @@ describe("federation presence export", () => {
             name: "all presence sharing enabled",
             settings: {
                 shareOnlinePresence: true,
-                sharePresenceToPeers: true,
                 shareListeningStatus: true,
             },
             expected: [
@@ -136,7 +122,6 @@ describe("federation presence export", () => {
                     settings: {
                         is: {
                             shareOnlinePresence: true,
-                            sharePresenceToPeers: true,
                         },
                     },
                 }),

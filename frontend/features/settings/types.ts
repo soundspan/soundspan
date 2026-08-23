@@ -18,8 +18,6 @@ export interface UserSettings {
     loudnessMode: "off" | "track" | "album" | "auto";
     shareOnlinePresence: boolean;
     shareListeningStatus: boolean;
-    sharePresenceToPeers: boolean;
-    sharePlaylistsToPeers: boolean;
     wifiOnly: boolean;
     offlineEnabled: boolean;
     maxCacheSizeMb: number;

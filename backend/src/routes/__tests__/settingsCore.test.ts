@@ -192,8 +192,6 @@ const existingSettings = {
     playbackQuality: "high",
     loudnessMode: "auto",
     shareOnlinePresence: true,
-    sharePresenceToPeers: false,
-    sharePlaylistsToPeers: false,
     shareListeningStatus: false,
     wifiOnly: true,
     offlineEnabled: false,
@@ -272,8 +270,6 @@ describe("settings routes integration", () => {
                 userId: "user-1",
                 playbackQuality: "medium",
                 shareOnlinePresence: false,
-                sharePresenceToPeers: false,
-                sharePlaylistsToPeers: false,
                 shareListeningStatus: false,
                 wifiOnly: false,
                 offlineEnabled: false,
@@ -336,32 +332,24 @@ describe("settings routes integration", () => {
         );
     });
 
-    it("updates the peer presence export preference", async () => {
+    it("strips removed peer-sharing fields from old-client updates", async () => {
         const res = await request(app)
             .post("/api/settings")
             .set(AUTH_HEADER, AUTH_VALUE)
-            .send({ sharePresenceToPeers: true });
+            .send({
+                wifiOnly: false,
+                sharePresenceToPeers: true,
+                sharePlaylistsToPeers: true,
+            });
 
         expect(res.status).toBe(200);
         expect(mockUserSettingsUpsert).toHaveBeenCalledWith({
             where: { userId: "user-1" },
-            create: { userId: "user-1", sharePresenceToPeers: true },
-            update: { sharePresenceToPeers: true },
+            create: { userId: "user-1", wifiOnly: false },
+            update: { wifiOnly: false },
         });
-    });
-
-    it("updates the peer playlist export preference", async () => {
-        const res = await request(app)
-            .post("/api/settings")
-            .set(AUTH_HEADER, AUTH_VALUE)
-            .send({ sharePlaylistsToPeers: true });
-
-        expect(res.status).toBe(200);
-        expect(mockUserSettingsUpsert).toHaveBeenCalledWith({
-            where: { userId: "user-1" },
-            create: { userId: "user-1", sharePlaylistsToPeers: true },
-            update: { sharePlaylistsToPeers: true },
-        });
+        expect(res.body).not.toHaveProperty("sharePresenceToPeers");
+        expect(res.body).not.toHaveProperty("sharePlaylistsToPeers");
     });
 
     it("clears the TIDAL quality cache when tidalStreamingQuality is updated", async () => {

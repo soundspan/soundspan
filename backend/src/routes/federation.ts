@@ -208,7 +208,7 @@ router.get(
 /** @openapi
  * /api/federation/v1/social/playlists:
  *   get:
- *     summary: List public playlists whose owners opted into peer sharing
+ *     summary: List every public playlist for peers holding social:read; private playlists are never exported
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
  *     parameters:
@@ -237,7 +237,7 @@ router.get(
 /** @openapi
  * /api/federation/v1/social/playlists/{id}:
  *   get:
- *     summary: Get one still-public, still-opted-in peer playlist
+ *     summary: Get one public playlist for a peer holding social:read; private playlists are never exported
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
  *     parameters:

@@ -18,7 +18,7 @@ import {
 describe("federation playlist export", () => {
     beforeEach(() => jest.clearAllMocks());
 
-    it("filters list reads to public playlists owned by opted-in users", async () => {
+    it("filters list reads to public playlists", async () => {
         playlistFindMany.mockResolvedValueOnce([
             {
                 id: "playlist-1",
@@ -47,16 +47,13 @@ describe("federation playlist export", () => {
             expect.objectContaining({
                 where: {
                     isPublic: true,
-                    user: {
-                        settings: { is: { sharePlaylistsToPeers: true } },
-                    },
                 },
                 take: 26,
             }),
         );
     });
 
-    it("never exports private or owner-opt-out playlists in detail reads", async () => {
+    it("never exports private playlists in detail reads", async () => {
         playlistFindFirst.mockResolvedValueOnce(null);
 
         await expect(
@@ -67,15 +64,12 @@ describe("federation playlist export", () => {
                 where: {
                     id: "playlist-private",
                     isPublic: true,
-                    user: {
-                        settings: { is: { sharePlaylistsToPeers: true } },
-                    },
                 },
             }),
         );
     });
 
-    it("re-checks owner opt-in and publication when detail is requested", async () => {
+    it("re-checks publication when detail is requested", async () => {
         playlistFindFirst.mockResolvedValueOnce(null);
 
         await expect(

@@ -72,8 +72,6 @@ model UserSettings {
   playbackQuality       String  @default("original")
   loudnessMode          String  @default("auto")
   shareOnlinePresence   Boolean @default(false)
-  sharePresenceToPeers  Boolean @default(false)
-  sharePlaylistsToPeers Boolean @default(false)
   shareListeningStatus  Boolean @default(false)
   wifiOnly              Boolean @default(false)
   offlineEnabled        Boolean @default(false)

@@ -120,9 +120,9 @@ export function HostCredentialForm({
             </label>
             <p className="text-xs text-gray-500">
                 Online-status sharing is built in: users who turn on “Share
-                online presence” and “Share presence with trusted peers” in
-                their Social settings appear in the other server’s Social tab.
-                Nothing is shared for users who haven’t opted in.
+                online presence” in their Social settings appear in the other
+                server’s Social tab. Nothing is shared for users who haven’t
+                opted in.
             </p>
             <SubmitButton busy={busy} label="Issue credential" />
         </form>

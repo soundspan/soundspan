@@ -100,7 +100,7 @@ Both controls live on the `Admin` page under `Federation`. Federation must be en
 3. Click `Issue credential`. The token is shown once — copy it before closing the dialog.
 4. Send the token to the other admin, along with your server's URL. Once they connect, your server shows them under `Sharing to them`.
 
-Online-status sharing is built into every connection, but it is private by default. A user only appears in the other server's Social tab if they turn on both `Share online presence` and `Share presence with trusted peers` in their own Social settings. Remote users always show under a `From <server name>` heading, so it is clear they are on another instance.
+Online-status sharing is built into every connection, but it is private by default. A user only appears in the other server's Social tab if they turn on `Share online presence` in their own Social settings — one switch covers this server and its peers. Remote users always show under a `From <server name>` heading, so it is clear they are on another instance.
 
 If a token is lost or leaked, use `Rotate` on that peer's card to issue a fresh one, or `Revoke` to cut off access.
 
@@ -132,11 +132,11 @@ The federation health panel shows per-peer sync freshness, stream usage, and the
 
 ### Social sharing between servers (Federation)
 
-If your server is federated with others, two social surfaces can cross between them. Both are off by default, and both need two switches: the person sharing must opt in, and nothing is shown unless the receiving side wants it.
+If your server is federated with others, two social surfaces can cross between them: online status and public playlists. Sharing follows the same choices you already made for this server — share your presence, or make a playlist public, and it applies to peers too. Nothing extra is shared behind your back, and presence is still off by default.
 
-**Seeing friends on other servers.** When your admin turns on `Show user status from peers` (under `Admin -> Federation`), the Social tab gains sections like "From Family server" listing people on that server who chose to share. Peer status updates every few minutes — the tab shows how fresh each section is. To appear on other servers yourself, turn on both `Share online presence` and `Share presence with trusted peers` in `Settings -> Social`. Your current track travels only if `Share listening status` is also on.
+**Seeing friends on other servers.** When your admin turns on `Show user status from peers` (under `Admin -> Federation`), the Social tab gains sections like "From Family server" listing people on that server who chose to share. Peer status updates every few minutes — the tab shows how fresh each section is. To appear on other servers yourself, turn on `Share online presence` in `Settings -> Social` — the same switch that shows you on this server. Your current track travels only if `Share listening status` is also on.
 
-**Playlists from other servers.** People on federated servers can share their public playlists. Turn on `Share public playlists with trusted peers` in `Settings -> Social` to share yours; private playlists never leave your server. Shared playlists from peers appear in a "From your peers" section on Home. Open one to play it, `Follow` it (it stays live and updates when the owner changes it), or `Save a copy` (a snapshot that becomes a normal playlist of yours). Tracks you also have locally play from your library; the rest stream from the peer, and anything the peer can no longer provide is shown dimmed.
+**Playlists from other servers.** Public playlists are shared automatically between federated servers — public means public, on this server and its peers. Private playlists never leave your server; make a playlist private to stop sharing it. Shared playlists from peers appear in a "From your peers" section on Home. Open one to play it, `Follow` it (it stays live and updates when the owner changes it), or `Save a copy` (a snapshot that becomes a normal playlist of yours). Tracks you also have locally play from your library; the rest stream from the peer, and anything the peer can no longer provide is shown dimmed.
 
 When you opt in, the other server sees your username or display name — that is how friends recognize you. What never crosses servers: your listening history, your private playlists, your email, and your login details. Servers only exchange what the people involved explicitly chose to share.
 

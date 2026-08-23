@@ -33,8 +33,6 @@ const settingsSchema = z.object({
     playbackQuality: z.enum(["original", "high", "medium", "low"]).optional(),
     loudnessMode: z.enum(["off", "track", "album", "auto"]).optional(),
     shareOnlinePresence: z.boolean().optional(),
-    sharePresenceToPeers: z.boolean().optional(),
-    sharePlaylistsToPeers: z.boolean().optional(),
     shareListeningStatus: z.boolean().optional(),
     wifiOnly: z.boolean().optional(),
     offlineEnabled: z.boolean().optional(),
@@ -93,8 +91,6 @@ router.get("/", async (req, res) => {
                     userId,
                     playbackQuality: "medium",
                     shareOnlinePresence: false,
-                    sharePresenceToPeers: false,
-                    sharePlaylistsToPeers: false,
                     shareListeningStatus: false,
                     wifiOnly: false,
                     offlineEnabled: false,
@@ -138,10 +134,6 @@ router.get("/", async (req, res) => {
  *                 type: string
  *                 enum: [off, track, album, auto]
  *               shareOnlinePresence:
- *                 type: boolean
- *               sharePresenceToPeers:
- *                 type: boolean
- *               sharePlaylistsToPeers:
  *                 type: boolean
  *               shareListeningStatus:
  *                 type: boolean

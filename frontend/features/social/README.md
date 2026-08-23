@@ -13,4 +13,4 @@ Start-here guide for `frontend/features/social`.
 
 ## Scope
 
-Cross-peer social surfaces (federation phase 0): browsing public playlists shared by federated peers (`hooks/usePeerPlaylists.ts`, `components/PeerPlaylistsShelf.tsx`) and the peer presence roster. The API boundary is `frontend/lib/api/peerPlaylists.ts`. Local-only social settings (presence/listening toggles) remain in the `settings` domain.
+Cross-peer social surfaces (federation phase 0): browsing public playlists shared by federated peers (`hooks/usePeerPlaylists.ts`, `components/PeerPlaylistsShelf.tsx`) and the peer presence roster. The API boundary is `frontend/lib/api/peerPlaylists.ts`. The social settings (presence/listening toggles) live in the `settings` domain; "Share online presence" covers both this instance and federated peers.
