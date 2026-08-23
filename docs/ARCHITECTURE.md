@@ -193,6 +193,10 @@ That single setting controls visibility on the local instance and to federated
 peers. **Share listening status** independently controls whether track details
 are included. Every playlist marked public is available to peers with the
 `social:read` scope; users must make a playlist private to prevent peer export.
+On the consuming instance, the Social roster includes cached peer presence
+whenever federation is enabled; there is no administrator display gate. A peer
+snapshot read failure fails closed to the local roster instead of failing the
+request.
 
 The browser never receives an instance credential. Federated cover and stream
 requests use the consumer's ordinary authenticated routes; the consumer backend

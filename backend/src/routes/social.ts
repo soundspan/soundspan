@@ -15,6 +15,7 @@ import type { FederationPeerPresenceSnapshot } from "../utils/federationPresence
 import { z } from "zod";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { sendRouteError } from "./routeErrorResponse";
+import { config } from "../config";
 import {
     browseFederationPeerPlaylists,
     copyFederationPeerPlaylist,
@@ -493,12 +494,8 @@ async function getOnlinePresenceMap(): Promise<Map<string, number>> {
 async function visiblePeerPresence(): Promise<
     FederationPeerPresenceSnapshot[] | undefined
 > {
+    if (!config.features.federation) return undefined;
     try {
-        const settings = await prisma.systemSettings.findUnique({
-            where: { id: "default" },
-            select: { federationShowPeerStatus: true },
-        });
-        if (settings?.federationShowPeerStatus !== true) return undefined;
         return await readFederationPeerPresenceSnapshots();
     } catch (error) {
         log.error("Failed to load peer presence display data", { error });
@@ -608,7 +605,7 @@ router.post("/presence/heartbeat", async (req, res) => {
  *                         format: date-time
  *                 peers:
  *                   type: array
- *                   description: Present only when peer status display is enabled
+ *                   description: Included when federation is enabled and peer snapshots can be read; empty when no snapshots exist
  *                   items:
  *                     type: object
  *                     required: [peerId, peerName, users, fetchedAt]

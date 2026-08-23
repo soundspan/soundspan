@@ -73,7 +73,6 @@ export interface SystemSettings {
     downloadSource: DownloadSource;
     // Federation identity
     federationInstanceName: string | null;
-    federationShowPeerStatus: boolean;
     primaryFailureFallback: DownloadFallback;
     // Playback source priority (comma-separated provider order)
     playbackSourceOrder: string;

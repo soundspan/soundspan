@@ -373,26 +373,25 @@ describe("systemSettings runtime routes", () => {
         expect(mockInvalidateSystemSettingsCache).toHaveBeenCalledTimes(1);
     });
 
-    it("persists the peer status display gate", async () => {
+    it("strips the removed peer-status field from old-client updates", async () => {
         const req = {
             user: { id: "admin-1" },
-            body: { federationShowPeerStatus: true },
+            body: {
+                federationShowPeerStatus: true,
+                showVersion: true,
+            },
         } as any;
         const res = createRes();
 
         await postSettingsHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
-            expect.objectContaining({
-                create: expect.objectContaining({
-                    federationShowPeerStatus: true,
-                }),
-                update: expect.objectContaining({
-                    federationShowPeerStatus: true,
-                }),
-            }),
-        );
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith({
+            where: { id: "default" },
+            create: { id: "default", showVersion: true },
+            update: { showVersion: true },
+        });
+        expect(res.body).not.toHaveProperty("federationShowPeerStatus");
     });
 
     it.each(["", "   ", null])(

@@ -271,7 +271,6 @@ model SystemSettings {
   showVersion                 Boolean  @default(false)
   federationInstanceId        String?
   federationInstanceName      String?
-  federationShowPeerStatus    Boolean  @default(false)
   catalogEpoch                String?
 }
 

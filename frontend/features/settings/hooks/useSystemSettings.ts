@@ -42,7 +42,6 @@ const defaultSystemSettings: SystemSettings = {
     downloadSource: "soulseek",
     federationInstanceName: null,
     playbackSourceOrder: "library,peers,tidal,ytmusic",
-    federationShowPeerStatus: false,
     primaryFailureFallback: "none",
     // YouTube Music streaming
     ytMusicEnabled: false,
