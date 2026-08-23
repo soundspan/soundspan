@@ -52,6 +52,10 @@ jest.mock("../../utils/systemSettings", () => ({
 jest.mock("../../services/federationPresence", () => ({
     readFederationPeerPresenceSnapshots: jest.fn(),
 }));
+jest.mock("../../config", () => ({
+    config: { features: { federation: true } },
+}));
+
 jest.mock("../../utils/logger", () => ({
     logger: {
         child: () => ({
