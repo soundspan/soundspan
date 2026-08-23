@@ -16,7 +16,13 @@ import {
     Loader2,
     Heart,
     Download,
+    ListMusic,
 } from "lucide-react";
+import { usePeerPlaylists } from "@/features/social/hooks/usePeerPlaylists";
+import type { PeerPlaylistSummary } from "@/lib/api/peerPlaylists";
+import { useFeatures } from "@/lib/features-context";
+import { PeerBadge } from "@/components/ui/PeerBadge";
+import { peerPlaylistHref } from "@/lib/unifiedPlaylists";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
@@ -41,6 +47,8 @@ interface PlaylistItem {
         };
     };
 }
+
+type PlaylistOrigin = "all" | "local" | "peers";
 
 interface Playlist {
     id: string;
@@ -220,14 +228,54 @@ function PlaylistCard({
 /**
  * Renders the PlaylistsPage component.
  */
+/** Grid card for a federated peer playlist: badge, placeholder art, peer link. */
+function PeerPlaylistCard({
+    playlist,
+    index,
+}: {
+    playlist: PeerPlaylistSummary;
+    index: number;
+}) {
+    return (
+        <Link href={peerPlaylistHref(playlist.peer.id, playlist.remoteId)}>
+            <div
+                className="group cursor-pointer p-3 rounded-md transition-colors hover:bg-white/5"
+                data-tv-card
+                data-tv-card-index={index}
+                tabIndex={0}
+            >
+                <div className="relative aspect-square mb-3 rounded-md overflow-hidden shadow-lg bg-gradient-to-br from-surface-highlight to-surface-elevated flex items-center justify-center">
+                    <ListMusic className="w-10 h-10 text-gray-400" />
+                    <div className="absolute top-2 left-2">
+                        <PeerBadge
+                            peerName={playlist.peer.name}
+                            online={true}
+                        />
+                    </div>
+                </div>
+                <h3 className="text-sm font-semibold truncate text-white">
+                    {playlist.name}
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5 truncate">
+                    By {playlist.owner.displayName} · {playlist.trackCount}{" "}
+                    {playlist.trackCount === 1 ? "song" : "songs"}
+                </p>
+            </div>
+        </Link>
+    );
+}
+
 export default function PlaylistsPage() {
     useRouter();
     useAuth();
     const { playTracks } = useAudioControls();
     const queryClient = useQueryClient();
     const [showHiddenTab, setShowHiddenTab] = useState(false);
+    const [origin, setOrigin] = useState<PlaylistOrigin>("all");
     const likedQuery = useLikedPlaylistQuery(1);
     const likedTotal = likedQuery.data?.total ?? 0;
+    const { federation } = useFeatures();
+    const { playlists: peerPlaylists } = usePeerPlaylists();
 
     // Use React Query hook for playlists
     const { data: playlists = [], isLoading } = usePlaylistsQuery();
@@ -323,9 +371,27 @@ export default function PlaylistsPage() {
         );
     }
 
+    // A stored "peers" origin degrades to "all" if federation is off so the
+    // grid never renders empty with the source controls hidden.
+    const effectiveOrigin: PlaylistOrigin = federation ? origin : "all";
     const displayedPlaylists = showHiddenTab
         ? hiddenPlaylists
-        : visiblePlaylists;
+        : effectiveOrigin === "peers"
+          ? []
+          : visiblePlaylists;
+    const displayedPeerPlaylists =
+        federation && !showHiddenTab && effectiveOrigin !== "local"
+            ? peerPlaylists
+            : [];
+    const totalShown =
+        displayedPlaylists.length + displayedPeerPlaylists.length;
+    // The subtitle always describes the visible (non-hidden) spectrum, even
+    // while the hidden tab is open — matching the pre-merge behavior.
+    const subtitleCount =
+        (effectiveOrigin === "peers" ? 0 : visiblePlaylists.length) +
+        (federation && effectiveOrigin !== "local" ? peerPlaylists.length : 0);
+    const showLikedCard =
+        !showHiddenTab && effectiveOrigin !== "peers" && likedTotal > 0;
 
     return (
         <div className="min-h-screen relative">
@@ -345,13 +411,41 @@ export default function PlaylistsPage() {
             <div className="relative px-4 md:px-8 py-6">
                 <PageHeader
                     title="Playlists"
-                    subtitle={`${visiblePlaylists.length} ${
-                        visiblePlaylists.length === 1 ? "playlist" : "playlists"
+                    subtitle={`${subtitleCount} ${
+                        subtitleCount === 1 ? "playlist" : "playlists"
                     }`}
                     icon={Music}
                     className="mb-4"
                     actions={
                         <>
+                            {federation && !showHiddenTab && (
+                                <div
+                                    role="group"
+                                    aria-label="Playlist source"
+                                    className="flex items-center gap-1 rounded-full bg-white/5 p-1"
+                                >
+                                    {(
+                                        [
+                                            ["all", "All"],
+                                            ["local", "Local"],
+                                            ["peers", "Peers"],
+                                        ] as const
+                                    ).map(([value, label]) => (
+                                        <button
+                                            key={value}
+                                            onClick={() => setOrigin(value)}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+                                                effectiveOrigin === value
+                                                    ? "bg-brand text-black"
+                                                    : "text-gray-400 hover:text-white",
+                                            )}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                             <Link
                                 href="/import"
                                 className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-white/10 text-white hover:bg-white/20 transition-all"
@@ -400,14 +494,13 @@ export default function PlaylistsPage() {
                     </div>
                 )}
 
-                {displayedPlaylists.length > 0 ||
-                (!showHiddenTab && likedTotal > 0) ? (
+                {totalShown > 0 || showLikedCard ? (
                     <div
                         data-tv-section="playlists"
                         className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2"
                     >
                         {/* Pinned: My Liked */}
-                        {!showHiddenTab && likedTotal > 0 && (
+                        {showLikedCard && (
                             <Link href="/playlist/my-liked">
                                 <div
                                     className="group cursor-pointer p-3 rounded-md transition-colors hover:bg-white/5"
@@ -433,17 +526,24 @@ export default function PlaylistsPage() {
                                 <PlaylistCard
                                     key={playlist.id}
                                     playlist={playlist}
-                                    index={
-                                        !showHiddenTab && likedTotal > 0
-                                            ? index + 1
-                                            : index
-                                    }
+                                    index={showLikedCard ? index + 1 : index}
                                     onPlay={handlePlayPlaylist}
                                     onToggleHide={handleToggleHide}
                                     isHiddenView={showHiddenTab}
                                 />
                             ),
                         )}
+                        {displayedPeerPlaylists.map((playlist, index) => (
+                            <PeerPlaylistCard
+                                key={`peer:${playlist.peer.id}:${playlist.remoteId}`}
+                                playlist={playlist}
+                                index={
+                                    displayedPlaylists.length +
+                                    index +
+                                    (showLikedCard ? 1 : 0)
+                                }
+                            />
+                        ))}
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -453,14 +553,18 @@ export default function PlaylistsPage() {
                         <h2 className="text-lg font-semibold text-white mb-1">
                             {showHiddenTab
                                 ? "No hidden playlists"
-                                : "No playlists yet"}
+                                : effectiveOrigin === "peers"
+                                  ? "No peer playlists"
+                                  : "No playlists yet"}
                         </h2>
                         <p className="text-sm text-gray-400 max-w-sm">
                             {showHiddenTab
                                 ? "You haven't hidden any playlists"
-                                : "Create your first playlist by adding songs from albums or artists"}
+                                : effectiveOrigin === "peers"
+                                  ? "Your peers haven't shared any public playlists, or they're unreachable right now"
+                                  : "Create your first playlist by adding songs from albums or artists"}
                         </p>
-                        {!showHiddenTab && (
+                        {!showHiddenTab && effectiveOrigin !== "peers" && (
                             <Link
                                 href="/explore"
                                 className="mt-6 px-5 py-2.5 rounded-full text-sm font-medium bg-brand text-black hover:brightness-110 transition-all"

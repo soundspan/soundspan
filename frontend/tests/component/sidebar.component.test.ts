@@ -9,6 +9,15 @@ const state = {
     hasActiveSessions: false,
     isMobile: false,
     isTablet: false,
+    federation: false,
+    peerPlaylists: [] as Array<{
+        remoteId: string;
+        name: string;
+        trackCount: number;
+        updatedAt: string;
+        owner: { displayName: string };
+        peer: { id: string; name: string };
+    }>,
 };
 
 mock.module("next/navigation", {
@@ -89,6 +98,29 @@ mock.module("@/hooks/useMediaQuery", {
     },
 });
 
+mock.module("@/lib/features-context", {
+    namedExports: {
+        useFeatures: () => ({ federation: state.federation }),
+    },
+});
+
+mock.module("@/features/social/hooks/usePeerPlaylists", {
+    namedExports: {
+        usePeerPlaylists: () => ({
+            playlists: state.peerPlaylists,
+            peerErrors: [],
+            enabled: state.federation,
+        }),
+    },
+});
+
+mock.module("@/components/ui/PeerBadge", {
+    namedExports: {
+        PeerBadge: ({ peerName }: { peerName: string }) =>
+            React.createElement("span", null, `peer-badge:${peerName}`),
+    },
+});
+
 mock.module("@/lib/toast-context", {
     namedExports: {
         useToast: () => ({
@@ -118,6 +150,8 @@ beforeEach(() => {
     state.hasActiveSessions = false;
     state.isMobile = false;
     state.isTablet = false;
+    state.federation = false;
+    state.peerPlaylists = [];
 });
 
 test("returns null for auth routes", async () => {
@@ -175,4 +209,46 @@ test("keeps prefetch enabled for primary sidebar navigation links", async () => 
             `Primary nav link ${href} should not force prefetch off`,
         );
     }
+});
+
+test("renders badged peer playlists in the unified list when federated", async () => {
+    state.federation = true;
+    state.peerPlaylists = [
+        {
+            remoteId: "remote-1",
+            name: "Peer Jams",
+            trackCount: 4,
+            updatedAt: "2026-08-20T00:00:00.000Z",
+            owner: { displayName: "Sam" },
+            peer: { id: "peer-a", name: "Family server" },
+        },
+    ];
+
+    const { Sidebar } = await import("../../components/layout/Sidebar");
+    const html = renderToStaticMarkup(React.createElement(Sidebar));
+
+    assert.match(html, /Peer Jams/);
+    assert.match(html, /peer-badge:Family server/);
+    assert.match(html, /href="\/peer-playlists\/peer-a\/remote-1"/);
+    assert.match(html, /by Sam/);
+});
+
+test("hides peer playlists without federation", async () => {
+    state.federation = false;
+    state.peerPlaylists = [
+        {
+            remoteId: "remote-1",
+            name: "Peer Jams",
+            trackCount: 4,
+            updatedAt: "2026-08-20T00:00:00.000Z",
+            owner: { displayName: "Sam" },
+            peer: { id: "peer-a", name: "Family server" },
+        },
+    ];
+
+    const { Sidebar } = await import("../../components/layout/Sidebar");
+    const html = renderToStaticMarkup(React.createElement(Sidebar));
+
+    assert.doesNotMatch(html, /Peer Jams/);
+    assert.doesNotMatch(html, /peer-badge:/);
 });

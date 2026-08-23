@@ -17,6 +17,15 @@ import { MobileSidebar } from "./MobileSidebar";
 import { SIDEBAR_NAVIGATION } from "./socialNavigation";
 import { BRAND_NAME } from "@/lib/brand";
 import { useLikedPlaylistQuery } from "@/hooks/useQueries";
+import { usePeerPlaylists } from "@/features/social/hooks/usePeerPlaylists";
+import { useFeatures } from "@/lib/features-context";
+import { PeerBadge } from "@/components/ui/PeerBadge";
+import {
+    buildUnifiedPlaylistRows,
+    playlistFilterOptions,
+    type UnifiedPlaylistFilter,
+    type UnifiedPlaylistSort,
+} from "@/lib/unifiedPlaylists";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Playlist {
@@ -30,8 +39,8 @@ interface Playlist {
     user?: { username: string };
 }
 
-type PlaylistSort = "created" | "updated" | "alphabetical";
-type PlaylistFilter = "all" | "mine" | "others";
+type PlaylistSort = UnifiedPlaylistSort;
+type PlaylistFilter = UnifiedPlaylistFilter;
 
 /**
  * Renders the Sidebar component.
@@ -45,6 +54,8 @@ export function Sidebar() {
     const hasActiveSessions = useActiveListenSessions();
     const likedQuery = useLikedPlaylistQuery(1);
     const likedTotal = likedQuery.data?.total ?? 0;
+    const { federation } = useFeatures();
+    const { playlists: peerPlaylists } = usePeerPlaylists();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
@@ -187,26 +198,16 @@ export function Sidebar() {
         return null;
     }
 
-    // Apply filter and sort to playlists
-    const filteredSortedPlaylists = playlists
-        .filter((p) => !p.isHidden)
-        .filter((p) => {
-            if (playlistFilter === "mine") return p.isOwner !== false;
-            if (playlistFilter === "others") return p.isOwner === false;
-            return true;
-        })
-        .sort((a, b) => {
-            if (playlistSort === "alphabetical") {
-                return a.name.localeCompare(b.name);
-            }
-            if (playlistSort === "created") {
-                return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
-            }
-            // updated (default) — most recently updated first
-            return (b.updatedAt ?? b.createdAt ?? "").localeCompare(
-                a.updatedAt ?? a.createdAt ?? "",
-            );
-        });
+    // Merge local and (when federated) peer playlists into one filtered,
+    // sorted spectrum. A stored "peers" filter degrades to "all" if the
+    // federation feature is off so the list never renders empty and stuck.
+    const effectiveFilter =
+        !federation && playlistFilter === "peers" ? "all" : playlistFilter;
+    const filteredSortedPlaylists = buildUnifiedPlaylistRows(
+        playlists,
+        federation ? peerPlaylists : [],
+        { filter: effectiveFilter, sort: playlistSort },
+    );
 
     const isFiltered = playlistFilter !== "all" || playlistSort !== "updated";
 
@@ -361,11 +362,13 @@ export function Sidebar() {
                         className="relative group/link"
                     >
                         <span className="text-[10px] font-black text-gray-400 group-hover/link:text-transparent group-hover/link:bg-clip-text group-hover/link:bg-gradient-to-r group-hover/link:from-ai-hover group-hover/link:to-[#00c8ff] transition-all duration-300 uppercase tracking-[0.15em]">
-                            {playlistFilter === "others"
+                            {effectiveFilter === "others"
                                 ? "Shared playlists"
-                                : playlistFilter === "mine"
+                                : effectiveFilter === "mine"
                                   ? "Your playlists"
-                                  : "All playlists"}
+                                  : effectiveFilter === "peers"
+                                    ? "Peer playlists"
+                                    : "All playlists"}
                         </span>
                         <div className="absolute -bottom-0.5 left-0 right-0 h-px bg-gradient-to-r from-ai/0 via-ai/50 to-ai/0 opacity-0 group-hover/link:opacity-100 transition-opacity duration-300" />
                     </Link>
@@ -437,28 +440,24 @@ export function Sidebar() {
                                     <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                                         Show
                                     </div>
-                                    {(
-                                        [
-                                            ["all", "All playlists"],
-                                            ["mine", "Your playlists"],
-                                            ["others", "Shared playlists"],
-                                        ] as const
-                                    ).map(([value, label]) => (
-                                        <button
-                                            key={value}
-                                            onClick={() =>
-                                                setPlaylistFilter(value)
-                                            }
-                                            className={cn(
-                                                "w-full text-left px-3 py-1.5 text-sm transition-colors",
-                                                playlistFilter === value
-                                                    ? "text-white bg-white/5"
-                                                    : "text-gray-400 hover:text-white hover:bg-white/5",
-                                            )}
-                                        >
-                                            {label}
-                                        </button>
-                                    ))}
+                                    {playlistFilterOptions(federation).map(
+                                        ([value, label]) => (
+                                            <button
+                                                key={value}
+                                                onClick={() =>
+                                                    setPlaylistFilter(value)
+                                                }
+                                                className={cn(
+                                                    "w-full text-left px-3 py-1.5 text-sm transition-colors",
+                                                    playlistFilter === value
+                                                        ? "text-white bg-white/5"
+                                                        : "text-gray-400 hover:text-white hover:bg-white/5",
+                                                )}
+                                            >
+                                                {label}
+                                            </button>
+                                        ),
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -547,13 +546,13 @@ export function Sidebar() {
                         </>
                     ) : filteredSortedPlaylists.length > 0 ? (
                         filteredSortedPlaylists.map((playlist) => {
-                            const isActive =
-                                pathname === `/playlist/${playlist.id}`;
-                            const isShared = playlist.isOwner === false;
+                            const isActive = pathname === playlist.href;
+                            const isShared =
+                                playlist.kind === "local" && !playlist.isOwner;
                             return (
                                 <Link
-                                    key={playlist.id}
-                                    href={`/playlist/${playlist.id}`}
+                                    key={playlist.key}
+                                    href={playlist.href}
                                     prefetch={false}
                                     className={cn(
                                         "block px-3 py-2.5 rounded-lg transition-all duration-300 group relative overflow-hidden",
@@ -578,11 +577,18 @@ export function Sidebar() {
                                         >
                                             {playlist.name}
                                         </div>
+                                        {playlist.kind === "peer" && (
+                                            <PeerBadge
+                                                peerName={playlist.peerName}
+                                                online={true}
+                                                className="relative z-10 shrink-0"
+                                            />
+                                        )}
                                         {isShared && (
                                             <span
                                                 className="shrink-0 w-1.5 h-1.5 rounded-full bg-ai"
                                                 title={`Shared by ${
-                                                    playlist.user?.username ||
+                                                    playlist.ownerName ||
                                                     "someone"
                                                 }`}
                                             />
@@ -596,10 +602,9 @@ export function Sidebar() {
                                                 : "text-gray-400 group-hover:text-gray-400",
                                         )}
                                     >
-                                        {isShared
+                                        {playlist.kind === "peer" || isShared
                                             ? `by ${
-                                                  playlist.user?.username ||
-                                                  "Shared"
+                                                  playlist.ownerName || "Shared"
                                               }`
                                             : "Playlist"}{" "}
                                         • {playlist.trackCount} track
