@@ -10,6 +10,8 @@ import {
     Loader2,
     Search,
     Heart,
+    Check,
+    Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/utils/cn";
@@ -44,6 +46,10 @@ interface AlbumActionBarProps {
     isPlayingThisAlbum?: boolean;
     onPause?: () => void;
     downloadsEnabled?: boolean;
+    requestsEnabled?: boolean;
+    isRequestedAlbum?: boolean;
+    isSubmittingRequest?: boolean;
+    onRequestAlbum?: () => void;
     isInListenTogetherGroup?: boolean;
 }
 
@@ -135,6 +141,49 @@ function AcquisitionControls(props: AcquisitionControlsProps) {
                 <span>Search</span>
             </button>
         </div>
+    );
+}
+
+interface RequestControlsProps {
+    requested: boolean;
+    submitting: boolean;
+    onRequest: () => void;
+}
+
+function RequestControls(props: RequestControlsProps) {
+    if (props.requested) {
+        return (
+            <button
+                type="button"
+                disabled
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full font-medium bg-white/5 text-white/50 cursor-not-allowed"
+                title="You already have an open request for this album"
+            >
+                <Check className="w-4 h-4" />
+                <span>Requested</span>
+            </button>
+        );
+    }
+    return (
+        <button
+            type="button"
+            onClick={props.onRequest}
+            disabled={props.submitting}
+            className={cn(
+                "flex items-center gap-2 px-5 py-2.5 rounded-full font-medium transition-all",
+                props.submitting
+                    ? "bg-white/5 text-white/50 cursor-not-allowed"
+                    : "bg-brand-hover hover:bg-brand text-black hover:scale-105",
+            )}
+            title="Ask an admin to add this album to the library"
+        >
+            {props.submitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+                <Send className="w-4 h-4" />
+            )}
+            <span>{props.submitting ? "Requesting..." : "Request"}</span>
+        </button>
     );
 }
 
@@ -370,6 +419,13 @@ function ActionControlRow(props: {
                             onSearch={props.onSearch}
                         />
                     )}
+                    {visibility.showRequest && actions.onRequestAlbum && (
+                        <RequestControls
+                            requested={actions.isRequestedAlbum ?? false}
+                            submitting={actions.isSubmittingRequest ?? false}
+                            onRequest={actions.onRequestAlbum}
+                        />
+                    )}
                 </>
             )}
             <SecondaryControls
@@ -397,6 +453,8 @@ export function AlbumActionBar(props: AlbumActionBarProps) {
         rgMbid: props.album.rgMbid,
         mbid: props.album.mbid,
         downloadsEnabled: props.downloadsEnabled ?? true,
+        requestsEnabled:
+            (props.requestsEnabled ?? false) && Boolean(props.onRequestAlbum),
         hasAddAllToQueue: Boolean(props.onAddAllToQueue),
         hasAlbumPreferenceAction: Boolean(props.onToggleAlbumLike),
         isInListenTogetherGroup: props.isInListenTogetherGroup ?? false,

@@ -281,6 +281,17 @@ mock.module("@/features/album/hooks/useYtMusicGapFill", {
     },
 });
 
+mock.module("@/features/album/hooks/useAlbumRequest", {
+    exports: {
+        useAlbumRequest: () => ({
+            requestsEnabled: false,
+            isRequestedAlbum: false,
+            isSubmittingRequest: false,
+            requestAlbum: async () => undefined,
+        }),
+    },
+});
+
 mock.module("@/features/album/hooks/useAlbumActions", {
     exports: {
         useAlbumActions: () => ({

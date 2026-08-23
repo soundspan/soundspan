@@ -12,6 +12,7 @@ describe("workers runtime behavior", () => {
             on: jest.fn(),
             isReady: jest.fn(async () => undefined),
             add: jest.fn(async () => ({ id: "job-1" })),
+            removeRepeatable: jest.fn(async () => undefined),
             close: jest.fn(async () => undefined),
             removeAllListeners: jest.fn(),
             getJobCounts: jest.fn(async () => ({
@@ -29,6 +30,7 @@ describe("workers runtime behavior", () => {
         discovery?: boolean;
         autoPlaylists?: boolean;
         federation?: boolean;
+        requests?: boolean;
         vibeProviderUrl?: string;
     }) {
         const { vibeProviderUrl, ...featureFlags } = featureOverrides ?? {};
@@ -72,6 +74,11 @@ describe("workers runtime behavior", () => {
             skipped: 0,
             continued: false,
             capacityLimited: false,
+        }));
+        const processRequestFulfillmentBatch = jest.fn(async () => ({
+            selected: 0,
+            fulfilled: 0,
+            failed: 0,
         }));
         const finalizeGenericImportQueueFailure = jest.fn(
             async () => undefined,
@@ -220,6 +227,9 @@ describe("workers runtime behavior", () => {
             LOUDNESS_BACKFILL_JOB_NAME: "track-loudness-backfill",
             processLoudnessBackfill,
         }));
+        jest.doMock("../processors/requestFulfillmentProcessor", () => ({
+            processRequestFulfillmentBatch,
+        }));
         jest.doMock("../../services/genericImportJobRunner", () => ({
             genericImportJobRunner: {
                 registerRecoveryJobs,
@@ -257,6 +267,7 @@ describe("workers runtime behavior", () => {
                     discovery: true,
                     autoPlaylists: true,
                     federation: false,
+                    requests: true,
                     ...featureFlags,
                 },
             },
@@ -315,6 +326,7 @@ describe("workers runtime behavior", () => {
             processGenericImport,
             processTrackRemovalPurge,
             processLoudnessBackfill,
+            processRequestFulfillmentBatch,
             finalizeGenericImportQueueFailure,
             registerRecoveryJobs,
             registerFederationProcessors,
@@ -451,6 +463,38 @@ describe("workers runtime behavior", () => {
                 backoff: { type: "exponential", delay: 5_000 },
                 removeOnComplete: true,
                 removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "request-fulfillment-reconcile",
+            { mode: "repeat" },
+            {
+                jobId: "scheduler:request-fulfillment:repeat",
+                repeat: { every: 5 * 60 * 1000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+    });
+
+    it("removes the persisted request schedule when the feature is disabled", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks({ requests: false });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        expect(mocks.schedulerQueue.add).not.toHaveBeenCalledWith(
+            "request-fulfillment-reconcile",
+            expect.anything(),
+            expect.anything(),
+        );
+        expect(mocks.schedulerQueue.removeRepeatable).toHaveBeenCalledWith(
+            "request-fulfillment-reconcile",
+            {
+                every: 5 * 60 * 1000,
+                jobId: "scheduler:request-fulfillment:repeat",
             },
         );
     });

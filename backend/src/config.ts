@@ -853,6 +853,15 @@ export const config = {
         autoPlaylists: parseEnvBool(process.env.AUTO_PLAYLISTS_ENABLED, true),
         // Read-only instance federation API and host credential management.
         federation: parseEnvBool(process.env.FEDERATION_ENABLED, false),
+        // User-facing album request queue and fulfillment reconciler.
+        requests: parseEnvBool(process.env.FEATURE_REQUESTS, true),
+    },
+
+    requests: {
+        dailyCapPerUser: positiveIntEnvOr(
+            process.env.REQUESTS_PER_USER_PER_DAY,
+            10,
+        ),
     },
 
     federation: {

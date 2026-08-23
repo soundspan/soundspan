@@ -953,6 +953,32 @@
                     "vibePanels.component.test.ts"
                 ]
             }
+        },
+        {
+            "id": "music-requests",
+            "name": "Music Requests",
+            "description": "Non-admin album request queue: request buttons on album and release surfaces, an admin approval page, request notifications, and a fulfillment reconciler feeding the existing download path",
+            "frontend": {
+                "feature_dirs": ["album"],
+                "routes": ["/requests"]
+            },
+            "backend": {
+                "routes": ["requests.ts"],
+                "services": ["musicRequestService.ts", "albumDownloadJobs.ts"],
+                "workers": [
+                    "processors/requestFulfillmentProcessor.ts",
+                    "requestFulfillmentSchedule.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": ["requestsRuntime.test.ts"],
+                "backend_contract": ["musicRequestService.test.ts"],
+                "frontend": [
+                    "musicRequests.test.ts",
+                    "requestsPage.component.test.ts",
+                    "albumActionBar.component.test.ts"
+                ]
+            }
         }
     ]
 }

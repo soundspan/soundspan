@@ -14,6 +14,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | --- | --- |
 | `backend/src/services/acquisitionService.ts` | Core |
 | `backend/src/services/albumResolutionService.ts` | Core |
+| `backend/src/services/albumDownloadJobs.ts` | Shared locked album download-job creation and active-job deduplication |
 | `backend/src/services/albumTitleGuards.ts` | Shared remote-album placeholder-title classification |
 | `backend/src/services/albumLoudness.ts` | Transactional active-track loudness rollups and per-album serialization |
 | `backend/src/services/artistCountsService.ts` | Core |
@@ -131,6 +132,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |
 | `backend/src/services/musicScanner.ts` | Core |
+| `backend/src/services/musicRequestService.ts` | Album request deduplication, quota, review, and notification lifecycle |
 | `backend/src/services/nativeCoverHealing.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |

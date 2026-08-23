@@ -8,6 +8,7 @@ import {
     Download,
     Heart,
     Home,
+    Inbox,
     LogOut,
     Radio,
     RefreshCw,
@@ -223,6 +224,28 @@ export function MobileSidebar({
                                 Settings
                             </span>
                         </Link>
+
+                        {user?.role === "admin" && (
+                            <Link
+                                href="/requests"
+                                aria-current={
+                                    pathname === "/requests"
+                                        ? "page"
+                                        : undefined
+                                }
+                                className={cn(
+                                    "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
+                                    pathname === "/requests"
+                                        ? "bg-white/10 text-white"
+                                        : "text-gray-400 hover:text-white hover:bg-white/5",
+                                )}
+                            >
+                                <Inbox className="w-5 h-5" />
+                                <span className="text-[15px] font-medium">
+                                    Requests
+                                </span>
+                            </Link>
+                        )}
 
                         {user?.role === "admin" && (
                             <Link

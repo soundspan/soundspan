@@ -54,7 +54,6 @@ const FIXED_SCAN_ROOTS = Object.freeze([
 
 const BASELINE = Object.freeze({
     "backend/src/routes/browse.ts": 1540,
-    "backend/src/routes/downloads.ts": 1591,
     "backend/src/routes/enrichment.ts": 2277,
     "backend/src/routes/library/artists.ts": 1553,
     "backend/src/routes/library/radio.ts": 1661,

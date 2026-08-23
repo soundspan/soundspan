@@ -54,6 +54,10 @@ import {
 } from "./vibeEmbedMetrics";
 import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
 import { prisma } from "../utils/db";
+import {
+    createRequestMetrics,
+    type MusicRequestAction,
+} from "./requestMetrics";
 
 export type {
     FederationAuthFailureReason,
@@ -80,6 +84,7 @@ const domainMetrics = createDomainMetrics(metricsRegistry);
 const libraryHealthMetrics = createLibraryHealthMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
 const providerTrackGcMetrics = createProviderTrackGcMetrics(metricsRegistry);
+const requestMetrics = createRequestMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -130,6 +135,11 @@ export const httpMetricsMiddleware = httpMetrics.middleware;
 /** Records one browse-image cache lookup. */
 export function recordBrowseImageCacheResult(result: "hit" | "miss"): void {
     domainMetrics.browseImageCacheRequests.inc({ result });
+}
+
+/** Records one bounded music request state or rejection action. */
+export function recordMusicRequestAction(action: MusicRequestAction): void {
+    requestMetrics.requests.inc({ action });
 }
 
 /** Records one Library Health panel cache outcome. */

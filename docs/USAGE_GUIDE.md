@@ -47,6 +47,20 @@ Volume leveling evens out loudness differences between songs so you do not reach
 - Non-admin accounts only see `Notifications` and `Social` in the activity panel (`Active`, `History`, and `Imports` remain admin-only).
 - Open `My History` from `Settings -> History & Personalization` (`Open My History`) for queue-like controls: click-to-play, add to queue, and add to playlist.
 
+## Requesting Music
+
+Non-admin users cannot download music directly. Instead, they can ask for it:
+
+- Open an album that is not in the library. A `Request` button appears where admins see `Download`.
+- Click `Request`. The button changes to `Requested` and an admin is notified.
+- Admins review requests on the `Requests` page (avatar menu -> `Requests`): approve to start the download through the server's normal download path, or decline.
+- You get a notification when your request is approved, declined, or when the album lands in the library.
+- Visit `/requests` to see your own requests and cancel pending ones.
+
+Limits: you cannot request an album that is already in the library, already requested, or already downloading, and there is a daily per-user cap (default 10, operators can change `REQUESTS_PER_USER_PER_DAY`). Operators can turn the whole feature off with `FEATURE_REQUESTS=false`.
+
+Discover Weekly no longer downloads albums for non-admin users. On the default recommendation mode, playlists still generate for everyone from music the server already has. The legacy download-based mode is admin-only.
+
 ## Keyboard Shortcuts
 
 | Key         | Action                   |

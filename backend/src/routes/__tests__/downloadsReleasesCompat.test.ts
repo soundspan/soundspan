@@ -153,11 +153,6 @@ describe("downloads/release compatibility regressions", () => {
     const radarHandler = getRouteHandler(releasesRouter, "/radar", "get");
     const upcomingHandler = getRouteHandler(releasesRouter, "/upcoming", "get");
     const recentHandler = getRouteHandler(releasesRouter, "/recent", "get");
-    const downloadReleaseHandler = getRouteHandler(
-        releasesRouter,
-        "/download/:albumMbid",
-        "post",
-    );
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -318,33 +313,6 @@ describe("downloads/release compatibility regressions", () => {
                 }),
             ]),
         );
-    });
-
-    it("requires authentication for release-radar download trigger", async () => {
-        const req = {
-            params: { albumMbid: "rg-abc" },
-        } as any;
-        const res = createRes();
-
-        await downloadReleaseHandler(req, res);
-
-        expect(res.statusCode).toBe(401);
-        expect(res.body).toEqual({ error: "Authentication required" });
-    });
-
-    it("returns 501 for authenticated release-radar download trigger", async () => {
-        const req = {
-            params: { albumMbid: "rg-abc" },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await downloadReleaseHandler(req, res);
-
-        expect(res.statusCode).toBe(501);
-        expect(res.body).toEqual({
-            error: "Download feature not yet implemented for release radar",
-        });
     });
 
     it("defaults upcoming days and returns releases in ascending order with count", async () => {

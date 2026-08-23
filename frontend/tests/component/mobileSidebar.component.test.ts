@@ -3,9 +3,14 @@ import { beforeEach, mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-const state = {
+const state: {
+    pathname: string;
+    hasActiveSessions: boolean;
+    user: { id: string; role: string } | undefined;
+} = {
     pathname: "/discover",
     hasActiveSessions: false,
+    user: undefined,
 };
 
 const Icon = () => React.createElement("i");
@@ -42,6 +47,8 @@ mock.module("lucide-react", {
         X: Icon,
         Radio: Icon,
         Users: Icon,
+        Inbox: Icon,
+        Shield: Icon,
     },
 });
 
@@ -63,6 +70,7 @@ mock.module("@/lib/api", {
 mock.module("@/lib/auth-context", {
     namedExports: {
         useAuth: () => ({
+            user: state.user,
             logout: async () => undefined,
         }),
     },
@@ -88,6 +96,7 @@ mock.module("@/components/ui/EqBars", {
 beforeEach(() => {
     state.pathname = "/discover";
     state.hasActiveSessions = false;
+    state.user = undefined;
 });
 
 test("returns null when closed", async () => {
@@ -140,6 +149,34 @@ test("shows listen-together marker when sessions are active", async () => {
     );
 
     assert.match(html, /eq-bars/);
+});
+
+test("admins see Requests and Admin links; users see neither", async () => {
+    const { MobileSidebar } =
+        await import("../../components/layout/MobileSidebar");
+
+    state.user = { id: "u1", role: "user" };
+    const userHtml = renderToStaticMarkup(
+        React.createElement(MobileSidebar, {
+            isOpen: true,
+            onClose: () => undefined,
+            hasActiveSessions: false,
+        }),
+    );
+    assert.doesNotMatch(userHtml, /href="\/requests"/);
+    assert.doesNotMatch(userHtml, /href="\/admin"/);
+
+    state.user = { id: "a1", role: "admin" };
+    const adminHtml = renderToStaticMarkup(
+        React.createElement(MobileSidebar, {
+            isOpen: true,
+            onClose: () => undefined,
+            hasActiveSessions: false,
+        }),
+    );
+    assert.match(adminHtml, /href="\/requests"/);
+    assert.match(adminHtml, />Requests</);
+    assert.match(adminHtml, /href="\/admin"/);
 });
 
 test("marks settings as the current route when viewing settings", async () => {

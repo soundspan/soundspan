@@ -22,6 +22,8 @@ mock.module("lucide-react", {
         Loader2: icon("loader2"),
         Search: icon("search"),
         Heart: icon("heart"),
+        Check: icon("check"),
+        Send: icon("send"),
     },
 });
 
@@ -141,6 +143,78 @@ test("AlbumActionBar keeps remote albums playable and acquirable without album p
     assert.match(html, /title="Add to playlist"/);
     assert.doesNotMatch(html, /Like every track on this album/);
     assert.doesNotMatch(html, /Remove like from all tracks/);
+});
+
+test("AlbumActionBar shows Request instead of Download for non-admin viewers", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const html = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: {
+                ...baseProps.album,
+                owned: false,
+                rgMbid: "real-release-group",
+            },
+            source: "discovery" as const,
+            downloadsEnabled: false,
+            requestsEnabled: true,
+            onRequestAlbum: noop,
+        }),
+    );
+
+    assert.match(html, />Request</);
+    assert.doesNotMatch(html, />Download</);
+    assert.doesNotMatch(html, />Search</);
+});
+
+test("AlbumActionBar renders a disabled Requested state for open requests", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const html = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: {
+                ...baseProps.album,
+                owned: false,
+                rgMbid: "real-release-group",
+            },
+            source: "discovery" as const,
+            downloadsEnabled: false,
+            requestsEnabled: true,
+            isRequestedAlbum: true,
+            onRequestAlbum: noop,
+        }),
+    );
+
+    assert.match(html, />Requested</);
+    assert.match(html, /already have an open request/);
+    assert.doesNotMatch(html, />Request</);
+});
+
+test("AlbumActionBar never shows Request to viewers with direct downloads", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const html = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: {
+                ...baseProps.album,
+                owned: false,
+                rgMbid: "real-release-group",
+            },
+            source: "discovery" as const,
+            downloadsEnabled: true,
+            requestsEnabled: true,
+            onRequestAlbum: noop,
+        }),
+    );
+
+    assert.match(html, />Download</);
+    assert.doesNotMatch(html, />Request</);
 });
 
 test("AlbumActionBar hides acquisition controls for a synthetic remote release group", async () => {

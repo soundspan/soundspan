@@ -11,7 +11,9 @@ import { api } from "@/lib/api";
 const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "addTrackToPlaylist",
     "backfillMoodBuckets",
+    "approveMusicRequest",
     "cancelImportJob",
+    "cancelMusicRequest",
     "cancelYouTubeDownload",
     "cleanupStaleJobs",
     "clearAllCaches",
@@ -33,6 +35,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "createFederationPeer",
     "createInviteCode",
     "createListenGroup",
+    "createMusicRequest",
     "createPlaylist",
     "createShareLink",
     "delete",
@@ -114,8 +117,12 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getMoodBucketMix",
     "getMoodBucketPresets",
     "getMoodPresets",
+    "denyMusicRequest",
     "getMyListenGroup",
+    "getMyMusicRequests",
+    "getMusicRequests",
     "getNotifications",
+    "getRequestAvailability",
     "getOnboardingStatus",
     "getPlayHistorySummary",
     "getPlaybackState",
@@ -309,5 +316,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 289);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 296);
 });

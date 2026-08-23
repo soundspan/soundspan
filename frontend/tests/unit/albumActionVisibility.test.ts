@@ -11,6 +11,7 @@ const baseInput = {
     albumId: "album-1",
     rgMbid: "real-release-group",
     downloadsEnabled: true,
+    requestsEnabled: false,
     hasAddAllToQueue: true,
     hasAlbumPreferenceAction: true,
     isInListenTogetherGroup: false,
@@ -58,4 +59,47 @@ test("album action visibility applies ownership, feature, and group policy", () 
     assert.equal(owned.canShowAlbumPreference, true);
     assert.equal(owned.hasLockedControls, true);
     assert.equal(owned.hasActionControls, true);
+});
+
+test("request affordance shows for non-admin viewers on unowned real albums", () => {
+    const visibility = getAlbumActionVisibility({
+        ...baseInput,
+        downloadsEnabled: false,
+        requestsEnabled: true,
+    });
+
+    assert.equal(visibility.showAcquisition, false);
+    assert.equal(visibility.showRequest, true);
+    assert.equal(visibility.hasActionControls, true);
+});
+
+test("request affordance hides for owned albums and synthetic identifiers", () => {
+    const owned = getAlbumActionVisibility({
+        ...baseInput,
+        downloadsEnabled: false,
+        requestsEnabled: true,
+        source: "library",
+        owned: true,
+    });
+    assert.equal(owned.showRequest, false);
+
+    const synthetic = getAlbumActionVisibility({
+        ...baseInput,
+        downloadsEnabled: false,
+        requestsEnabled: true,
+        source: "remote",
+        rgMbid: "remote:generated-hash",
+    });
+    assert.equal(synthetic.showRequest, false);
+});
+
+test("direct download wins over request when both capabilities are present", () => {
+    const visibility = getAlbumActionVisibility({
+        ...baseInput,
+        downloadsEnabled: true,
+        requestsEnabled: true,
+    });
+
+    assert.equal(visibility.showAcquisition, true);
+    assert.equal(visibility.showRequest, false);
 });

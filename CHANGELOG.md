@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Music requests: non-admin users get a Request button on albums and Release Radar entries they can't download. Admins review the queue on a new Requests page (avatar menu), approve to start the download through the normal path, or decline; requesters get notifications when their request is approved, declined, fulfilled, or fails. One open request per album per user, with a daily per-user cap (`REQUESTS_PER_USER_PER_DAY`, default 10) and a feature switch (`FEATURE_REQUESTS`). (#663)
 - Local users can browse active peers' public playlists on demand, follow them with live availability, and copy resolvable tracks into caller-owned local playlists. Peer playlist export uses the existing `social:read` scope; it shares the owner's display name for attribution and never exposes private playlists, account ids, or emails.
 - Federation peers can receive privacy-filtered online presence through the new `social:read` scope. Phase 0 deliberately requires `library:read` with `social:read` because social exchange piggybacks on catalog sync; social-only peering is out of scope. Users must enable online presence before they appear to peers, and peer snapshots expire automatically when syncs stop.
 - Federation administrators can set the instance display name advertised to peers. Peer health now exposes classified probe failures and the latest embedding federation outcome, including space-mismatch skips.
@@ -26,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The unimplemented release-radar album-download endpoint that always returned HTTP 501 was removed in favor of the music request queue API. (#663)
 - Federation pairing-code endpoints and persisted codes were removed. Older peers that support only pairing codes can no longer pair against an upgraded server, and in-flight codes stop working on upgrade. (#708)
 
 ### Fixed

@@ -17,6 +17,7 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/search",
         "../routes/recommendations",
         "../routes/downloads",
+        "../routes/requests",
         "../routes/webhooks",
         "../routes/audiobooks",
         "../routes/podcasts",
@@ -93,6 +94,7 @@ describe("api entrypoint runtime behavior", () => {
                 discovery?: boolean;
                 autoPlaylists?: boolean;
                 federation?: boolean;
+                requests?: boolean;
             };
         };
         bcryptHashImpl?: (value: string, salt: number) => Promise<string>;
@@ -240,6 +242,7 @@ describe("api entrypoint runtime behavior", () => {
                 discovery: true,
                 autoPlaylists: true,
                 federation: true,
+                requests: true,
                 ...(configOverrides?.features || {}),
             },
         };
@@ -602,6 +605,7 @@ describe("api entrypoint runtime behavior", () => {
                     discovery: false,
                     autoPlaylists: false,
                     federation: false,
+                    requests: false,
                 },
             },
         });
@@ -618,6 +622,7 @@ describe("api entrypoint runtime behavior", () => {
             "/api/vibe",
             "/api/federation/v1",
             "/api/federation/admin",
+            "/api/requests",
         ]) {
             const call = mocks.app.use.mock.calls.find(
                 (args: unknown[]) => args[0] === prefix,
@@ -673,6 +678,7 @@ describe("api entrypoint runtime behavior", () => {
             "/api/mixes",
             "/api/analysis",
             "/api/vibe",
+            "/api/requests",
         ]) {
             const call = mocks.app.use.mock.calls.find(
                 (args: unknown[]) => args[0] === prefix,
@@ -743,6 +749,7 @@ describe("api entrypoint runtime behavior", () => {
                 route("../routes/recommendations"),
             ],
             "/api/downloads": ["api-limiter", route("../routes/downloads")],
+            "/api/requests": ["api-limiter", route("../routes/requests")],
             "/api/notifications": [
                 "api-limiter",
                 route("../routes/notifications"),

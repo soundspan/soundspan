@@ -10,10 +10,18 @@ import {
     ArrowRight,
     CheckCircle2,
     Loader2,
+    Send,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useDownloadContext } from "@/lib/download-context";
+import {
+    openRequestRgMbids,
+    useCreateMusicRequest,
+    useMyMusicRequests,
+    useRequestsGate,
+} from "@/hooks/useMusicRequests";
 import { api } from "@/lib/api";
 import Link from "next/link";
 import Image from "next/image";
@@ -51,6 +59,10 @@ export default function ReleasesPage() {
     );
     const [error, setError] = useState<string | null>(null);
     const { downloadsEnabled } = useDownloadContext();
+    const { requestsEnabled } = useRequestsGate();
+    const myRequests = useMyMusicRequests(requestsEnabled);
+    const createRequest = useCreateMusicRequest();
+    const requestedRgMbids = openRequestRgMbids(myRequests.data);
 
     const fetchReleases = async () => {
         try {
@@ -73,23 +85,44 @@ export default function ReleasesPage() {
         fetchReleases();
     }, []);
 
-    const handleDownload = async (
-        albumMbid: string,
-        releaseId: string | number,
-    ) => {
+    const handleAcquire = async (release: ReleaseItem) => {
+        const toastId = `release-acquire-${release.id}`;
         try {
-            setDownloadingId(releaseId);
-            await api.request<{ success: boolean; message?: string }>(
-                `/releases/download/${albumMbid}`,
-                {
-                    method: "POST",
-                    timeoutMs: 20_000,
-                },
+            setDownloadingId(release.id);
+            if (downloadsEnabled) {
+                toast.loading(`Downloading ${release.title}...`, {
+                    id: toastId,
+                });
+                await api.downloadAlbum(
+                    release.artistName,
+                    release.title,
+                    release.albumMbid,
+                );
+                toast.success(`Download started for ${release.title}`, {
+                    id: toastId,
+                });
+                await fetchReleases();
+                return;
+            }
+            toast.loading(`Requesting ${release.title}...`, { id: toastId });
+            await createRequest.mutateAsync({
+                artistName: release.artistName,
+                albumTitle: release.title,
+                rgMbid: release.albumMbid,
+                ...(release.artistMbid
+                    ? { artistMbid: release.artistMbid }
+                    : {}),
+            });
+            toast.success(
+                `Requested ${release.title} — an admin will review it`,
+                { id: toastId },
             );
-            // Refresh to show updated status
-            await fetchReleases();
         } catch (err) {
-            sharedFrontendLogger.error("Download failed:", err);
+            sharedFrontendLogger.error("Release acquisition failed:", err);
+            toast.error(
+                err instanceof Error ? err.message : "Something went wrong",
+                { id: toastId },
+            );
         } finally {
             setDownloadingId(null);
         }
@@ -181,9 +214,18 @@ export default function ReleasesPage() {
                                     key={`${release.albumMbid}-${release.id}`}
                                     release={release}
                                     formatDate={formatDate}
-                                    onDownload={handleDownload}
+                                    onAcquire={handleAcquire}
                                     isDownloading={downloadingId === release.id}
-                                    downloadsEnabled={downloadsEnabled}
+                                    mode={
+                                        downloadsEnabled
+                                            ? "download"
+                                            : requestsEnabled
+                                              ? "request"
+                                              : "none"
+                                    }
+                                    isRequested={requestedRgMbids.has(
+                                        release.albumMbid.toLowerCase(),
+                                    )}
                                 />
                             ))}
                         </div>
@@ -209,9 +251,18 @@ export default function ReleasesPage() {
                                     key={`${release.albumMbid}-${release.id}`}
                                     release={release}
                                     formatDate={formatDate}
-                                    onDownload={handleDownload}
+                                    onAcquire={handleAcquire}
                                     isDownloading={downloadingId === release.id}
-                                    downloadsEnabled={downloadsEnabled}
+                                    mode={
+                                        downloadsEnabled
+                                            ? "download"
+                                            : requestsEnabled
+                                              ? "request"
+                                              : "none"
+                                    }
+                                    isRequested={requestedRgMbids.has(
+                                        release.albumMbid.toLowerCase(),
+                                    )}
                                 />
                             ))}
                         </div>
@@ -246,15 +297,17 @@ export default function ReleasesPage() {
 function ReleaseCard({
     release,
     formatDate,
-    onDownload,
+    onAcquire,
     isDownloading,
-    downloadsEnabled = true,
+    mode,
+    isRequested,
 }: {
     release: ReleaseItem;
     formatDate: (date: string) => string;
-    onDownload: (albumMbid: string, releaseId: string | number) => void;
+    onAcquire: (release: ReleaseItem) => void;
     isDownloading: boolean;
-    downloadsEnabled?: boolean;
+    mode: "download" | "request" | "none";
+    isRequested: boolean;
 }) {
     const isUpcoming = release.status === "upcoming";
     const hasIt = release.inLibrary;
@@ -296,23 +349,32 @@ function ReleaseCard({
                           : "Available"}
                 </div>
 
-                {/* Download Button Overlay */}
-                {downloadsEnabled && release.canDownload && !hasIt && (
+                {/* Acquire Overlay: admins download, everyone else requests */}
+                {mode !== "none" && release.canDownload && !hasIt && (
                     <button
-                        onClick={() =>
-                            onDownload(release.albumMbid, release.id)
+                        onClick={() => onAcquire(release)}
+                        disabled={isDownloading || isRequested}
+                        title={
+                            isRequested
+                                ? "Already requested"
+                                : mode === "download"
+                                  ? "Download this release"
+                                  : "Request this release"
                         }
-                        disabled={isDownloading}
                         className={cn(
                             "absolute inset-0 flex items-center justify-center",
                             "bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity",
-                            isDownloading && "opacity-100",
+                            (isDownloading || isRequested) && "opacity-100",
                         )}
                     >
                         {isDownloading ? (
                             <Loader2 className="w-8 h-8 text-white animate-spin" />
-                        ) : (
+                        ) : isRequested ? (
+                            <CheckCircle2 className="w-8 h-8 text-white" />
+                        ) : mode === "download" ? (
                             <Download className="w-8 h-8 text-white" />
+                        ) : (
+                            <Send className="w-8 h-8 text-white" />
                         )}
                     </button>
                 )}

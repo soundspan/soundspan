@@ -9,6 +9,7 @@ import {
     AlertCircle,
     CheckCircle,
     ExternalLink,
+    Inbox,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import Link from "next/link";
@@ -90,6 +91,14 @@ export function NotificationsTab({
             case "playlist_ready":
             case "import_complete":
                 return <ListMusic className="w-4 h-4 text-brand" />;
+            case "request_submitted":
+                return <Inbox className="w-4 h-4 text-brand" />;
+            case "request_approved":
+            case "request_fulfilled":
+                return <CheckCircle className="w-4 h-4 text-green-400" />;
+            case "request_denied":
+            case "request_failed":
+                return <AlertCircle className="w-4 h-4 text-red-400" />;
             case "system":
             default:
                 return <Bell className="w-4 h-4 text-white/60" />;
@@ -100,6 +109,9 @@ export function NotificationsTab({
         const metadata = notification.metadata as
             | Record<string, unknown>
             | undefined;
+        if (typeof metadata?.requestId === "string") {
+            return "/requests";
+        }
         if (typeof metadata?.playlistId === "string") {
             return `/playlist/${metadata.playlistId}`;
         }

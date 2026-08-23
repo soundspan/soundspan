@@ -19,6 +19,7 @@ import { musicBrainzService } from "../services/musicbrainz";
 import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { mapInteractiveRelease } from "../services/releaseContracts";
+import { createAlbumDownloadJob } from "../services/albumDownloadJobs";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import crypto from "crypto";
 
@@ -75,78 +76,6 @@ router.get("/availability", async (req, res) => {
         sendInternalRouteError(res, "Failed to check download availability");
     }
 });
-
-/**
- * Verify and potentially correct artist name before download
- * Uses multiple sources for canonical name resolution:
- * 1. MusicBrainz (if MBID provided) - most authoritative
- * 2. LastFM correction API - handles aliases and misspellings
- * 3. Original name - fallback
- *
- * @returns Object with verified name and whether correction was applied
- */
-async function verifyArtistName(
-    artistName: string,
-    artistMbid?: string,
-): Promise<{
-    verifiedName: string;
-    wasCorrected: boolean;
-    source: "musicbrainz" | "lastfm" | "original";
-    originalName: string;
-}> {
-    const originalName = artistName;
-
-    // Strategy 1: If we have MBID, use MusicBrainz as authoritative source
-    if (artistMbid) {
-        try {
-            const mbArtist = await musicBrainzService.getArtist(artistMbid);
-            if (mbArtist?.name) {
-                return {
-                    verifiedName: mbArtist.name,
-                    wasCorrected:
-                        mbArtist.name.toLowerCase() !==
-                        artistName.toLowerCase(),
-                    source: "musicbrainz",
-                    originalName,
-                };
-            }
-        } catch (error) {
-            logger.warn(
-                `MusicBrainz lookup failed for MBID ${artistMbid}:`,
-                error,
-            );
-        }
-    }
-
-    // Strategy 2: Use LastFM correction API
-    try {
-        const correction = await lastFmService.getArtistCorrection(artistName);
-        if (correction?.corrected) {
-            logger.debug(
-                `[VERIFY] LastFM correction: "${artistName}" → "${correction.canonicalName}"`,
-            );
-            return {
-                verifiedName: correction.canonicalName,
-                wasCorrected: true,
-                source: "lastfm",
-                originalName,
-            };
-        }
-    } catch (error) {
-        logger.warn(
-            `LastFM correction lookup failed for "${artistName}":`,
-            error,
-        );
-    }
-
-    // Strategy 3: Return original name
-    return {
-        verifiedName: artistName,
-        wasCorrected: false,
-        source: "original",
-        originalName,
-    };
-}
 
 /**
  * @openapi
@@ -275,72 +204,25 @@ router.post("/", requireAdmin, async (req, res) => {
             });
         }
 
-        // Single album download - verify artist name before proceeding
-        // NOTE: Do NOT pass `mbid` here — for album downloads, mbid is a release-group
-        // MBID, not an artist MBID. Passing it to getArtist() would cause a 404.
-        let verifiedArtistName = artistName;
-        if (type === "album" && artistName) {
-            const verification = await verifyArtistName(artistName);
-            if (verification.wasCorrected) {
-                logger.debug(
-                    `[DOWNLOAD] Artist name verified: "${artistName}" → "${verification.verifiedName}" (source: ${verification.source})`,
-                );
-                verifiedArtistName = verification.verifiedName;
-            }
-        }
-
-        // Single album download - use transaction with row-level locking to prevent race conditions
-        // This prevents TOCTOU (Time-Of-Check-Time-Of-Use) race condition where two concurrent
-        // requests could both pass the "check if exists" step and create duplicate jobs
-        const jobResult = await prisma.$transaction(async (tx) => {
-            // Check for existing active job with FOR UPDATE SKIP LOCKED
-            // FOR UPDATE locks the rows for the duration of the transaction
-            // SKIP LOCKED prevents blocking on rows locked by other transactions
-            const existingJobs = await tx.$queryRaw<
-                Array<{
-                    id: string;
-                    status: string;
-                    subject: string;
-                    createdAt: Date;
-                }>
-            >`
-                SELECT id, status, subject, "createdAt"
-                FROM "DownloadJob"
-                WHERE "targetMbid" = ${mbid}
-                AND status IN ('pending', 'processing')
-                FOR UPDATE SKIP LOCKED
-            `;
-
-            if (existingJobs.length > 0) {
-                const existingJob = existingJobs[0];
-                logger.debug(
-                    `[DOWNLOAD] Job already exists for ${mbid}: ${existingJob.id} (${existingJob.status})`,
-                );
-                return { duplicate: true, job: existingJob };
-            }
-
-            // No existing active job found, create new one
-            const newJob = await tx.downloadJob.create({
-                data: {
-                    userId,
-                    subject,
-                    type,
-                    targetMbid: mbid,
-                    status: "pending",
-                    metadata: {
-                        downloadType,
-                        rootFolderPath,
-                        artistName: verifiedArtistName,
-                        albumTitle,
-                    },
-                },
-            });
-
-            return { duplicate: false, job: newJob };
+        const jobResult = await createAlbumDownloadJob({
+            userId,
+            mbid,
+            subject,
+            artistName,
+            albumTitle,
+            downloadType,
+            rootFolderPath,
         });
 
-        // Handle duplicate case - return existing job info
         if (jobResult.duplicate) {
+            if (jobResult.duplicateSource === "unique") {
+                return res.json({
+                    id: jobResult.job.id,
+                    status: jobResult.job.status,
+                    duplicate: true,
+                    message: "Download already in progress",
+                });
+            }
             return res.json({
                 id: jobResult.job.id,
                 status: jobResult.job.status,
@@ -364,7 +246,7 @@ router.post("/", requireAdmin, async (req, res) => {
             mbid,
             subject,
             rootFolderPath,
-            verifiedArtistName,
+            jobResult.verifiedArtistName,
             albumTitle,
         ).catch((error) => {
             logger.error(
@@ -381,26 +263,6 @@ router.post("/", requireAdmin, async (req, res) => {
             message: "Download job created. Processing in background.",
         });
     } catch (error: any) {
-        // Handle P2002 unique constraint violation - race condition caught by unique index
-        // This can happen when two transactions both see empty results from SKIP LOCKED
-        // and both attempt to insert, with one winning and the other hitting the unique constraint
-        if (error.code === "P2002") {
-            const { mbid } = req.body;
-            const existingJob = await prisma.downloadJob.findFirst({
-                where: {
-                    targetMbid: mbid,
-                    status: { in: ["pending", "processing"] },
-                },
-            });
-            if (existingJob) {
-                return res.json({
-                    id: existingJob.id,
-                    status: existingJob.status,
-                    duplicate: true,
-                    message: "Download already in progress",
-                });
-            }
-        }
         logger.error("Create download job error:", error);
         sendInternalRouteError(res, "Failed to create download job");
     }
@@ -665,8 +527,8 @@ async function failJobWithoutDispatch(
     });
 }
 
-// Background download processor
-async function processDownload(
+/** Dispatch one album download through the configured source and fallback chain. */
+export async function processDownload(
     jobId: string,
     type: string,
     mbid: string,

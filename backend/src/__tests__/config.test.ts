@@ -179,6 +179,8 @@ describe("config module", () => {
             "http://localhost:5173",
         ]);
         expect(config.features.federation).toBe(false);
+        expect(config.features.requests).toBe(true);
+        expect(config.requests).toEqual({ dailyCapPerUser: 10 });
         expect(config.federation.allowPrivatePeers).toBe(false);
         expect(config.federation.allowProxy).toBe(false);
         expect(config.workers.federationTombstoneRetentionDays).toBe(90);
@@ -670,6 +672,22 @@ describe("config module", () => {
         });
 
         expect(config.lidarr).toBeUndefined();
+    });
+
+    it("configures music requests from bounded environment knobs", async () => {
+        const enabled = await loadConfigModule({
+            FEATURE_REQUESTS: "false",
+            REQUESTS_PER_USER_PER_DAY: "25",
+        });
+        expect(enabled.config.features.requests).toBe(false);
+        expect(enabled.config.requests).toEqual({ dailyCapPerUser: 25 });
+
+        const fallback = await loadConfigModule({
+            FEATURE_REQUESTS: undefined,
+            REQUESTS_PER_USER_PER_DAY: "0",
+        });
+        expect(fallback.config.features.requests).toBe(true);
+        expect(fallback.config.requests).toEqual({ dailyCapPerUser: 10 });
     });
 
     it("keeps explicit empty allowed-origins input without fallback", async () => {

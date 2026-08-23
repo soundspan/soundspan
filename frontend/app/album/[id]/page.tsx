@@ -21,6 +21,7 @@ import {
     useAlbumActions,
     useAlbumLikedState,
 } from "@/features/album/hooks/useAlbumActions";
+import { useAlbumRequest } from "@/features/album/hooks/useAlbumRequest";
 import { useYtMusicGapFill } from "@/features/album/hooks/useYtMusicGapFill";
 import { useTidalGapFill } from "@/features/album/hooks/useTidalGapFill";
 import { useTrackPreview } from "@/hooks/useTrackPreview";
@@ -108,6 +109,12 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     } = useAlbumActions();
     const { isPendingByMbid, downloadsEnabled } = useDownloadContext();
     const { previewTrack, previewPlaying, handlePreview } = useTrackPreview();
+    const {
+        requestsEnabled,
+        isRequestedAlbum,
+        isSubmittingRequest,
+        requestAlbum,
+    } = useAlbumRequest(rawAlbum);
 
     // Use enriched tracks (with TIDAL + YT Music gap-fill) when available
     const album = rawAlbum
@@ -250,6 +257,10 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     isPlayingThisAlbum={currentTrack?.album?.id === album.id}
                     onPause={pause}
                     downloadsEnabled={downloadsEnabled}
+                    requestsEnabled={requestsEnabled}
+                    isRequestedAlbum={isRequestedAlbum}
+                    isSubmittingRequest={isSubmittingRequest}
+                    onRequestAlbum={() => void requestAlbum()}
                     isInListenTogetherGroup={isInGroup}
                 />
             </AlbumHero>

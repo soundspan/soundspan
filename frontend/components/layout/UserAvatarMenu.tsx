@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Settings, LogOut, RefreshCw, Shield } from "lucide-react";
+import { Settings, LogOut, RefreshCw, Shield, Inbox } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { useJobStatus } from "@/hooks/useJobStatus";
@@ -169,6 +169,16 @@ export function UserAvatarMenu() {
                         <Settings className="w-4 h-4" />
                         Settings
                     </Link>
+                    {user?.role === "admin" && (
+                        <Link
+                            href="/requests"
+                            onClick={() => setIsOpen(false)}
+                            className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+                        >
+                            <Inbox className="w-4 h-4" />
+                            Requests
+                        </Link>
+                    )}
                     {user?.role === "admin" && (
                         <Link
                             href="/admin"

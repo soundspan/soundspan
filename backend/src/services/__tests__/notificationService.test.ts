@@ -182,4 +182,55 @@ describe("notificationService", () => {
             }),
         });
     });
+
+    it("creates request lifecycle notifications with stable metadata", async () => {
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue({
+            id: "request-notification",
+        });
+        const details = {
+            requestId: "request-1",
+            rgMbid: "4f9d25d1-32c2-4093-83a5-34fcbaaf6f25",
+            artistName: "Massive Attack",
+            albumTitle: "Mezzanine",
+        };
+
+        await notificationService.notifyRequestSubmitted(
+            "admin-1",
+            "listener",
+            details,
+        );
+        await notificationService.notifyRequestApproved("user-1", details);
+        await notificationService.notifyRequestDenied(
+            "user-1",
+            details,
+            "Not available",
+        );
+        await notificationService.notifyRequestFulfilled("user-1", details);
+        await notificationService.notifyRequestFailed("user-1", details);
+
+        expect(mockPrisma.notification.create).toHaveBeenNthCalledWith(1, {
+            data: {
+                userId: "admin-1",
+                type: "request_submitted",
+                title: "listener requested Massive Attack — Mezzanine",
+                message: "Review the pending album request.",
+                metadata: details,
+            },
+        });
+        expect(mockPrisma.notification.create).toHaveBeenNthCalledWith(3, {
+            data: expect.objectContaining({
+                userId: "user-1",
+                type: "request_denied",
+                message: "Your request was declined: Not available",
+                metadata: details,
+            }),
+        });
+        expect(mockPrisma.notification.create).toHaveBeenNthCalledWith(5, {
+            data: expect.objectContaining({
+                type: "request_failed",
+                message: "The download failed.",
+                metadata: details,
+            }),
+        });
+    });
 });

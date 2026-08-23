@@ -31,6 +31,7 @@ import { WithPlaylists } from "./api/playlists";
 import { WithPodcasts } from "./api/podcasts";
 import { WithPlays } from "./api/plays";
 import { WithRecommendations } from "./api/recommendations";
+import { WithRequests } from "./api/requests";
 import { WithSettings } from "./api/settings";
 import { WithSoulseek } from "./api/soulseek";
 import { WithTidal } from "./api/tidal";
@@ -454,32 +455,34 @@ export interface PlaybackClientMetricInput {
     fields?: Record<string, unknown>;
 }
 
-class ApiClient extends WithPeerPlaylists(
-    WithLibraryHealthDashboard(
-        WithListenGroups(
-            WithFederation(
-                WithTidal(
-                    WithYouTube(
-                        WithYtMusic(
-                            WithVibe(
-                                WithAudiobooks(
-                                    WithPodcasts(
-                                        WithSoulseek(
-                                            WithEnrichment(
-                                                WithMetadata(
-                                                    WithNotifications(
-                                                        WithDiscover(
-                                                            WithImports(
-                                                                WithDownloads(
-                                                                    WithAuth(
-                                                                        WithConnectors(
-                                                                            WithSettings(
-                                                                                WithPlays(
-                                                                                    WithRecommendations(
-                                                                                        WithMedia(
-                                                                                            WithPlaylists(
-                                                                                                WithLibrary(
-                                                                                                    ApiClientCore,
+class ApiClient extends WithRequests(
+    WithPeerPlaylists(
+        WithLibraryHealthDashboard(
+            WithListenGroups(
+                WithFederation(
+                    WithTidal(
+                        WithYouTube(
+                            WithYtMusic(
+                                WithVibe(
+                                    WithAudiobooks(
+                                        WithPodcasts(
+                                            WithSoulseek(
+                                                WithEnrichment(
+                                                    WithMetadata(
+                                                        WithNotifications(
+                                                            WithDiscover(
+                                                                WithImports(
+                                                                    WithDownloads(
+                                                                        WithAuth(
+                                                                            WithConnectors(
+                                                                                WithSettings(
+                                                                                    WithPlays(
+                                                                                        WithRecommendations(
+                                                                                            WithMedia(
+                                                                                                WithPlaylists(
+                                                                                                    WithLibrary(
+                                                                                                        ApiClientCore,
+                                                                                                    ),
                                                                                                 ),
                                                                                             ),
                                                                                         ),

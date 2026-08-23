@@ -12,58 +12,59 @@ enum LibraryHealthStatus {
 }
 
 model User {
-  id                     String                @id @default(cuid())
-  username               String                @unique
-  displayName            String?
-  email                  String?               @unique
-  passwordHash           String?
-  subsonicPassword       String? // Encrypted plaintext for Subsonic token auth (md5 requires plaintext)
-  role                   String                @default("user")
-  onboardingComplete     Boolean               @default(false)
-  enrichmentSettings     Json?
-  twoFactorEnabled       Boolean               @default(false)
-  twoFactorSecret        String?
-  twoFactorRecoveryCodes String?
-  profilePicture         Bytes?
-  moodMixParams          Json?
-  tokenVersion           Int                   @default(0)
-  pendingDeletionAt      DateTime?
-  createdAt              DateTime              @default(now())
-  appPasswords           AppPassword[]
-  apiKeys                ApiKey[]
-  audiobookProgress      AudiobookProgress[]
-  cachedTracks           CachedTrack[]
-  deviceLinkCodes        DeviceLinkCode[]
-  discoverExclusions     DiscoverExclusion[]
-  discoveryAlbums        DiscoveryAlbum[]
-  dislikedEntities       DislikedEntity[]
-  downloadJobs           DownloadJob[]
-  hiddenPlaylists        HiddenPlaylist[]
-  likedTracks            LikedTrack[]
-  likedRemoteTracks      LikedRemoteTrack[]
-  listeningState         ListeningState[]
-  notifications          Notification[]
-  plays                  Play[]
-  playbackStates         PlaybackState[]
-  playlists              Playlist[]
-  trackRatings           TrackRating[]
-  podcastDownloads       PodcastDownload[]
-  podcastProgress        PodcastProgress[]
-  podcastSubscriptions   PodcastSubscription[]
-  spotifyImportJobs      SpotifyImportJob[]
-  importJobs             ImportJob[]
-  bookmarks              Bookmark[]
-  unavailableAlbums      UnavailableAlbum[]
-  syncGroupsHosted       SyncGroup[]           @relation("SyncGroupHost")
-  syncGroupMemberships   SyncGroupMember[]
-  discoverConfig         UserDiscoverConfig?
-  userMoodMix            UserMoodMix?
-  settings               UserSettings?
-  externalIdentities     ExternalIdentity[]
-  inviteCodesCreated     InviteCode[]          @relation("InviteCodesCreated")
-  inviteCodeUsed         InviteCodeUsage?      @relation("InviteCodeUsed")
-  shareLinks             ShareLink[]
-  federationPeersCreated FederationPeer[]
+  id                        String                     @id @default(cuid())
+  username                  String                     @unique
+  displayName               String?
+  email                     String?                    @unique
+  passwordHash              String?
+  subsonicPassword          String? // Encrypted plaintext for Subsonic token auth (md5 requires plaintext)
+  role                      String                     @default("user")
+  onboardingComplete        Boolean                    @default(false)
+  enrichmentSettings        Json?
+  twoFactorEnabled          Boolean                    @default(false)
+  twoFactorSecret           String?
+  twoFactorRecoveryCodes    String?
+  profilePicture            Bytes?
+  moodMixParams             Json?
+  tokenVersion              Int                        @default(0)
+  pendingDeletionAt         DateTime?
+  createdAt                 DateTime                   @default(now())
+  appPasswords              AppPassword[]
+  apiKeys                   ApiKey[]
+  audiobookProgress         AudiobookProgress[]
+  cachedTracks              CachedTrack[]
+  deviceLinkCodes           DeviceLinkCode[]
+  discoverExclusions        DiscoverExclusion[]
+  discoveryAlbums           DiscoveryAlbum[]
+  dislikedEntities          DislikedEntity[]
+  downloadJobs              DownloadJob[]
+  musicRequests             MusicRequest[]
+  hiddenPlaylists           HiddenPlaylist[]
+  likedTracks               LikedTrack[]
+  likedRemoteTracks         LikedRemoteTrack[]
+  listeningState            ListeningState[]
+  notifications             Notification[]
+  plays                     Play[]
+  playbackStates            PlaybackState[]
+  playlists                 Playlist[]
+  trackRatings              TrackRating[]
+  podcastDownloads          PodcastDownload[]
+  podcastProgress           PodcastProgress[]
+  podcastSubscriptions      PodcastSubscription[]
+  spotifyImportJobs         SpotifyImportJob[]
+  importJobs                ImportJob[]
+  bookmarks                 Bookmark[]
+  unavailableAlbums         UnavailableAlbum[]
+  syncGroupsHosted          SyncGroup[]                @relation("SyncGroupHost")
+  syncGroupMemberships      SyncGroupMember[]
+  discoverConfig            UserDiscoverConfig?
+  userMoodMix               UserMoodMix?
+  settings                  UserSettings?
+  externalIdentities        ExternalIdentity[]
+  inviteCodesCreated        InviteCode[]               @relation("InviteCodesCreated")
+  inviteCodeUsed            InviteCodeUsage?           @relation("InviteCodeUsed")
+  shareLinks                ShareLink[]
+  federationPeersCreated    FederationPeer[]
   federationPlaylistFollows FederationPlaylistFollow[]
 }
 
@@ -167,24 +168,24 @@ model PlaybackState {
 }
 
 model SyncGroup {
-  id         String  @id @default(cuid())
-  name       String  @default("Listen Together")
-  joinCode   String  @unique
-  groupType  String  @default("host-follower") // "host-follower" | "collaborative"
-  visibility String  @default("public") // "public" | "private"
-  hostUserId String
-  isActive   Boolean @default(true)
+  id                        String  @id @default(cuid())
+  name                      String  @default("Listen Together")
+  joinCode                  String  @unique
+  groupType                 String  @default("host-follower") // "host-follower" | "collaborative"
+  visibility                String  @default("public") // "public" | "private"
+  hostUserId                String
+  isActive                  Boolean @default(true)
   cleanupPublicationPending Boolean @default(false)
 
   // Playback state (persisted periodically from in-memory manager)
-  trackId        String?
-  queue          Json? // Array of SyncQueueItem objects
-  currentIndex   Int      @default(0)
-  isPlaying      Boolean  @default(false)
-  currentTime    Float    @default(0)
-  stateVersion   Int      @default(0) // Monotonic counter
-  membershipFence BigInt  @default(0) // Last distributed membership fencing token
-  stateUpdatedAt DateTime @default(now())
+  trackId         String?
+  queue           Json? // Array of SyncQueueItem objects
+  currentIndex    Int      @default(0)
+  isPlaying       Boolean  @default(false)
+  currentTime     Float    @default(0)
+  stateVersion    Int      @default(0) // Monotonic counter
+  membershipFence BigInt   @default(0) // Last distributed membership fencing token
+  stateUpdatedAt  DateTime @default(now())
 
   endedAt   DateTime?
   createdAt DateTime  @default(now())
@@ -201,14 +202,14 @@ model SyncGroup {
 }
 
 model SyncGroupMember {
-  id          String    @id @default(cuid())
-  syncGroupId String
-  userId      String
-  isHost      Boolean   @default(false)
-  joinedAt    DateTime  @default(now())
-  lastSeenAt  DateTime  @updatedAt
-  leftAt      DateTime?
-  cleanupPublicationPending Boolean @default(false)
+  id                        String    @id @default(cuid())
+  syncGroupId               String
+  userId                    String
+  isHost                    Boolean   @default(false)
+  joinedAt                  DateTime  @default(now())
+  lastSeenAt                DateTime  @updatedAt
+  leftAt                    DateTime?
+  cleanupPublicationPending Boolean   @default(false)
 
   syncGroup SyncGroup @relation(fields: [syncGroupId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -321,36 +322,36 @@ model Artist {
 }
 
 model Album {
-  id               String                   @id @default(cuid())
-  rgMbid           String                   @unique
-  artistId         String
-  title            String
-  year             Int?
-  coverUrl         String?
-  primaryType      String
-  label            String?
-  genres           Json?
-  lastSynced       DateTime                 @default(now())
-  updatedAt        DateTime                 @default(now()) @updatedAt
-  location         AlbumLocation            @default(LIBRARY)
-  searchVector     Unsupported("tsvector")?
-  displayTitle     String?
-  displayYear      Int?
-  hasUserOverrides Boolean                  @default(false)
-  userCoverUrl     String?
-  userGenres       Json?
-  originalYear     Int?
-  peerId           String?
-  remoteId         String?
+  id                String                   @id @default(cuid())
+  rgMbid            String                   @unique
+  artistId          String
+  title             String
+  year              Int?
+  coverUrl          String?
+  primaryType       String
+  label             String?
+  genres            Json?
+  lastSynced        DateTime                 @default(now())
+  updatedAt         DateTime                 @default(now()) @updatedAt
+  location          AlbumLocation            @default(LIBRARY)
+  searchVector      Unsupported("tsvector")?
+  displayTitle      String?
+  displayYear       Int?
+  hasUserOverrides  Boolean                  @default(false)
+  userCoverUrl      String?
+  userGenres        Json?
+  originalYear      Int?
+  peerId            String?
+  remoteId          String?
   albumLoudnessLufs Float?
   albumTruePeakDb   Float?
-  artist           Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  federationPeer   FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
-  tracks           Track[]
-  tracksTidal      TrackTidal[]
-  tracksYtMusic    TrackYtMusic[]
-  ownedBy          OwnedAlbum[]
-  discoveryRecords DiscoveryAlbum[]
+  artist            Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  federationPeer    FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
+  tracks            Track[]
+  tracksTidal       TrackTidal[]
+  tracksYtMusic     TrackYtMusic[]
+  ownedBy           OwnedAlbum[]
+  discoveryRecords  DiscoveryAlbum[]
 
   @@unique([peerId, remoteId])
   @@index([artistId])
@@ -425,10 +426,10 @@ model Track {
   // Track.id across file moves, renames, retags, and in-place quality
   // upgrades. Deliberately NOT unique — the same audio can legitimately
   // exist at two paths, and the same recording on album + compilation.
-  audioHash     String?   // "sha256:<hex>" of the primary encoded audio stream (tag-invariant)
+  audioHash     String? // "sha256:<hex>" of the primary encoded audio stream (tag-invariant)
   audioHashedAt DateTime? // when audioHash was computed (backfill/staleness tracking)
-  recordingMbid String?   // MusicBrainz recording id, from file tags
-  isrc          String?   // first ISRC from file tags
+  recordingMbid String? // MusicBrainz recording id, from file tags
+  isrc          String? // first ISRC from file tags
   removedAt     DateTime? // soft-delete marker; null means active
 
   // F15: DB-generated uniform sample key for /tracks/shuffle's indexed
@@ -445,24 +446,24 @@ model Track {
   vibeAnalysisGeneration      Int       @default(0)
   vibeAnalysisStatusUpdatedAt DateTime? // When the status was last updated
 
-  cachedBy        CachedTrack[]
-  likedBy         LikedTrack[]
-  mappings        TrackMapping[]
-  bookmarks       Bookmark[]
-  libraryHealthRecord LibraryHealthRecord?
-  moodBuckets     MoodBucket[]
-  plays           Play[]
-  playlistItems   PlaylistItem[]
-  album           Album            @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  federationPeer  FederationPeer?  @relation(fields: [peerId], references: [id], onDelete: Cascade)
-  dedupOfTrack    Track?           @relation("FederationTrackDedup", fields: [dedupOfTrackId], references: [id], onDelete: SetNull)
-  deduplicatedFederatedTracks Track[] @relation("FederationTrackDedup")
-  trackGenres     TrackGenre[]
-  transcodedFiles TranscodedFile[]
-  ratings         TrackRating[]
-  embeddings      TrackEmbedding[]
-  lyrics          TrackLyrics?
-  syncGroups      SyncGroup[]      @relation("SyncGroupTrack")
+  cachedBy                    CachedTrack[]
+  likedBy                     LikedTrack[]
+  mappings                    TrackMapping[]
+  bookmarks                   Bookmark[]
+  libraryHealthRecord         LibraryHealthRecord?
+  moodBuckets                 MoodBucket[]
+  plays                       Play[]
+  playlistItems               PlaylistItem[]
+  album                       Album                @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  federationPeer              FederationPeer?      @relation(fields: [peerId], references: [id], onDelete: Cascade)
+  dedupOfTrack                Track?               @relation("FederationTrackDedup", fields: [dedupOfTrackId], references: [id], onDelete: SetNull)
+  deduplicatedFederatedTracks Track[]              @relation("FederationTrackDedup")
+  trackGenres                 TrackGenre[]
+  transcodedFiles             TranscodedFile[]
+  ratings                     TrackRating[]
+  embeddings                  TrackEmbedding[]
+  lyrics                      TrackLyrics?
+  syncGroups                  SyncGroup[]          @relation("SyncGroupTrack")
 
   @@unique([peerId, remoteId])
   @@index([albumId])
@@ -497,49 +498,49 @@ model Track {
 }
 
 model FederationPeer {
-  id             String        @id @default(cuid())
-  name           String
-  direction      PeerDirection
-  baseUrl        String?
-  credentialHash String?       @unique
+  id                   String                     @id @default(cuid())
+  name                 String
+  direction            PeerDirection
+  baseUrl              String?
+  credentialHash       String?                    @unique
   /// AES-GCM v2 envelope; startup backfill encrypts legacy non-v2 plaintext.
-  outboundToken  String?
-  scopes         String[]
-  capabilities   String[]      @default([])
-  inboundStatus  PeerStatus?
-  outboundStatus PeerStatus?
-  lastSeenAt     DateTime?
-  lastSyncSuccessAt DateTime?
-  lastSyncDurationMs Int?
-  lastErrorAt    DateTime?
-  lastError      String?
-  lastErrorClass String?
+  outboundToken        String?
+  scopes               String[]
+  capabilities         String[]                   @default([])
+  inboundStatus        PeerStatus?
+  outboundStatus       PeerStatus?
+  lastSeenAt           DateTime?
+  lastSyncSuccessAt    DateTime?
+  lastSyncDurationMs   Int?
+  lastErrorAt          DateTime?
+  lastError            String?
+  lastErrorClass       String?
   lastEmbeddingOutcome String?
-  lastSyncCursor String?
-  catalogEpoch   String?
-  showDedupedCopies Boolean @default(false)
+  lastSyncCursor       String?
+  catalogEpoch         String?
+  showDedupedCopies    Boolean                    @default(false)
   maxConcurrentStreams Int?
-  maxStreamKbps Int?
-  createdById    String
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  createdBy      User          @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  artists        Artist[]
-  albums         Album[]
-  tracks         Track[]
-  audiobooks     Audiobook[]
-  podcastListings FederationPodcastListing[]
-  playlistFollows FederationPlaylistFollow[]
+  maxStreamKbps        Int?
+  createdById          String
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  createdBy            User                       @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  artists              Artist[]
+  albums               Album[]
+  tracks               Track[]
+  audiobooks           Audiobook[]
+  podcastListings      FederationPodcastListing[]
+  playlistFollows      FederationPlaylistFollow[]
 }
 
 model FederationPlaylistFollow {
-  id        String   @id @default(cuid())
+  id        String         @id @default(cuid())
   userId    String
   peerId    String
   remoteId  String
   name      String
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   peer      FederationPeer @relation(fields: [peerId], references: [id], onDelete: Cascade)
 
   @@unique([userId, peerId, remoteId])
@@ -589,13 +590,13 @@ model Bookmark {
 
 model LibraryHealthRecord {
   id         String              @id @default(cuid())
-  trackId     String              @unique
-  status      LibraryHealthStatus
-  filePath    String
-  detail      String?
-  detectedAt  DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  track       Track               @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  trackId    String              @unique
+  status     LibraryHealthStatus
+  filePath   String
+  detail     String?
+  detectedAt DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  track      Track               @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
   @@index([status, updatedAt])
 }
@@ -669,19 +670,19 @@ model HiddenPlaylist {
 }
 
 model ShareLink {
-  id               String    @id @default(cuid())
-  token            String    @unique
-  userId           String
+  id             String    @id @default(cuid())
+  token          String    @unique
+  userId         String
   /// What kind of resource is shared
-  resourceType     String // "playlist" | "album" | "track"
-  resourceId       String
-  expiresAt        DateTime?
-  maxPlays         Int?
-  playCount        Int       @default(0)
-  lastStreamedAt   DateTime?
-  revoked          Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resourceType   String // "playlist" | "album" | "track"
+  resourceId     String
+  expiresAt      DateTime?
+  maxPlays       Int?
+  playCount      Int       @default(0)
+  lastStreamedAt DateTime?
+  revoked        Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([token])
   @@index([userId])
@@ -755,23 +756,23 @@ model SpotifyImportJob {
 }
 
 model ImportJob {
-  id                   String   @id @default(cuid())
-  userId               String
-  sourceType           String
-  sourceId             String
-  sourceUrl            String
-  normalizedSource     String
-  playlistName         String
+  id                    String   @id @default(cuid())
+  userId                String
+  sourceType            String
+  sourceId              String
+  sourceUrl             String
+  normalizedSource      String
+  playlistName          String
   requestedPlaylistName String?
-  status               String
-  progress             Int      @default(0)
-  summary              Json
-  resolvedTracks       Json?
-  createdPlaylistId    String?
-  error                String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status                String
+  progress              Int      @default(0)
+  summary               Json
+  resolvedTracks        Json?
+  createdPlaylistId     String?
+  error                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -854,6 +855,30 @@ model DownloadJob {
   @@index([targetMbid])
 }
 
+model MusicRequest {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          String    @default("album")
+  artistName    String
+  albumTitle    String
+  artistMbid    String?
+  rgMbid        String
+  status        String    @default("pending")
+  note          String?
+  deniedReason  String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  downloadJobId String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([rgMbid])
+  @@index([downloadJobId])
+}
+
 model ListeningState {
   id         String   @id @default(cuid())
   userId     String
@@ -869,7 +894,7 @@ model ListeningState {
 }
 
 model DiscoveryAlbum {
-  id             String         @id @default(cuid())
+  id             String           @id @default(cuid())
   userId         String
   rgMbid         String
   artistName     String
@@ -877,16 +902,16 @@ model DiscoveryAlbum {
   albumTitle     String
   lidarrAlbumId  Int?
   downloadedAt   DateTime?
-  folderPath     String         @default("")
+  folderPath     String           @default("")
   weekStartDate  DateTime
-  weekEndDate    DateTime       @default(now())
-  status         DiscoverStatus @default(ACTIVE)
+  weekEndDate    DateTime         @default(now())
+  status         DiscoverStatus   @default(ACTIVE)
   likedAt        DateTime?
   catalogAlbumId String?
   similarity     Float?
   tier           String?
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  catalogAlbum   Album?         @relation(fields: [catalogAlbumId], references: [id], onDelete: SetNull)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  catalogAlbum   Album?           @relation(fields: [catalogAlbumId], references: [id], onDelete: SetNull)
   tracks         DiscoveryTrack[]
 
   @@unique([userId, weekStartDate, rgMbid])
@@ -1060,27 +1085,27 @@ model PodcastRecommendation {
 }
 
 model Podcast {
-  id              String                   @id @default(cuid())
-  feedUrl         String                   @unique
-  title           String
-  author          String?
-  description     String?
-  imageUrl        String?
-  localCoverPath  String?
-  itunesId        String?                  @unique
-  language        String?
-  explicit        Boolean                  @default(false)
-  episodeCount    Int                      @default(0)
-  feedEtag        String?
+  id               String                   @id @default(cuid())
+  feedUrl          String                   @unique
+  title            String
+  author           String?
+  description      String?
+  imageUrl         String?
+  localCoverPath   String?
+  itunesId         String?                  @unique
+  language         String?
+  explicit         Boolean                  @default(false)
+  episodeCount     Int                      @default(0)
+  feedEtag         String?
   feedLastModified String?
-  lastRefreshed   DateTime                 @default(now())
-  refreshInterval Int                      @default(3600)
-  autoRefresh     Boolean                  @default(true)
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  searchVector    Unsupported("tsvector")?
-  episodes        PodcastEpisode[]
-  subscriptions   PodcastSubscription[]
+  lastRefreshed    DateTime                 @default(now())
+  refreshInterval  Int                      @default(3600)
+  autoRefresh      Boolean                  @default(true)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  searchVector     Unsupported("tsvector")?
+  episodes         PodcastEpisode[]
+  subscriptions    PodcastSubscription[]
 
   @@index([itunesId])
   @@index([lastRefreshed])
@@ -1418,8 +1443,8 @@ model TrackEmbedding {
 }
 
 model TrackTidal {
-  id            String         @id @default(cuid())
-  tidalId       Int            @unique
+  id            String             @id @default(cuid())
+  tidalId       Int                @unique
   title         String
   artist        String
   album         String
@@ -1429,9 +1454,9 @@ model TrackTidal {
   explicit      Boolean?
   artistId      String?
   albumId       String?
-  createdAt     DateTime       @default(now())
-  artistEntity  Artist?        @relation(fields: [artistId], references: [id], onDelete: SetNull)
-  albumEntity   Album?         @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  createdAt     DateTime           @default(now())
+  artistEntity  Artist?            @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  albumEntity   Album?             @relation(fields: [albumId], references: [id], onDelete: SetNull)
   likedBy       LikedRemoteTrack[]
   mappings      TrackMapping[]
   plays         Play[]
@@ -1443,8 +1468,8 @@ model TrackTidal {
 }
 
 model TrackYtMusic {
-  id            String         @id @default(cuid())
-  videoId       String         @unique
+  id            String             @id @default(cuid())
+  videoId       String             @unique
   title         String
   artist        String
   album         String
@@ -1452,9 +1477,9 @@ model TrackYtMusic {
   thumbnailUrl  String?
   artistId      String?
   albumId       String?
-  createdAt     DateTime       @default(now())
-  artistEntity  Artist?        @relation(fields: [artistId], references: [id], onDelete: SetNull)
-  albumEntity   Album?         @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  createdAt     DateTime           @default(now())
+  artistEntity  Artist?            @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  albumEntity   Album?             @relation(fields: [albumId], references: [id], onDelete: SetNull)
   likedBy       LikedRemoteTrack[]
   mappings      TrackMapping[]
   plays         Play[]
@@ -1473,7 +1498,7 @@ model TrackMapping {
   trackTidalId   String?
   trackYtMusicId String?
   confidence     Float
-  source         String        // "gap-fill" | "isrc" | "import-match" | "manual" | "federation"
+  source         String // "gap-fill" | "isrc" | "import-match" | "manual" | "federation"
   stale          Boolean       @default(false)
   staleAt        DateTime?
   createdAt      DateTime      @default(now())

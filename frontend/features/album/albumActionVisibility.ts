@@ -8,6 +8,7 @@ export interface AlbumActionVisibilityInput {
     rgMbid?: string;
     mbid?: string;
     downloadsEnabled: boolean;
+    requestsEnabled: boolean;
     hasAddAllToQueue: boolean;
     hasAlbumPreferenceAction: boolean;
     isInListenTogetherGroup: boolean;
@@ -19,6 +20,7 @@ export interface AlbumActionVisibility {
     isOwned: boolean;
     isLibraryVisible: boolean;
     showAcquisition: boolean;
+    showRequest: boolean;
     hasLockedControls: boolean;
     canShowAddAllToQueue: boolean;
     canShowAddToPlaylist: boolean;
@@ -52,6 +54,14 @@ export function getAlbumActionVisibility(
     const showAcquisition = Boolean(
         input.downloadsEnabled && !isOwned && acquisitionMbid,
     );
+    // Requests are the non-admin path; direct download always wins when both
+    // capabilities are somehow present.
+    const showRequest = Boolean(
+        input.requestsEnabled &&
+        !showAcquisition &&
+        !isOwned &&
+        acquisitionMbid,
+    );
     const canShowAlbumPreference =
         isOwned && input.source !== "remote" && input.hasAlbumPreferenceAction;
     const canShareAlbum = Boolean(input.albumId);
@@ -67,13 +77,17 @@ export function getAlbumActionVisibility(
         isOwned,
         isLibraryVisible,
         showAcquisition,
+        showRequest,
         hasLockedControls,
         canShowAddAllToQueue: input.hasAddAllToQueue,
         canShowAddToPlaylist: isLibraryVisible,
         canShowAlbumPreference,
         canShareAlbum,
         hasActionControls: input.isInListenTogetherGroup
-            ? hasLockedControls || optionalControls
-            : isLibraryVisible || showAcquisition || optionalControls,
+            ? hasLockedControls || showRequest || optionalControls
+            : isLibraryVisible ||
+              showAcquisition ||
+              showRequest ||
+              optionalControls,
     };
 }

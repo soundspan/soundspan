@@ -85,6 +85,8 @@ services:
             AUTO_PLAYLISTS_ENABLED: ${AUTO_PLAYLISTS_ENABLED:-true}
             VIBE_PROVIDER_URL: ${VIBE_PROVIDER_URL:-http://vibe-provider-dclap:${DCLAP_HTTP_PORT:-8092}}
             FEDERATION_ENABLED: ${FEDERATION_ENABLED:-false}
+            FEATURE_REQUESTS: ${FEATURE_REQUESTS:-true}
+            REQUESTS_PER_USER_PER_DAY: ${REQUESTS_PER_USER_PER_DAY:-10}
             FEDERATION_ALLOW_PRIVATE_PEERS: ${FEDERATION_ALLOW_PRIVATE_PEERS:-false}
             FEDERATION_ALLOW_PROXY: ${FEDERATION_ALLOW_PROXY:-false}
             # Host passthrough (null-form: absent in the container unless set on
@@ -234,6 +236,8 @@ services:
             AUTO_PLAYLISTS_ENABLED: ${AUTO_PLAYLISTS_ENABLED:-true}
             VIBE_PROVIDER_URL: ${VIBE_PROVIDER_URL:-http://vibe-provider-dclap:${DCLAP_HTTP_PORT:-8092}}
             FEDERATION_ENABLED: ${FEDERATION_ENABLED:-false}
+            FEATURE_REQUESTS: ${FEATURE_REQUESTS:-true}
+            REQUESTS_PER_USER_PER_DAY: ${REQUESTS_PER_USER_PER_DAY:-10}
             FEDERATION_ALLOW_PRIVATE_PEERS: ${FEDERATION_ALLOW_PRIVATE_PEERS:-false}
             FEDERATION_ALLOW_PROXY: ${FEDERATION_ALLOW_PROXY:-false}
             # Host passthrough (null-form: absent in the container unless set on

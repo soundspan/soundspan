@@ -7,7 +7,20 @@ export type NotificationType =
     | "download_failed"
     | "playlist_ready"
     | "import_complete"
+    | "request_submitted"
+    | "request_approved"
+    | "request_denied"
+    | "request_fulfilled"
+    | "request_failed"
     | "error";
+
+/** Stable metadata included with every music request notification. */
+export interface RequestNotificationMetadata {
+    requestId: string;
+    rgMbid: string;
+    artistName: string;
+    albumTitle: string;
+}
 
 export interface CreateNotificationParams {
     userId: string;
@@ -203,6 +216,80 @@ class NotificationService {
             title: "Import Complete",
             message,
             metadata: { playlistId, playlistName, matchedTracks, totalTracks },
+        });
+    }
+
+    /** Notify an administrator about a newly submitted request. */
+    async notifyRequestSubmitted(
+        adminUserId: string,
+        requesterUsername: string,
+        metadata: RequestNotificationMetadata,
+    ) {
+        return this.create({
+            userId: adminUserId,
+            type: "request_submitted",
+            title: `${requesterUsername} requested ${metadata.artistName} — ${metadata.albumTitle}`,
+            message: "Review the pending album request.",
+            metadata,
+        });
+    }
+
+    /** Notify the requester that an administrator approved the request. */
+    async notifyRequestApproved(
+        userId: string,
+        metadata: RequestNotificationMetadata,
+    ) {
+        return this.create({
+            userId,
+            type: "request_approved",
+            title: "Music Request Approved",
+            message: `${metadata.artistName} — ${metadata.albumTitle} is being downloaded.`,
+            metadata,
+        });
+    }
+
+    /** Notify the requester that an administrator declined the request. */
+    async notifyRequestDenied(
+        userId: string,
+        metadata: RequestNotificationMetadata,
+        reason?: string,
+    ) {
+        return this.create({
+            userId,
+            type: "request_denied",
+            title: "Music Request Declined",
+            message: reason
+                ? `Your request was declined: ${reason}`
+                : "Your request was declined.",
+            metadata,
+        });
+    }
+
+    /** Notify the requester that the approved album reached the library. */
+    async notifyRequestFulfilled(
+        userId: string,
+        metadata: RequestNotificationMetadata,
+    ) {
+        return this.create({
+            userId,
+            type: "request_fulfilled",
+            title: "Music Request Fulfilled",
+            message: `${metadata.artistName} — ${metadata.albumTitle} is now in your library.`,
+            metadata,
+        });
+    }
+
+    /** Notify the requester that the approved album download failed. */
+    async notifyRequestFailed(
+        userId: string,
+        metadata: RequestNotificationMetadata,
+    ) {
+        return this.create({
+            userId,
+            type: "request_failed",
+            title: "Music Request Failed",
+            message: "The download failed.",
+            metadata,
         });
     }
 

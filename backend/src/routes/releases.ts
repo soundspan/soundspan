@@ -269,49 +269,4 @@ router.get("/recent", async (req, res) => {
     }
 });
 
-/**
- * @openapi
- * /api/releases/download/{albumMbid}:
- *   post:
- *     summary: Download a release from the radar
- *     tags: [Releases]
- *     security:
- *       - apiKeyAuth: []
- *     parameters:
- *       - in: path
- *         name: albumMbid
- *         required: true
- *         schema:
- *           type: string
- *         description: MusicBrainz album ID to download
- *     responses:
- *       200:
- *         description: Download started successfully
- *       401:
- *         description: Not authenticated
- *       501:
- *         description: Download feature not yet implemented
- */
-router.post("/download/:albumMbid", async (req, res) => {
-    try {
-        const { albumMbid } = req.params;
-        const userId = req.user?.id;
-
-        if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
-        }
-
-        logger.debug(`[Releases] Download requested for album: ${albumMbid}`);
-
-        // Release-radar downloads are intentionally unimplemented; this endpoint
-        // returns 501 until that feature is built.
-        res.status(501).json({
-            error: "Download feature not yet implemented for release radar",
-        });
-    } catch (error: any) {
-        logger.error("[Releases] Download error:", error.message);
-        res.status(500).json({ error: "Failed to start download" });
-    }
-});
-
 export default router;

@@ -54,6 +54,13 @@ import type { ReconciliationCursor } from "../services/trackReconciliation";
 import { processAudioHashBackfill } from "./processors/audioHashBackfillProcessor";
 import { processLoudnessBackfill } from "./processors/loudnessBackfillProcessor";
 import { processTrackRemovalPurge } from "./processors/trackRemovalPurgeProcessor";
+import { processRequestFulfillmentBatch } from "./processors/requestFulfillmentProcessor";
+import {
+    REQUEST_FULFILLMENT_INTERVAL_MS,
+    REQUEST_FULFILLMENT_JOB_ID,
+    REQUEST_FULFILLMENT_JOB_NAME,
+    requestFulfillmentRepeatSchedule,
+} from "./requestFulfillmentSchedule";
 import {
     registerFederationProcessors,
     registerFederationSchedules,
@@ -542,10 +549,21 @@ async function registerSchedulerJobs(): Promise<void> {
     await schedulerQueue.isReady();
 
     const schedulerJobs = buildSchedulerJobs();
-
     for (const job of schedulerJobs) {
         await schedulerQueue.add(job.type, job.data, job.opts);
     }
+    if (config.features.requests) {
+        const job = requestFulfillmentRepeatSchedule;
+        await schedulerQueue.add(job.type, job.data, job.opts);
+        return;
+    }
+    await schedulerQueue.removeRepeatable(REQUEST_FULFILLMENT_JOB_NAME, {
+        every: REQUEST_FULFILLMENT_INTERVAL_MS,
+        jobId: REQUEST_FULFILLMENT_JOB_ID,
+    });
+    log.info(
+        "Music requests disabled (FEATURE_REQUESTS=false); fulfillment scheduler not registered",
+    );
 }
 
 // Register processors with named job types
@@ -629,6 +647,11 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
         case SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh:
         case "remote-track-metadata-refresh":
             await processRemoteTrackMetadataRefreshJob();
+            break;
+        case REQUEST_FULFILLMENT_JOB_NAME:
+            if (config.features.requests) {
+                await processRequestFulfillmentBatch();
+            }
             break;
         default:
             log.warn(

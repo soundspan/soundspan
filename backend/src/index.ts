@@ -276,6 +276,14 @@ if (config.features.discovery) {
     app.use("/api/recommendations", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
+if (config.features.requests) {
+    app.use("/api/requests", apiLimiter, require("./routes/requests").default);
+} else {
+    logger.info(
+        "[Features] Music requests disabled (FEATURE_REQUESTS=false); /api/requests returns 404",
+    );
+    app.use("/api/requests", apiLimiter, createFeatureDisabledHandler());
+}
 app.use("/api/notifications", apiLimiter, notificationsRoutes);
 app.use("/api/webhooks", webhooksRoutes); // The Lidarr POST has its own webhookLimiter; GET /lidarr/verify stays unthrottled for Lidarr's test probe
 // Audiobook routes classify metadata, covers, and audio into separate limiter tiers.
