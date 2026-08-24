@@ -22,6 +22,7 @@ const mockLogger = {
 mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../workers/queues", () => ({ scanQueue: mockScanQueue }));
+jest.mock("../../config", () => ({ config: { underJest: true } }));
 jest.mock("../../utils/ioredis", () => ({
     createIORedisClient: mockCreateIORedisClient,
 }));

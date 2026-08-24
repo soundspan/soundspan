@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import type { Job } from "bull";
 import type Redis from "ioredis";
 import { scanQueue } from "../workers/queues";
+import { config } from "../config";
 import { createIORedisClient } from "../utils/ioredis";
 import { logger } from "../utils/logger";
 
@@ -45,10 +46,7 @@ function getFollowUpRedis(): Redis {
         );
     }
     if (!followUpRedis) {
-        const testOptions =
-            process.env.JEST_WORKER_ID === undefined
-                ? {}
-                : { lazyConnect: true };
+        const testOptions = config.underJest ? { lazyConnect: true } : {};
         followUpRedis = createIORedisClient(
             "coalesced-library-scan-follow-up",
             testOptions,
