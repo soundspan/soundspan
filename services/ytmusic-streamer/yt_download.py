@@ -14,7 +14,13 @@ import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
+from uuid import uuid4
+
+from mutagen.flac import FLAC
+from mutagen.id3 import ID3
+from mutagen.mp4 import MP4
+from mutagen.oggopus import OggOpus
 
 # Audio file extensions produced by the download postprocessors (plus raw
 # bestaudio containers in case postprocessing is skipped).
@@ -22,6 +28,9 @@ AUDIO_EXTENSIONS = {".mp3", ".opus", ".flac", ".m4a", ".ogg", ".webm"}
 
 # Download-job states that mean a download is still in flight.
 ACTIVE_DOWNLOAD_STATUSES = {"queued", "downloading", "processing"}
+
+_MAX_FILENAME_BYTES = 255
+_MAX_COLLISION_COUNTER = 5
 
 
 def find_active_download_job(
@@ -71,6 +80,36 @@ class _WarningLogger(Protocol):
     def warning(self, message: str) -> None: ...
 
 
+class _TagReader(Protocol):
+    """Typed view of Mutagen's untyped mapping-like tag containers."""
+
+    def get(self, key: str) -> object: ...
+
+
+class _Id3Reader(Protocol):
+    """Typed view of the ID3 frame lookup used by the identity reader."""
+
+    def getall(self, key: str) -> list[object]: ...
+
+
+class _Id3TextFrame(Protocol):
+    """Typed view shared by Mutagen TXXX and COMM text frames."""
+
+    text: list[str]
+
+
+class _Id3UserTextFrame(_Id3TextFrame, Protocol):
+    """Typed view of Mutagen's TXXX description field."""
+
+    desc: str
+
+
+class _Mp4Reader(Protocol):
+    """Typed view of Mutagen's optional MP4 tag container."""
+
+    tags: _TagReader | None
+
+
 def _sanitize_path_component(name: str) -> str:
     """Replace filesystem-reserved characters and trim unsafe suffixes."""
     for char in '<>:"/\\|?*':
@@ -99,6 +138,45 @@ def _require_contained_download_path(path: Path, destination_root: Path) -> Path
     return resolved_path
 
 
+def _build_bounded_filename(stem: str, suffix: str, extension: str) -> str:
+    """Build one UTF-8 filename component within the common 255-byte limit."""
+    reserved_bytes = len(f"{suffix}{extension}".encode())
+    stem_budget = _MAX_FILENAME_BYTES - reserved_bytes
+    if stem_budget < 1:
+        raise ValueError("Download filename suffix exceeds the 255-byte component limit")
+    bounded_stem = stem.encode()[:stem_budget].decode(errors="ignore")
+    if not bounded_stem:
+        raise ValueError("Download filename has no stem within the 255-byte component limit")
+    return f"{bounded_stem}{suffix}{extension}"
+
+
+def _build_album_track_candidates(planned_path: Path, video_id: str) -> tuple[Path, ...]:
+    """Build the planned album path and five byte-bounded identity alternatives."""
+    candidates = [planned_path]
+    for counter in range(1, _MAX_COLLISION_COUNTER + 1):
+        identity_suffix = f" [{video_id}]" if counter == 1 else f" [{video_id}-{counter}]"
+        candidate_name = _build_bounded_filename(
+            planned_path.stem,
+            identity_suffix,
+            planned_path.suffix,
+        )
+        candidates.append(planned_path.with_name(candidate_name))
+    return tuple(candidates)
+
+
+def _build_album_track_tmp_path(final_path: Path, destination_root: Path) -> Path:
+    """Build a contained, byte-bounded temporary path unique to one invocation."""
+    temporary_name = _build_bounded_filename(
+        final_path.stem,
+        f".{uuid4().hex}.tmp",
+        final_path.suffix,
+    )
+    return _require_contained_download_path(
+        final_path.with_name(temporary_name),
+        destination_root,
+    )
+
+
 def build_album_track_paths(
     music_path: Path,
     album_artist: str,
@@ -107,7 +185,7 @@ def build_album_track_paths(
     track_title: str,
     audio_format: str,
 ) -> tuple[Path, Path, Path]:
-    """Build deterministic contained paths for one album track and its temp file."""
+    """Build a deterministic album path and a unique contained temporary path."""
     if track_number < 1:
         raise ValueError("Track number must be positive")
     components = (
@@ -117,13 +195,84 @@ def build_album_track_paths(
     )
     relative_stem = _sanitize_download_relative_path("/".join(components))
     extension = audio_format.lstrip(".")
-    relative_path = relative_stem.parent / f"{relative_stem.name}.{extension}"
+    filename = _build_bounded_filename(relative_stem.name, "", f".{extension}")
+    relative_path = relative_stem.parent / filename
     destination_root = music_path.resolve()
     final_path = _require_contained_download_path(
         destination_root / relative_path, destination_root
     )
-    tmp_path = final_path.with_name(f"{final_path.stem}.tmp{final_path.suffix}")
-    return relative_path, final_path, _require_contained_download_path(tmp_path, destination_root)
+    tmp_path = _build_album_track_tmp_path(final_path, destination_root)
+    return relative_path, final_path, tmp_path
+
+
+def _parse_ytmusic_identity(tag_values: object) -> str | None:
+    """Parse one ffmpeg-written YouTube Music identity metadata value."""
+    if isinstance(tag_values, str):
+        values = [tag_values]
+    elif isinstance(tag_values, list):
+        values = tag_values[:16]
+    else:
+        return None
+    for value in values:
+        if not isinstance(value, str) or not value.startswith("ytmusic:"):
+            continue
+        video_id = value.removeprefix("ytmusic:")
+        if video_id:
+            return video_id
+    return None
+
+
+def _read_mp3_video_id(path: Path) -> str | None:
+    """Read ffmpeg's MP3 description/comment frames and conservative COMM variants."""
+    # Mutagen 1.48.1 lacks complete annotations; ID3.getall owns these frame shapes.
+    tags = cast(_Id3Reader, ID3(path))  # type: ignore[no-untyped-call]
+    for raw_frame in tags.getall("TXXX")[:16]:
+        frame = cast(_Id3UserTextFrame, raw_frame)
+        if frame.desc.lower() not in {"description", "comment"}:
+            continue
+        video_id = _parse_ytmusic_identity(frame.text)
+        if video_id is not None:
+            return video_id
+    for raw_frame in tags.getall("COMM")[:16]:
+        comment_frame = cast(_Id3TextFrame, raw_frame)
+        video_id = _parse_ytmusic_identity(comment_frame.text)
+        if video_id is not None:
+            return video_id
+    return None
+
+
+def _read_mapping_video_id(tags: _TagReader, keys: tuple[str, ...]) -> str | None:
+    """Read every supported metadata key independently until identity is found."""
+    for key in keys:
+        video_id = _parse_ytmusic_identity(tags.get(key))
+        if video_id is not None:
+            return video_id
+    return None
+
+
+def _read_embedded_video_id(path: Path) -> str | None:
+    """Read an ffmpeg-written album identity, returning None for every failure."""
+    try:
+        suffix = path.suffix.lower()
+        if suffix == ".mp3":
+            return _read_mp3_video_id(path)
+        if suffix in {".opus", ".ogg"}:
+            # Mutagen 1.48.1 lacks complete annotations for Vorbis mapping access.
+            opus_tags = cast(_TagReader, OggOpus(path))  # type: ignore[no-untyped-call]
+            return _read_mapping_video_id(opus_tags, ("description", "comment"))
+        if suffix == ".flac":
+            # Mutagen 1.48.1 lacks complete annotations for Vorbis mapping access.
+            flac_tags = cast(_TagReader, FLAC(path))  # type: ignore[no-untyped-call]
+            return _read_mapping_video_id(flac_tags, ("description", "comment"))
+        if suffix == ".m4a":
+            # Mutagen 1.48.1 lacks complete annotations for MP4 tag access.
+            mp4_audio = cast(_Mp4Reader, MP4(path))  # type: ignore[no-untyped-call]
+            if mp4_audio.tags is None:
+                return None
+            return _read_mapping_video_id(mp4_audio.tags, ("desc", "\xa9des", "\xa9cmt"))
+    except Exception:
+        return None
+    return None
 
 
 def build_audio_download_opts(
@@ -424,6 +573,9 @@ def build_tag_rewrite_command(filepath: str, tags: dict[str, Any], tmp_path: str
     ]
     for key, value in tags.items():
         cmd += ["-metadata", f"{key}={value}"]
+    if Path(tmp_path).suffix.lower() in {".opus", ".ogg"} and "comment" in tags:
+        cmd += ["-metadata:s:a:0", f"comment={tags['comment']}"]
+        cmd += ["-metadata:s:a:0", f"description={tags.get('description', '')}"]
     cmd.append(tmp_path)
     return cmd
 

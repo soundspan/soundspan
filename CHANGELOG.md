@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Two different TIDAL tracks whose names collapse to the same filename no longer overwrite each other; the second download is saved under a disambiguated name, while legacy files without embedded TIDAL identity still refresh in place at their planned path.
+- Album downloads from YouTube Music no longer silently skip a track when two song names collide into the same filename — the second track is saved under a disambiguated name.
 - Retrying a failed album download now uses the configured download source instead of always routing to Lidarr.
 - TIDAL downloads now convert tracks detected as lossless to real FLAC files. Tracks detected as AAC-only are saved as `.m4a` instead of mislabeled `.flac`; when codec detection is unavailable, the original file is kept as-is.
 - Max-quality (Hi-Res) TIDAL downloads are no longer saved as broken files missing their opening data.

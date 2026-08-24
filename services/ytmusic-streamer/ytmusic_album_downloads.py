@@ -1,17 +1,24 @@
 """YouTube Music album download jobs and HTTP routes."""
 
 import asyncio
+import glob
 import os
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
 from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException, Query
 from yt_download import (
+    _build_album_track_candidates,
+    _build_album_track_tmp_path,
+    _read_embedded_video_id,
+    _require_contained_download_path,
     _stamp_audio_tags,
     build_album_track_paths,
     build_audio_download_opts,
@@ -32,6 +39,8 @@ _yt_album_download_executor = ThreadPoolExecutor(
 )
 _yt_album_download_jobs: dict[str, JsonObject] = {}
 _yt_album_download_tasks: set[asyncio.Task[None]] = set()
+_album_track_install_lock = threading.Lock()
+_MAX_OWNED_TEMP_ARTIFACTS = 64
 
 
 def _album_search_artists(value: object) -> list[str]:
@@ -163,7 +172,7 @@ def _album_track_tags(
     track: JsonObject, index: int, album_title: str, album_artist: str, year: str
 ) -> dict[str, str]:
     """Build scanner-compatible tags for one album track."""
-    _video_id, title, track_number, artists = _track_details(track, index)
+    video_id, title, track_number, artists = _track_details(track, index)
     return {
         "artist": ", ".join(artists) or album_artist,
         "album_artist": album_artist,
@@ -171,7 +180,64 @@ def _album_track_tags(
         "title": title,
         "track": str(track_number),
         "date": year,
+        "comment": f"ytmusic:{video_id}",
     }
+
+
+def _resolve_album_track_path(
+    planned_path: Path,
+    destination_root: Path,
+    video_id: str,
+) -> Path:
+    """Resolve one bounded identity-checked album path without overwriting files."""
+    candidates = _build_album_track_candidates(planned_path, video_id)
+    first_free: Path | None = None
+    for index, candidate in enumerate(candidates):
+        contained = _require_contained_download_path(candidate, destination_root)
+        if not contained.exists():
+            if first_free is None:
+                first_free = contained
+            continue
+        if not contained.is_file():
+            continue
+        embedded_id = _read_embedded_video_id(contained)
+        if embedded_id == video_id:
+            return contained
+        if embedded_id is None and index == 0:
+            log.debug(
+                "Keeping legacy YouTube Music album track without embedded identity at %s",
+                contained,
+            )
+            return contained
+    if first_free is not None:
+        return first_free
+    raise RuntimeError(
+        f"No safe download path for YouTube Music video {video_id}; all {len(candidates)} "
+        "candidates are occupied by other or unidentified files"
+    )
+
+
+def _install_album_track(
+    tmp_path: Path,
+    planned_path: Path,
+    destination_root: Path,
+    video_id: str,
+) -> Path:
+    """Atomically install a tagged temp file into a race-safe resolved candidate."""
+    with _album_track_install_lock:
+        final_path = _resolve_album_track_path(planned_path, destination_root, video_id)
+        if final_path.is_file():
+            tmp_path.unlink()
+            return final_path
+        if final_path != planned_path:
+            log.info(
+                "Album path collision at %s; saving YouTube Music video %s to %s",
+                planned_path,
+                video_id,
+                final_path,
+            )
+        os.replace(tmp_path, final_path)
+        return final_path
 
 
 def _album_progress_hook(job: JsonObject, download_cancelled: type[Exception]) -> Any:
@@ -186,28 +252,43 @@ def _album_progress_hook(job: JsonObject, download_cancelled: type[Exception]) -
     return update
 
 
-def _download_album_track_sync(
+def _select_album_track_paths(
     *,
-    job: JsonObject,
-    track: JsonObject,
-    index: int,
-    album_title: str,
-    album_artist: str,
-    year: str,
-    audio_format: str,
-    quality: str,
     music_path: Path,
-) -> str:
-    """Download, tag, and atomically place one album track."""
-    import yt_dlp
-
-    video_id, title, track_number, _artists = _track_details(track, index)
-    _relative, final_path, tmp_path = build_album_track_paths(
+    album_artist: str,
+    album_title: str,
+    track_number: int,
+    title: str,
+    audio_format: str,
+    video_id: str,
+) -> tuple[Path, Path | None]:
+    """Return an existing resume target or planned and unique temporary paths."""
+    _relative, planned_path, planned_tmp_path = build_album_track_paths(
         music_path, album_artist, album_title, track_number, title, audio_format
     )
+    destination_root = music_path.resolve()
+    final_path = _resolve_album_track_path(planned_path, destination_root, video_id)
     if final_path.is_file():
-        return str(final_path)
+        return final_path, None
+    tmp_path = (
+        planned_tmp_path
+        if final_path == planned_path
+        else _build_album_track_tmp_path(final_path, destination_root)
+    )
     final_path.parent.mkdir(parents=True, exist_ok=True)
+    return planned_path, tmp_path
+
+
+def _extract_album_track(
+    job: JsonObject,
+    video_id: str,
+    tmp_path: Path,
+    audio_format: str,
+    quality: str,
+) -> None:
+    """Run one bounded yt-dlp extraction into a unique temporary path."""
+    import yt_dlp
+
     _extract_pacer.wait()
     hook = _album_progress_hook(job, yt_dlp.utils.DownloadCancelled)
     options = build_audio_download_opts(
@@ -224,13 +305,90 @@ def _download_album_track_sync(
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
     if not info or not tmp_path.is_file():
         raise ValueError("Track download completed without an output file")
+
+
+def _tag_album_track(
+    tmp_path: Path,
+    track: JsonObject,
+    index: int,
+    album_title: str,
+    album_artist: str,
+    year: str,
+    video_id: str,
+) -> None:
+    """Stamp scanner-compatible tags and require readable track identity."""
     _stamp_audio_tags(
         str(tmp_path),
         _album_track_tags(track, index, album_title, album_artist, year),
         log,
     )
-    os.replace(tmp_path, final_path)
-    return str(final_path)
+    if _read_embedded_video_id(tmp_path) == video_id:
+        return
+    raise ValueError("Track identity metadata could not be embedded")
+
+
+def _cleanup_album_track_temp(tmp_path: Path) -> None:
+    """Remove bounded yt-dlp artifacts owned by one UUID temporary stem."""
+    owned_pattern = f"{glob.escape(str(tmp_path.with_suffix('')))}.*"
+    artifact_names = islice(glob.iglob(owned_pattern), _MAX_OWNED_TEMP_ARTIFACTS)
+    for artifact_name in artifact_names:
+        artifact = Path(artifact_name)
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError as error:
+            log.warning(
+                "Could not remove YouTube Music album temp artifact %s: %s", artifact, error
+            )
+
+
+def _download_album_track_sync(
+    *,
+    job: JsonObject,
+    track: JsonObject,
+    index: int,
+    album_title: str,
+    album_artist: str,
+    year: str,
+    audio_format: str,
+    quality: str,
+    music_path: Path,
+) -> str:
+    """Download, tag, and atomically place one album track."""
+    video_id, title, track_number, _artists = _track_details(track, index)
+    planned_path, tmp_path = _select_album_track_paths(
+        music_path=music_path,
+        album_artist=album_artist,
+        album_title=album_title,
+        track_number=track_number,
+        title=title,
+        audio_format=audio_format,
+        video_id=video_id,
+    )
+    if tmp_path is None:
+        return str(planned_path)
+    succeeded = False
+    try:
+        _extract_album_track(job, video_id, tmp_path, audio_format, quality)
+        _tag_album_track(
+            tmp_path,
+            track,
+            index,
+            album_title,
+            album_artist,
+            year,
+            video_id,
+        )
+        installed_path = _install_album_track(
+            tmp_path,
+            planned_path,
+            music_path.resolve(),
+            video_id,
+        )
+        succeeded = True
+        return str(installed_path)
+    finally:
+        if not succeeded:
+            _cleanup_album_track_temp(tmp_path)
 
 
 def _record_track_failure(job: JsonObject, track: JsonObject, error: Exception) -> None:
