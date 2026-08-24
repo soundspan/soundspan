@@ -22,6 +22,14 @@ from model_provider import (
     InferenceQueueFullError,
 )
 
+INTERNAL_API_SECRET = "test-internal-secret-value"
+
+
+@pytest.fixture(autouse=True)
+def internal_api_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure the internal secret used by authenticated behavior tests."""
+    monkeypatch.setenv("INTERNAL_API_SECRET", INTERNAL_API_SECRET)
+
 
 @pytest.fixture(autouse=True)
 def inline_executor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -31,7 +39,17 @@ def inline_executor(monkeypatch: pytest.MonkeyPatch) -> None:
         await asyncio.sleep(0)
         return function(*args)
 
+    async def run_dependency_inline(
+        function: Callable[..., object],
+        **kwargs: object,
+    ) -> object:
+        return function(**kwargs)
+
     monkeypatch.setattr(http_server.asyncio, "to_thread", run_inline)
+    monkeypatch.setattr(
+        "fastapi.dependencies.utils.run_in_threadpool",
+        run_dependency_inline,
+    )
 
 
 class StubProvider:
@@ -105,11 +123,12 @@ def _request(
     async def send() -> httpx.Response:
         app = http_server.create_app(provider)
         transport = httpx.ASGITransport(app=app)
+        request_headers = {"X-Internal-Secret": INTERNAL_API_SECRET} if headers is None else headers
         async with (
             app.router.lifespan_context(app),
             httpx.AsyncClient(transport=transport, base_url="http://test") as client,
         ):
-            return await client.request(method, path, json=json, headers=headers)
+            return await client.request(method, path, json=json, headers=request_headers)
 
     return asyncio.run(send())
 
@@ -184,14 +203,52 @@ def test_auth_rejects_missing_or_wrong_secret(
     monkeypatch: pytest.MonkeyPatch,
     header: str | None,
 ) -> None:
-    """Require the configured internal secret on every route."""
+    """Require the configured internal secret on non-health routes."""
     monkeypatch.setenv("INTERNAL_API_SECRET", "expected-secret")
     headers = {} if header is None else {"X-Internal-Secret": header}
 
-    response = _request(StubProvider(), "GET", "/health", headers=headers)
+    response = _request(StubProvider(), "GET", "/v1/space", headers=headers)
 
-    assert response.status_code == 401
-    assert response.json() == {"error": "Unauthorized"}
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden"}
+
+
+def test_auth_rejects_unset_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail closed on non-health routes when the internal secret is unset."""
+    monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
+
+    response = _request(StubProvider(), "GET", "/v1/space", headers={})
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden"}
+
+
+def test_auth_rejects_published_default_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject the published default even when the request header matches it."""
+    default_secret = "soundspan-internal-secret-change-me"
+    monkeypatch.setenv("INTERNAL_API_SECRET", default_secret)
+
+    response = _request(
+        StubProvider(),
+        "GET",
+        "/v1/space",
+        headers={"X-Internal-Secret": default_secret},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden"}
+
+
+def test_health_accepts_missing_header_with_configured_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the health probe exempt when the internal secret is configured."""
+    monkeypatch.setenv("INTERNAL_API_SECRET", "expected-secret")
+
+    response = _request(StubProvider(), "GET", "/health", headers={})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_auth_accepts_matching_secret(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,7 +258,7 @@ def test_auth_accepts_matching_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     response = _request(
         StubProvider(),
         "GET",
-        "/health",
+        "/v1/space",
         headers={"X-Internal-Secret": "expected-secret"},
     )
 
@@ -223,11 +280,11 @@ def test_text_embedding_returns_normalized_vector() -> None:
 
 @pytest.mark.parametrize("payload", [{}, {"text": ""}, {"text": " "}, {"text": "x" * 2049}])
 def test_text_embedding_rejects_invalid_body(payload: dict[str, str]) -> None:
-    """Map invalid text bodies to the stable 400 response."""
+    """Map invalid text bodies to the stable 422 response."""
     response = _request(StubProvider(), "POST", "/v1/embed/text", json=payload)
 
-    assert response.status_code == 400
-    assert response.json() == {"error": "Invalid request body"}
+    assert response.status_code == 422
+    assert response.json() == {"error": "Invalid request parameters"}
 
 
 def test_text_model_load_failure_is_unavailable() -> None:
@@ -306,7 +363,11 @@ def test_http_admission_rejects_before_executor_submission(
         transport = httpx.ASGITransport(app=app)
         async with (
             app.router.lifespan_context(app),
-            httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+            httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"X-Internal-Secret": INTERNAL_API_SECRET},
+            ) as client,
         ):
             active = asyncio.create_task(client.post("/v1/embed/text", json={"text": "active"}))
             await asyncio.wait_for(started.wait(), timeout=1)

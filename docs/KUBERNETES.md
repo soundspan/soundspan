@@ -126,7 +126,7 @@ non-root.
 | TIDAL Sidecar                    | Yes          | `GET /health`                                                                      |
 | YT Music Streamer                | Yes          | `GET /health`                                                                      |
 | Audio Analyzer                   | No           | Process check                                                                      |
-| Vibe Embedding Provider (DCLAP)  | No           | TCP socket on `:8091` (`/health` requires internal authentication)                 |
+| Vibe Embedding Provider (DCLAP)  | No           | TCP socket on `:8091` (`/health` is exempt from internal auth; TCP probe kept)     |
 | AIO                              | Yes          | `GET /` on `:3030`                                                                 |
 
 ## Prometheus Scraping

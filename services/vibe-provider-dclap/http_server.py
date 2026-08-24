@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import os
 import time
 from collections.abc import AsyncIterator
@@ -11,8 +10,6 @@ from contextlib import asynccontextmanager, suppress
 from typing import Never, Protocol, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from inference import normalize_vector
 from model_provider import (
     AudioDecodeError,
@@ -32,9 +29,12 @@ from settings import (
     MODEL_VERSION,
     SAMPLE_RATE_HZ,
 )
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from services.common.logging_utils import configure_service_logger
+from services.common.sidecar_runtime_utils import (
+    register_error_handlers,
+    require_internal_secret,
+)
 
 logger = configure_service_logger("vibe-provider-dclap-http")
 TEXT_INFERENCE_BUDGET_SECONDS = 25.0
@@ -93,49 +93,6 @@ class AudioEmbeddingRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     track_ref: str = Field(alias="trackRef", min_length=1, strict=True)
-
-
-async def require_internal_secret(request: Request) -> None:
-    """Require the configured internal secret on every HTTP request."""
-    expected = os.getenv("INTERNAL_API_SECRET")
-    if not expected:
-        return
-    provided = request.headers.get("x-internal-secret")
-    if not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-
-def _register_error_handlers(app: FastAPI) -> None:
-    """Install the provider's stable non-200 JSON response shape."""
-
-    @app.exception_handler(StarletteHTTPException)
-    async def handle_http_error(
-        _request: Request,
-        error: StarletteHTTPException,
-    ) -> JSONResponse:
-        return JSONResponse(
-            {"error": str(error.detail)},
-            status_code=error.status_code,
-            headers=error.headers,
-        )
-
-    @app.exception_handler(RequestValidationError)
-    async def handle_validation_error(
-        _request: Request,
-        _error: RequestValidationError,
-    ) -> JSONResponse:
-        return JSONResponse({"error": "Invalid request body"}, status_code=400)
-
-    @app.exception_handler(Exception)
-    async def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
-        logger.error(
-            "Unhandled HTTP provider error on %s %s: %s",
-            request.method,
-            request.url.path,
-            error,
-            exc_info=True,  # noqa: LOG014 -- registered handler runs with an active exception
-        )
-        return JSONResponse({"error": "Internal Server Error"}, status_code=500)
 
 
 def _provider(request: Request) -> Provider:
@@ -355,7 +312,7 @@ def create_app(provider: Provider) -> FastAPI:
     )
     app.state.provider = provider
     app.state.provider_tasks = set()
-    _register_error_handlers(app)
+    register_error_handlers(app, logger)
     app.add_api_route("/health", health, methods=["GET"])
     app.add_api_route("/v1/space", space, methods=["GET"])
     app.add_api_route("/v1/embed/text", embed_text, methods=["POST"])

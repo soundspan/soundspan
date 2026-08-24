@@ -250,6 +250,19 @@ describe("vibe provider client", () => {
         expectMetric("text", "auth");
     });
 
+    it("maps a forbidden authentication rejection", async () => {
+        mockFetch.mockResolvedValueOnce(
+            jsonResponse({ error: "Forbidden" }, 403),
+        );
+
+        const request = embedText("quiet focus");
+        await expect(request).rejects.toBeInstanceOf(VibeProviderAuthError);
+        await expect(request).rejects.toMatchObject({
+            message: "Forbidden",
+        });
+        expectMetric("text", "auth");
+    });
+
     it("classifies provider failures by status when the error body is not JSON", async () => {
         mockFetch.mockResolvedValueOnce(
             new Response("<html>bad gateway</html>", {

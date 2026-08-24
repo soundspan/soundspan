@@ -242,7 +242,8 @@ function throwForStatus(
             message,
             boundedRetryAfterMs(retryAfter),
         );
-    if (status === 401) throw new VibeProviderAuthError(message);
+    if (status === 401 || status === 403)
+        throw new VibeProviderAuthError(message);
     if (status >= 500) throw new VibeProviderServerError(status, message);
     throw new VibeProviderRequestError(status, message);
 }

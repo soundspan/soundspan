@@ -86,6 +86,9 @@ services:
             DCLAP_ONNX_INTRA_OP_THREADS: ${DCLAP_ONNX_INTRA_OP_THREADS:-1}
             DCLAP_HTTP_PORT: ${DCLAP_HTTP_PORT:-8092}
             DCLAP_IMAGE_VERSION: ${VERSION:-local}
+            # The provider fails closed: with this unset (or left at the
+            # published default) every non-/health request returns 403.
+            # Export the value from backend/.env before starting this profile.
             INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
         volumes:
             - "${MUSIC_PATH:-./music}:/music:ro"

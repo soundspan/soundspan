@@ -99,8 +99,8 @@ spec:
             - name: music
               mountPath: /music
               readOnly: true
-          # The HTTP health route requires X-Internal-Secret. Kubernetes
-          # httpGet probes cannot source that header from a Secret.
+          # /health is exempt from internal-secret auth (shared sidecar
+          # guard); TCP probes are kept for the smallest probe surface.
           {{- with .Values.vibeProviderDclap.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

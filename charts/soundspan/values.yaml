@@ -589,8 +589,8 @@ vibeProviderDclap:
       memory: 1Gi
     limits:
       memory: 2560Mi
-  # TCP probes avoid the authenticated /health route, whose required internal
-  # secret header cannot be sourced from a Kubernetes httpGet probe.
+  # /health is exempt from internal-secret auth (shared sidecar guard); TCP
+  # probes are kept for the smallest probe surface.
   livenessProbe:
     tcpSocket:
       port: http

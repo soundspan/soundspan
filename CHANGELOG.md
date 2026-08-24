@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Album downloads now use queued, serialized processing, one album at a time across the deployment, with renewable claims, restart recovery, and queue-owned lifecycle reconciliation.
+- The DCLAP vibe provider now answers malformed requests with the same 422 response the other sidecars use (previously 400).
 
 ### Fixed
 
+- The DCLAP vibe provider now refuses requests when its internal secret is missing or left at the default, instead of silently allowing them.
 - Two different TIDAL tracks whose names collapse to the same filename no longer overwrite each other; the second download is saved under a disambiguated name, while legacy files without embedded TIDAL identity still refresh in place at their planned path.
 - Album downloads from YouTube Music no longer silently skip a track when two song names collide into the same filename — the second track is saved under a disambiguated name.
 - Retrying a failed album download now uses the configured download source instead of always routing to Lidarr.
