@@ -469,6 +469,132 @@ def _build_api(access_token: str, user_id: str, country_code: str) -> TidalAPIPr
     return cast(TidalAPIProtocol, TidalAPI(client, user_id=user_id, country_code=country_code))
 
 
+def _finalize_flac_download(
+    tmp_path: Path,
+    planned_file_path: Path,
+    destination_root: Path,
+    track_id: int,
+) -> Path:
+    """Extract a FLAC stream and return its contained final codec-specific path."""
+    from tiddl.core.utils.ffmpeg import FFmpegError, extract_flac
+
+    try:
+        converted_path = extract_flac(tmp_path)
+    except (FFmpegError, FileNotFoundError) as error:
+        log.warning(
+            "FLAC extraction failed for track %s: %s; saving original download",
+            track_id,
+            error,
+        )
+        return _fallback_flac_download(tmp_path, planned_file_path, destination_root)
+
+    try:
+        trusted_converted_path = _require_regular_converted_path(
+            converted_path,
+            destination_root,
+        )
+    except ValueError as error:
+        log.warning(
+            "FLAC extraction returned an unsafe path for track %s: %s; saving original download",
+            track_id,
+            error,
+        )
+        return _fallback_flac_download(tmp_path, planned_file_path, destination_root)
+
+    return _install_converted_flac_download(
+        tmp_path,
+        trusted_converted_path,
+        planned_file_path,
+        destination_root,
+        track_id,
+    )
+
+
+def _require_regular_converted_path(converted_path: Path, destination_root: Path) -> Path:
+    """Validate an extractor result before it can become a library file."""
+    resolved_path = _require_contained_download_path(converted_path.resolve(), destination_root)
+    if converted_path.is_symlink() or not resolved_path.is_file():
+        raise ValueError("Converted download is not a regular non-symlink file")
+    return resolved_path
+
+
+def _fallback_flac_download(
+    tmp_path: Path,
+    planned_file_path: Path,
+    destination_root: Path,
+) -> Path:
+    """Remove ffmpeg output and retain the original download at its planned path."""
+    tmp_path.with_suffix(".tmp.flac").unlink(missing_ok=True)
+    shutil.move(str(tmp_path), str(planned_file_path))
+    _remove_stale_codec_sibling(planned_file_path, destination_root)
+    return planned_file_path
+
+
+def _remove_stale_codec_sibling(final_path: Path, destination_root: Path) -> None:
+    """Remove only the opposite known codec sibling beside a completed download."""
+    contained_final_path = _require_contained_download_path(final_path, destination_root)
+    if contained_final_path.suffix == ".flac":
+        sibling_extension = ".m4a"
+    elif contained_final_path.suffix == ".m4a":
+        sibling_extension = ".flac"
+    else:
+        return
+    sibling_path = contained_final_path.with_suffix(sibling_extension)
+    _require_contained_download_path(sibling_path, destination_root)
+    sibling_path.unlink(missing_ok=True)
+
+
+def _cleanup_failed_flac_install(
+    tmp_path: Path,
+    converted_path: Path,
+    final_path: Path,
+    track_id: int,
+) -> None:
+    """Best-effort cleanup that retains one recoverable copy after install failure."""
+    if final_path.is_file() and not final_path.is_symlink():
+        preserved_path = final_path
+    elif tmp_path.is_file() and not tmp_path.is_symlink():
+        preserved_path = tmp_path
+    else:
+        preserved_path = converted_path
+    if converted_path != preserved_path:
+        _unlink_failed_flac_path(converted_path, track_id)
+    if tmp_path != preserved_path:
+        _unlink_failed_flac_path(tmp_path, track_id)
+    ffmpeg_path = tmp_path.with_suffix(".tmp.flac")
+    if ffmpeg_path != preserved_path:
+        _unlink_failed_flac_path(ffmpeg_path, track_id)
+
+
+def _unlink_failed_flac_path(path: Path, track_id: int) -> None:
+    """Remove a failed-install artifact without replacing the active exception."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        log.warning("Could not clean FLAC artifact for track %s: %s", track_id, error)
+
+
+def _install_converted_flac_download(
+    tmp_path: Path,
+    converted_path: Path,
+    planned_file_path: Path,
+    destination_root: Path,
+    track_id: int,
+) -> Path:
+    """Install a validated extractor result and remove temporary codec siblings."""
+    final_path = planned_file_path.with_suffix(converted_path.suffix)
+    try:
+        final_path = _require_contained_download_path(final_path, destination_root)
+        shutil.move(str(converted_path), str(final_path))
+        tmp_path.unlink(missing_ok=True)
+        tmp_path.with_suffix(".tmp.flac").unlink(missing_ok=True)
+        _remove_stale_codec_sibling(final_path, destination_root)
+    except Exception:
+        _cleanup_failed_flac_install(tmp_path, converted_path, final_path, track_id)
+        raise
+    return final_path
+
+
 def _download_track_sync(
     api: TrackDownloadAPIProtocol,
     track_id: int,
@@ -497,6 +623,7 @@ def _download_track_sync(
     # 3. Get stream data
     stream = api.get_track_stream(track_id=track_id, quality=quality)
     urls, file_extension = parse_track_stream(stream)
+    urls = _prepend_dash_init_segment(stream, urls, track_id)
 
     relative_file, file_path, tmp_path = _build_download_file_path(
         relative_stem,
@@ -517,14 +644,13 @@ def _download_track_sync(
 
     # 5. If FLAC, ffmpeg extraction may be needed
     if file_extension == ".flac":
-        try:
-            from tiddl.core.utils.ffmpeg import extract_flac
-
-            extract_flac(tmp_path, file_path)
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            # Fallback — just rename
-            shutil.move(str(tmp_path), str(file_path))
+        file_path = _finalize_flac_download(
+            tmp_path,
+            file_path,
+            dest_base.resolve(),
+            track_id,
+        )
+        relative_file = relative_file.with_suffix(file_path.suffix)
     else:
         shutil.move(str(tmp_path), str(file_path))
 
@@ -758,6 +884,7 @@ async def _run_user_api_call(
 _MAX_MANIFEST_BYTES = 1 * 1024 * 1024
 
 _DASH_NS = "{urn:mpeg:dash:schema:mpd:2011}"
+_DASH_MANIFEST_MIME_TYPE = "application/dash+xml"
 
 
 def _parse_dash_mpd(manifest_b64: str) -> Element | None:
@@ -809,6 +936,36 @@ def _extract_dash_init_url(manifest_b64: str) -> str | None:
     return None
 
 
+def _prepend_dash_init_segment(
+    stream: Any,
+    urls: list[str],
+    track_id: int,
+    *,
+    warn_on_missing: bool = True,
+) -> list[str]:
+    """Prepend a DASH initialization URL while preserving download fallback behavior."""
+    if getattr(stream, "manifestMimeType", None) != _DASH_MANIFEST_MIME_TYPE:
+        return urls
+
+    init_url = _extract_dash_init_url(stream.manifest)
+    if not init_url:
+        if warn_on_missing:
+            log.warning(
+                "Could not prepend DASH init segment for track %s; "
+                "manifest is invalid or lacks initialization URL",
+                track_id,
+            )
+        return urls
+
+    updated_urls = [init_url, *(url for url in urls if url != init_url)]
+    log.info(
+        "Prepended DASH init segment for track %s (%d total segments)",
+        track_id,
+        len(updated_urls),
+    )
+    return updated_urls
+
+
 def _resolve_dash_codec(manifest_b64: str) -> str | None:
     """Read the ``codecs`` attribute from the DASH MPD Representation element.
 
@@ -849,7 +1006,7 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
 
     # DASH manifests (HI_RES_LOSSLESS) produce multiple segment URLs.
     # BTS manifests (LOW/HIGH/LOSSLESS) produce a single direct URL.
-    is_dash = stream.manifestMimeType == "application/dash+xml"
+    is_dash = stream.manifestMimeType == _DASH_MANIFEST_MIME_TYPE
 
     if is_dash:
         # ── DASH (HI_RES_LOSSLESS): fMP4 container with FLAC, ALAC, or AAC ──
@@ -868,17 +1025,7 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
             acodec = dash_codec_lower or "aac"
         content_type = "audio/mp4"
 
-        # Prepend the initialization segment (moov atom with duration
-        # metadata) so the <audio> element knows the full track length
-        # and seeking works correctly.
-        init_url = _extract_dash_init_url(stream.manifest)
-        if init_url:
-            urls = [init_url, *urls]
-            log.info(
-                "Prepended DASH init segment for track %s (%d total segments)",
-                track_id,
-                len(urls),
-            )
+        urls = _prepend_dash_init_segment(stream, urls, track_id, warn_on_missing=False)
     else:
         # ── BTS single-URL (LOW/HIGH/LOSSLESS) ──
         if file_extension == ".flac":
