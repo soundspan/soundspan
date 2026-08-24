@@ -865,9 +865,49 @@ describe("library scan and organize runtime coverage", () => {
         const res = createRes();
         await scanHandler({ user: { id: "user-5" } } as any, res);
 
-        expect(completedJob.getState).toHaveBeenCalledTimes(1);
+        expect(completedJob.getState).toHaveBeenCalledTimes(2);
         expect(completedJob.remove).toHaveBeenCalledTimes(1);
         expect(mockScanQueueAdd).toHaveBeenCalledTimes(1);
+        expect(completedJob.remove.mock.invocationCallOrder[0]).toBeLessThan(
+            mockScanQueueAdd.mock.invocationCallOrder[0],
+        );
+    });
+
+    it("leaves a live maintenance job retained and relies on stable-id add deduplication", async () => {
+        const liveJob = {
+            id: "library-global-maintenance",
+            getState: jest.fn().mockResolvedValue("active"),
+            remove: jest.fn().mockResolvedValue(undefined),
+        };
+        mockScanQueueGetJob.mockResolvedValueOnce(liveJob);
+
+        const res = createRes();
+        await scanHandler({ user: { id: "user-live" } } as any, res);
+
+        expect(liveJob.getState).toHaveBeenCalledTimes(1);
+        expect(liveJob.remove).not.toHaveBeenCalled();
+        expect(mockScanQueueAdd).toHaveBeenCalledTimes(1);
+    });
+
+    it("surfaces retained terminal job removal failures without adding", async () => {
+        const removeError = new Error("remove unavailable");
+        const completedJob = {
+            id: "library-global-maintenance",
+            getState: jest.fn().mockResolvedValue("completed"),
+            remove: jest.fn().mockRejectedValue(removeError),
+        };
+        mockScanQueueGetJob.mockResolvedValueOnce(completedJob);
+
+        const res = createRes();
+        await invokeWithErrorHandler(
+            scanHandler,
+            { user: { id: "user-remove-error" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(500);
+        expect(completedJob.getState).toHaveBeenCalledTimes(2);
+        expect(mockScanQueueAdd).not.toHaveBeenCalled();
     });
 
     it("rate limits a user who started maintenance during the cooldown", async () => {

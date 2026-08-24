@@ -85,17 +85,27 @@ describe("computeAudioStreamHash (unit)", () => {
 
         expect(mockExecFile).toHaveBeenCalledTimes(1);
         const [, args] = mockExecFile.mock.calls[0] as [string, string[]];
-        expect(args).toEqual(
-            expect.arrayContaining([
-                "-map",
-                "0:a:0",
-                "-c",
-                "copy",
-                "-f",
-                "streamhash",
-                "/music/a.flac",
-            ]),
-        );
+        expect(args).toEqual([
+            "-hide_banner",
+            "-nostats",
+            "-v",
+            "error",
+            "-probesize",
+            "5M",
+            "-analyzeduration",
+            "5M",
+            "-i",
+            "/music/a.flac",
+            "-map",
+            "0:a:0",
+            "-c",
+            "copy",
+            "-f",
+            "streamhash",
+            "-hash",
+            "sha256",
+            "-",
+        ]);
         // Never decode: -c copy must be present, and no encoder args.
         expect(args).not.toContain("-c:a");
     });

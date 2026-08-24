@@ -6,7 +6,7 @@ import {
     cleanStuckDownloads,
     getRecentCompletedDownloads,
 } from "../services/lidarr";
-import { scanQueue } from "../workers/queues";
+import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { yieldToEventLoop } from "../utils/async";
 import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
@@ -368,10 +368,10 @@ class QueueCleanerService {
                         logger.debug(
                             `    Triggering library scan for recovered job(s)...`,
                         );
-                        await scanQueue.add("scan", {
-                            type: "full",
-                            source: "queue-cleaner-recovery",
-                        });
+                        await requestCoalescedLibraryScan(
+                            null,
+                            "queue-cleaner-recovery",
+                        );
                     }
                 }
             }

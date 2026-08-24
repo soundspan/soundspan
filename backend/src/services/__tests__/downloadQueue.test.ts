@@ -29,10 +29,8 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn(),
 }));
 
-jest.mock("../../workers/queues", () => ({
-    scanQueue: {
-        add: jest.fn(),
-    },
+jest.mock("../coalescedLibraryScan", () => ({
+    requestCoalescedLibraryScan: jest.fn(),
 }));
 
 jest.mock("axios", () => ({
@@ -50,14 +48,15 @@ async function loadHarness() {
     const { downloadQueueManager } = await import("../downloadQueue");
     const { prisma } = await import("../../utils/db");
     const { getSystemSettings } = await import("../../utils/systemSettings");
-    const { scanQueue } = await import("../../workers/queues");
+    const { requestCoalescedLibraryScan } =
+        await import("../coalescedLibraryScan");
     const axios = (await import("axios")).default as any;
 
     return {
         manager: downloadQueueManager as any,
         prisma,
         getSystemSettings: getSystemSettings as jest.Mock,
-        scanQueue,
+        requestCoalescedLibraryScan: requestCoalescedLibraryScan as jest.Mock,
         axios,
     };
 }
@@ -414,59 +413,55 @@ describe("downloadQueueManager", () => {
     });
 
     it("triggerLibrarySync queues a scan job for first user", async () => {
-        const { manager, prisma, scanQueue } = await loadHarness();
+        const { manager, prisma, requestCoalescedLibraryScan } =
+            await loadHarness();
         const mockFindFirst = prisma.user.findFirst as jest.Mock;
-        const scanAdd = scanQueue.add as jest.Mock;
 
         mockFindFirst.mockResolvedValue({ id: "user-1" });
-        scanAdd.mockResolvedValue({});
+        requestCoalescedLibraryScan.mockResolvedValue(undefined);
 
         const result = await (manager as any).triggerLibrarySync();
 
         expect(result).toBe(true);
-        expect(scanAdd).toHaveBeenCalledWith(
-            "scan",
-            expect.objectContaining({
-                userId: "user-1",
-                source: "download-queue",
-            }),
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            "user-1",
+            "download-queue",
         );
 
         manager.shutdown();
     });
 
     it("triggerLibrarySync returns false when no users exist", async () => {
-        const { manager, prisma, scanQueue } = await loadHarness();
+        const { manager, prisma, requestCoalescedLibraryScan } =
+            await loadHarness();
         const mockFindFirst = prisma.user.findFirst as jest.Mock;
-        const scanAdd = scanQueue.add as jest.Mock;
 
         mockFindFirst.mockResolvedValue(null);
 
         const result = await (manager as any).triggerLibrarySync();
 
         expect(result).toBe(false);
-        expect(scanAdd).not.toHaveBeenCalled();
+        expect(requestCoalescedLibraryScan).not.toHaveBeenCalled();
 
         manager.shutdown();
     });
 
     it("triggerLibrarySync returns false when queueing scan throws", async () => {
-        const { manager, prisma, scanQueue } = await loadHarness();
+        const { manager, prisma, requestCoalescedLibraryScan } =
+            await loadHarness();
         const mockFindFirst = prisma.user.findFirst as jest.Mock;
-        const scanAdd = scanQueue.add as jest.Mock;
 
         mockFindFirst.mockResolvedValue({ id: "user-1" });
-        scanAdd.mockRejectedValue(new Error("queue unavailable"));
+        requestCoalescedLibraryScan.mockRejectedValue(
+            new Error("queue unavailable"),
+        );
 
         const result = await (manager as any).triggerLibrarySync();
 
         expect(result).toBe(false);
-        expect(scanAdd).toHaveBeenCalledWith(
-            "scan",
-            expect.objectContaining({
-                userId: "user-1",
-                source: "download-queue",
-            }),
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            "user-1",
+            "download-queue",
         );
 
         manager.shutdown();

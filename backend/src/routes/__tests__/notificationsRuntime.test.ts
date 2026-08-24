@@ -61,11 +61,9 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings,
 }));
 
-const scanQueue = {
-    add: jest.fn(),
-};
-jest.mock("../../workers/queues", () => ({
-    scanQueue,
+const requestCoalescedLibraryScan = jest.fn();
+jest.mock("../../services/coalescedLibraryScan", () => ({
+    requestCoalescedLibraryScan,
 }));
 
 const simpleDownloadManager = {
@@ -252,7 +250,7 @@ describe("notifications route runtime", () => {
             successful: 0,
             files: [],
         });
-        scanQueue.add.mockResolvedValue({ id: "scan-1" });
+        requestCoalescedLibraryScan.mockResolvedValue(undefined);
         simpleDownloadManager.startDownload.mockResolvedValue({
             success: true,
             error: null,
@@ -837,7 +835,6 @@ describe("notifications route runtime", () => {
             success: true,
             filePath: "/music/Artist/Album/track.flac",
         });
-        scanQueue.add.mockResolvedValueOnce({ id: "scan-success" });
 
         const successReq = {
             user: { id: "u1" },
@@ -861,6 +858,10 @@ describe("notifications route runtime", () => {
                     }),
                 }),
             }),
+        );
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            "u1",
+            "retry-pending-track",
         );
 
         prisma.downloadJob.findFirst.mockResolvedValueOnce({
@@ -1109,7 +1110,6 @@ describe("notifications route runtime", () => {
             successful: 1,
             files: ["/music/Artist/Album/track.flac"],
         });
-        scanQueue.add.mockResolvedValueOnce({ id: "scan-spotify" });
 
         const successReq = {
             user: { id: "u1" },
@@ -1134,6 +1134,10 @@ describe("notifications route runtime", () => {
                     }),
                 }),
             }),
+        );
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            "u1",
+            "retry-spotify-import",
         );
 
         prisma.downloadJob.findFirst.mockResolvedValueOnce({

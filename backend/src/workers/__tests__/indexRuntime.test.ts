@@ -114,6 +114,8 @@ describe("workers runtime behavior", () => {
             processed: 0,
             errors: 0,
         }));
+        const consumeCoalescedScanFollowUp = jest.fn(async () => undefined);
+        const closeCoalescedLibraryScanRedis = jest.fn(async () => undefined);
         const isImageBackfillNeeded = jest.fn(async () => ({
             needed: false,
             artistsWithExternalUrls: 0,
@@ -316,6 +318,11 @@ describe("workers runtime behavior", () => {
             isBackfillNeeded,
             backfillAllArtistCounts,
         }));
+        jest.doMock("../../services/coalescedLibraryScan", () => ({
+            COALESCED_SCAN_JOB_ID: "coalesced-library-scan",
+            consumeCoalescedScanFollowUp,
+            closeCoalescedLibraryScanRedis,
+        }));
         jest.doMock("../../services/imageBackfill", () => ({
             isImageBackfillNeeded,
             backfillAllImages,
@@ -370,6 +377,8 @@ describe("workers runtime behavior", () => {
             audiobookCacheService,
             isBackfillNeeded,
             backfillAllArtistCounts,
+            consumeCoalescedScanFollowUp,
+            closeCoalescedLibraryScanRedis,
             isImageBackfillNeeded,
             backfillAllImages,
             lidarrService,
@@ -864,6 +873,16 @@ describe("workers runtime behavior", () => {
     it("shuts down workers and queue resources cleanly", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
+        const shutdownEvents: string[] = [];
+        mocks.scanQueue.close.mockImplementation(async () => {
+            shutdownEvents.push("scan-close");
+        });
+        mocks.scanQueue.removeAllListeners.mockImplementation(() => {
+            shutdownEvents.push("scan-listeners-removed");
+        });
+        mocks.enrichmentStateService.disconnect.mockImplementation(async () => {
+            shutdownEvents.push("enrichment-disconnect");
+        });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const workers = require("../index");
@@ -885,6 +904,9 @@ describe("workers runtime behavior", () => {
         expect(mocks.schedulerQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.genericImportQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.albumDownloadQueue.close).toHaveBeenCalledTimes(1);
+        expect(mocks.scanQueue.close.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.scanQueue.removeAllListeners.mock.invocationCallOrder[0],
+        );
         expect(
             mocks.albumDownloadQueue.close.mock.invocationCallOrder[0],
         ).toBeLessThan(
@@ -894,6 +916,12 @@ describe("workers runtime behavior", () => {
         expect(mocks.enrichmentStateService.disconnect).toHaveBeenCalledTimes(
             1,
         );
+        expect(mocks.closeCoalescedLibraryScanRedis).toHaveBeenCalledTimes(1);
+        expect(shutdownEvents).toEqual([
+            "scan-close",
+            "scan-listeners-removed",
+            "enrichment-disconnect",
+        ]);
         expect(mocks.shutdownDiscoverProcessor).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerLockRedis.quit).toHaveBeenCalledTimes(1);
         expect(
@@ -901,6 +929,68 @@ describe("workers runtime behavior", () => {
         ).toBeGreaterThan(
             mocks.schedulerQueue.close.mock.invocationCallOrder[0],
         );
+    });
+
+    it("awaits unified enrichment shutdown before closing queues", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        let resolveEnrichmentStop!: () => void;
+        const enrichmentStop = new Promise<undefined>((resolve) => {
+            resolveEnrichmentStop = () => resolve(undefined);
+        });
+        mocks.stopUnifiedEnrichmentWorker.mockImplementationOnce(
+            () => enrichmentStop,
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const workers = require("../index");
+        await flushPromises();
+
+        const shutdown = workers.shutdownWorkers();
+        await flushPromises();
+
+        expect(mocks.stopUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
+        expect(mocks.scanQueue.close).not.toHaveBeenCalled();
+
+        resolveEnrichmentStop();
+        await shutdown;
+
+        expect(mocks.scanQueue.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("drains in-flight coalesced follow-up consumption before shutdown returns", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        let resolveConsumption!: () => void;
+        const consumption = new Promise<undefined>((resolve) => {
+            resolveConsumption = () => resolve(undefined);
+        });
+        mocks.consumeCoalescedScanFollowUp.mockImplementationOnce(
+            () => consumption,
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const workers = require("../index");
+        await flushPromises();
+        const completedHandler = mocks.scanQueue.on.mock.calls.find(
+            (call) => call[0] === "completed",
+        )?.[1];
+        completedHandler(
+            { id: "coalesced-library-scan", data: {}, name: "scan" },
+            { tracksAdded: 0, tracksUpdated: 0, tracksRemoved: 0 },
+        );
+
+        let shutdownReturned = false;
+        const shutdown = workers.shutdownWorkers().then(() => {
+            shutdownReturned = true;
+        });
+        await flushPromises();
+
+        expect(mocks.scanQueue.close).toHaveBeenCalledTimes(1);
+        expect(shutdownReturned).toBe(false);
+        resolveConsumption();
+        await shutdown;
+        expect(shutdownReturned).toBe(true);
     });
 
     it("executes scheduler wildcard data-integrity job when claim is acquired", async () => {
@@ -1772,6 +1862,74 @@ describe("workers runtime behavior", () => {
         ).toHaveLength(2);
     });
 
+    it("consumes coalesced follow-ups from settled scan queue events", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const getHandler = (event: string) =>
+            mocks.scanQueue.on.mock.calls.find(
+                (call) => call[0] === event,
+            )?.[1];
+        const coalescedJob = {
+            id: "coalesced-library-scan",
+            data: {},
+            name: "scan",
+        };
+        const otherJob = { id: "other-scan", data: {}, name: "scan" };
+
+        getHandler("completed")(coalescedJob, {
+            tracksAdded: 0,
+            tracksUpdated: 0,
+            tracksRemoved: 0,
+        });
+        getHandler("failed")(coalescedJob, new Error("scan failed"));
+        getHandler("completed")(otherJob, {
+            tracksAdded: 0,
+            tracksUpdated: 0,
+            tracksRemoved: 0,
+        });
+        getHandler("failed")(otherJob, new Error("other scan failed"));
+        await flushPromises();
+
+        expect(mocks.consumeCoalescedScanFollowUp).toHaveBeenCalledTimes(2);
+    });
+
+    it("warns without throwing when settled-event follow-up consumption rejects", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        mocks.consumeCoalescedScanFollowUp.mockRejectedValueOnce(
+            new Error("follow-up unavailable"),
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const completedHandler = mocks.scanQueue.on.mock.calls.find(
+            (call) => call[0] === "completed",
+        )?.[1];
+        expect(() =>
+            completedHandler(
+                {
+                    id: "coalesced-library-scan",
+                    data: {},
+                    name: "scan",
+                },
+                { tracksAdded: 0, tracksUpdated: 0, tracksRemoved: 0 },
+            ),
+        ).not.toThrow();
+        await flushPromises();
+
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            "Failed to consume coalesced scan follow-up after queue settlement",
+            { error: expect.any(Error) },
+        );
+    });
+
     it("handles scheduler failed/completed event logs when job identity is missing", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
@@ -2129,7 +2287,7 @@ describe("workers runtime behavior", () => {
             (call) => call[0] === "*",
         )?.[1];
 
-        for (let i = 0; i < 25; i += 1) {
+        for (let i = 0; i < 35; i += 1) {
             await schedulerHandler({
                 id: `skip-${i}`,
                 name: "data-integrity-check",
@@ -2137,8 +2295,17 @@ describe("workers runtime behavior", () => {
             });
         }
 
-        expect(mocks.logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining("data integrity check skipped"),
+        const skipWarnings = mocks.logger.warn.mock.calls.filter(
+            ([message]) =>
+                typeof message === "string" &&
+                message.includes("data integrity check skipped"),
+        );
+        expect(skipWarnings).toHaveLength(2);
+        expect(skipWarnings[0][0]).toEqual(
+            expect.stringContaining("skipped 3 consecutive time(s)"),
+        );
+        expect(skipWarnings[1][0]).toEqual(
+            expect.stringContaining("skipped 30 consecutive time(s)"),
         );
         const claimObservabilityMessage = mocks.logger.info.mock.calls
             .map(([message]) => message)

@@ -27,11 +27,9 @@ jest.mock("../../services/youtubeDownload", () => ({
     watchYouTubeDownloadJobUntilTerminal: jest.fn(),
 }));
 
-const scanQueue = {
-    add: jest.fn(),
-};
-jest.mock("../../workers/queues", () => ({
-    scanQueue,
+const requestCoalescedLibraryScan = jest.fn();
+jest.mock("../../services/coalescedLibraryScan", () => ({
+    requestCoalescedLibraryScan,
 }));
 
 import router, { rememberBoundedJobId } from "../youtube";
@@ -55,37 +53,6 @@ const mockWatchJob = watchYouTubeDownloadJobUntilTerminal as jest.Mock;
 async function flushAsync() {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
-}
-
-/** Bull job options every coalesced YouTube-download scan is enqueued with. */
-const COALESCED_SCAN_JOB_OPTIONS = expect.objectContaining({
-    jobId: "youtube-download-library-scan",
-    removeOnComplete: true,
-    removeOnFail: true,
-});
-
-/**
- * Minimal stand-in for the Bull job returned by scanQueue.add: exposes the
- * getState()/finished() surface the coalescing logic uses, with test hooks
- * to move the job through waiting → active → completed.
- */
-function createFakeBullJob() {
-    let state = "waiting";
-    let resolveFinished!: (value?: unknown) => void;
-    const finishedPromise = new Promise((resolve) => {
-        resolveFinished = resolve;
-    });
-    return {
-        getState: jest.fn(async () => state),
-        finished: jest.fn(() => finishedPromise),
-        setActive() {
-            state = "active";
-        },
-        complete() {
-            state = "completed";
-            resolveFinished(undefined);
-        },
-    };
 }
 
 function findRouteLayer(path: string, method: "get" | "post" | "delete") {
@@ -152,6 +119,7 @@ describe("youtube routes runtime", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        requestCoalescedLibraryScan.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -418,7 +386,7 @@ describe("youtube routes runtime", () => {
                 expect.any(Function),
                 expect.objectContaining({ sleep: expect.any(Function) }),
             );
-            expect(scanQueue.add).not.toHaveBeenCalled();
+            expect(requestCoalescedLibraryScan).not.toHaveBeenCalled();
         });
 
         it("reuses one watcher and one timer when the same job starts twice", async () => {
@@ -497,7 +465,6 @@ describe("youtube routes runtime", () => {
                 status: "queued",
             });
             mockWatchJob.mockResolvedValue("completed");
-            scanQueue.add.mockResolvedValue(undefined);
             const req = {
                 body: { videoId: "dQw4w9WgXcQ" },
                 user: { id: "user-1" },
@@ -507,14 +474,10 @@ describe("youtube routes runtime", () => {
             await downloadHandler(req, res);
             await flushAsync();
 
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-            expect(scanQueue.add).toHaveBeenCalledWith(
-                "scan",
-                {
-                    userId: "user-1",
-                    source: "youtube-download",
-                },
-                COALESCED_SCAN_JOB_OPTIONS,
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledTimes(1);
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+                "user-1",
+                "youtube-download",
             );
 
             // A later completed status poll must not enqueue a second scan.
@@ -534,7 +497,7 @@ describe("youtube routes runtime", () => {
                 pollRes,
             );
             expect(pollRes.statusCode).toBe(200);
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledTimes(1);
         });
 
         it("enqueues a scan immediately when the file already existed", async () => {
@@ -542,7 +505,6 @@ describe("youtube routes runtime", () => {
                 jobId: "job-existing",
                 status: "completed",
             });
-            scanQueue.add.mockResolvedValue(undefined);
             const req = {
                 body: { videoId: "dQw4w9WgXcQ" },
                 user: { id: "user-1" },
@@ -555,14 +517,10 @@ describe("youtube routes runtime", () => {
             expect(res.statusCode).toBe(202);
             // The on-disk file may never have been imported (failed scan,
             // out-of-band placement), so completion always queues a scan.
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-            expect(scanQueue.add).toHaveBeenCalledWith(
-                "scan",
-                {
-                    userId: "user-1",
-                    source: "youtube-download",
-                },
-                COALESCED_SCAN_JOB_OPTIONS,
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledTimes(1);
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+                "user-1",
+                "youtube-download",
             );
             expect(mockWatchJob).not.toHaveBeenCalled();
         });
@@ -582,7 +540,7 @@ describe("youtube routes runtime", () => {
             await downloadHandler(req, res);
             await flushAsync();
 
-            expect(scanQueue.add).not.toHaveBeenCalled();
+            expect(requestCoalescedLibraryScan).not.toHaveBeenCalled();
         });
 
         it("returns 400 for an invalid body", async () => {
@@ -658,7 +616,7 @@ describe("youtube routes runtime", () => {
                 status: "downloading",
                 progressPct: 42.5,
             });
-            expect(scanQueue.add).not.toHaveBeenCalled();
+            expect(requestCoalescedLibraryScan).not.toHaveBeenCalled();
         });
 
         it("returns 404 for an unknown job", async () => {
@@ -683,7 +641,6 @@ describe("youtube routes runtime", () => {
                 filePath: "/music/YouTube Downloads/Set [dQw4w9WgXcQ].mp3",
                 error: null,
             });
-            scanQueue.add.mockResolvedValue(undefined);
 
             for (let poll = 0; poll < 3; poll++) {
                 const req = {
@@ -698,14 +655,10 @@ describe("youtube routes runtime", () => {
                 expect(res.body).toMatchObject({ status: "completed" });
             }
 
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-            expect(scanQueue.add).toHaveBeenCalledWith(
-                "scan",
-                {
-                    userId: "user-1",
-                    source: "youtube-download",
-                },
-                COALESCED_SCAN_JOB_OPTIONS,
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledTimes(1);
+            expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+                "user-1",
+                "youtube-download",
             );
         });
 
@@ -730,7 +683,7 @@ describe("youtube routes runtime", () => {
                 status: "failed",
                 error: "Video unavailable",
             });
-            expect(scanQueue.add).not.toHaveBeenCalled();
+            expect(requestCoalescedLibraryScan).not.toHaveBeenCalled();
         });
 
         it("passes the bulk-run source label through to the sidecar", async () => {
@@ -852,98 +805,6 @@ describe("youtube routes runtime", () => {
                 );
             },
         );
-    });
-
-    describe("library scan coalescing", () => {
-        it("coalesces completions while a scan is still queued into one scan job", async () => {
-            const bullJob = createFakeBullJob();
-            scanQueue.add.mockResolvedValue(bullJob);
-            mockGetDownloadJobStatus.mockImplementation(async (id: string) => ({
-                jobId: id,
-                status: "completed",
-                progressPct: 100,
-                filePath: `/music/YouTube Downloads/${id}.mp3`,
-                error: null,
-            }));
-
-            for (const jobId of ["job-co-q1", "job-co-q2", "job-co-q3"]) {
-                const res = createRes();
-                await statusHandler(
-                    { params: { jobId }, user: { id: "user-1" } } as any,
-                    res,
-                );
-                expect(res.statusCode).toBe(200);
-            }
-
-            // One queued scan covers every download that completed before it
-            // started; the later completions must not add more jobs.
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-            expect(scanQueue.add).toHaveBeenCalledWith(
-                "scan",
-                { userId: "user-1", source: "youtube-download" },
-                COALESCED_SCAN_JOB_OPTIONS,
-            );
-
-            // Scan finishes with no completions observed while it ran — no
-            // follow-up scan.
-            bullJob.complete();
-            await flushAsync();
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-        });
-
-        it("queues exactly one follow-up scan for completions observed while a scan is running", async () => {
-            const firstScan = createFakeBullJob();
-            const secondScan = createFakeBullJob();
-            scanQueue.add
-                .mockResolvedValueOnce(firstScan)
-                .mockResolvedValueOnce(secondScan);
-            mockGetDownloadJobStatus.mockImplementation(async (id: string) => ({
-                jobId: id,
-                status: "completed",
-                progressPct: 100,
-                filePath: `/music/YouTube Downloads/${id}.mp3`,
-                error: null,
-            }));
-
-            await statusHandler(
-                {
-                    params: { jobId: "job-co-r1" },
-                    user: { id: "user-1" },
-                } as any,
-                createRes(),
-            );
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-
-            // The scan starts running; its file enumeration may already have
-            // happened, so later completions need a follow-up scan.
-            firstScan.setActive();
-            await statusHandler(
-                {
-                    params: { jobId: "job-co-r2" },
-                    user: { id: "user-1" },
-                } as any,
-                createRes(),
-            );
-            await statusHandler(
-                {
-                    params: { jobId: "job-co-r3" },
-                    user: { id: "user-1" },
-                } as any,
-                createRes(),
-            );
-            // Still only the running scan — the follow-up is deferred until
-            // it finishes, and the two completions collapse into one.
-            expect(scanQueue.add).toHaveBeenCalledTimes(1);
-
-            firstScan.complete();
-            await flushAsync();
-            expect(scanQueue.add).toHaveBeenCalledTimes(2);
-
-            // Nothing completed while the follow-up ran — it settles quietly.
-            secondScan.complete();
-            await flushAsync();
-            expect(scanQueue.add).toHaveBeenCalledTimes(2);
-        });
     });
 
     describe("rememberBoundedJobId", () => {

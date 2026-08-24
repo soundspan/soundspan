@@ -276,10 +276,11 @@ async function handleDownload(payload: any) {
         // scan to fall back on, so skipping entirely would strand external
         // Lidarr imports until someone scans manually. Instead, COALESCE: a
         // stable Bull jobId makes concurrent add() calls collapse into one
-        // queued scan (same scheme as the YouTube download scan in
-        // routes/youtube.ts), bounding a webhook flood to a single queued scan
-        // at a time. Edge: an import landing while a scan is already ACTIVE
-        // waits for the next scan trigger — acceptable next to the DoS.
+        // queued scan, analogous to services/coalescedLibraryScan.ts. This path
+        // keeps a separate ID so an external import is not deduplicated behind
+        // the shared scan's 30-second delay. Edge: an import landing while a
+        // scan is already ACTIVE waits for the next scan trigger — acceptable
+        // next to the DoS.
         logger.debug(
             `   No matching job for downloadId=${downloadId}; requesting coalesced library scan for the external import.`,
         );

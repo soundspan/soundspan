@@ -88,6 +88,11 @@ import {
     withSchedulerClaimRedisRetry,
 } from "../utils/schedulerClaim";
 import { withTimeout } from "../utils/withTimeout";
+import {
+    closeCoalescedLibraryScanRedis,
+    COALESCED_SCAN_JOB_ID,
+    consumeCoalescedScanFollowUp,
+} from "../services/coalescedLibraryScan";
 
 const log = logger.child("WorkerScheduler");
 const queueProcessorLog = log.child("QueueProcessor");
@@ -103,6 +108,22 @@ const queueProcessorCounters = {
     completed: 0,
     failed: 0,
 };
+const coalescedFollowUpConsumptions = new Set<Promise<void>>();
+
+function consumeCoalescedFollowUpAfterSettlement(job: Bull.Job<any>): void {
+    if (String(job.id) !== COALESCED_SCAN_JOB_ID) return;
+    const consumption = consumeCoalescedScanFollowUp()
+        .catch((error: unknown) => {
+            log.warn(
+                "Failed to consume coalesced scan follow-up after queue settlement",
+                { error },
+            );
+        })
+        .finally(() => {
+            coalescedFollowUpConsumptions.delete(consumption);
+        });
+    coalescedFollowUpConsumptions.add(consumption);
+}
 
 function recordQueueProcessorEvent(
     queueName: string,
@@ -789,6 +810,7 @@ startTrackMappingStalenessWorker();
 // Event handlers for scan queue
 scanQueue.on("completed", (job, result) => {
     recordQueueProcessorEvent("library-scan", "completed", job);
+    consumeCoalescedFollowUpAfterSettlement(job);
     log.debug(
         `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} (workerId=${WORKER_PROCESSOR_ID})`,
     );
@@ -796,6 +818,7 @@ scanQueue.on("completed", (job, result) => {
 
 scanQueue.on("failed", (job, err) => {
     recordQueueProcessorEvent("library-scan", "failed", job);
+    consumeCoalescedFollowUpAfterSettlement(job);
     log.error(
         `Scan job ${job.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
         err.message,
@@ -1053,6 +1076,15 @@ export async function shutdownWorkers(): Promise<void> {
     // Drain the album processor while its finalizer listener is still active.
     await albumDownloadQueue.close();
 
+    // Drain scan jobs and their settlement follow-ups before listener removal.
+    await scanQueue.close();
+    await withTimeout(
+        () => Promise.allSettled(Array.from(coalescedFollowUpConsumptions)),
+        ONE_MINUTE_MS,
+        "coalesced scan follow-up drain",
+        log,
+    );
+
     // Remove all event listeners to prevent memory leaks
     scanQueue.removeAllListeners();
     discoverQueue.removeAllListeners();
@@ -1065,7 +1097,6 @@ export async function shutdownWorkers(): Promise<void> {
 
     // Close all queues gracefully
     await Promise.all([
-        scanQueue.close(),
         discoverQueue.close(),
         imageQueue.close(),
         validationQueue.close(),
@@ -1081,6 +1112,9 @@ export async function shutdownWorkers(): Promise<void> {
     } catch (err) {
         log.error("Failed to disconnect enrichment state service:", err);
     }
+
+    await closeCoalescedLibraryScanRedis();
+    log.debug("Coalesced library scan Redis disconnected");
 
     // Disconnect discover processor lock Redis connection
     try {

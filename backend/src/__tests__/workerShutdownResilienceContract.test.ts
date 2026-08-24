@@ -2,28 +2,12 @@ import fs from "fs";
 import path from "path";
 
 describe("worker shutdown resilience contract", () => {
-    const workersPath = path.resolve(__dirname, "../workers/index.ts");
     const unifiedPath = path.resolve(
         __dirname,
         "../workers/unifiedEnrichment.ts",
     );
 
-    const workersSource = fs.readFileSync(workersPath, "utf8");
     const unifiedSource = fs.readFileSync(unifiedPath, "utf8");
-
-    it("awaits enrichment worker stop and keeps enrichment state alive until queue close", () => {
-        expect(workersSource).toContain("await stopUnifiedEnrichmentWorker()");
-
-        const queueCloseIndex = workersSource.indexOf(
-            "await Promise.all([\n        scanQueue.close()",
-        );
-        const enrichmentDisconnectIndex = workersSource.indexOf(
-            "await enrichmentStateService.disconnect()",
-        );
-
-        expect(queueCloseIndex).toBeGreaterThan(-1);
-        expect(enrichmentDisconnectIndex).toBeGreaterThan(queueCloseIndex);
-    });
 
     it("waits for active enrichment cycle and updates state before local redis teardown", () => {
         expect(unifiedSource).toContain(

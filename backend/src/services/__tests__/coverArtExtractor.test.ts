@@ -139,6 +139,42 @@ describe("CoverArtExtractor", () => {
         );
     });
 
+    it("serializes concurrent embedded-cover extraction", async () => {
+        const events: string[] = [];
+        let releaseFirst!: () => void;
+        const firstBlocked = new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+        });
+        mockExistsSync.mockImplementation(
+            (target: string) => target === "/tmp/covers",
+        );
+        mockParseFile
+            .mockImplementationOnce(async () => {
+                events.push("first-start");
+                await firstBlocked;
+                events.push("first-finish");
+                return { common: { picture: [] } };
+            })
+            .mockImplementationOnce(async () => {
+                events.push("second-start");
+                return { common: { picture: [] } };
+            });
+
+        const extractor = new CoverArtExtractor("/tmp/covers");
+        const first = extractor.extractCoverArt("/music/first.flac", "first");
+        await Promise.resolve();
+        const second = extractor.extractCoverArt(
+            "/music/second.flac",
+            "second",
+        );
+        await Promise.resolve();
+
+        expect(events).toEqual(["first-start"]);
+        releaseFirst();
+        await Promise.all([first, second]);
+        expect(events).toEqual(["first-start", "first-finish", "second-start"]);
+    });
+
     it("returns cached path for getCoverArtPath only when file exists", async () => {
         mockExistsSync.mockImplementation((target: string) => {
             if (target === "/tmp/covers") return true;

@@ -1,4 +1,5 @@
 import * as path from "path";
+import type { ScanJobData } from "../scanProcessor";
 
 describe("scanProcessor runtime behavior", () => {
     type ProgressEvent = {
@@ -254,6 +255,12 @@ describe("scanProcessor runtime behavior", () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
+    it("accepts a null user for recovery scan jobs", () => {
+        const data: ScanJobData = { userId: null };
+
+        expect(data.userId).toBeNull();
+    });
 
     it("reconcile path returns 0 when no active download jobs exist", async () => {
         const { module, prisma, matchAlbum, discoverWeeklyService } =

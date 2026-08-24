@@ -167,6 +167,7 @@ const discoverQueue = {
 const scanQueue = {
     add: jest.fn(async () => undefined),
 };
+const requestCoalescedLibraryScan = jest.fn(async () => undefined);
 const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
     albumsDeleted: 0,
     artistsDeleted: 0,
@@ -179,6 +180,10 @@ jest.mock("../../services/libraryOrphanCleanup", () => ({
 jest.mock("../../workers/queues", () => ({
     discoverQueue,
     scanQueue,
+}));
+
+jest.mock("../../services/coalescedLibraryScan", () => ({
+    requestCoalescedLibraryScan,
 }));
 
 jest.mock("../../services/discovery", () => ({
@@ -960,7 +965,7 @@ describe("discover legacy-mode runtime behavior", () => {
             albumsDeleted: 1,
             artistsDeleted: 1,
         });
-        scanQueue.add.mockResolvedValueOnce(undefined);
+        requestCoalescedLibraryScan.mockResolvedValueOnce(undefined);
 
         const req = { user: { id: "user-1" } } as any;
         const res = createRes();
@@ -1013,10 +1018,10 @@ describe("discover legacy-mode runtime behavior", () => {
         });
         expect(prisma.artist.deleteMany).not.toHaveBeenCalled();
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
-        expect(scanQueue.add).toHaveBeenCalledWith("scan", {
-            userId: "user-1",
-            musicPath: "/music",
-        });
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            "user-1",
+            "discover-legacy-clear",
+        );
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             success: true,
@@ -1325,7 +1330,9 @@ describe("discover legacy-mode runtime behavior", () => {
             .spyOn(fs, "rmSync")
             .mockImplementation(() => undefined as unknown as void);
 
-        scanQueue.add.mockRejectedValueOnce(new Error("queue down"));
+        requestCoalescedLibraryScan.mockRejectedValueOnce(
+            new Error("queue down"),
+        );
 
         const req = { user: { id: "user-1" } } as any;
         const res = createRes();

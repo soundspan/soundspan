@@ -26,7 +26,7 @@ import { TRACK_VISIBLE_WHERE } from "../../../utils/librarySorting";
 import { logger } from "../../../utils/logger";
 import { safeResolvePath } from "../../../utils/safeResolvePath";
 import { getSystemSettings } from "../../../utils/systemSettings";
-import { scanQueue } from "../../../workers/queues";
+import { requestCoalescedLibraryScan } from "../../../services/coalescedLibraryScan";
 import { sendClearPlaylistFailure } from "../shared";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
@@ -900,10 +900,7 @@ export async function handleLegacyClear(
         // === PHASE 4: Trigger library scan to sync database with filesystem ===
         logger.debug(`\n[SCAN] Triggering library scan to sync database...`);
         try {
-            await scanQueue.add("scan", {
-                userId,
-                musicPath: config.music.musicPath,
-            });
+            await requestCoalescedLibraryScan(userId, "discover-legacy-clear");
             logger.debug(`   Library scan queued successfully`);
         } catch (scanError: any) {
             logger.debug(`   Library scan queue failed: ${scanError.message}`);

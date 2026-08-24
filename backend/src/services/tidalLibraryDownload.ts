@@ -5,6 +5,7 @@ import { prisma } from "../utils/db";
 import { getSystemSettings } from "../utils/systemSettings";
 import { simpleDownloadManager } from "./simpleDownloadManager";
 import { tidalService, type TidalAlbumDownloadResult } from "./tidal";
+import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
 
 type DownloadMetadata = Record<string, unknown>;
 type TidalAlbumMatch = NonNullable<
@@ -184,13 +185,7 @@ async function queueLibraryScan(
     userId: string,
     result: TidalAlbumDownloadResult,
 ): Promise<void> {
-    const { scanQueue } = await import("../workers/queues");
-    await scanQueue.add("scan", {
-        userId,
-        source: "tidal-download",
-        artistName: result.artist,
-        albumTitle: result.album_title,
-    });
+    await requestCoalescedLibraryScan(userId, "tidal-download");
     logger.debug(
         `[TIDAL] Scan queued for: ${result.artist} - ${result.album_title}`,
     );

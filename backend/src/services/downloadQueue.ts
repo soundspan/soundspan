@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
 
 interface DownloadInfo {
     downloadId: string;
@@ -500,7 +501,6 @@ class DownloadQueueManager {
      */
     private async triggerLibrarySync(): Promise<boolean> {
         try {
-            const { scanQueue } = await import("../workers/queues");
             const { prisma } = await import("../utils/db");
 
             logger.debug("   Starting library scan...");
@@ -513,10 +513,7 @@ class DownloadQueueManager {
             }
 
             // Trigger scan via queue
-            await scanQueue.add("scan", {
-                userId: firstUser.id,
-                source: "download-queue",
-            });
+            await requestCoalescedLibraryScan(firstUser.id, "download-queue");
 
             logger.debug("Library scan queued");
             return true;

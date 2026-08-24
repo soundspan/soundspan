@@ -37,17 +37,17 @@ jest.mock("../youtubeLibraryDownload", () => ({
     processYoutubeDownload: jest.fn(),
 }));
 
-jest.mock("../../workers/queues", () => ({
-    scanQueue: { add: jest.fn() },
+jest.mock("../coalescedLibraryScan", () => ({
+    requestCoalescedLibraryScan: jest.fn(),
 }));
 
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { scanQueue } from "../../workers/queues";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { tidalService } from "../tidal";
 import { processYoutubeDownload } from "../youtubeLibraryDownload";
 import { processTidalDownload } from "../tidalLibraryDownload";
+import { requestCoalescedLibraryScan } from "../coalescedLibraryScan";
 
 const mockFindUnique = prisma.downloadJob.findUnique as jest.Mock;
 const mockUpdate = prisma.downloadJob.update as jest.Mock;
@@ -56,7 +56,7 @@ const mockFindAlbum = tidalService.findAlbum as jest.Mock;
 const mockDownloadAlbum = tidalService.downloadAlbum as jest.Mock;
 const mockFallback = simpleDownloadManager.startDownload as jest.Mock;
 const mockProcessYoutubeDownload = processYoutubeDownload as jest.Mock;
-const mockScan = scanQueue.add as jest.Mock;
+const mockScan = requestCoalescedLibraryScan as jest.Mock;
 
 describe("tidalLibraryDownload", () => {
     beforeEach(() => {
@@ -103,12 +103,7 @@ describe("tidalLibraryDownload", () => {
                 }),
             }),
         );
-        expect(mockScan).toHaveBeenCalledWith("scan", {
-            userId: "user-1",
-            source: "tidal-download",
-            artistName: "Artist",
-            albumTitle: "Album",
-        });
+        expect(mockScan).toHaveBeenCalledWith("user-1", "tidal-download");
     });
 
     it("clears the first-attempt failure state after a successful retry", async () => {

@@ -51,7 +51,7 @@ describe("queueCleaner", () => {
             items: [],
         }));
         const getRecentCompletedDownloads = jest.fn(async () => []);
-        const scanQueue = { add: jest.fn(async () => ({ id: "scan-1" })) };
+        const requestCoalescedLibraryScan = jest.fn(async () => undefined);
         const simpleDownloadManager = {
             markStaleJobsAsFailed: jest.fn(async () => 0),
             reconcileWithLidarr: jest.fn(async () => ({ reconciled: 0 })),
@@ -73,7 +73,9 @@ describe("queueCleaner", () => {
             cleanStuckDownloads,
             getRecentCompletedDownloads,
         }));
-        jest.doMock("../../workers/queues", () => ({ scanQueue }));
+        jest.doMock("../../services/coalescedLibraryScan", () => ({
+            requestCoalescedLibraryScan,
+        }));
         jest.doMock("../../services/simpleDownloadManager", () => ({
             simpleDownloadManager,
         }));
@@ -92,7 +94,7 @@ describe("queueCleaner", () => {
             cleanStuckDownloads,
             getRecentCompletedDownloads,
             prisma,
-            scanQueue,
+            requestCoalescedLibraryScan,
             simpleDownloadManager,
             discoverWeeklyService,
             getSystemSettings,
@@ -250,7 +252,7 @@ describe("queueCleaner", () => {
             prisma,
             getSystemSettings,
             getRecentCompletedDownloads,
-            scanQueue,
+            requestCoalescedLibraryScan,
         } = loadQueueCleaner();
 
         (getSystemSettings as jest.Mock).mockResolvedValue({
@@ -267,7 +269,9 @@ describe("queueCleaner", () => {
 
         prisma.downloadJob.findMany
             .mockResolvedValueOnce([]) // reconcileWithLocalLibrary processing jobs
-            .mockResolvedValueOnce([{ id: "job-1", discoveryBatchId: null }]); // orphaned jobs
+            .mockResolvedValueOnce([
+                { id: "job-1", userId: "user-1", discoveryBatchId: null },
+            ]); // orphaned jobs
         prisma.downloadJob.count.mockResolvedValueOnce(0);
 
         (queueCleaner as any).isRunning = true;
@@ -280,10 +284,10 @@ describe("queueCleaner", () => {
                 completedAt: expect.any(Date),
             },
         });
-        expect(scanQueue.add).toHaveBeenCalledWith("scan", {
-            type: "full",
-            source: "queue-cleaner-recovery",
-        });
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            null,
+            "queue-cleaner-recovery",
+        );
 
         queueCleaner.stop();
     });

@@ -45,6 +45,11 @@ export async function computeAudioStreamHash(
         "-nostats",
         "-v",
         "error",
+        // Pin ffmpeg's current probe defaults so a build cannot raise them.
+        "-probesize",
+        "5M",
+        "-analyzeduration",
+        "5M",
         "-i",
         filePath,
         "-map",

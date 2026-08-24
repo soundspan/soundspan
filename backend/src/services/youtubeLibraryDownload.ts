@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { getSystemSettings } from "../utils/systemSettings";
 import { simpleDownloadManager } from "./simpleDownloadManager";
+import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
 import {
     type YtAlbumDownloadJobStatus,
     watchYouTubeDownloadJobUntilTerminal,
@@ -270,17 +271,9 @@ async function failYoutubeJob(
 async function queueLibraryScanSafely(
     jobId: string,
     userId: string,
-    artistName: string,
-    albumTitle: string,
 ): Promise<void> {
     try {
-        const { scanQueue } = await import("../workers/queues");
-        await scanQueue.add("scan", {
-            userId,
-            source: "youtube-download",
-            artistName,
-            albumTitle,
-        });
+        await requestCoalescedLibraryScan(userId, "youtube-download");
     } catch (error) {
         logger.warn(
             "YouTube Music library scan enqueue failed; download remains completed",
@@ -336,5 +329,5 @@ export async function processYoutubeDownload(
         await failYoutubeJob(jobId, metadata);
         return;
     }
-    await queueLibraryScanSafely(jobId, userId, artistName, albumTitle);
+    await queueLibraryScanSafely(jobId, userId);
 }

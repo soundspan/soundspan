@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The DCLAP vibe provider now refuses requests when its internal secret is missing or left at the default, instead of silently allowing them.
+- Finishing a batch of album downloads now triggers one combined library scan instead of one scan per album, which could crash the background worker.
+- Library scans now skip embedded covers during routine metadata parsing and extract new-album covers one at a time to reduce memory spikes.
 - Two different TIDAL tracks whose names collapse to the same filename no longer overwrite each other; the second download is saved under a disambiguated name, while legacy files without embedded TIDAL identity still refresh in place at their planned path.
 - Album downloads from YouTube Music no longer silently skip a track when two song names collide into the same filename — the second track is saved under a disambiguated name.
 - Retrying a failed album download now uses the configured download source instead of always routing to Lidarr.

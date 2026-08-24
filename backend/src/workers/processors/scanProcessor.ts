@@ -146,7 +146,7 @@ async function reconcileDownloadJobsWithScan(): Promise<number> {
 }
 
 export interface ScanJobData {
-    userId: string;
+    userId: string | null;
     musicPath?: string; // Optional: use custom path or default from config
     albumMbid?: string; // Optional: if scan triggered by download completion
     artistMbid?: string; // Optional: if scan triggered by download completion

@@ -26,6 +26,7 @@ import {
     requirePlaylistMutationLock,
     reorderLockedPlaylistItems,
 } from "../services/playlistMutationLock";
+import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 
 const router = Router();
 
@@ -2141,29 +2142,16 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
 
                     // Trigger a library scan to add the track and reconcile pending
                     try {
-                        const { scanQueue } = await import("../workers/queues");
-                        const scanJob = await scanQueue.add(
-                            "scan",
-                            {
-                                userId,
-                                source: "retry-pending-track",
-                                albumMbid: pendingTrack.albumMbid || undefined,
-                                artistMbid:
-                                    pendingTrack.artistMbid || undefined,
-                            },
-                            {
-                                priority: 1, // High priority
-                                removeOnComplete: true,
-                            },
+                        await requestCoalescedLibraryScan(
+                            userId,
+                            "retry-pending-track",
                         );
                         logger.debug(
                             `[Retry] Queued library scan to reconcile pending tracks`,
                         );
                         sessionLog(
                             "PENDING-RETRY",
-                            `Queued library scan (bullJobId=${
-                                scanJob.id ?? "unknown"
-                            })`,
+                            "Queued coalesced library scan",
                         );
                     } catch (scanError) {
                         logger.error(

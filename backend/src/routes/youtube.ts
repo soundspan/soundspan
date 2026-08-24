@@ -17,7 +17,6 @@
  */
 
 import { Router, Request, Response } from "express";
-import type Bull from "bull";
 import { z } from "zod";
 import {
     requireAuth,
@@ -28,6 +27,7 @@ import {
     youtubeDownloadService,
     watchYouTubeDownloadJobUntilTerminal,
 } from "../services/youtubeDownload";
+import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 import { logger } from "../utils/logger";
 import { sendRouteError } from "./routeErrorResponse";
 
@@ -389,121 +389,6 @@ export function rememberBoundedJobId(
     }
 }
 
-// ── Library scan coalescing ───────────────────────────────────────
-//
-// A bulk run can complete hundreds of download jobs in quick succession;
-// enqueueing one full-library scan per job would serialize hundreds of
-// redundant scans. Instead, completions coalesce into at most one QUEUED
-// scan at a time:
-// - no scan pending → enqueue one (stable Bull jobId, so concurrent adds
-//   collapse into a single job while it exists);
-// - a scan is queued but not started → nothing to do, it will pick the new
-//   file up when it runs;
-// - a scan is RUNNING → its file enumeration may already have passed the
-//   new file, so remember to enqueue exactly one follow-up scan when it
-//   settles.
-//
-// Scans stay full-library (not scoped to the YouTube download dir):
-// MusicScannerService.scanLibrary() diffs ALL DB tracks against the files
-// found under the given path and flags the rest MISSING_FROM_DISK, so a
-// scoped scan would corrupt the library.
-
-/** Stable Bull job id for the coalesced YouTube-download library scan. */
-const YOUTUBE_SCAN_JOB_ID = "youtube-download-library-scan";
-
-/** The coalesced scan job currently queued or running, if any. */
-let pendingScanJob: Bull.Job | null = null;
-/** Set when a download completes while a scan is running: one follow-up scan. */
-let followUpScanUserId: string | null = null;
-
-/**
- * Request a (coalesced) full-library scan on behalf of a completed
- * download. See the coalescing rules above; throws when the initial
- * enqueue fails so the caller can retry on a later poll/watcher tick.
- */
-async function requestCoalescedLibraryScan(userId: string): Promise<void> {
-    for (;;) {
-        const tracked = pendingScanJob;
-        if (!tracked) {
-            await enqueueCoalescedScanJob(userId);
-            return;
-        }
-
-        let state: string;
-        try {
-            state = await tracked.getState();
-        } catch {
-            state = "unknown";
-        }
-        if (tracked !== pendingScanJob) {
-            // The tracked job settled while we looked at it — re-evaluate.
-            continue;
-        }
-        if (state === "waiting" || state === "delayed" || state === "paused") {
-            // Queued but not started: the scan will see this file when it
-            // runs. Nothing to enqueue.
-            return;
-        }
-        // Active (or terminal-but-not-yet-observed): the scan may already
-        // have enumerated files, so ask for exactly one follow-up scan once
-        // it settles. The watcher consumes this flag.
-        followUpScanUserId = userId;
-        return;
-    }
-}
-
-/** Enqueue the coalesced scan job and watch it until it settles. */
-async function enqueueCoalescedScanJob(userId: string): Promise<void> {
-    const { scanQueue } = await import("../workers/queues");
-    const job = await scanQueue.add(
-        "scan",
-        {
-            userId,
-            source: "youtube-download",
-        },
-        {
-            // Bull ignores add() while a job with this id exists, so
-            // concurrent enqueues collapse into one. Remove the record on
-            // settle so the id is reusable for the next scan.
-            jobId: YOUTUBE_SCAN_JOB_ID,
-            removeOnComplete: true,
-            removeOnFail: true,
-        },
-    );
-    pendingScanJob = job;
-    void watchCoalescedScanJob(job);
-}
-
-/**
- * Wait for the coalesced scan job to settle, then enqueue the single
- * follow-up scan if any download completed while it was running.
- */
-async function watchCoalescedScanJob(job: Bull.Job): Promise<void> {
-    try {
-        await job.finished();
-    } catch {
-        // A failed/removed scan still settles the coalescing state; the
-        // follow-up below (or the next completed download) re-enqueues.
-    }
-    if (pendingScanJob === job) {
-        pendingScanJob = null;
-    }
-    const followUpUserId = followUpScanUserId;
-    followUpScanUserId = null;
-    if (followUpUserId !== null) {
-        try {
-            await enqueueCoalescedScanJob(followUpUserId);
-            logger.debug(
-                "[YouTube Route] Follow-up library scan queued after running scan settled",
-            );
-        } catch (scanErr: any) {
-            logger.warn(
-                `[YouTube Route] Failed to queue follow-up library scan: ${scanErr.message}`,
-            );
-        }
-    }
-}
-
 /**
  * Queue a (coalesced) library scan for a completed download job exactly
  * once. Removes the job from the dedupe set again when the enqueue fails so
@@ -522,7 +407,7 @@ async function enqueueLibraryScanForDownloadJob(
         MAX_SCANNED_DOWNLOAD_JOB_IDS,
     );
     try {
-        await requestCoalescedLibraryScan(userId);
+        await requestCoalescedLibraryScan(userId, "youtube-download");
         logger.debug(
             `[YouTube Route] Library scan requested after download job ${jobId}`,
         );

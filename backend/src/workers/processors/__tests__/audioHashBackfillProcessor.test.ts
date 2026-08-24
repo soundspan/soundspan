@@ -51,14 +51,15 @@ describe("audioHashBackfillProcessor", () => {
             const suffix = filePath.length.toString(16).padStart(2, "0");
             return `sha256:${suffix.repeat(32)}`;
         });
-        const parseFile = jest.fn<Promise<ParsedIdentityMetadata>, [string]>(
-            async () => ({
-                common: {
-                    musicbrainz_recordingid: " recording-default ",
-                    isrc: [" USRC17607839 "],
-                },
-            }),
-        );
+        const parseFile = jest.fn<
+            Promise<ParsedIdentityMetadata>,
+            [string, { skipCovers: boolean }]
+        >(async () => ({
+            common: {
+                musicbrainz_recordingid: " recording-default ",
+                isrc: [" USRC17607839 "],
+            },
+        }));
         const access = jest.fn(async (filePath: string) => {
             if (missingPaths.includes(filePath)) {
                 const error = new Error(
@@ -145,11 +146,9 @@ describe("audioHashBackfillProcessor", () => {
         expect(computeAudioStreamHash).toHaveBeenCalledTimes(49);
         expect(computeAudioStreamHash).not.toHaveBeenCalledWith(missingPath);
         expect(parseFile).toHaveBeenCalledTimes(49);
-        expect(parseFile).toHaveBeenCalledWith("/music/Artist/Track-0.flac");
-        expect(parseFile).not.toHaveBeenCalledWith(
-            "/music/Artist/Track-0.flac",
-            expect.anything(),
-        );
+        expect(parseFile).toHaveBeenCalledWith("/music/Artist/Track-0.flac", {
+            skipCovers: true,
+        });
         expect(prisma.track.updateMany).toHaveBeenCalledTimes(49);
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
             where: { id: "track-000", audioHash: null, origin: "LOCAL" },
@@ -361,7 +360,9 @@ describe("audioHashBackfillProcessor", () => {
             skipped: 1,
             continued: false,
         });
-        expect(parseFile).toHaveBeenCalledWith("/music/Artist/No-Hash.flac");
+        expect(parseFile).toHaveBeenCalledWith("/music/Artist/No-Hash.flac", {
+            skipCovers: true,
+        });
         expect(prisma.track.updateMany).not.toHaveBeenCalled();
     });
 

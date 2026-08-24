@@ -29,6 +29,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/audioStreaming.ts` | Core |
 | `backend/src/services/browseImageCache.ts` | Core |
 | `backend/src/services/cacheHelpers.ts` | Core |
+| `backend/src/services/coalescedLibraryScan.ts` | Deployment-wide full-library scan coalescing and follow-up admission |
 | `backend/src/services/coverArt.ts` | Core |
 | `backend/src/services/coverArtExtractor.ts` | Core |
 | `backend/src/services/coverArtResize.ts` | Core |

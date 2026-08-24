@@ -123,11 +123,9 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings,
 }));
 
-const scanQueue = {
-    add: jest.fn(),
-};
-jest.mock("../../workers/queues", () => ({
-    scanQueue,
+const requestCoalescedLibraryScan = jest.fn();
+jest.mock("../../services/coalescedLibraryScan", () => ({
+    requestCoalescedLibraryScan,
 }));
 
 jest.mock("../../utils/playlistLogger", () => ({
@@ -353,7 +351,7 @@ describe("playlists route runtime", () => {
             soulseekUsername: null,
             soulseekPassword: null,
         });
-        scanQueue.add.mockResolvedValue({ id: "scan-1" });
+        requestCoalescedLibraryScan.mockResolvedValue(undefined);
     });
 
     it("requires admin authorization for pending-track retries", () => {
@@ -3096,7 +3094,6 @@ describe("playlists route runtime", () => {
             success: true,
             filePath: "/music/Artist/Album/track.flac",
         });
-        scanQueue.add.mockResolvedValueOnce({ id: "scan-success" });
 
         const req = {
             user: { id: "u1" },
@@ -3125,18 +3122,9 @@ describe("playlists route runtime", () => {
                 }),
             }),
         );
-        expect(scanQueue.add).toHaveBeenCalledWith(
-            "scan",
-            expect.objectContaining({
-                userId: "u1",
-                source: "retry-pending-track",
-                albumMbid: "rg-1",
-                artistMbid: "ar-1",
-            }),
-            expect.objectContaining({
-                priority: 1,
-                removeOnComplete: true,
-            }),
+        expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
+            "u1",
+            "retry-pending-track",
         );
     });
 
@@ -3171,7 +3159,9 @@ describe("playlists route runtime", () => {
             success: true,
             filePath: "/music/Artist/Album/track.flac",
         });
-        scanQueue.add.mockRejectedValueOnce(new Error("scan enqueue failed"));
+        requestCoalescedLibraryScan.mockRejectedValueOnce(
+            new Error("scan enqueue failed"),
+        );
 
         const req = {
             user: { id: "u1" },
@@ -3221,7 +3211,9 @@ describe("playlists route runtime", () => {
             success: true,
             filePath: "/music/Artist/Album/track.flac",
         });
-        scanQueue.add.mockRejectedValueOnce(new Error("scan blew up"));
+        requestCoalescedLibraryScan.mockRejectedValueOnce(
+            new Error("scan blew up"),
+        );
 
         const req = {
             user: { id: "u1" },

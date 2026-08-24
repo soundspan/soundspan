@@ -71,7 +71,7 @@ const mockLogger = {
 };
 mockLogger.child.mockReturnValue(mockLogger);
 
-const mockBackfillAllArtistCounts = jest.fn();
+const mockUpdateArtistCountsInBatches = jest.fn();
 const mockComputeAudioStreamHash = jest.fn();
 const mockGetAlbumCover = jest.fn();
 const mockNormalizeArtistName = jest.fn((name: string) =>
@@ -151,7 +151,7 @@ jest.mock("../../utils/artistNormalization", () => ({
 }));
 
 jest.mock("../artistCountsService", () => ({
-    backfillAllArtistCounts: mockBackfillAllArtistCounts,
+    updateArtistCountsInBatches: mockUpdateArtistCountsInBatches,
 }));
 
 jest.mock("../audioHash", () => ({
@@ -172,6 +172,8 @@ jest.mock("../../config", () => ({
 
 const { MusicScannerService } =
     require("../musicScanner") as typeof import("../musicScanner");
+const { persistScannedTrack } =
+    require("../scannedTrackPersistence") as typeof import("../scannedTrackPersistence");
 const { isLossyAudioCodec } =
     require("../libraryHealthDashboard/qualityOutliers") as typeof import("../libraryHealthDashboard/qualityOutliers");
 const { albumOrphanRetentionGuardWhere, artistOrphanRetentionGuardWhere } =
@@ -194,7 +196,7 @@ interface TestIdentityTrack {
     recordingMbid: string | null;
     isrc: string | null;
     removedAt: Date | null;
-    album: { rgMbid: string | null; location: string };
+    album: { rgMbid: string | null; location: string; artistId: string };
 }
 
 function identityTrack(
@@ -219,7 +221,11 @@ function identityTrack(
         recordingMbid: null,
         isrc: null,
         removedAt: null,
-        album: { rgMbid: "rg-album-1", location: "LIBRARY" },
+        album: {
+            rgMbid: "rg-album-1",
+            location: "LIBRARY",
+            artistId: "artist-1",
+        },
         ...overrides,
     };
 }
@@ -321,7 +327,10 @@ describe("MusicScannerService.scanLibrary", () => {
         mockPrisma.ownedAlbum.create.mockResolvedValue({});
         mockPrisma.ownedAlbum.upsert.mockResolvedValue({});
 
-        mockBackfillAllArtistCounts.mockResolvedValue(undefined);
+        mockUpdateArtistCountsInBatches.mockResolvedValue({
+            updated: 0,
+            failed: 0,
+        });
         mockGetAlbumCover.mockResolvedValue(null);
         mockComputeAudioStreamHash.mockResolvedValue(
             "sha256:" + "ab".repeat(32),
@@ -514,7 +523,11 @@ describe("MusicScannerService.scanLibrary", () => {
         const local = identityTrack("local-new", "Artist/Track.flac");
         const otherAlbum = {
             ...identityTrack("federated-other", "unused", {
-                album: { rgMbid: "rg-other", location: "FEDERATED" },
+                album: {
+                    rgMbid: "rg-other",
+                    location: "FEDERATED",
+                    artistId: "artist-other",
+                },
             }),
             filePath: null,
             origin: "FEDERATED",
@@ -561,7 +574,11 @@ describe("MusicScannerService.scanLibrary", () => {
         const scanner = new MusicScannerService();
         mockConfig.features.federation = true;
         const local = identityTrack("discover-new", "Discover/Track.flac", {
-            album: { rgMbid: "rg-album-1", location: "DISCOVER" },
+            album: {
+                rgMbid: "rg-album-1",
+                location: "DISCOVER",
+                artistId: "artist-1",
+            },
         });
         jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
             "/music/Discover/Track.flac",
@@ -836,6 +853,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
         expect(queueInstances[0].add).toHaveBeenCalledTimes(1);
         expect(queueInstances[0].onIdle).toHaveBeenCalledTimes(1);
+        expect(mockUpdateArtistCountsInBatches).not.toHaveBeenCalled();
     });
 
     it("reprocesses unchanged files when disc-number backfill is pending", async () => {
@@ -850,11 +868,9 @@ describe("MusicScannerService.scanLibrary", () => {
             discNoBackfillDone: false,
         });
         mockPrisma.track.findMany.mockResolvedValue([
-            {
-                id: "track-1",
-                filePath: "Artist/Track.mp3",
+            identityTrack("track-1", "Artist/Track.mp3", {
                 fileModified: new Date("2026-02-10T00:00:00.000Z"),
-            },
+            }),
         ]);
         mockStat.mockResolvedValue({
             mtime: new Date("2026-02-01T00:00:00.000Z"),
@@ -871,9 +887,12 @@ describe("MusicScannerService.scanLibrary", () => {
                 errors: [],
             }),
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            skipCovers: true,
+        });
         expect(mockParseFile).not.toHaveBeenCalledWith(audioFile, {
             duration: true,
+            skipCovers: true,
         });
         expect(mockPrisma.systemSettings.updateMany).toHaveBeenCalledWith({
             data: { discNoBackfillDone: true },
@@ -899,9 +918,12 @@ describe("MusicScannerService.scanLibrary", () => {
                 errors: [],
             }),
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            skipCovers: true,
+        });
         expect(mockParseFile).not.toHaveBeenCalledWith(audioFile, {
             duration: true,
+            skipCovers: true,
         });
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -920,7 +942,9 @@ describe("MusicScannerService.scanLibrary", () => {
                 }),
             }),
         );
-        expect(mockBackfillAllArtistCounts).toHaveBeenCalledTimes(1);
+        expect(mockUpdateArtistCountsInBatches).toHaveBeenCalledWith([
+            "artist-1",
+        ]);
     });
 
     it.each([
@@ -1326,9 +1350,12 @@ describe("MusicScannerService.scanLibrary", () => {
         const result = await scanner.scanLibrary("/music");
 
         expect(result.errors).toEqual([]);
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            skipCovers: true,
+        });
         expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
             duration: true,
+            skipCovers: true,
         });
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -1665,7 +1692,9 @@ describe("MusicScannerService.scanLibrary", () => {
                 tracksRemoved: 0,
             }),
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            skipCovers: true,
+        });
         expect(mockComputeAudioStreamHash).toHaveBeenCalledWith(audioFile);
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -2014,6 +2043,9 @@ describe("MusicScannerService.scanLibrary", () => {
         });
         expect(mockPrisma.track.deleteMany).not.toHaveBeenCalled();
         expect(result.tracksRemoved).toBe(1);
+        expect(mockUpdateArtistCountsInBatches).toHaveBeenCalledWith([
+            "artist-1",
+        ]);
         expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledWith({
             where: { trackId: "track-missing-1" },
             update: {
@@ -2244,6 +2276,99 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(queueInstances[0].onIdle).toHaveBeenCalledTimes(1);
     });
 
+    it("refreshes the persisted artist when health cleanup fails", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.flac";
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.libraryHealthRecord.deleteMany.mockRejectedValueOnce(
+            new Error("health cleanup failed"),
+        );
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(1);
+        expect(result.errors).toEqual([
+            { file: audioFile, error: "health cleanup failed" },
+        ]);
+        expect(mockUpdateArtistCountsInBatches).toHaveBeenCalledWith([
+            "artist-1",
+        ]);
+    });
+
+    it("keeps a fast-path persist successful when mutation recording throws", async () => {
+        const recorderError = new Error("mutation recorder failed");
+        const artistIds = new Set<string>();
+        const clearHealthIssue = jest.fn(async () => undefined);
+        mockPrisma.track.upsert.mockResolvedValueOnce({ id: "track-new" });
+
+        await expect(
+            persistScannedTrack(
+                {} as Parameters<typeof persistScannedTrack>[0],
+                "album-1",
+                218,
+                {
+                    contentChangeDetected: false,
+                    storedAudioHash: null,
+                    computedAudioHash: null,
+                    previousAlbumId: null,
+                    previousDuration: null,
+                    revival: false,
+                },
+                clearHealthIssue,
+                () => {
+                    artistIds.add("artist-1");
+                    throw recorderError;
+                },
+            ),
+        ).resolves.toBeUndefined();
+
+        expect(clearHealthIssue).toHaveBeenCalledWith("track-new");
+        expect(artistIds).toEqual(new Set(["artist-1"]));
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            "Failed to record durable scanned track mutation",
+            { error: recorderError },
+        );
+    });
+
+    it("keeps a transactional persist successful when mutation recording throws", async () => {
+        const recorderError = new Error("mutation recorder failed");
+        const artistIds = new Set<string>();
+        mockPrisma.track.upsert.mockResolvedValueOnce({
+            id: "track-existing",
+        });
+
+        await expect(
+            persistScannedTrack(
+                {} as Parameters<typeof persistScannedTrack>[0],
+                "album-1",
+                218,
+                {
+                    contentChangeDetected: false,
+                    storedAudioHash: null,
+                    computedAudioHash: null,
+                    previousAlbumId: "album-1",
+                    previousDuration: 218,
+                    revival: true,
+                },
+                jest.fn(async () => undefined),
+                () => {
+                    artistIds.add("artist-1");
+                    throw recorderError;
+                },
+            ),
+        ).resolves.toBeUndefined();
+
+        expect(mockRecomputeAlbumLoudness).toHaveBeenCalled();
+        expect(artistIds).toEqual(new Set(["artist-1"]));
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            "Failed to record durable scanned track mutation",
+            { error: recorderError },
+        );
+    });
+
     it("marks unreadable metadata for existing tracks when parseFile fails", async () => {
         const scanner = new MusicScannerService();
         const audioFile = "/music/Broken/Bad.flac";
@@ -2297,11 +2422,9 @@ describe("MusicScannerService.scanLibrary", () => {
             "findAudioFiles",
         ).mockResolvedValue([audioFile]);
         mockPrisma.track.findMany.mockResolvedValue([
-            {
-                id: "track-existing-2",
-                filePath: "Artist/Track.mp3",
+            identityTrack("track-existing-2", "Artist/Track.mp3", {
                 fileModified: new Date("2026-01-01T00:00:00.000Z"),
-            },
+            }),
         ]);
         mockPrisma.track.upsert.mockResolvedValueOnce({
             id: "track-existing-2",
@@ -2406,26 +2529,24 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
     });
 
-    it("does not fail scan when artist count backfill fails asynchronously", async () => {
+    it("does not fail the scan when scoped artist count refresh fails", async () => {
         const scanner = new MusicScannerService();
-        const audioFile = "/music/Artist/Track.mp3";
-
         jest.spyOn(
             MusicScannerService.prototype as any,
             "findAudioFiles",
-        ).mockResolvedValue([audioFile]);
-        mockBackfillAllArtistCounts.mockRejectedValueOnce(
-            new Error("backfill timeout"),
+        ).mockResolvedValue(["/music/Artist/Track.mp3"]);
+        mockUpdateArtistCountsInBatches.mockRejectedValueOnce(
+            new Error("count refresh failed"),
         );
 
         const result = await scanner.scanLibrary("/music");
+        await new Promise<void>((resolve) => setImmediate(resolve));
 
         expect(result.tracksAdded).toBe(1);
         expect(mockLogger.error).toHaveBeenCalledWith(
             "[Scan] Artist counts update failed:",
             expect.any(Error),
         );
-        expect(result.errors).toEqual([]);
     });
 });
 

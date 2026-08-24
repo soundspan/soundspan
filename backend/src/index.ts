@@ -787,6 +787,10 @@ async function gracefulShutdown(signal: string) {
             await shutdownSchedulerClaimRedis();
         }
 
+        const { closeCoalescedLibraryScanRedis } =
+            await import("./services/coalescedLibraryScan");
+        await closeCoalescedLibraryScanRedis();
+
         // Close Redis connection (node-redis v5+ replaced quit() with close())
         logger.debug("Closing Redis connection...");
         await redisClient.close();

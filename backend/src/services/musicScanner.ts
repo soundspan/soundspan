@@ -14,7 +14,6 @@ import {
     extractPrimaryArtist,
     parseArtistFromPath,
 } from "../utils/artistNormalization";
-import { backfillAllArtistCounts } from "./artistCountsService";
 import { processBatched } from "../utils/async";
 import { computeAudioStreamHash } from "./audioHash";
 import { matchTrackIdentities } from "./trackIdentityMatcher";
@@ -31,6 +30,7 @@ import { recomputeAlbumLoudness } from "./albumLoudness";
 import { persistScannedTrack } from "./scannedTrackPersistence";
 import { deriveAudioFormatLabel } from "./audioFormatLabel";
 import { promoteAlbumOwnership } from "./albumOwnershipPromotion";
+import { updateArtistCountsInBatches } from "./artistCountsService";
 
 const scanLogger = logger.child("MusicScannerService");
 const TRACK_IDENTITY_SELECT = {
@@ -49,12 +49,12 @@ const TRACK_IDENTITY_SELECT = {
     recordingMbid: true,
     isrc: true,
     removedAt: true,
-    album: { select: { rgMbid: true } },
+    album: { select: { rgMbid: true, artistId: true } },
 } satisfies Prisma.TrackSelect;
 
 const FEDERATION_RECONCILIATION_TRACK_SELECT = {
     ...TRACK_IDENTITY_SELECT,
-    album: { select: { rgMbid: true, location: true } },
+    album: { select: { rgMbid: true, location: true, artistId: true } },
 } satisfies Prisma.TrackSelect;
 
 type IdentityTrackRow = Prisma.TrackGetPayload<{
@@ -155,13 +155,12 @@ interface ScanResult {
     duration: number;
 }
 
-/**
- * Represents the MusicScannerService class.
- */
+/** Scans local audio metadata into the library. */
 export class MusicScannerService {
     private scanQueue = new PQueue({ concurrency: 10 });
     private progressCallback?: (progress: ScanProgress) => void;
     private coverArtExtractor?: CoverArtExtractor;
+    private touchedArtistIds = new Set<string>();
 
     constructor(
         progressCallback?: (progress: ScanProgress) => void,
@@ -324,6 +323,8 @@ export class MusicScannerService {
             try {
                 await rebindMovedTrack(match, revival);
                 reboundMatches.push(match);
+                this.touchedArtistIds.add(match.missing.album.artistId);
+                this.touchedArtistIds.add(match.candidate.album.artistId);
             } catch (error: unknown) {
                 if (!isPrismaRecordNotFound(error)) throw error;
                 scanLogger.warn(
@@ -405,11 +406,10 @@ export class MusicScannerService {
         return result.rebound;
     }
 
-    /**
-     * Scan the music directory and update the database
-     */
+    /** Scans the music directory and updates the database. */
     async scanLibrary(musicPath: string): Promise<ScanResult> {
         const startTime = Date.now();
+        this.touchedArtistIds = new Set<string>();
         const result: ScanResult = {
             tracksAdded: 0,
             tracksUpdated: 0,
@@ -522,6 +522,8 @@ export class MusicScannerService {
                         Boolean(removedTrack),
                         albumPromotions,
                     );
+                    if (existingTrack)
+                        this.touchedArtistIds.add(existingTrack.album.artistId);
                     if (!existingTrack) newTrackPaths.add(relativePath);
                 } catch (err: any) {
                     const relativePath = path.relative(musicPath, audioFile);
@@ -591,6 +593,11 @@ export class MusicScannerService {
                 unmatchedTracks,
                 audioFiles.length,
             );
+            if (result.tracksRemoved > 0) {
+                for (const track of unmatchedTracks) {
+                    this.touchedArtistIds.add(track.album.artistId);
+                }
+            }
         }
 
         const shouldCleanOrphans =
@@ -620,12 +627,12 @@ export class MusicScannerService {
             );
         }
 
-        // Update artist denormalized counts in background (non-blocking).
-        // The library artists route has a JOIN-based fallback for when counts
-        // are stale, so the UI works immediately even before this completes.
-        backfillAllArtistCounts().catch((err) => {
-            logger.error("[Scan] Artist counts update failed:", err);
-        });
+        const touchedArtistIds = [...this.touchedArtistIds].sort();
+        if (touchedArtistIds.length > 0) {
+            updateArtistCountsInBatches(touchedArtistIds).catch((err) => {
+                logger.error("[Scan] Artist counts update failed:", err);
+            });
+        }
 
         return result;
     }
@@ -1035,11 +1042,8 @@ export class MusicScannerService {
     }
 
     /**
-     * Process a single audio file and update database.
-     *
-     * Cohesion exception: this pre-existing scanner unit performs one linear
-     * metadata-import workflow. Persistence and loudness decisions are kept
-     * in persistScannedTrack so this orchestration does not own those rules.
+     * Imports one audio file. Persistence and loudness decisions remain in
+     * persistScannedTrack to keep this metadata workflow cohesive.
      */
     private async processAudioFile(
         absolutePath: string,
@@ -1053,18 +1057,14 @@ export class MusicScannerService {
         revival = false,
         albumPromotions: Map<string, Promise<void>> = new Map(),
     ): Promise<void> {
-        // Extract metadata in two stages. The cheap header-only parse yields
-        // a duration for most formats (FLAC STREAMINFO, MP3 Xing, MP4 atoms).
-        // Formats that keep the duration at the END of the stream (ogg/opus —
-        // YouTube downloads are opus by default) return none, so only those
-        // files pay for the full-file `duration: true` parse; without it they
-        // import as 0:00. Full-file parsing must stay the exception: running
-        // it for every file (10 concurrent parses) pegged the worker's event
-        // loop for minutes per scan, starving Bull lock renewal and the
-        // liveness probe until the kubelet killed the worker mid-scan.
-        let metadata = await parseFile(absolutePath);
+        // Most formats expose duration in headers. Only missing durations get
+        // a full parse; covers stay skipped to cap concurrent off-heap buffers.
+        let metadata = await parseFile(absolutePath, { skipCovers: true });
         if (!metadata.format.duration) {
-            metadata = await parseFile(absolutePath, { duration: true });
+            metadata = await parseFile(absolutePath, {
+                duration: true,
+                skipCovers: true,
+            });
         }
         const stats = await fs.promises.stat(absolutePath);
 
@@ -1431,18 +1431,8 @@ export class MusicScannerService {
             if (this.coverArtExtractor) {
                 let needsExtraction = !album.coverUrl;
 
-                // Check if existing native cover file is missing
                 if (album.coverUrl?.startsWith("native:")) {
                     const nativePath = album.coverUrl.replace("native:", "");
-                    const coverCachePath = path.join(
-                        path.dirname(absolutePath),
-                        "..",
-                        "..",
-                        "cache",
-                        "covers",
-                        nativePath,
-                    );
-                    // Use the extractor's cache path instead
                     const extractorCachePath = path.join(
                         (this.coverArtExtractor as any).coverCachePath,
                         nativePath,
@@ -1559,6 +1549,7 @@ export class MusicScannerService {
                 revival,
             },
             (trackId) => this.clearTrackHealthIssue(trackId),
+            () => this.touchedArtistIds.add(artist.id),
         );
     }
 }

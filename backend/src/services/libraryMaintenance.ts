@@ -10,6 +10,11 @@ const LIBRARY_MAINTENANCE_CLAIM_KEY =
     "library:maintenance:admission:library-global-maintenance";
 const LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS = 6 * 60 * 60;
 const LIBRARY_MAINTENANCE_COOLDOWN_SECONDS = 30;
+const TERMINAL_LIBRARY_MAINTENANCE_STATES = new Set([
+    "completed",
+    "failed",
+    "stuck",
+]);
 /** Scoped logger shared by maintenance orchestration and its route boundary. */
 export const libraryMaintenanceLogger = logger.child("LibraryMaintenance");
 
@@ -56,14 +61,23 @@ const findPendingLibraryMaintenanceJob = async () => {
     return jobs[0] ?? null;
 };
 
-const removeSettledLibraryMaintenanceJob = async (): Promise<void> => {
+const removeRetainedTerminalLibraryMaintenanceJob = async (): Promise<void> => {
     const job = await scanQueue.getJob(LIBRARY_MAINTENANCE_JOB_ID);
     if (!job) {
         return;
     }
     const state = await job.getState();
-    if (state === "completed" || state === "failed") {
+    if (!TERMINAL_LIBRARY_MAINTENANCE_STATES.has(state)) {
+        return;
+    }
+    const currentState = await job.getState();
+    if (!TERMINAL_LIBRARY_MAINTENANCE_STATES.has(currentState)) {
+        return;
+    }
+    try {
         await job.remove();
+    } catch (error) {
+        throw error;
     }
 };
 
@@ -93,8 +107,6 @@ export const admitLibraryMaintenance = async (
                 jobId: String(pendingJob.id),
             };
         }
-        await removeSettledLibraryMaintenanceJob();
-
         const cooldownKey = `library:maintenance:cooldown:${userId}`;
         const cooldownToken = crypto.randomUUID();
         const cooldownAcquired = await scanQueue.client.set(
@@ -222,6 +234,7 @@ export const startAdmittedLibraryScan = async (
     let scanQueued = false;
     try {
         await organizeBeforeLibraryScan();
+        await removeRetainedTerminalLibraryMaintenanceJob();
         const job = await scanQueue.add(
             "scan",
             { userId, musicPath: config.music.musicPath },

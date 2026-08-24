@@ -128,11 +128,14 @@ function recordSkippedClaim(claimKey: string, operationName: string): void {
     const skippedCount = (schedulerClaimSkipCounts.get(claimKey) ?? 0) + 1;
     schedulerClaimSkipCounts.set(claimKey, skippedCount);
     schedulerClaimCounters.skipped += 1;
-    const message =
-        skippedCount >= SCHEDULER_SKIP_WARN_THRESHOLD
-            ? `${operationName} skipped ${skippedCount} consecutive time(s); claim held by another worker (owner=${SCHEDULER_CLAIM_OWNER_ID})`
-            : `Skipping ${operationName}; claim is held by another worker (owner=${SCHEDULER_CLAIM_OWNER_ID})`;
-    if (skippedCount >= SCHEDULER_SKIP_WARN_THRESHOLD) {
+    const periodicWarnInterval = SCHEDULER_SKIP_WARN_THRESHOLD * 10;
+    const shouldWarn =
+        skippedCount === SCHEDULER_SKIP_WARN_THRESHOLD ||
+        skippedCount % periodicWarnInterval === 0;
+    const message = shouldWarn
+        ? `${operationName} skipped ${skippedCount} consecutive time(s); claim held by another worker (owner=${SCHEDULER_CLAIM_OWNER_ID})`
+        : `Skipping ${operationName}; claim is held by another worker (owner=${SCHEDULER_CLAIM_OWNER_ID})`;
+    if (shouldWarn) {
         claimLog.warn(message);
     } else {
         claimLog.debug(message);

@@ -96,7 +96,7 @@ async function readTrackIdentityTags(
     filePath: string,
 ): Promise<{ recordingMbid: string | null; isrc: string | null }> {
     try {
-        const metadata = await parseFile(filePath);
+        const metadata = await parseFile(filePath, { skipCovers: true });
         return extractTrackIdentityTags(metadata);
     } catch (error) {
         log.warn(`Failed to read identity tags for ${filePath}`, { error });

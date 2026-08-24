@@ -1,11 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { recomputeAlbumLoudness } from "./albumLoudness";
 import { hasAudioReplacement, hasUnprovenAudioChange } from "./trackRebinding";
 import {
     applyTrackReplacement,
     removeReplacementCacheFiles,
 } from "./trackReplacement";
+
+const log = logger.child("ScannedTrackPersistence");
 
 /** Prior audio identity needed to decide scanner loudness persistence. */
 export interface ScanPersistenceContext {
@@ -36,6 +39,14 @@ function needsLoudnessRefresh(
     );
 }
 
+function recordMutationSafely(recordDurableMutation: () => void): void {
+    try {
+        recordDurableMutation();
+    } catch (error) {
+        log.warn("Failed to record durable scanned track mutation", { error });
+    }
+}
+
 /** Persists one scanned track with replacement and album-rollup decisions. */
 export async function persistScannedTrack(
     trackUpsert: Prisma.TrackUpsertArgs,
@@ -43,6 +54,7 @@ export async function persistScannedTrack(
     nextDuration: number,
     context: ScanPersistenceContext,
     clearHealthIssue: (trackId: string) => Promise<void>,
+    recordDurableMutation: () => void,
 ): Promise<void> {
     const replacement =
         context.contentChangeDetected &&
@@ -61,6 +73,7 @@ export async function persistScannedTrack(
         !needsLoudnessRefresh(context, nextAlbumId, nextDuration)
     ) {
         const track = await prisma.track.upsert(trackUpsert);
+        recordMutationSafely(recordDurableMutation);
         await clearHealthIssue(track.id);
         return;
     }
@@ -84,5 +97,6 @@ export async function persistScannedTrack(
         });
         return paths;
     });
+    recordMutationSafely(recordDurableMutation);
     await removeReplacementCacheFiles(cachePaths);
 }

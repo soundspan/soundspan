@@ -273,6 +273,7 @@ describe("api entrypoint runtime behavior", () => {
         );
         const shutdownSchedulerClaimRedis = jest.fn(async () => undefined);
         const shutdownUmapProjection = jest.fn(async () => undefined);
+        const closeCoalescedLibraryScanRedis = jest.fn(async () => undefined);
 
         jest.doMock("express", () => expressFn);
         jest.doMock("express-session", () => sessionMiddleware, {
@@ -356,6 +357,9 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../services/umapProjection", () => ({
             shutdownUmapProjection,
         }));
+        jest.doMock("../services/coalescedLibraryScan", () => ({
+            closeCoalescedLibraryScanRedis,
+        }));
 
         for (const routeModule of routeModules) {
             jest.doMock(routeModule, () => ({
@@ -389,6 +393,7 @@ describe("api entrypoint runtime behavior", () => {
             shutdownWorkers,
             shutdownSchedulerClaimRedis,
             shutdownUmapProjection,
+            closeCoalescedLibraryScanRedis,
             compressionMiddleware,
             compressionFilter,
             createMetricsRouter,
@@ -1213,8 +1218,12 @@ describe("api entrypoint runtime behavior", () => {
 
         expect(mocks.shutdownWorkers).not.toHaveBeenCalled();
         expect(mocks.shutdownSchedulerClaimRedis).toHaveBeenCalledTimes(1);
+        expect(mocks.closeCoalescedLibraryScanRedis).toHaveBeenCalledTimes(1);
         expect(
             mocks.shutdownSchedulerClaimRedis.mock.invocationCallOrder[0],
+        ).toBeLessThan(mocks.redisClient.close.mock.invocationCallOrder[0]);
+        expect(
+            mocks.closeCoalescedLibraryScanRedis.mock.invocationCallOrder[0],
         ).toBeLessThan(mocks.redisClient.close.mock.invocationCallOrder[0]);
         expect(process.exit).toHaveBeenCalledWith(0);
     });

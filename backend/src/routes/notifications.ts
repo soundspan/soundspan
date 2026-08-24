@@ -6,6 +6,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
 import { enqueueAlbumDownload } from "../services/albumDownloadQueueService";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
+import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
@@ -668,23 +669,9 @@ router.post(
                             });
 
                             try {
-                                const { scanQueue } =
-                                    await import("../workers/queues");
-                                await scanQueue.add(
-                                    "scan",
-                                    {
-                                        userId: req.user!.id,
-                                        source: "retry-pending-track",
-                                        albumMbid:
-                                            pendingTrack.albumMbid || undefined,
-                                        artistMbid:
-                                            pendingTrack.artistMbid ||
-                                            undefined,
-                                    },
-                                    {
-                                        priority: 1,
-                                        removeOnComplete: true,
-                                    },
+                                await requestCoalescedLibraryScan(
+                                    req.user!.id,
+                                    "retry-pending-track",
                                 );
                             } catch {
                                 // Best-effort; job status already reflects download
@@ -826,14 +813,10 @@ router.post(
                             );
 
                             // Trigger library scan
-                            const { scanQueue } =
-                                await import("../workers/queues");
-                            await scanQueue.add("scan", {
-                                paths: [],
-                                fullScan: false,
-                                userId: req.user!.id,
-                                source: "retry-spotify-import",
-                            });
+                            await requestCoalescedLibraryScan(
+                                req.user!.id,
+                                "retry-spotify-import",
+                            );
                         } else {
                             // Soulseek failed, try the configured source if we have an MBID
                             logger.debug(
