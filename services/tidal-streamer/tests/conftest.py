@@ -12,6 +12,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICES_ROOT = SERVICE_ROOT.parent
 
 
 def _install_tiddl_stub() -> None:
@@ -94,13 +95,18 @@ def internal_api_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def local_app_module() -> Iterator[None]:
     """Ensure `import app` resolves to this sidecar during the test."""
     sys.modules.pop("app", None)
+    sys.modules.pop("tidal_downloads", None)
     sys.path.insert(0, str(SERVICE_ROOT))
+    sys.path.insert(0, str(SERVICES_ROOT))
     try:
         yield
     finally:
         sys.modules.pop("app", None)
+        sys.modules.pop("tidal_downloads", None)
         while str(SERVICE_ROOT) in sys.path:
             sys.path.remove(str(SERVICE_ROOT))
+        while str(SERVICES_ROOT) in sys.path:
+            sys.path.remove(str(SERVICES_ROOT))
 
 
 @pytest.fixture()

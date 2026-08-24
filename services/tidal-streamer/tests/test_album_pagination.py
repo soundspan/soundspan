@@ -16,7 +16,7 @@ def _album_items(count: int, start: int = 0) -> list[SimpleNamespace]:
 
 def test_paginates_all_pages() -> None:
     """Pagination returns every track and requests each page once."""
-    import app
+    import tidal_downloads
 
     calls = []
 
@@ -31,7 +31,7 @@ def test_paginates_all_pages() -> None:
 
     fake_api = SimpleNamespace(get_album_items=get_album_items)
 
-    tracks = app._get_album_tracks(fake_api, 123)
+    tracks = tidal_downloads._get_album_tracks(fake_api, 123)
 
     assert len(tracks) == 250
     assert calls == [(123, 100, 0), (123, 100, 100), (123, 100, 200)]
@@ -39,7 +39,7 @@ def test_paginates_all_pages() -> None:
 
 def test_zero_limit_does_not_infinite_loop() -> None:
     """An echoed zero limit cannot prevent pagination from terminating."""
-    import app
+    import tidal_downloads
 
     calls = []
 
@@ -59,7 +59,7 @@ def test_zero_limit_does_not_infinite_loop() -> None:
 
     fake_api = SimpleNamespace(get_album_items=get_album_items)
 
-    tracks = app._get_album_tracks(fake_api, 123)
+    tracks = tidal_downloads._get_album_tracks(fake_api, 123)
 
     assert len(tracks) == 100
     assert len(calls) <= 2
@@ -67,7 +67,7 @@ def test_zero_limit_does_not_infinite_loop() -> None:
 
 def test_stops_on_empty_first_page() -> None:
     """An empty first page terminates pagination immediately."""
-    import app
+    import tidal_downloads
 
     calls = []
 
@@ -77,7 +77,7 @@ def test_stops_on_empty_first_page() -> None:
 
     fake_api = SimpleNamespace(get_album_items=get_album_items)
 
-    tracks = app._get_album_tracks(fake_api, 123)
+    tracks = tidal_downloads._get_album_tracks(fake_api, 123)
 
     assert tracks == []
     assert len(calls) == 1

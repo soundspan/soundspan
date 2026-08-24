@@ -75,7 +75,7 @@ def test_dash_download_prepends_init_segment_and_writes_all_bytes_in_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app
+    import tidal_downloads
 
     init_url = "https://cdn.tidal.com/init.mp4"
     media_urls = [
@@ -92,10 +92,10 @@ def test_dash_download_prepends_init_segment_and_writes_all_bytes_in_order(
         media_urls[0]: b"segment-one",
         media_urls[1]: b"segment-two",
     }
-    received_urls = _configure_download(monkeypatch, app, media_bytes)
-    monkeypatch.setattr(app, "parse_track_stream", lambda _stream: (media_urls, ".m4a"))
+    received_urls = _configure_download(monkeypatch, tidal_downloads, media_bytes)
+    monkeypatch.setattr(tidal_downloads, "parse_track_stream", lambda _stream: (media_urls, ".m4a"))
 
-    result = app._download_track_sync(
+    result = tidal_downloads._download_track_sync(
         _FakeDownloadApi(stream),
         1,
         "HI_RES_LOSSLESS",
@@ -113,7 +113,7 @@ def test_dash_download_deduplicates_init_url_already_in_media_urls(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app
+    import tidal_downloads
 
     init_url = "https://cdn.tidal.com/init.mp4"
     media_url = "https://cdn.tidal.com/segment-1.mp4"
@@ -124,10 +124,12 @@ def test_dash_download_deduplicates_init_url_already_in_media_urls(
         manifest=_build_mpd(init_url),
     )
     media_bytes = {init_url: b"init", media_url: b"media"}
-    received_urls = _configure_download(monkeypatch, app, media_bytes)
-    monkeypatch.setattr(app, "parse_track_stream", lambda _stream: (parsed_urls, ".m4a"))
+    received_urls = _configure_download(monkeypatch, tidal_downloads, media_bytes)
+    monkeypatch.setattr(
+        tidal_downloads, "parse_track_stream", lambda _stream: (parsed_urls, ".m4a")
+    )
 
-    app._download_track_sync(
+    tidal_downloads._download_track_sync(
         _FakeDownloadApi(stream),
         2,
         "HI_RES_LOSSLESS",
@@ -142,7 +144,7 @@ def test_bts_download_passes_parsed_urls_through_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app
+    import tidal_downloads
 
     media_urls = ["https://cdn.tidal.com/track.m4a"]
     stream = types.SimpleNamespace(
@@ -152,12 +154,12 @@ def test_bts_download_passes_parsed_urls_through_unchanged(
     )
     received_urls = _configure_download(
         monkeypatch,
-        app,
+        tidal_downloads,
         {media_urls[0]: b"track-bytes"},
     )
-    monkeypatch.setattr(app, "parse_track_stream", lambda _stream: (media_urls, ".m4a"))
+    monkeypatch.setattr(tidal_downloads, "parse_track_stream", lambda _stream: (media_urls, ".m4a"))
 
-    result = app._download_track_sync(
+    result = tidal_downloads._download_track_sync(
         _FakeDownloadApi(stream),
         2,
         "HIGH",
@@ -174,7 +176,7 @@ def test_valid_dash_manifest_without_init_warns_and_downloads_media_segments(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    import app
+    import tidal_downloads
 
     media_urls = [
         "https://cdn.tidal.com/0.mp4",
@@ -189,13 +191,13 @@ def test_valid_dash_manifest_without_init_warns_and_downloads_media_segments(
     )
     received_urls = _configure_download(
         monkeypatch,
-        app,
+        tidal_downloads,
         {url: f"segment-{index}".encode() for index, url in enumerate(media_urls)},
     )
-    monkeypatch.setattr(app, "parse_track_stream", lambda _stream: (media_urls, ".m4a"))
+    monkeypatch.setattr(tidal_downloads, "parse_track_stream", lambda _stream: (media_urls, ".m4a"))
 
     with caplog.at_level(logging.WARNING, logger="tidal-streamer"):
-        result = app._download_track_sync(
+        result = tidal_downloads._download_track_sync(
             _FakeDownloadApi(stream),
             3,
             "HI_RES_LOSSLESS",
@@ -212,7 +214,7 @@ def test_valid_dash_manifest_without_init_warns_and_downloads_media_segments(
 def test_malformed_dash_manifest_warns_at_helper_boundary(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    import app
+    import tidal_downloads
 
     stream = types.SimpleNamespace(
         manifestMimeType="application/dash+xml",
@@ -221,7 +223,7 @@ def test_malformed_dash_manifest_warns_at_helper_boundary(
     urls = ["https://cdn.tidal.com/segment.mp4"]
 
     with caplog.at_level(logging.WARNING, logger="tidal-streamer"):
-        result = app._prepend_dash_init_segment(stream, urls, 4)
+        result = tidal_downloads._prepend_dash_init_segment(stream, urls, 4)
 
     assert result == urls
     assert "DASH init segment" in caplog.text
@@ -231,7 +233,7 @@ def test_malformed_dash_manifest_warns_at_helper_boundary(
 def test_malformed_dash_manifest_is_silent_when_warning_is_disabled(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    import app
+    import tidal_downloads
 
     stream = types.SimpleNamespace(
         manifestMimeType="application/dash+xml",
@@ -240,7 +242,7 @@ def test_malformed_dash_manifest_is_silent_when_warning_is_disabled(
     urls = ["https://cdn.tidal.com/segment.mp4"]
 
     with caplog.at_level(logging.WARNING, logger="tidal-streamer"):
-        result = app._prepend_dash_init_segment(stream, urls, 5, warn_on_missing=False)
+        result = tidal_downloads._prepend_dash_init_segment(stream, urls, 5, warn_on_missing=False)
 
     assert result == urls
     assert "DASH init segment" not in caplog.text

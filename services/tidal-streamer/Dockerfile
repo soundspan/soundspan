@@ -26,6 +26,7 @@ RUN python3 -m pip uninstall -y pip
 
 # Copy application code
 COPY services/tidal-streamer/app.py ./app.py
+COPY services/tidal-streamer/tidal_downloads.py ./tidal_downloads.py
 COPY services/common ./common
 
 # Create writable directories and non-root user

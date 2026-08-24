@@ -77,14 +77,14 @@ class TestExtractDashInitUrl:
     """Tests for _extract_dash_init_url."""
 
     def test_extracts_init_url_from_valid_mpd(self) -> None:
-        from app import _extract_dash_init_url
+        from tidal_downloads import _extract_dash_init_url
 
         mpd = _build_mpd(init_url="https://cdn.tidal.com/tracks/123/init.mp4")
         result = _extract_dash_init_url(_encode_manifest(mpd))
         assert result == "https://cdn.tidal.com/tracks/123/init.mp4"
 
     def test_extracts_init_url_from_adaptation_level_template(self) -> None:
-        from app import _extract_dash_init_url
+        from tidal_downloads import _extract_dash_init_url
 
         mpd = _build_mpd(
             init_url="https://cdn.tidal.com/adapt/init.mp4",
@@ -94,7 +94,7 @@ class TestExtractDashInitUrl:
         assert result == "https://cdn.tidal.com/adapt/init.mp4"
 
     def test_returns_none_when_no_segment_template(self) -> None:
-        from app import _extract_dash_init_url
+        from tidal_downloads import _extract_dash_init_url
 
         mpd = """<?xml version="1.0" encoding="UTF-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
@@ -104,7 +104,7 @@ class TestExtractDashInitUrl:
         assert result is None
 
     def test_returns_none_when_no_initialization_attribute(self) -> None:
-        from app import _extract_dash_init_url
+        from tidal_downloads import _extract_dash_init_url
 
         mpd = """<?xml version="1.0" encoding="UTF-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
@@ -118,19 +118,19 @@ class TestExtractDashInitUrl:
         assert result is None
 
     def test_returns_none_on_invalid_base64(self) -> None:
-        from app import _extract_dash_init_url
+        from tidal_downloads import _extract_dash_init_url
 
         result = _extract_dash_init_url("not-valid-base64!!!")
         assert result is None
 
     def test_returns_none_on_invalid_xml(self) -> None:
-        from app import _extract_dash_init_url
+        from tidal_downloads import _extract_dash_init_url
 
         result = _extract_dash_init_url(_encode_manifest("<not-xml"))
         assert result is None
 
     def test_returns_none_on_oversized_manifest(self) -> None:
-        from app import _MAX_MANIFEST_BYTES, _extract_dash_init_url
+        from tidal_downloads import _MAX_MANIFEST_BYTES, _extract_dash_init_url
 
         # Manifest that exceeds the size cap when decoded
         big_xml = "<MPD>" + "x" * (_MAX_MANIFEST_BYTES + 1) + "</MPD>"
@@ -145,34 +145,34 @@ class TestResolveDashCodec:
     """Tests for _resolve_dash_codec."""
 
     def test_returns_flac_codec(self) -> None:
-        from app import _resolve_dash_codec
+        from tidal_downloads import _resolve_dash_codec
 
         mpd = _build_mpd(codecs="flac")
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result == "flac"
 
     def test_returns_aac_codec(self) -> None:
-        from app import _resolve_dash_codec
+        from tidal_downloads import _resolve_dash_codec
 
         mpd = _build_mpd(codecs="mp4a.40.2")
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result == "mp4a.40.2"
 
     def test_returns_alac_codec(self) -> None:
-        from app import _resolve_dash_codec
+        from tidal_downloads import _resolve_dash_codec
 
         mpd = _build_mpd(codecs="alac")
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result == "alac"
 
     def test_returns_none_on_invalid_manifest(self) -> None:
-        from app import _resolve_dash_codec
+        from tidal_downloads import _resolve_dash_codec
 
         result = _resolve_dash_codec("bad-input")
         assert result is None
 
     def test_returns_none_when_no_representation(self) -> None:
-        from app import _resolve_dash_codec
+        from tidal_downloads import _resolve_dash_codec
 
         mpd = """<?xml version="1.0" encoding="UTF-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
@@ -182,7 +182,7 @@ class TestResolveDashCodec:
         assert result is None
 
     def test_returns_none_on_oversized_manifest(self) -> None:
-        from app import _MAX_MANIFEST_BYTES, _resolve_dash_codec
+        from tidal_downloads import _MAX_MANIFEST_BYTES, _resolve_dash_codec
 
         big_xml = "<MPD>" + "x" * (_MAX_MANIFEST_BYTES + 1) + "</MPD>"
         result = _resolve_dash_codec(_encode_manifest(big_xml))
@@ -196,26 +196,26 @@ class TestParseDashMpd:
     """Tests for the shared MPD parser."""
 
     def test_parses_valid_manifest(self) -> None:
-        from app import _parse_dash_mpd
+        from tidal_downloads import _parse_dash_mpd
 
         mpd = _build_mpd()
         result = _parse_dash_mpd(_encode_manifest(mpd))
         assert result is not None
 
     def test_returns_none_for_empty_string(self) -> None:
-        from app import _parse_dash_mpd
+        from tidal_downloads import _parse_dash_mpd
 
         result = _parse_dash_mpd("")
         assert result is None
 
     def test_returns_none_for_non_base64(self) -> None:
-        from app import _parse_dash_mpd
+        from tidal_downloads import _parse_dash_mpd
 
         result = _parse_dash_mpd("not-valid-base64!!!")
         assert result is None
 
     def test_returns_none_for_oversized_manifest(self) -> None:
-        from app import _MAX_MANIFEST_BYTES, _parse_dash_mpd
+        from tidal_downloads import _MAX_MANIFEST_BYTES, _parse_dash_mpd
 
         big_xml = "<MPD>" + "x" * (_MAX_MANIFEST_BYTES + 1) + "</MPD>"
         result = _parse_dash_mpd(_encode_manifest(big_xml))
