@@ -2,6 +2,7 @@ import type { DownloadJob, Prisma } from "@prisma/client";
 import { lastFmService } from "./lastfm";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "./albumDownloadQueueOwnership";
 
 const log = logger.child?.("AlbumDownloadJobs") ?? logger;
 const ACTIVE_DOWNLOAD_STATUSES = ["pending", "processing"] as const;
@@ -20,6 +21,7 @@ export interface CreateAlbumDownloadJobParams {
     albumTitle?: string;
     downloadType: "library" | "discovery";
     rootFolderPath: string;
+    metadata: Readonly<{ queuedVia: typeof ALBUM_DOWNLOAD_QUEUE_OWNER }>;
 }
 
 /** A newly created job or the active job that already owns the album. */
@@ -94,10 +96,12 @@ async function createWithDatabase(
             targetMbid: params.mbid,
             status: "pending",
             metadata: {
+                ...params.metadata,
                 downloadType: params.downloadType,
                 rootFolderPath: params.rootFolderPath,
                 artistName: verifiedArtistName,
                 albumTitle: params.albumTitle,
+                statusText: "Queued",
             },
         },
     });

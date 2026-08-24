@@ -50,7 +50,7 @@ describe("workers/queues", () => {
             "rediss://user:pass@cache.example:6381/2",
         );
 
-        expect(bullCtor).toHaveBeenCalledTimes(8);
+        expect(bullCtor).toHaveBeenCalledTimes(9);
         const firstCallArgs = bullCtor.mock.calls[0];
         const firstQueueOptions = firstCallArgs[1];
 
@@ -65,7 +65,7 @@ describe("workers/queues", () => {
                 tls: {},
             }),
         );
-        expect(queuesModule.queues).toHaveLength(8);
+        expect(queuesModule.queues).toHaveLength(9);
         expect(bullCtor.mock.calls.map((call) => call[0])).toEqual([
             "library-scan",
             "discover-weekly",
@@ -75,6 +75,7 @@ describe("workers/queues", () => {
             "worker-scheduler",
             "generic-import",
             "federation-sync",
+            "album-download",
         ]);
         expect(logger.debug).toHaveBeenCalledWith(
             expect.stringContaining("Redis config resolved"),
@@ -129,6 +130,28 @@ describe("workers/queues", () => {
         expect(importCall![1].defaultJobOptions).toEqual({
             attempts: 3,
             backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: 100,
+            removeOnFail: 200,
+        });
+    });
+
+    it("bounds album download retries, stalled recovery, and Redis retention", () => {
+        const { bullCtor } = loadQueues("redis://cache.example:6379/0");
+        const albumDownloadCall = bullCtor.mock.calls.find(
+            (call: any[]) => call[0] === "album-download",
+        );
+
+        expect(albumDownloadCall).toBeDefined();
+        expect(albumDownloadCall![1].settings).toEqual(
+            expect.objectContaining({
+                stalledInterval: 30_000,
+                lockDuration: 30_000,
+                maxStalledCount: 1,
+            }),
+        );
+        expect(albumDownloadCall![1].defaultJobOptions).toEqual({
+            attempts: 2,
+            backoff: { type: "exponential", delay: 60_000 },
             removeOnComplete: 100,
             removeOnFail: 200,
         });

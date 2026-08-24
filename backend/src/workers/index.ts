@@ -10,6 +10,7 @@ import {
     schedulerQueue,
     genericImportQueue,
     federationQueue,
+    albumDownloadQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import {
@@ -23,6 +24,14 @@ import {
     GENERIC_IMPORT_WORKER_CONCURRENCY,
     processGenericImport,
 } from "./processors/genericImportProcessor";
+import {
+    ALBUM_DOWNLOAD_JOB_NAME,
+    ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
+    finalizeAlbumDownloadQueueFailure,
+    processAlbumDownload,
+} from "./processors/albumDownloadProcessor";
+import { recordAlbumDownloadOutcome } from "../metrics";
+import { recoverUnqueuedAlbumDownloads } from "../services/albumDownloadQueueService";
 import {
     startUnifiedEnrichmentWorker,
     stopUnifiedEnrichmentWorker,
@@ -110,9 +119,13 @@ function recordQueueProcessorEvent(
         // Unconditional start breadcrumb for the heavy queues: a job that
         // pegs the loop until the kubelet kills the process never lets the
         // watchdog interval fire, so the last log line before death must
-        // already name the culprit. Scheduler cycles and library scans are
-        // the known stall suspects; other queues stay on sampled logging.
-        if (queueName === "worker-scheduler" || queueName === "library-scan") {
+        // already name the culprit. Scheduler cycles, library scans, and
+        // long-running album downloads need this; other queues stay sampled.
+        if (
+            queueName === "worker-scheduler" ||
+            queueName === "library-scan" ||
+            queueName === "album-download"
+        ) {
             queueProcessorLog.info(
                 `job-start queue=${queueName} jobId=${jobId} jobName=${jobName}`,
             );
@@ -264,6 +277,20 @@ async function processReconciliationJob(): Promise<void> {
                 log.debug(
                     `Periodic sync: ${syncResult.cancelled} job(s) synced with Lidarr queue`,
                 );
+            }
+        },
+    );
+}
+
+async function processAlbumDownloadRecoveryJob(): Promise<void> {
+    await runWithSchedulerClaim(
+        "scheduler-claim:album-download-recovery",
+        5 * ONE_MINUTE_MS,
+        "album download recovery",
+        async () => {
+            const recovered = await recoverUnqueuedAlbumDownloads();
+            if (recovered > 0) {
+                log.info(`Recovered ${recovered} unqueued album downloads`);
             }
         },
     );
@@ -588,6 +615,11 @@ genericImportQueue.process(
     GENERIC_IMPORT_WORKER_CONCURRENCY,
     processGenericImport,
 );
+albumDownloadQueue.process(
+    ALBUM_DOWNLOAD_JOB_NAME,
+    ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
+    processAlbumDownload,
+);
 if (config.features.federation) {
     registerFederationProcessors();
 } else {
@@ -604,6 +636,9 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
             break;
         case SCHEDULER_JOB_TYPES.reconciliation:
             await processReconciliationJob();
+            break;
+        case SCHEDULER_JOB_TYPES.albumDownloadRecovery:
+            await processAlbumDownloadRecoveryJob();
             break;
         case SCHEDULER_JOB_TYPES.lidarrCleanup:
             await processLidarrCleanupJob(mode);
@@ -875,6 +910,50 @@ genericImportQueue.on("failed", (job, error) => {
     );
 });
 
+albumDownloadQueue.on("active", (job) => {
+    recordQueueProcessorEvent("album-download", "active", job);
+});
+
+albumDownloadQueue.on("completed", (job) => {
+    recordQueueProcessorEvent("album-download", "completed", job);
+    recordAlbumDownloadOutcome("completed");
+});
+
+albumDownloadQueue.on("stalled", () => {
+    recordAlbumDownloadOutcome("retried");
+});
+
+async function handleAlbumDownloadQueueFailure(
+    job: Bull.Job<any>,
+    error: Error,
+): Promise<void> {
+    const state = await job.getState();
+    if (state !== "failed") {
+        recordAlbumDownloadOutcome("retried");
+        return;
+    }
+    recordAlbumDownloadOutcome("failed");
+    await finalizeAlbumDownloadQueueFailure(job, error, state);
+}
+
+albumDownloadQueue.on("failed", (job, error) => {
+    if (!job) {
+        queueProcessorLog.error("Album download queue failure had no job", {
+            error,
+        });
+        return;
+    }
+    recordQueueProcessorEvent("album-download", "failed", job);
+    void handleAlbumDownloadQueueFailure(job, error).catch(
+        (finalizationError) => {
+            queueProcessorLog.error(
+                "Failed to classify or finalize album download queue failure",
+                { jobId: job.id, error: finalizationError },
+            );
+        },
+    );
+});
+
 // The scheduler queue runs the heavy maintenance cycles (metadata refresh,
 // reconciliation, artist-count backfills) — the primary stall suspects — so
 // it MUST feed the event-loop watchdog's attribution registry.
@@ -971,6 +1050,9 @@ export async function shutdownWorkers(): Promise<void> {
     // Shutdown download queue manager
     downloadQueueManager.shutdown();
 
+    // Drain the album processor while its finalizer listener is still active.
+    await albumDownloadQueue.close();
+
     // Remove all event listeners to prevent memory leaks
     scanQueue.removeAllListeners();
     discoverQueue.removeAllListeners();
@@ -979,6 +1061,7 @@ export async function shutdownWorkers(): Promise<void> {
     schedulerQueue.removeAllListeners();
     genericImportQueue.removeAllListeners();
     federationQueue.removeAllListeners();
+    albumDownloadQueue.removeAllListeners();
 
     // Close all queues gracefully
     await Promise.all([
@@ -1027,4 +1110,5 @@ export {
     schedulerQueue,
     genericImportQueue,
     federationQueue,
+    albumDownloadQueue,
 };

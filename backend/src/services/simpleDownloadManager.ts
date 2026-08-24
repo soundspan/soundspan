@@ -25,6 +25,7 @@ import { sessionLog } from "../utils/playlistLogger";
 import { config } from "../config";
 import axios from "axios";
 import * as crypto from "crypto";
+import { isAlbumDownloadQueueOwned } from "./albumDownloadQueueOwnership";
 
 // Type for transactional prisma client
 type TransactionClient = Omit<
@@ -1369,9 +1370,7 @@ class SimpleDownloadManager {
 
     /**
      * Mark stale jobs as failed (called by cleanup job)
-     * - Pending jobs (never started) timeout after 3 minutes = "download never started"
-     * - Processing jobs with no lidarrRef (never grabbed) timeout after 2 minutes = "no sources found"
-     * - Processing jobs with lidarrRef (grabbed but not imported) timeout after 5 minutes = "import failed"
+     * Applies the configured pending, no-source, and import timeouts to legacy-owned jobs.
      * Optionally accepts a pre-fetched snapshot to avoid duplicate API calls.
      */
     async markStaleJobsAsFailed(
@@ -1407,9 +1406,10 @@ class SimpleDownloadManager {
 
         // Handle old pending jobs - batch update instead of individual updates
         const stalePendingJobs = pendingJobs.filter(
-            (job) => job.createdAt < pendingCutoff,
+            (job) =>
+                !isAlbumDownloadQueueOwned(job.metadata) &&
+                job.createdAt < pendingCutoff,
         );
-
         const pendingDiscoveryBatchIds = new Set<string>();
 
         if (stalePendingJobs.length > 0) {

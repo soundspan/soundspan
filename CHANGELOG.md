@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Album downloads now use queued, serialized processing, one album at a time across the deployment, with renewable claims, restart recovery, and queue-owned lifecycle reconciliation.
+
 ### Fixed
 
 - Retrying a failed album download now uses the configured download source instead of always routing to Lidarr.
@@ -59,8 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.4.1] - 2026-08-22
 
 ### Added
-
-### Changed
 
 ### Fixed
 

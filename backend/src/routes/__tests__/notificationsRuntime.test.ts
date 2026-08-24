@@ -75,10 +75,9 @@ jest.mock("../../services/simpleDownloadManager", () => ({
     simpleDownloadManager,
 }));
 
-const dispatchAlbumDownload = jest.fn();
-jest.mock("../../services/downloadDispatcher", () => ({
-    dispatchAlbumDownload: (...args: unknown[]) =>
-        dispatchAlbumDownload(...args),
+const enqueueAlbumDownload = jest.fn();
+jest.mock("../../services/albumDownloadQueueService", () => ({
+    enqueueAlbumDownload: (...args: unknown[]) => enqueueAlbumDownload(...args),
 }));
 
 import router from "../notifications";
@@ -258,7 +257,7 @@ describe("notifications route runtime", () => {
             success: true,
             error: null,
         });
-        dispatchAlbumDownload.mockResolvedValue(undefined);
+        enqueueAlbumDownload.mockResolvedValue(undefined);
     });
 
     it("requires admin authorization for download retries", () => {
@@ -284,13 +283,13 @@ describe("notifications route runtime", () => {
         expect(soulseekService.downloadBestMatch).not.toHaveBeenCalled();
         expect(soulseekService.searchAndDownloadBatch).not.toHaveBeenCalled();
         expect(simpleDownloadManager.startDownload).not.toHaveBeenCalled();
-        expect(dispatchAlbumDownload).not.toHaveBeenCalled();
+        expect(enqueueAlbumDownload).not.toHaveBeenCalled();
         expect(prisma.downloadJob.updateMany).not.toHaveBeenCalled();
         expect(prisma.downloadJob.update).not.toHaveBeenCalled();
         expect(prisma.downloadJob.create).not.toHaveBeenCalled();
     });
 
-    it("routes an admin generic album retry through the dispatcher", async () => {
+    it("routes an admin generic album retry through the durable queue", async () => {
         prisma.downloadJob.findFirst.mockResolvedValueOnce({
             id: "job-generic",
             userId: "u1",
@@ -305,7 +304,7 @@ describe("notifications route runtime", () => {
             metadata: {},
         });
         let resolveDispatch!: () => void;
-        dispatchAlbumDownload.mockImplementationOnce(
+        enqueueAlbumDownload.mockImplementationOnce(
             () =>
                 new Promise<void>((resolve) => {
                     resolveDispatch = resolve;
@@ -331,7 +330,7 @@ describe("notifications route runtime", () => {
             newJobId: "job-new-generic",
             error: null,
         });
-        expect(dispatchAlbumDownload).toHaveBeenCalledWith({
+        expect(enqueueAlbumDownload).toHaveBeenCalledWith({
             jobId: "job-new-generic",
             type: "album",
             mbid: "album-mbid",
@@ -339,13 +338,22 @@ describe("notifications route runtime", () => {
             artistName: "Artist",
             albumTitle: "Album",
         });
+        expect(prisma.downloadJob.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    metadata: expect.objectContaining({
+                        queuedVia: "album-download-queue",
+                    }),
+                }),
+            }),
+        );
         resolveDispatch();
         await retryPromise;
         await flushAsyncWork();
         expect(simpleDownloadManager.startDownload).not.toHaveBeenCalled();
     });
 
-    it("marks a scheduled generic album retry failed when dispatch rejects", async () => {
+    it("observes a generic album queue admission rejection", async () => {
         prisma.downloadJob.findFirst.mockResolvedValueOnce({
             id: "job-generic-failed",
             userId: "u1",
@@ -359,8 +367,8 @@ describe("notifications route runtime", () => {
             id: "job-new-generic-failed",
             metadata: {},
         });
-        const dispatchError = new Error("provider token=dispatch-secret");
-        dispatchAlbumDownload.mockRejectedValueOnce(dispatchError);
+        const enqueueError = new Error("provider token=queue-secret");
+        enqueueAlbumDownload.mockRejectedValueOnce(enqueueError);
         const req = {
             user: { id: "u1", role: "admin" },
             params: { id: "job-generic-failed" },
@@ -376,62 +384,16 @@ describe("notifications route runtime", () => {
             newJobId: "job-new-generic-failed",
             error: null,
         });
-        expect(prisma.downloadJob.update).toHaveBeenCalledWith({
-            where: { id: "job-new-generic-failed" },
-            data: {
-                status: "failed",
-                error: "Download dispatch failed",
-                completedAt: expect.any(Date),
-            },
-        });
-        expect(
-            JSON.stringify(prisma.downloadJob.update.mock.calls),
-        ).not.toContain("dispatch-secret");
+        expect(prisma.downloadJob.update).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "job-new-generic-failed" },
+            }),
+        );
         expect(mockLogger.error).toHaveBeenCalledWith(
-            "[Retry] Album dispatch error:",
-            dispatchError,
+            "[Retry] Album enqueue error:",
+            enqueueError,
         );
         expect(simpleDownloadManager.startDownload).not.toHaveBeenCalled();
-    });
-
-    it("logs when generic album dispatch failure persistence rejects", async () => {
-        prisma.downloadJob.findFirst.mockResolvedValueOnce({
-            id: "job-generic-persistence-failed",
-            userId: "u1",
-            subject: "Artist - Album",
-            type: "album",
-            targetMbid: "album-mbid",
-            artistMbid: "artist-mbid",
-            metadata: { albumTitle: "Album" },
-        });
-        prisma.downloadJob.create.mockResolvedValueOnce({
-            id: "job-new-generic-persistence-failed",
-            metadata: {},
-        });
-        const dispatchError = new Error("dispatch unavailable");
-        const persistenceError = new Error("database unavailable");
-        dispatchAlbumDownload.mockRejectedValueOnce(dispatchError);
-        prisma.downloadJob.update
-            .mockResolvedValueOnce({})
-            .mockRejectedValueOnce(persistenceError);
-        const req = {
-            user: { id: "u1", role: "admin" },
-            params: { id: "job-generic-persistence-failed" },
-        } as any;
-        const res = createRes();
-
-        await retryDownload(req, res);
-        await flushAsyncWork();
-
-        expect(res.body).toEqual({
-            success: true,
-            newJobId: "job-new-generic-persistence-failed",
-            error: null,
-        });
-        expect(mockLogger.error).toHaveBeenCalledWith(
-            "[Retry] Failed to persist album dispatch failure:",
-            persistenceError,
-        );
     });
 
     it("keeps generic artist retries on the simple download manager", async () => {
@@ -464,7 +426,7 @@ describe("notifications route runtime", () => {
             "u1",
             false,
         );
-        expect(dispatchAlbumDownload).not.toHaveBeenCalled();
+        expect(enqueueAlbumDownload).not.toHaveBeenCalled();
         expect(res.body).toEqual({
             success: true,
             newJobId: "job-new-artist",
@@ -1204,7 +1166,7 @@ describe("notifications route runtime", () => {
         await retryDownload(lidarrFailReq, lidarrFailRes);
         await flushAsyncWork();
         expect(lidarrFailRes.statusCode).toBe(200);
-        expect(dispatchAlbumDownload).toHaveBeenCalledWith({
+        expect(enqueueAlbumDownload).toHaveBeenCalledWith({
             jobId: "job-new-spotify-lidarr-fail",
             type: "album",
             mbid: "mbid-spotify-lidarr-fail",
@@ -1212,6 +1174,18 @@ describe("notifications route runtime", () => {
             artistName: "Artist",
             albumTitle: "Album",
         });
+        expect(prisma.downloadJob.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "job-new-spotify-lidarr-fail" },
+                data: expect.objectContaining({
+                    status: "pending",
+                    metadata: expect.objectContaining({
+                        queuedVia: "album-download-queue",
+                        statusText: "Queued",
+                    }),
+                }),
+            }),
+        );
         expect(simpleDownloadManager.startDownload).not.toHaveBeenCalled();
 
         prisma.downloadJob.findFirst.mockResolvedValueOnce({
@@ -1301,10 +1275,10 @@ describe("notifications route runtime", () => {
         ).not.toContain(spotifyRawError);
     });
 
-    it("attributes spotify_import fallback dispatch rejection to dispatch", async () => {
+    it("attributes spotify_import fallback admission rejection to the queue", async () => {
         prepareSpotifyImportFallback("spotify-dispatch-failed");
-        const dispatchError = new Error("configured source unavailable");
-        dispatchAlbumDownload.mockRejectedValueOnce(dispatchError);
+        const enqueueError = new Error("queue unavailable");
+        enqueueAlbumDownload.mockRejectedValueOnce(enqueueError);
         const req = {
             user: { id: "u1" },
             params: { id: "job-spotify-dispatch-failed" },
@@ -1318,50 +1292,15 @@ describe("notifications route runtime", () => {
         );
 
         expect(res.statusCode).toBe(200);
-        expect(prisma.downloadJob.update).toHaveBeenCalledWith({
-            where: { id: "job-new-spotify-dispatch-failed" },
-            data: {
-                status: "failed",
-                error: "Download dispatch failed",
-                completedAt: expect.any(Date),
-            },
-        });
         expect(prisma.downloadJob.update).not.toHaveBeenCalledWith(
             expect.objectContaining({
-                data: expect.objectContaining({ error: "Soulseek error" }),
+                where: { id: "job-new-spotify-dispatch-failed" },
+                data: expect.objectContaining({ status: "failed" }),
             }),
         );
         expect(mockLogger.error).toHaveBeenCalledWith(
-            "[Retry] Album dispatch error:",
-            dispatchError,
-        );
-        expect(unhandledRejections).toEqual([]);
-    });
-
-    it("observes spotify_import fallback failure-persistence rejection", async () => {
-        prepareSpotifyImportFallback("spotify-dispatch-persistence-failed");
-        const persistenceError = new Error("database unavailable");
-        dispatchAlbumDownload.mockRejectedValueOnce(
-            new Error("configured source unavailable"),
-        );
-        prisma.downloadJob.update
-            .mockResolvedValueOnce({})
-            .mockRejectedValueOnce(persistenceError);
-        const req = {
-            user: { id: "u1" },
-            params: { id: "job-spotify-dispatch-persistence-failed" },
-        } as any;
-        const res = createRes();
-
-        const unhandledRejections = await captureUnhandledRejections(
-            async () => {
-                await retryDownload(req, res);
-            },
-        );
-
-        expect(mockLogger.error).toHaveBeenCalledWith(
-            "[Retry] Failed to persist album dispatch failure:",
-            persistenceError,
+            "[Retry] Album enqueue error:",
+            enqueueError,
         );
         expect(unhandledRejections).toEqual([]);
     });

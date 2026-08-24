@@ -10,6 +10,7 @@ import {
     type AlbumDownloadJobResult,
     type CreateAlbumDownloadJobParams,
 } from "./albumDownloadJobs";
+import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "./albumDownloadQueueOwnership";
 import {
     notificationService,
     type RequestNotificationMetadata,
@@ -401,6 +402,7 @@ function approvalJobParams(
         albumTitle: request.albumTitle,
         downloadType: "library",
         rootFolderPath,
+        metadata: { queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER },
     };
 }
 

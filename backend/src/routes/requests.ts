@@ -14,7 +14,7 @@ import {
     MUSIC_REQUEST_STATUSES,
     MusicRequestServiceError,
 } from "../services/musicRequestService";
-import { dispatchAlbumDownload } from "../services/downloadDispatcher";
+import { enqueueAlbumDownloadInBackground } from "../services/albumDownloadQueueService";
 import { logger } from "../utils/logger";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 
@@ -121,18 +121,13 @@ async function handleListAll(req: Request, res: Response) {
 }
 
 function dispatchApprovedDownload(dispatch: DownloadDispatch): void {
-    dispatchAlbumDownload({
+    enqueueAlbumDownloadInBackground({
         jobId: dispatch.jobId,
         type: dispatch.type,
         mbid: dispatch.mbid,
         subject: dispatch.subject,
         artistName: dispatch.artistName,
         albumTitle: dispatch.albumTitle,
-    }).catch((error) => {
-        log.error(
-            `Download processing failed for job ${dispatch.jobId}:`,
-            error,
-        );
     });
 }
 
@@ -296,7 +291,7 @@ router.get("/", requireAdmin, asyncHandler(handleListAll));
  * @openapi
  * /api/requests/{id}/approve:
  *   post:
- *     summary: Approve a pending request and start its album download
+ *     summary: Approve a pending request and queue its album download
  *     tags: [Music Requests]
  *     security:
  *       - apiKeyAuth: []

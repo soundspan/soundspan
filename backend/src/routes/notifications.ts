@@ -4,7 +4,8 @@ import { notificationService } from "../services/notificationService";
 import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
-import { dispatchAlbumDownload } from "../services/downloadDispatcher";
+import { enqueueAlbumDownload } from "../services/albumDownloadQueueService";
+import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
@@ -444,7 +445,7 @@ router.post(
  * /api/notifications/downloads/{id}/retry:
  *   post:
  *     summary: Retry a failed download (admin only)
- *     description: Retries a failed or exhausted download job. The generic album case schedules the retry through the configured download source. Validation failures, artist retries, and pending-track or spotify_import preconditions can still return a domain result with success false.
+ *     description: Retries a failed or exhausted download job. Generic album work is queued for serialized background processing through the configured download source. Validation failures, artist retries, and pending-track or spotify_import preconditions can still return a domain result with success false.
  *     tags: [Notifications]
  *     security:
  *       - apiKeyAuth: []
@@ -843,7 +844,22 @@ router.post(
                                 failedJob.targetMbid &&
                                 !failedJob.targetMbid.startsWith("retry_")
                             ) {
-                                await dispatchAlbumDownload({
+                                await prisma.downloadJob.update({
+                                    where: { id: newJobRecord.id },
+                                    data: {
+                                        status: "pending",
+                                        metadata: {
+                                            ...(newJobRecord.metadata as Record<
+                                                string,
+                                                unknown
+                                            >),
+                                            queuedVia:
+                                                ALBUM_DOWNLOAD_QUEUE_OWNER,
+                                            statusText: "Queued",
+                                        },
+                                    },
+                                });
+                                await enqueueAlbumDownload({
                                     jobId: newJobRecord.id,
                                     type: "album",
                                     mbid: failedJob.targetMbid,
@@ -852,24 +868,9 @@ router.post(
                                     albumTitle,
                                 }).catch((error) => {
                                     logger.error(
-                                        `[Retry] Album dispatch error:`,
+                                        `[Retry] Album enqueue error:`,
                                         error,
                                     );
-                                    return prisma.downloadJob
-                                        .update({
-                                            where: { id: newJobRecord.id },
-                                            data: {
-                                                status: "failed",
-                                                error: "Download dispatch failed",
-                                                completedAt: new Date(),
-                                            },
-                                        })
-                                        .catch((persistenceError) => {
-                                            logger.error(
-                                                `[Retry] Failed to persist album dispatch failure:`,
-                                                persistenceError,
-                                            );
-                                        });
                                 });
                             } else {
                                 await prisma.downloadJob.update({
@@ -938,12 +939,18 @@ router.post(
                     artistMbid: failedJob.artistMbid,
                     subject: failedJob.subject,
                     status: "pending",
-                    metadata: (metadata || {}) as any,
+                    metadata: {
+                        ...(metadata || {}),
+                        ...(failedJob.type === "album"
+                            ? { queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER }
+                            : {}),
+                        statusText: "Queued",
+                    } as any,
                 },
             });
 
             if (failedJob.type === "album") {
-                dispatchAlbumDownload({
+                enqueueAlbumDownload({
                     jobId: newJobRecord.id,
                     type: failedJob.type,
                     mbid: failedJob.targetMbid,
@@ -951,22 +958,7 @@ router.post(
                     artistName,
                     albumTitle,
                 }).catch((error) => {
-                    logger.error(`[Retry] Album dispatch error:`, error);
-                    return prisma.downloadJob
-                        .update({
-                            where: { id: newJobRecord.id },
-                            data: {
-                                status: "failed",
-                                error: "Download dispatch failed",
-                                completedAt: new Date(),
-                            },
-                        })
-                        .catch((persistenceError) => {
-                            logger.error(
-                                `[Retry] Failed to persist album dispatch failure:`,
-                                persistenceError,
-                            );
-                        });
+                    logger.error(`[Retry] Album enqueue error:`, error);
                 });
 
                 return res.json({

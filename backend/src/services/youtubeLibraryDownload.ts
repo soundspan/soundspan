@@ -29,6 +29,11 @@ function asMetadata(value: unknown): DownloadMetadata {
         : {};
 }
 
+function withoutFailedAt(metadata: DownloadMetadata): DownloadMetadata {
+    const { failedAt: _failedAt, ...retainedMetadata } = metadata;
+    return retainedMetadata;
+}
+
 function asAlbumSearchCandidate(value: unknown): AlbumSearchCandidate | null {
     if (!value || typeof value !== "object") return null;
     const candidate = value as Record<string, unknown>;
@@ -101,6 +106,7 @@ async function markSearching(
         where: { id: jobId },
         data: {
             status: "processing",
+            error: null,
             metadata: {
                 ...metadata,
                 currentSource: "youtube",
@@ -225,8 +231,9 @@ async function completeYoutubeJob(
         data: {
             status: "completed",
             completedAt: new Date(),
+            error: null,
             metadata: {
-                ...metadata,
+                ...withoutFailedAt(metadata),
                 currentSource: "youtube",
                 statusText: `YouTube Music ✓ ${result.downloaded}/${result.totalTracks} tracks`,
                 youtubeAlbumJobId: result.jobId,
@@ -258,6 +265,28 @@ async function failYoutubeJob(
             },
         },
     });
+}
+
+async function queueLibraryScanSafely(
+    jobId: string,
+    userId: string,
+    artistName: string,
+    albumTitle: string,
+): Promise<void> {
+    try {
+        const { scanQueue } = await import("../workers/queues");
+        await scanQueue.add("scan", {
+            userId,
+            source: "youtube-download",
+            artistName,
+            albumTitle,
+        });
+    } catch (error) {
+        logger.warn(
+            "YouTube Music library scan enqueue failed; download remains completed",
+            { jobId, error },
+        );
+    }
 }
 
 /** Process a library album through public YouTube Music search and download. */
@@ -299,18 +328,13 @@ export async function processYoutubeDownload(
             );
         }
         await completeYoutubeJob(jobId, result, metadata);
-        const { scanQueue } = await import("../workers/queues");
-        await scanQueue.add("scan", {
-            userId,
-            source: "youtube-download",
-            artistName,
-            albumTitle,
-        });
     } catch (error: unknown) {
         logger.error(
             `[YouTube Music] Download failed for job ${jobId}:`,
             error instanceof Error ? error.message : error,
         );
         await failYoutubeJob(jobId, metadata);
+        return;
     }
+    await queueLibraryScanSafely(jobId, userId, artistName, albumTitle);
 }

@@ -1,8 +1,10 @@
+const mockLoggerWarn = jest.fn();
+
 jest.mock("../../utils/logger", () => ({
     logger: {
         debug: jest.fn(),
         info: jest.fn(),
-        warn: jest.fn(),
+        warn: mockLoggerWarn,
         error: jest.fn(),
     },
 }));
@@ -107,6 +109,49 @@ describe("tidalLibraryDownload", () => {
             artistName: "Artist",
             albumTitle: "Album",
         });
+    });
+
+    it("clears the first-attempt failure state after a successful retry", async () => {
+        mockFindUnique.mockResolvedValueOnce({
+            metadata: {
+                albumMbid: "rg-1",
+                retained: true,
+                failedAt: "2026-08-24T10:00:00.000Z",
+            },
+        });
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        const searchingUpdate = mockUpdate.mock.calls.find(
+            ([call]) =>
+                call.data?.metadata?.statusText === "Searching TIDAL...",
+        )?.[0];
+        const completedUpdate = mockUpdate.mock.calls.find(
+            ([call]) => call.data?.status === "completed",
+        )?.[0];
+        expect(searchingUpdate.data.error).toBeNull();
+        expect(completedUpdate.data.error).toBeNull();
+        expect(completedUpdate.data.metadata).toEqual(
+            expect.objectContaining({ retained: true }),
+        );
+        expect(completedUpdate.data.metadata).not.toHaveProperty("failedAt");
+    });
+
+    it("keeps a completed download completed when scan admission fails", async () => {
+        const scanError = new Error("scan queue unavailable");
+        mockScan.mockRejectedValueOnce(scanError);
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        expect(
+            mockUpdate.mock.calls.some(
+                ([call]) => call.data?.status === "failed",
+            ),
+        ).toBe(false);
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "TIDAL library scan enqueue failed; download remains completed",
+            { jobId: "job-1", error: scanError },
+        );
     });
 
     it("hands a search miss to a configured youtube fallback", async () => {

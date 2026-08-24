@@ -143,6 +143,18 @@ export const federationQueue = new Bull("federation-sync", {
     },
 });
 
+/** Durable queue for serialized album downloads. */
+export const albumDownloadQueue = new Bull("album-download", {
+    redis: redisConfig,
+    defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 60000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    },
+    settings: defaultQueueSettings,
+});
+
 // Export all queues for monitoring
 export const queues = [
     scanQueue,
@@ -153,6 +165,7 @@ export const queues = [
     schedulerQueue,
     genericImportQueue,
     federationQueue,
+    albumDownloadQueue,
 ];
 
 // Add error handlers to all queues to prevent unhandled exceptions

@@ -14,6 +14,7 @@ export const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
 export const SCHEDULER_JOB_TYPES = {
     dataIntegrity: "data-integrity-check",
     reconciliation: "download-reconciliation-cycle",
+    albumDownloadRecovery: "album-download-recovery-cycle",
     lidarrCleanup: "lidarr-cleanup-cycle",
     cacheWarmup: "cache-warmup-startup",
     podcastCleanup: "podcast-cache-cleanup",
@@ -34,6 +35,8 @@ export const SCHEDULER_JOB_IDS = {
     dataIntegrityRepeat: "scheduler:data-integrity:repeat",
     reconciliationStartup: "scheduler:reconciliation:startup",
     reconciliationRepeat: "scheduler:reconciliation:repeat",
+    albumDownloadRecoveryStartup: "scheduler:album-download-recovery:startup",
+    albumDownloadRecoveryRepeat: "scheduler:album-download-recovery:repeat",
     lidarrCleanupStartup: "scheduler:lidarr-cleanup:startup",
     lidarrCleanupRepeat: "scheduler:lidarr-cleanup:repeat",
     cacheWarmupStartup: "scheduler:cache-warmup:startup",
@@ -120,6 +123,26 @@ export function buildSchedulerJobs(): SchedulerRegistration[] {
             opts: {
                 jobId: SCHEDULER_JOB_IDS.reconciliationRepeat,
                 repeat: { every: 2 * ONE_MINUTE_MS },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.albumDownloadRecovery,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.albumDownloadRecoveryStartup,
+                delay: ONE_MINUTE_MS,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.albumDownloadRecovery,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.albumDownloadRecoveryRepeat,
+                repeat: { every: 5 * ONE_MINUTE_MS },
                 removeOnComplete: true,
                 removeOnFail: 10,
             },

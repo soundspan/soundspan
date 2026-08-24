@@ -975,6 +975,12 @@ describe("simpleDownloadManager", () => {
                 status: "pending",
                 createdAt: freshDate,
             },
+            {
+                id: "pending-queue-owned",
+                status: "pending",
+                createdAt: staleDate,
+                metadata: { queuedVia: "album-download-queue" },
+            },
         ]);
         mockPrisma.downloadJob.updateMany.mockResolvedValueOnce({ count: 1 });
 

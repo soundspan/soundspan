@@ -14,7 +14,8 @@ import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { mapInteractiveRelease } from "../services/releaseContracts";
 import { createAlbumDownloadJob } from "../services/albumDownloadJobs";
-import { dispatchAlbumDownload } from "../services/downloadDispatcher";
+import { enqueueAlbumDownloadInBackground } from "../services/albumDownloadQueueService";
+import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import crypto from "crypto";
 
@@ -77,6 +78,7 @@ router.get("/availability", async (req, res) => {
  * /api/downloads:
  *   post:
  *     summary: Create a new download job for an artist or album
+ *     description: Creates a persisted download job and queues album work for serialized background processing.
  *     tags: [Downloads]
  *     security:
  *       - apiKeyAuth: []
@@ -107,7 +109,7 @@ router.get("/availability", async (req, res) => {
  *                 default: library
  *     responses:
  *       200:
- *         description: Download job created or duplicate found
+ *         description: Album jobs are created and queued for background processing, or an active duplicate is returned
  *       400:
  *         description: Missing required fields or no download service configured
  *       401:
@@ -207,6 +209,7 @@ router.post("/", requireAdmin, async (req, res) => {
             albumTitle,
             downloadType,
             rootFolderPath,
+            metadata: { queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER },
         });
 
         if (jobResult.duplicate) {
@@ -234,19 +237,13 @@ router.post("/", requireAdmin, async (req, res) => {
             `[DOWNLOAD] Triggering Lidarr: ${type} "${subject}" -> ${rootFolderPath}`,
         );
 
-        // Process in background
-        dispatchAlbumDownload({
+        enqueueAlbumDownloadInBackground({
             jobId: job.id,
             type,
             mbid,
             subject,
             artistName: jobResult.verifiedArtistName,
             albumTitle,
-        }).catch((error) => {
-            logger.error(
-                `Download processing failed for job ${job.id}:`,
-                error,
-            );
         });
 
         res.json({
@@ -429,12 +426,14 @@ async function processArtistDownload(
                         targetMbid: albumMbid,
                         status: "pending",
                         metadata: {
+                            queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER,
                             downloadType,
                             rootFolderPath,
                             artistName,
                             artistMbid,
                             albumTitle,
                             batchId, // Link all albums in this artist download
+                            statusText: "Queued",
                             batchArtist: artistName,
                             createdAt: now.toISOString(), // Track when job was created for timeout
                         },
@@ -459,16 +458,13 @@ async function processArtistDownload(
             jobs.push({ id: job.id, subject: albumSubject });
             logger.debug(`   [JOB] Created job for: ${albumSubject}`);
 
-            // Start the download in background
-            dispatchAlbumDownload({
+            enqueueAlbumDownloadInBackground({
                 jobId: job.id,
                 type: "album",
                 mbid: albumMbid,
                 subject: albumSubject,
                 artistName,
                 albumTitle,
-            }).catch((error) => {
-                logger.error(`Download failed for ${albumSubject}:`, error);
             });
         }
 

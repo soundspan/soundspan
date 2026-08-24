@@ -41,6 +41,7 @@ describe("workers runtime behavior", () => {
         const schedulerQueue = createQueueMock();
         const genericImportQueue = createQueueMock();
         const federationQueue = createQueueMock();
+        const albumDownloadQueue = createQueueMock();
 
         const logger = {
             debug: jest.fn(),
@@ -83,6 +84,12 @@ describe("workers runtime behavior", () => {
         const finalizeGenericImportQueueFailure = jest.fn(
             async () => undefined,
         );
+        const processAlbumDownload = jest.fn(async () => undefined);
+        const finalizeAlbumDownloadQueueFailure = jest.fn(
+            async () => undefined,
+        );
+        const recoverUnqueuedAlbumDownloads = jest.fn(async () => 0);
+        const recordAlbumDownloadOutcome = jest.fn();
         const registerRecoveryJobs = jest.fn(async () => undefined);
         const registerFederationProcessors = jest.fn();
         const registerFederationSchedules = jest.fn(async () => undefined);
@@ -144,6 +151,7 @@ describe("workers runtime behavior", () => {
             set: jest.fn(async () => "OK"),
             del: jest.fn(async () => 1),
             eval: jest.fn(async () => 1),
+            expire: jest.fn(async () => 1),
             quit: jest.fn(async () => "OK"),
             disconnect: jest.fn(),
         };
@@ -185,6 +193,7 @@ describe("workers runtime behavior", () => {
             schedulerQueue,
             genericImportQueue,
             federationQueue,
+            albumDownloadQueue,
         }));
         jest.doMock("../federationJobs", () => ({
             registerFederationProcessors,
@@ -218,6 +227,18 @@ describe("workers runtime behavior", () => {
             processGenericImport,
             finalizeGenericImportQueueFailure,
             GENERIC_IMPORT_WORKER_CONCURRENCY: 2,
+        }));
+        jest.doMock("../processors/albumDownloadProcessor", () => ({
+            ALBUM_DOWNLOAD_JOB_NAME: "album-download",
+            ALBUM_DOWNLOAD_WORKER_CONCURRENCY: 1,
+            processAlbumDownload,
+            finalizeAlbumDownloadQueueFailure,
+        }));
+        jest.doMock("../../services/albumDownloadQueueService", () => ({
+            recoverUnqueuedAlbumDownloads,
+        }));
+        jest.doMock("../../metrics", () => ({
+            recordAlbumDownloadOutcome,
         }));
         jest.doMock("../processors/trackRemovalPurgeProcessor", () => ({
             TRACK_REMOVAL_PURGE_JOB_NAME: "track-removal-purge",
@@ -314,6 +335,7 @@ describe("workers runtime behavior", () => {
             schedulerQueue,
             genericImportQueue,
             federationQueue,
+            albumDownloadQueue,
             logger,
             startUnifiedEnrichmentWorker,
             stopUnifiedEnrichmentWorker,
@@ -328,6 +350,10 @@ describe("workers runtime behavior", () => {
             processLoudnessBackfill,
             processRequestFulfillmentBatch,
             finalizeGenericImportQueueFailure,
+            processAlbumDownload,
+            finalizeAlbumDownloadQueueFailure,
+            recoverUnqueuedAlbumDownloads,
+            recordAlbumDownloadOutcome,
             registerRecoveryJobs,
             registerFederationProcessors,
             registerFederationSchedules,
@@ -388,6 +414,11 @@ describe("workers runtime behavior", () => {
             2,
             mocks.processGenericImport,
         );
+        expect(mocks.albumDownloadQueue.process).toHaveBeenCalledWith(
+            "album-download",
+            1,
+            mocks.processAlbumDownload,
+        );
         expect(mocks.registerRecoveryJobs).toHaveBeenCalledTimes(1);
         expect(mocks.registerFederationProcessors).not.toHaveBeenCalled();
         expect(mocks.registerFederationSchedules).not.toHaveBeenCalled();
@@ -398,6 +429,26 @@ describe("workers runtime behavior", () => {
         expect(mocks.stopDiscoverWeeklyCron).not.toHaveBeenCalled();
         expect(mocks.schedulerQueue.isReady).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.add).toHaveBeenCalled();
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "album-download-recovery-cycle",
+            { mode: "startup" },
+            {
+                jobId: "scheduler:album-download-recovery:startup",
+                delay: 60_000,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "album-download-recovery-cycle",
+            { mode: "repeat" },
+            {
+                jobId: "scheduler:album-download-recovery:repeat",
+                repeat: { every: 5 * 60_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "audiobook-auto-sync-startup",
             { mode: "repeat" },
@@ -807,6 +858,7 @@ describe("workers runtime behavior", () => {
         expect(workers.validationQueue).toBe(mocks.validationQueue);
         expect(workers.schedulerQueue).toBe(mocks.schedulerQueue);
         expect(workers.genericImportQueue).toBe(mocks.genericImportQueue);
+        expect(workers.albumDownloadQueue).toBe(mocks.albumDownloadQueue);
     });
 
     it("shuts down workers and queue resources cleanly", async () => {
@@ -827,8 +879,18 @@ describe("workers runtime behavior", () => {
         expect(
             mocks.genericImportQueue.removeAllListeners,
         ).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.albumDownloadQueue.removeAllListeners,
+        ).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.genericImportQueue.close).toHaveBeenCalledTimes(1);
+        expect(mocks.albumDownloadQueue.close).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.albumDownloadQueue.close.mock.invocationCallOrder[0],
+        ).toBeLessThan(
+            mocks.albumDownloadQueue.removeAllListeners.mock
+                .invocationCallOrder[0],
+        );
         expect(mocks.enrichmentStateService.disconnect).toHaveBeenCalledTimes(
             1,
         );
@@ -1067,6 +1129,37 @@ describe("workers runtime behavior", () => {
         ).toHaveBeenCalled();
         expect(mocks.backfillAllArtistCounts).toHaveBeenCalled();
         expect(mocks.backfillAllImages).toHaveBeenCalled();
+    });
+
+    it("runs the album-download recovery scheduler cycle under its claim", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        mocks.recoverUnqueuedAlbumDownloads.mockResolvedValueOnce(3);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+        await schedulerHandler({
+            id: "album-recovery-1",
+            name: "album-download-recovery-cycle",
+            data: { mode: "repeat" },
+        });
+
+        expect(mocks.schedulerLockRedis.set).toHaveBeenCalledWith(
+            "scheduler-claim:album-download-recovery",
+            expect.any(String),
+            "EX",
+            300,
+            "NX",
+        );
+        expect(mocks.recoverUnqueuedAlbumDownloads).toHaveBeenCalledTimes(1);
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            "Recovered 3 unqueued album downloads",
+        );
     });
 
     it("runs track-mapping reconcile job including YT->TIDAL upgrade pass", async () => {
@@ -1480,6 +1573,66 @@ describe("workers runtime behavior", () => {
         );
     });
 
+    it("atomically extends a scheduler claim only while its token still owns the key", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        mocks.schedulerLockRedis.eval
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(0)
+            .mockResolvedValue(1);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { extendSchedulerClaim } = require("../../utils/schedulerClaim");
+
+        await expect(
+            extendSchedulerClaim(
+                "scheduler-claim:test",
+                "claim-token",
+                900_000,
+            ),
+        ).resolves.toBe(true);
+
+        expect(mocks.schedulerLockRedis.eval).toHaveBeenNthCalledWith(
+            1,
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+            1,
+            "scheduler-claim:test",
+            "claim-token",
+            900_000,
+        );
+
+        await expect(
+            extendSchedulerClaim(
+                "scheduler-claim:test",
+                "claim-token",
+                900_000,
+            ),
+        ).resolves.toBe(false);
+        expect(mocks.schedulerLockRedis.eval).toHaveBeenNthCalledWith(
+            2,
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+            1,
+            "scheduler-claim:test",
+            "claim-token",
+            900_000,
+        );
+        expect(mocks.schedulerLockRedis.get).not.toHaveBeenCalled();
+        expect(mocks.schedulerLockRedis.expire).not.toHaveBeenCalled();
+
+        await Promise.all(
+            Array.from({ length: 23 }, () =>
+                extendSchedulerClaim(
+                    "scheduler-claim:test",
+                    "claim-token",
+                    900_000,
+                ),
+            ),
+        );
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            expect.stringContaining("extended=24 failedExtend=1"),
+        );
+    });
+
     it("registers queue event handlers and logs event activity", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
@@ -1536,6 +1689,30 @@ describe("workers runtime behavior", () => {
         getHandler(mocks.genericImportQueue, "completed")(job);
         const genericImportError = new Error("import-retries-exhausted");
         getHandler(mocks.genericImportQueue, "failed")(job, genericImportError);
+        getHandler(mocks.albumDownloadQueue, "active")(job);
+        getHandler(mocks.albumDownloadQueue, "completed")(job);
+        getHandler(mocks.albumDownloadQueue, "stalled")(job);
+        const albumDownloadError = new Error("album-download-failed");
+        const finalAlbumJob = {
+            ...job,
+            attemptsMade: 0,
+            opts: { attempts: 2 },
+            getState: jest.fn().mockResolvedValue("failed"),
+        };
+        const retriedAlbumJob = {
+            ...job,
+            attemptsMade: 2,
+            opts: { attempts: 2 },
+            getState: jest.fn().mockResolvedValue("delayed"),
+        };
+        getHandler(mocks.albumDownloadQueue, "failed")(
+            finalAlbumJob,
+            albumDownloadError,
+        );
+        getHandler(mocks.albumDownloadQueue, "failed")(
+            retriedAlbumJob,
+            new Error("album-download-retrying"),
+        );
         await flushPromises();
 
         getHandler(
@@ -1562,10 +1739,37 @@ describe("workers runtime behavior", () => {
                 /workerId=.* event=failed queue=worker-scheduler count=\d+/,
             ),
         );
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "job-start queue=album-download jobId=job-1 jobName=n1",
+            ),
+        );
         expect(mocks.finalizeGenericImportQueueFailure).toHaveBeenCalledWith(
             job,
             genericImportError,
         );
+        expect(mocks.finalizeAlbumDownloadQueueFailure).toHaveBeenCalledWith(
+            finalAlbumJob,
+            albumDownloadError,
+            "failed",
+        );
+        expect(mocks.finalizeAlbumDownloadQueueFailure).toHaveBeenCalledTimes(
+            1,
+        );
+        expect(finalAlbumJob.getState).toHaveBeenCalledTimes(1);
+        expect(retriedAlbumJob.getState).toHaveBeenCalledTimes(1);
+        expect(mocks.recordAlbumDownloadOutcome).toHaveBeenCalledWith(
+            "completed",
+        );
+        expect(mocks.recordAlbumDownloadOutcome).toHaveBeenCalledWith("failed");
+        expect(mocks.recordAlbumDownloadOutcome).toHaveBeenCalledWith(
+            "retried",
+        );
+        expect(
+            mocks.recordAlbumDownloadOutcome.mock.calls.filter(
+                ([outcome]) => outcome === "retried",
+            ),
+        ).toHaveLength(2);
     });
 
     it("handles scheduler failed/completed event logs when job identity is missing", async () => {

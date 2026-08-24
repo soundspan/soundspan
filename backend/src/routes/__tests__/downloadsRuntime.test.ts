@@ -57,10 +57,10 @@ jest.mock("../../services/youtubeDownload", () => ({
     },
 }));
 
-const mockDispatchAlbumDownload = jest.fn();
-jest.mock("../../services/downloadDispatcher", () => ({
-    dispatchAlbumDownload: (...args: unknown[]) =>
-        mockDispatchAlbumDownload(...args),
+const mockEnqueueAlbumDownloadInBackground = jest.fn();
+jest.mock("../../services/albumDownloadQueueService", () => ({
+    enqueueAlbumDownloadInBackground: (...args: unknown[]) =>
+        mockEnqueueAlbumDownloadInBackground(...args),
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
@@ -253,7 +253,7 @@ describe("downloads routes runtime", () => {
         mockSoulseekAvailable.mockResolvedValue(true);
         mockTidalAvailable.mockResolvedValue(false);
         mockYoutubeAvailable.mockResolvedValue(false);
-        mockDispatchAlbumDownload.mockResolvedValue(undefined);
+        mockEnqueueAlbumDownloadInBackground.mockReturnValue(undefined);
 
         mockGetArtist.mockResolvedValue(null);
         mockGetReleaseGroups.mockResolvedValue([]);
@@ -546,11 +546,12 @@ describe("downloads routes runtime", () => {
 
         const createdJob = { id: "job-created", status: "pending" };
 
+        const createAlbumJob = jest.fn().mockResolvedValue(createdJob);
         mockTransaction.mockImplementationOnce(async (callback: any) =>
             callback({
                 $queryRaw: jest.fn().mockResolvedValue([]),
                 downloadJob: {
-                    create: jest.fn().mockResolvedValue(createdJob),
+                    create: createAlbumJob,
                 },
             }),
         );
@@ -578,7 +579,7 @@ describe("downloads routes runtime", () => {
                 message: "Download job created. Processing in background.",
             }),
         );
-        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
             jobId: "job-created",
             type: "album",
             mbid: "rg-1",
@@ -586,6 +587,15 @@ describe("downloads routes runtime", () => {
             artistName: "Correct Artist",
             albumTitle: "Album",
         });
+        expect(createAlbumJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    metadata: expect.objectContaining({
+                        queuedVia: "album-download-queue",
+                    }),
+                }),
+            }),
+        );
     });
 
     it("returns existing active job for P2002 race-condition collisions", async () => {
@@ -1302,6 +1312,10 @@ describe("downloads routes runtime", () => {
             .mockResolvedValueOnce({ id: "existing-album" })
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(null);
+        const createArtistAlbumJob = jest.fn().mockResolvedValue({
+            id: "job-new",
+            status: "pending",
+        });
         mockTransaction
             .mockImplementationOnce(async (callback: any) =>
                 callback({
@@ -1325,10 +1339,7 @@ describe("downloads routes runtime", () => {
                         .mockResolvedValueOnce([])
                         .mockResolvedValueOnce([]),
                     downloadJob: {
-                        create: jest.fn().mockResolvedValue({
-                            id: "job-new",
-                            status: "pending",
-                        }),
+                        create: createArtistAlbumJob,
                     },
                 }),
             );
@@ -1352,7 +1363,7 @@ describe("downloads routes runtime", () => {
                 jobs: [{ id: "job-new", subject: "Artist Name - New Album" }],
             }),
         );
-        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
             jobId: "job-new",
             type: "album",
             mbid: "rg-new",
@@ -1360,6 +1371,15 @@ describe("downloads routes runtime", () => {
             artistName: "Artist Name",
             albumTitle: "New Album",
         });
+        expect(createArtistAlbumJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    metadata: expect.objectContaining({
+                        queuedVia: "album-download-queue",
+                    }),
+                }),
+            }),
+        );
     });
 
     it("skips recently failed artist albums without creating new jobs", async () => {
@@ -1404,7 +1424,7 @@ describe("downloads routes runtime", () => {
                 jobs: [],
             }),
         );
-        expect(mockDispatchAlbumDownload).not.toHaveBeenCalled();
+        expect(mockEnqueueAlbumDownloadInBackground).not.toHaveBeenCalled();
     });
 
     it("returns 500 when listing failed albums throws", async () => {
@@ -1440,7 +1460,7 @@ describe("downloads routes runtime", () => {
         expect(res.body).toEqual({ error: "Failed to delete failed album" });
     });
 
-    it("handles background processor rejections from single album jobs", async () => {
+    it("schedules single album jobs through the durable queue", async () => {
         mockTransaction.mockImplementationOnce(async (callback: any) =>
             callback({
                 $queryRaw: jest.fn().mockResolvedValue([]),
@@ -1452,10 +1472,6 @@ describe("downloads routes runtime", () => {
                 },
             }),
         );
-        mockDispatchAlbumDownload.mockRejectedValueOnce(
-            new Error("dispatch threw"),
-        );
-
         const req = {
             body: {
                 type: "album",
@@ -1472,10 +1488,14 @@ describe("downloads routes runtime", () => {
         await flushAsyncWork();
 
         expect(res.statusCode).toBe(200);
-        expect(mockLogger.error).toHaveBeenCalledWith(
-            "Download processing failed for job job-throw:",
-            expect.any(Error),
-        );
+        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
+            jobId: "job-throw",
+            type: "album",
+            mbid: "rg-throw",
+            subject: "Artist - Album",
+            artistName: "Artist",
+            albumTitle: "Album",
+        });
     });
 
     it("uses LastFM artist correction for artist downloads when MusicBrainz lookup fails", async () => {
@@ -1547,9 +1567,7 @@ describe("downloads routes runtime", () => {
                 },
             }),
         );
-        mockDispatchAlbumDownload.mockRejectedValueOnce(
-            new Error("batch failure"),
-        );
+        mockEnqueueAlbumDownloadInBackground.mockReturnValueOnce(undefined);
 
         const req = {
             body: {
@@ -1565,7 +1583,7 @@ describe("downloads routes runtime", () => {
         await flushAsyncWork();
 
         expect(res.statusCode).toBe(200);
-        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
             jobId: "job-batch-1",
             type: "album",
             mbid: "rg-batch-1",

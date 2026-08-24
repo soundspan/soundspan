@@ -38,6 +38,8 @@ const schedulerClaimCounters = {
     skipped: 0,
     failedAcquire: 0,
     failedRelease: 0,
+    extended: 0,
+    failedExtend: 0,
     retryRecoveries: 0,
 };
 let schedulerLockRedis: Redis = createIORedisClient(
@@ -49,7 +51,7 @@ let schedulerClaimRedisClosed = false;
 function logSchedulerClaimObservability(context: string): void {
     const counters = schedulerClaimCounters;
     claimObservabilityLog.info(
-        `context=${context} workerId=${SCHEDULER_CLAIM_PROCESS_ID} owner=${SCHEDULER_CLAIM_OWNER_ID} acquired=${counters.acquired} skipped=${counters.skipped} failedAcquire=${counters.failedAcquire} failedRelease=${counters.failedRelease} retryRecoveries=${counters.retryRecoveries}`,
+        `context=${context} workerId=${SCHEDULER_CLAIM_PROCESS_ID} owner=${SCHEDULER_CLAIM_OWNER_ID} acquired=${counters.acquired} skipped=${counters.skipped} failedAcquire=${counters.failedAcquire} failedRelease=${counters.failedRelease} extended=${counters.extended} failedExtend=${counters.failedExtend} retryRecoveries=${counters.retryRecoveries}`,
     );
 }
 
@@ -59,7 +61,9 @@ function maybeLogSchedulerClaimObservability(context: string): void {
         counters.acquired +
         counters.skipped +
         counters.failedAcquire +
-        counters.failedRelease;
+        counters.failedRelease +
+        counters.extended +
+        counters.failedExtend;
     if (totalEvents > 0 && totalEvents % OBSERVABILITY_LOG_EVERY === 0) {
         logSchedulerClaimObservability(context);
     }
@@ -195,12 +199,44 @@ async function releaseSchedulerClaim(
     }
 }
 
+function recordClaimExtension(extended: boolean): void {
+    schedulerClaimCounters[extended ? "extended" : "failedExtend"] += 1;
+    maybeLogSchedulerClaimObservability(extended ? "extend" : "failed-extend");
+}
+
+/** Extend a scheduler claim when the caller still owns its token. */
+export async function extendSchedulerClaim(
+    claimKey: string,
+    claimToken: string,
+    ttlMs: number,
+): Promise<boolean> {
+    try {
+        const ttlMilliseconds = Math.max(1, Math.ceil(ttlMs));
+        const extended = await withSchedulerClaimRedisRetry(
+            "claim extension",
+            (client) =>
+                client.eval(
+                    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+                    1,
+                    claimKey,
+                    claimToken,
+                    ttlMilliseconds,
+                ),
+        );
+        recordClaimExtension(extended === 1);
+        return extended === 1;
+    } catch (error) {
+        recordClaimExtension(false);
+        throw error;
+    }
+}
+
 /** Runs an operation under the Redis lease used by scheduled worker claims. */
 export async function runWithSchedulerClaim<T>(
     claimKey: string,
     ttlMs: number,
     operationName: string,
-    operation: () => Promise<T>,
+    operation: (claimToken: string) => Promise<T>,
 ): Promise<SchedulerClaimResult<T>> {
     let claimToken: string | null;
     try {
@@ -215,7 +251,7 @@ export async function runWithSchedulerClaim<T>(
     }
     if (!claimToken) return { acquired: false };
     try {
-        return { acquired: true, value: await operation() };
+        return { acquired: true, value: await operation(claimToken) };
     } finally {
         await releaseSchedulerClaim(claimKey, claimToken, operationName);
     }

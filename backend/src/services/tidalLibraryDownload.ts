@@ -22,6 +22,11 @@ function asMetadata(value: unknown): DownloadMetadata {
         : {};
 }
 
+function withoutFailedAt(metadata: DownloadMetadata): DownloadMetadata {
+    const { failedAt: _failedAt, ...retainedMetadata } = metadata;
+    return retainedMetadata;
+}
+
 async function markSearching(
     jobId: string,
     metadata: DownloadMetadata,
@@ -30,6 +35,7 @@ async function markSearching(
         where: { id: jobId },
         data: {
             status: "processing",
+            error: null,
             metadata: {
                 ...metadata,
                 currentSource: "tidal",
@@ -158,8 +164,9 @@ async function completeTidalJob(
         data: {
             status: "completed",
             completedAt: new Date(),
+            error: null,
             metadata: {
-                ...metadata,
+                ...withoutFailedAt(metadata),
                 currentSource: "tidal",
                 statusText: `TIDAL ✓ ${completedStatusText(result)}`,
                 tidalAlbumId: match.albumId,
@@ -187,6 +194,21 @@ async function queueLibraryScan(
     logger.debug(
         `[TIDAL] Scan queued for: ${result.artist} - ${result.album_title}`,
     );
+}
+
+async function queueLibraryScanSafely(
+    jobId: string,
+    userId: string,
+    result: TidalAlbumDownloadResult,
+): Promise<void> {
+    try {
+        await queueLibraryScan(userId, result);
+    } catch (error) {
+        logger.warn(
+            "TIDAL library scan enqueue failed; download remains completed",
+            { jobId, error },
+        );
+    }
 }
 
 async function failTidalJob(
@@ -222,6 +244,7 @@ export async function processTidalDownload(
         select: { metadata: true },
     });
     const metadata = asMetadata(existingJob?.metadata);
+    let completedResult: TidalAlbumDownloadResult;
     try {
         await markSearching(jobId, metadata);
         const match = await tidalService.findAlbum(artistName, albumTitle);
@@ -245,12 +268,14 @@ export async function processTidalDownload(
         await markDownloading(jobId, match, metadata);
         const result = await downloadAlbum(match);
         await completeTidalJob(jobId, match, result, metadata);
-        await queueLibraryScan(userId, result);
+        completedResult = result;
     } catch (error: unknown) {
         logger.error(
             `[TIDAL] Download failed for job ${jobId}:`,
             error instanceof Error ? error.message : error,
         );
         await failTidalJob(jobId, metadata);
+        return;
     }
+    await queueLibraryScanSafely(jobId, userId, completedResult);
 }

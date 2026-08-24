@@ -359,6 +359,7 @@ describe("musicRequestService", () => {
                 albumTitle: input.albumTitle,
                 downloadType: "library",
                 rootFolderPath: "/library",
+                metadata: { queuedVia: "album-download-queue" },
             },
             prisma,
             input.artistName,

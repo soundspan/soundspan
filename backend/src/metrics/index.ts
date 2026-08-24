@@ -58,6 +58,10 @@ import {
     createRequestMetrics,
     type MusicRequestAction,
 } from "./requestMetrics";
+import {
+    createAlbumDownloadMetrics,
+    type AlbumDownloadOutcome,
+} from "./albumDownloadMetrics";
 
 export type {
     FederationAuthFailureReason,
@@ -85,6 +89,7 @@ const libraryHealthMetrics = createLibraryHealthMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
 const providerTrackGcMetrics = createProviderTrackGcMetrics(metricsRegistry);
 const requestMetrics = createRequestMetrics(metricsRegistry);
+const albumDownloadMetrics = createAlbumDownloadMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -140,6 +145,13 @@ export function recordBrowseImageCacheResult(result: "hit" | "miss"): void {
 /** Records one bounded music request state or rejection action. */
 export function recordMusicRequestAction(action: MusicRequestAction): void {
     requestMetrics.requests.inc({ action });
+}
+
+/** Records one bounded album download queue outcome. */
+export function recordAlbumDownloadOutcome(
+    outcome: AlbumDownloadOutcome,
+): void {
+    albumDownloadMetrics.downloads.inc({ outcome });
 }
 
 /** Records one Library Health panel cache outcome. */

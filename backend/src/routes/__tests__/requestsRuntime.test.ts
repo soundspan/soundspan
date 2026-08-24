@@ -5,7 +5,7 @@ const mockListAllRequests = jest.fn();
 const mockApproveRequest = jest.fn();
 const mockDenyRequest = jest.fn();
 const mockGetRequestAvailability = jest.fn();
-const mockDispatchAlbumDownload = jest.fn();
+const mockEnqueueAlbumDownloadInBackground = jest.fn();
 
 class MockMusicRequestServiceError extends Error {
     constructor(
@@ -50,9 +50,9 @@ jest.mock("../../services/musicRequestService", () => ({
     getRequestAvailability: (...args: unknown[]) =>
         mockGetRequestAvailability(...args),
 }));
-jest.mock("../../services/downloadDispatcher", () => ({
-    dispatchAlbumDownload: (...args: unknown[]) =>
-        mockDispatchAlbumDownload(...args),
+jest.mock("../../services/albumDownloadQueueService", () => ({
+    enqueueAlbumDownloadInBackground: (...args: unknown[]) =>
+        mockEnqueueAlbumDownloadInBackground(...args),
 }));
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -148,7 +148,7 @@ describe("requests route runtime", () => {
             remainingToday: 9,
             dailyCap: 10,
         });
-        mockDispatchAlbumDownload.mockResolvedValue(undefined);
+        mockEnqueueAlbumDownloadInBackground.mockReturnValue(undefined);
     });
 
     it("requires an interactive authenticated session for the router", async () => {
@@ -356,7 +356,7 @@ describe("requests route runtime", () => {
         );
 
         expect(res.body).toEqual({ id: "request-1", status: "approved" });
-        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
             jobId: "job-1",
             type: "album",
             mbid: validBody.rgMbid,
@@ -375,7 +375,7 @@ describe("requests route runtime", () => {
         );
 
         expect(res.statusCode).toBe(200);
-        expect(mockDispatchAlbumDownload).not.toHaveBeenCalled();
+        expect(mockEnqueueAlbumDownloadInBackground).not.toHaveBeenCalled();
     });
 
     it("rejects invalid admin status filters", async () => {
