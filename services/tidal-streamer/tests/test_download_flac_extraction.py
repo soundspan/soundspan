@@ -76,9 +76,12 @@ def test_flac_extraction_uses_one_path_and_moves_converted_file(
     )
 
     expected = destination / "Artist" / "Album" / "01. Track.flac"
-    temporary = expected.with_suffix(".flac.tmp")
+    temporary = calls[0][0]
     intermediate = temporary.with_suffix(".flac")
     assert calls == [(temporary,)]
+    assert temporary.parent == expected.parent
+    assert temporary.name.startswith("01. Track.")
+    assert temporary.name.endswith(".tmp")
     assert expected.read_bytes() == b"audio"
     assert not temporary.exists()
     assert not intermediate.exists()
@@ -93,8 +96,10 @@ def test_aac_detection_uses_m4a_final_path_and_metadata_path(
     import tidal_downloads
 
     metadata_paths: list[Path] = []
+    temporary_paths: list[Path] = []
 
     def extract_flac(source: Path) -> Path:
+        temporary_paths.append(source)
         converted = source.with_suffix(".m4a")
         source.replace(converted)
         return converted
@@ -113,7 +118,7 @@ def test_aac_detection_uses_m4a_final_path_and_metadata_path(
 
     planned = destination / "Artist" / "Album" / "01. Track.flac"
     expected = planned.with_suffix(".m4a")
-    temporary = planned.with_suffix(".flac.tmp")
+    temporary = temporary_paths[0]
     intermediate = temporary.with_suffix(".m4a")
     assert expected.read_bytes() == b"audio"
     assert Path(result["file_path"]).resolve() == expected.resolve()
@@ -125,6 +130,38 @@ def test_aac_detection_uses_m4a_final_path_and_metadata_path(
     assert result["file_size"] == len(b"audio")
 
 
+def test_aac_detection_disambiguates_existing_m4a_for_different_track(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tidal_downloads
+
+    def extract_flac(source: Path) -> Path:
+        converted = source.with_suffix(".m4a")
+        source.replace(converted)
+        return converted
+
+    destination = tmp_path / "music"
+    existing = destination / "Artist" / "Album" / "01. Track.m4a"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"different-track")
+    _configure_flac_download(monkeypatch, tidal_downloads, extract_flac)
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: 700 if path == existing else None,
+    )
+
+    result = tidal_downloads._download_track_sync(
+        _FakeDownloadApi(), 8, "LOSSLESS", "ignored", destination
+    )
+
+    disambiguated = existing.with_name("01. Track [tidal-8].m4a")
+    assert existing.read_bytes() == b"different-track"
+    assert disambiguated.read_bytes() == b"audio"
+    assert Path(result["file_path"]) == disambiguated
+    assert result["relative_path"] == "Artist/Album/01. Track [tidal-8].m4a"
+
+
 def test_ffmpeg_error_logs_warning_and_falls_back_to_planned_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -132,7 +169,10 @@ def test_ffmpeg_error_logs_warning_and_falls_back_to_planned_path(
 ) -> None:
     import tidal_downloads
 
+    temporary_paths: list[Path] = []
+
     def extract_flac(source: Path) -> Path:
+        temporary_paths.append(source)
         source.with_suffix(".tmp.flac").write_bytes(b"partial-flac")
         raise _FakeFFmpegError("ffmpeg failed")
 
@@ -145,7 +185,7 @@ def test_ffmpeg_error_logs_warning_and_falls_back_to_planned_path(
         )
 
     expected = destination / "Artist" / "Album" / "01. Track.flac"
-    temporary = expected.with_suffix(".flac.tmp")
+    temporary = temporary_paths[0]
     intermediate = temporary.with_suffix(".tmp.flac")
     assert expected.read_bytes() == b"audio"
     assert not temporary.exists()
@@ -170,6 +210,11 @@ def test_flac_to_m4a_transition_removes_stale_flac_sibling(
     planned.parent.mkdir(parents=True)
     planned.write_bytes(b"old-flac")
     _configure_flac_download(monkeypatch, tidal_downloads, extract_flac)
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: 4 if path == planned else None,
+    )
 
     result = tidal_downloads._download_track_sync(
         _FakeDownloadApi(), 4, "LOSSLESS", "ignored", destination
@@ -197,6 +242,11 @@ def test_m4a_to_flac_transition_removes_stale_m4a_sibling(
     stale_m4a.parent.mkdir(parents=True)
     stale_m4a.write_bytes(b"old-m4a")
     _configure_flac_download(monkeypatch, tidal_downloads, extract_flac)
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: 5 if path == stale_m4a else None,
+    )
 
     result = tidal_downloads._download_track_sync(
         _FakeDownloadApi(), 5, "LOSSLESS", "ignored", destination
@@ -205,6 +255,79 @@ def test_m4a_to_flac_transition_removes_stale_m4a_sibling(
     assert planned.read_bytes() == b"audio"
     assert set(planned.parent.iterdir()) == {planned}
     assert Path(result["file_path"]) == planned
+
+
+@pytest.mark.parametrize(
+    "embedded_id",
+    [pytest.param(None, id="unknown"), pytest.param(999, id="different-track")],
+)
+def test_codec_transition_preserves_sibling_not_owned_by_current_track(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    embedded_id: int | None,
+) -> None:
+    import tidal_downloads
+
+    def extract_flac(source: Path) -> Path:
+        converted = source.with_suffix(".flac")
+        source.replace(converted)
+        return converted
+
+    destination = tmp_path / "music"
+    planned = destination / "Artist" / "Album" / "01. Track.flac"
+    sibling = planned.with_suffix(".m4a")
+    sibling.parent.mkdir(parents=True)
+    sibling.write_bytes(b"different-track")
+    _configure_flac_download(monkeypatch, tidal_downloads, extract_flac)
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: embedded_id if path == sibling else None,
+    )
+
+    result = tidal_downloads._download_track_sync(
+        _FakeDownloadApi(), 6, "LOSSLESS", "ignored", destination
+    )
+
+    assert planned.read_bytes() == b"audio"
+    assert sibling.read_bytes() == b"different-track"
+    assert set(planned.parent.iterdir()) == {planned, sibling}
+    assert Path(result["file_path"]) == planned
+
+
+def test_disambiguated_codec_switch_cleans_owned_planned_stem_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tidal_downloads
+
+    def extract_flac(source: Path) -> Path:
+        converted = source.with_suffix(".m4a")
+        source.replace(converted)
+        return converted
+
+    destination = tmp_path / "music"
+    planned = destination / "Artist" / "Album" / "01. Track.flac"
+    occupied_m4a = planned.with_suffix(".m4a")
+    planned.parent.mkdir(parents=True)
+    planned.write_bytes(b"old-current-track")
+    occupied_m4a.write_bytes(b"different-track")
+    _configure_flac_download(monkeypatch, tidal_downloads, extract_flac)
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: 8 if path == planned else 700 if path == occupied_m4a else None,
+    )
+
+    result = tidal_downloads._download_track_sync(
+        _FakeDownloadApi(), 8, "LOSSLESS", "ignored", destination
+    )
+
+    installed = occupied_m4a.with_name("01. Track [tidal-8].m4a")
+    assert not planned.exists()
+    assert occupied_m4a.read_bytes() == b"different-track"
+    assert installed.read_bytes() == b"audio"
+    assert set(installed.parent.iterdir()) == {occupied_m4a, installed}
+    assert Path(result["file_path"]) == installed
 
 
 def test_outside_converted_path_warns_and_falls_back_without_touching_outside_file(
@@ -235,7 +358,7 @@ def test_outside_converted_path_warns_and_falls_back_without_touching_outside_fi
     assert "outside MUSIC_PATH" in caplog.text
 
 
-def test_unexpected_final_move_failure_preserves_one_recoverable_file(
+def test_unexpected_final_move_failure_removes_all_staged_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import tidal_downloads
@@ -243,7 +366,7 @@ def test_unexpected_final_move_failure_preserves_one_recoverable_file(
     destination = tmp_path / "music"
     destination.mkdir()
     planned = destination / "Track.flac"
-    temporary = planned.with_suffix(".flac.tmp")
+    temporary = destination / "Track.0123456789abcdef0123456789abcdef.tmp"
     temporary.write_bytes(b"source-audio")
     converted = temporary.with_suffix(".flac")
 
@@ -260,6 +383,36 @@ def test_unexpected_final_move_failure_preserves_one_recoverable_file(
     with pytest.raises(OSError, match="move"):
         tidal_downloads._finalize_flac_download(temporary, planned, destination.resolve(), 7)
 
-    assert temporary.read_bytes() == b"source-audio"
+    assert not temporary.exists()
     assert not converted.exists()
-    assert set(destination.iterdir()) == {temporary}
+    assert list(destination.iterdir()) == []
+
+
+def test_ffmpeg_fallback_move_failure_removes_all_staged_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tidal_downloads
+
+    destination = tmp_path / "music"
+    destination.mkdir()
+    planned = destination / "Track.flac"
+    temporary = destination / "Track.0123456789abcdef0123456789abcdef.tmp"
+    temporary.write_bytes(b"source-audio")
+    intermediate = temporary.with_suffix(".tmp.flac")
+
+    def extract_flac(_source: Path) -> Path:
+        intermediate.write_bytes(b"partial-flac")
+        raise _FakeFFmpegError("ffmpeg failed")
+
+    def fail_move(_source: str, _destination: str) -> None:
+        raise OSError("move")
+
+    _configure_flac_download(monkeypatch, tidal_downloads, extract_flac)
+    monkeypatch.setattr("tidal_downloads.shutil.move", fail_move)
+
+    with pytest.raises(OSError, match="move"):
+        tidal_downloads._finalize_flac_download(temporary, planned, destination.resolve(), 7)
+
+    assert not temporary.exists()
+    assert not intermediate.exists()
+    assert list(destination.iterdir()) == []

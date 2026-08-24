@@ -82,6 +82,11 @@ module = ["tiddl", "tiddl.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# Mutagen 1.48.1 marks itself typed, but its file loaders and tag mappings remain untyped.
+module = ["mutagen", "mutagen.*"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
 # yt-dlp 2026.7.4 does not publish PEP 561 type information (2 import diagnostics).
 module = ["yt_dlp", "yt_dlp.*"]
 ignore_missing_imports = true

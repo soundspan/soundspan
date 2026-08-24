@@ -82,8 +82,14 @@ def test_download_rejects_temporary_file_symlink_escape(
     outside_file = tmp_path / "outside.m4a.tmp"
     target_parent.mkdir(parents=True)
     outside_file.write_bytes(b"unchanged")
-    (target_parent / "01. Track.m4a.tmp").symlink_to(outside_file)
+    fixed_uuid = "0123456789abcdef0123456789abcdef"
+    (target_parent / f"01. Track.{fixed_uuid}.tmp").symlink_to(outside_file)
     _configure_download(monkeypatch, tidal_downloads, "Artist/Album/01. Track", b"replacement")
+    monkeypatch.setattr(
+        tidal_downloads,
+        "uuid4",
+        lambda: types.SimpleNamespace(hex=fixed_uuid),
+    )
 
     with pytest.raises(ValueError, match="outside MUSIC_PATH"):
         tidal_downloads._download_track_sync(_FakeDownloadApi(), 1, "HIGH", "ignored", destination)

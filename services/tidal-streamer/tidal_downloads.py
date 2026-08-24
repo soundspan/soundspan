@@ -5,13 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import threading
 from base64 import b64decode
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
+from uuid import uuid4
 from xml.etree.ElementTree import Element
 from xml.etree.ElementTree import fromstring as xml_fromstring
 
 from common.sidecar_runtime_utils import env_float
+from mutagen.easymp4 import EasyMP4
+from mutagen.flac import FLAC
 from tiddl.core.metadata import Cover, add_track_metadata
 from tiddl.core.utils import parse_track_stream
 from tiddl.core.utils.format import format_template
@@ -34,6 +38,11 @@ __all__ = (
 
 JsonObject = dict[str, Any]
 log = logging.getLogger("tidal-streamer")
+
+_MAX_FILENAME_BYTES = 255
+_MAX_COLLISION_COUNTER = 5
+# Backend queue claims serialize downloads across replicas; this lock closes in-process races.
+_DOWNLOAD_INSTALL_LOCK = threading.Lock()
 
 
 class TrackDownloadAPIProtocol(Protocol):
@@ -110,18 +119,118 @@ def _build_download_file_path(
     file_extension: str,
     dest_base: Path,
 ) -> tuple[Path, Path, Path]:
-    """Build contained final and temporary paths from a rendered template."""
+    """Build a final path and a ``<stem>.<32 lowercase uuid4 hex>.tmp`` path."""
     relative_file = relative_stem.parent / f"{relative_stem.name}{file_extension}"
     destination_root = dest_base.resolve()
     file_path = _require_contained_download_path(
         destination_root / relative_file,
         destination_root,
     )
+    temporary_name = _build_bounded_filename(
+        file_path.stem,
+        f".{uuid4().hex}",
+        ".tmp",
+    )
     tmp_path = _require_contained_download_path(
-        file_path.with_suffix(file_path.suffix + ".tmp"),
+        file_path.with_name(temporary_name),
         destination_root,
     )
     return relative_file, file_path, tmp_path
+
+
+def _build_bounded_filename(stem: str, suffix: str, extension: str) -> str:
+    """Build one UTF-8 filename component within the common 255-byte limit."""
+    reserved_bytes = len(f"{suffix}{extension}".encode())
+    stem_budget = _MAX_FILENAME_BYTES - reserved_bytes
+    if stem_budget < 1:
+        raise ValueError("Download filename suffix exceeds the 255-byte component limit")
+    bounded_stem = stem.encode()[:stem_budget].decode(errors="ignore")
+    if not bounded_stem:
+        raise ValueError("Download filename has no stem within the 255-byte component limit")
+    return f"{bounded_stem}{suffix}{extension}"
+
+
+def _parse_tidal_comment(tag_values: object) -> int | None:
+    """Parse the single identity value written by tiddl's comment metadata."""
+    if not isinstance(tag_values, list) or not tag_values:
+        return None
+    comment = tag_values[0]
+    if not isinstance(comment, str) or not comment.startswith("tidal:"):
+        return None
+    track_id = comment.removeprefix("tidal:")
+    if not track_id.isdigit():
+        return None
+    return int(track_id)
+
+
+def _read_embedded_tidal_id(path: Path) -> int | None:
+    """Read a tiddl-written track identity, returning None for every failure."""
+    try:
+        if path.suffix.lower() == ".flac":
+            return _parse_tidal_comment(FLAC(path).get("COMMENT"))
+        if path.suffix.lower() == ".m4a":
+            return _parse_tidal_comment(EasyMP4(path).get("comment"))
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_final_download_path(
+    planned_path: Path,
+    destination_root: Path,
+    track_id: int,
+) -> Path:
+    """Reuse planned legacy files but require identity for occupied suffixes."""
+    candidates = _build_download_candidates(planned_path, track_id)
+    for candidate_index, candidate in enumerate(candidates):
+        contained_candidate = _require_contained_download_path(candidate, destination_root)
+        if not contained_candidate.exists():
+            if contained_candidate != planned_path:
+                log.info(
+                    "Download path collision at %s; saving track %s to %s",
+                    planned_path,
+                    track_id,
+                    contained_candidate,
+                )
+            return contained_candidate
+        embedded_id = _read_embedded_tidal_id(contained_candidate)
+        if embedded_id == track_id:
+            if contained_candidate != planned_path:
+                log.info(
+                    "Download path collision at %s; saving track %s to %s",
+                    planned_path,
+                    track_id,
+                    contained_candidate,
+                )
+            return contained_candidate
+        if candidate_index == 0 and embedded_id is None:
+            log.debug(
+                "Refreshing unidentified legacy file at planned path %s for track %s",
+                contained_candidate,
+                track_id,
+            )
+            return contained_candidate
+
+    raise RuntimeError(
+        f"No safe download path for TIDAL track {track_id}; all {len(candidates)} candidates "
+        "are occupied by other or unidentified files"
+    )
+
+
+def _build_download_candidates(planned_path: Path, track_id: int) -> tuple[Path, ...]:
+    """Build the planned path and five byte-bounded identity alternatives."""
+    candidates = [planned_path]
+    for counter in range(1, _MAX_COLLISION_COUNTER + 1):
+        identity_suffix = (
+            f" [tidal-{track_id}]" if counter == 1 else f" [tidal-{track_id}-{counter}]"
+        )
+        candidate_name = _build_bounded_filename(
+            planned_path.stem,
+            identity_suffix,
+            planned_path.suffix,
+        )
+        candidates.append(planned_path.with_name(candidate_name))
+    return tuple(candidates)
 
 
 def _finalize_flac_download(
@@ -134,35 +243,50 @@ def _finalize_flac_download(
     from tiddl.core.utils.ffmpeg import FFmpegError, extract_flac
 
     try:
-        converted_path = extract_flac(tmp_path)
-    except (FFmpegError, FileNotFoundError) as error:
-        log.warning(
-            "FLAC extraction failed for track %s: %s; saving original download",
-            track_id,
-            error,
-        )
-        return _fallback_flac_download(tmp_path, planned_file_path, destination_root)
+        try:
+            converted_path = extract_flac(tmp_path)
+        except (FFmpegError, FileNotFoundError) as error:
+            log.warning(
+                "FLAC extraction failed for track %s: %s; saving original download",
+                track_id,
+                error,
+            )
+            return _fallback_flac_download(
+                tmp_path,
+                planned_file_path,
+                destination_root,
+                track_id,
+            )
 
-    try:
-        trusted_converted_path = _require_regular_converted_path(
-            converted_path,
+        try:
+            trusted_converted_path = _require_regular_converted_path(
+                converted_path,
+                destination_root,
+            )
+        except ValueError as error:
+            log.warning(
+                "FLAC extraction returned an unsafe path for track %s: %s; "
+                "saving original download",
+                track_id,
+                error,
+            )
+            return _fallback_flac_download(
+                tmp_path,
+                planned_file_path,
+                destination_root,
+                track_id,
+            )
+
+        return _install_converted_flac_download(
+            tmp_path,
+            trusted_converted_path,
+            planned_file_path,
             destination_root,
-        )
-    except ValueError as error:
-        log.warning(
-            "FLAC extraction returned an unsafe path for track %s: %s; saving original download",
             track_id,
-            error,
         )
-        return _fallback_flac_download(tmp_path, planned_file_path, destination_root)
-
-    return _install_converted_flac_download(
-        tmp_path,
-        trusted_converted_path,
-        planned_file_path,
-        destination_root,
-        track_id,
-    )
+    except Exception:
+        _cleanup_staged_download(tmp_path, track_id)
+        raise
 
 
 def _require_regular_converted_path(converted_path: Path, destination_root: Path) -> Path:
@@ -177,56 +301,111 @@ def _fallback_flac_download(
     tmp_path: Path,
     planned_file_path: Path,
     destination_root: Path,
+    track_id: int,
 ) -> Path:
     """Remove ffmpeg output and retain the original download at its planned path."""
-    tmp_path.with_suffix(".tmp.flac").unlink(missing_ok=True)
-    shutil.move(str(tmp_path), str(planned_file_path))
-    _remove_stale_codec_sibling(planned_file_path, destination_root)
-    return planned_file_path
+    _cleanup_extractor_intermediates(tmp_path, track_id, None)
+    final_path = _resolve_final_download_path(planned_file_path, destination_root, track_id)
+    shutil.move(str(tmp_path), str(final_path))
+    return final_path
 
 
-def _remove_stale_codec_sibling(final_path: Path, destination_root: Path) -> None:
-    """Remove only the opposite known codec sibling beside a completed download."""
+def _remove_stale_codec_siblings(
+    planned_path: Path,
+    final_path: Path,
+    destination_root: Path,
+    track_id: int,
+) -> None:
+    """Remove current-track codec siblings for both planned and resolved stems."""
+    contained_planned_path = _require_contained_download_path(planned_path, destination_root)
     contained_final_path = _require_contained_download_path(final_path, destination_root)
-    if contained_final_path.suffix == ".flac":
-        sibling_extension = ".m4a"
-    elif contained_final_path.suffix == ".m4a":
-        sibling_extension = ".flac"
-    else:
+    sibling_extension = _opposite_codec_extension(contained_final_path)
+    if sibling_extension is None:
         return
-    sibling_path = contained_final_path.with_suffix(sibling_extension)
-    _require_contained_download_path(sibling_path, destination_root)
-    sibling_path.unlink(missing_ok=True)
+    sibling_paths = {
+        contained_planned_path.with_suffix(sibling_extension),
+        contained_final_path.with_suffix(sibling_extension),
+    }
+    for sibling_path in sibling_paths:
+        _remove_owned_codec_sibling(sibling_path, destination_root, track_id)
+
+
+def _opposite_codec_extension(path: Path) -> str | None:
+    """Return the other supported library codec extension."""
+    if path.suffix == ".flac":
+        return ".m4a"
+    if path.suffix == ".m4a":
+        return ".flac"
+    return None
+
+
+def _remove_owned_codec_sibling(
+    sibling_path: Path,
+    destination_root: Path,
+    track_id: int,
+) -> None:
+    """Remove one sibling only when its embedded identity matches the download."""
+    contained_sibling_path = _require_contained_download_path(sibling_path, destination_root)
+    if not contained_sibling_path.exists():
+        return
+    sibling_track_id = _read_embedded_tidal_id(contained_sibling_path)
+    # Planned UNKNOWN files may be refreshed, but deletion requires positive ownership proof.
+    if sibling_track_id != track_id:
+        log.debug(
+            "Keeping codec sibling %s for track %s because its embedded TIDAL id is %s",
+            contained_sibling_path,
+            track_id,
+            sibling_track_id,
+        )
+        return
+    contained_sibling_path.unlink()
 
 
 def _cleanup_failed_flac_install(
     tmp_path: Path,
     converted_path: Path,
-    final_path: Path,
     track_id: int,
 ) -> None:
-    """Best-effort cleanup that retains one recoverable copy after install failure."""
-    if final_path.is_file() and not final_path.is_symlink():
-        preserved_path = final_path
-    elif tmp_path.is_file() and not tmp_path.is_symlink():
-        preserved_path = tmp_path
-    else:
-        preserved_path = converted_path
-    if converted_path != preserved_path:
-        _unlink_failed_flac_path(converted_path, track_id)
-    if tmp_path != preserved_path:
-        _unlink_failed_flac_path(tmp_path, track_id)
-    ffmpeg_path = tmp_path.with_suffix(".tmp.flac")
-    if ffmpeg_path != preserved_path:
-        _unlink_failed_flac_path(ffmpeg_path, track_id)
+    """Remove UUID staging and a validated extractor result after failure."""
+    _cleanup_staged_download(tmp_path, track_id)
+    if converted_path not in _extractor_intermediate_paths(tmp_path):
+        _unlink_staged_path(converted_path, track_id)
 
 
-def _unlink_failed_flac_path(path: Path, track_id: int) -> None:
-    """Remove a failed-install artifact without replacing the active exception."""
+def _extractor_intermediate_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Return every filename shape the FLAC extractor can derive from UUID staging."""
+    return (
+        tmp_path.with_suffix(".flac"),
+        tmp_path.with_suffix(".m4a"),
+        tmp_path.with_suffix(".tmp.flac"),
+    )
+
+
+def _cleanup_extractor_intermediates(
+    tmp_path: Path,
+    track_id: int,
+    additional_path: Path | None,
+) -> None:
+    """Best-effort remove bounded extractor intermediates for one staged download."""
+    intermediate_paths = _extractor_intermediate_paths(tmp_path)
+    for intermediate_path in intermediate_paths:
+        _unlink_staged_path(intermediate_path, track_id)
+    if additional_path is not None and additional_path not in intermediate_paths:
+        _unlink_staged_path(additional_path, track_id)
+
+
+def _cleanup_staged_download(tmp_path: Path, track_id: int) -> None:
+    """Best-effort remove the exact UUID temp and its known extractor outputs."""
+    _unlink_staged_path(tmp_path, track_id)
+    _cleanup_extractor_intermediates(tmp_path, track_id, None)
+
+
+def _unlink_staged_path(path: Path, track_id: int) -> None:
+    """Remove a staged artifact without replacing the active exception."""
     try:
         path.unlink(missing_ok=True)
     except OSError as error:
-        log.warning("Could not clean FLAC artifact for track %s: %s", track_id, error)
+        log.warning("Could not clean staged artifact for track %s: %s", track_id, error)
 
 
 def _install_converted_flac_download(
@@ -239,15 +418,120 @@ def _install_converted_flac_download(
     """Install a validated extractor result and remove temporary codec siblings."""
     final_path = planned_file_path.with_suffix(converted_path.suffix)
     try:
-        final_path = _require_contained_download_path(final_path, destination_root)
+        final_path = _resolve_final_download_path(final_path, destination_root, track_id)
         shutil.move(str(converted_path), str(final_path))
-        tmp_path.unlink(missing_ok=True)
-        tmp_path.with_suffix(".tmp.flac").unlink(missing_ok=True)
-        _remove_stale_codec_sibling(final_path, destination_root)
     except Exception:
-        _cleanup_failed_flac_install(tmp_path, converted_path, final_path, track_id)
+        _cleanup_failed_flac_install(tmp_path, converted_path, track_id)
         raise
+    _cleanup_staged_download(tmp_path, track_id)
     return final_path
+
+
+def _install_staged_download(
+    tmp_path: Path,
+    planned_file_path: Path,
+    file_extension: str,
+    destination_root: Path,
+    track_id: int,
+) -> Path:
+    """Move one staged download into its identity-checked final candidate."""
+    if file_extension == ".flac":
+        return _finalize_flac_download(
+            tmp_path,
+            planned_file_path,
+            destination_root,
+            track_id,
+        )
+    final_path = _resolve_final_download_path(
+        planned_file_path,
+        destination_root,
+        track_id,
+    )
+    shutil.move(str(tmp_path), str(final_path))
+    return final_path
+
+
+def _fetch_download_cover(album: Any, track_id: int) -> tuple[bool, bytes | None]:
+    """Fetch optional cover bytes before installation without failing the audio download."""
+    if not album.cover:
+        return True, None
+    try:
+        return True, cast(bytes, Cover(album.cover).fetch_data())
+    except Exception as error:
+        log.warning("Failed to embed metadata for track %s: %s", track_id, error)
+        return False, None
+
+
+def _embed_download_metadata(
+    path: Path,
+    track: Any,
+    album: Any,
+    track_id: int,
+    cover_data: bytes | None,
+) -> None:
+    """Embed metadata and retain the completed audio when tagging fails."""
+    try:
+        add_track_metadata(
+            path=path,
+            track=track,
+            album_artist=track.artists[0].name if track.artists else "",
+            date=str(album.releaseDate.date()) if album.releaseDate else "",
+            cover_data=cover_data,
+            comment=f"tidal:{track_id}",
+        )
+    except Exception as error:
+        log.warning("Failed to embed metadata for track %s: %s", track_id, error)
+
+
+def _install_download_with_metadata(
+    tmp_path: Path,
+    planned_file_path: Path,
+    file_extension: str,
+    destination_root: Path,
+    track_id: int,
+    track: Any,
+    album: Any,
+) -> Path:
+    """Serialize candidate allocation, installation, tagging, and codec cleanup."""
+    cover_fetched, cover_data = _fetch_download_cover(album, track_id)
+    with _DOWNLOAD_INSTALL_LOCK:
+        final_path = _install_staged_download(
+            tmp_path,
+            planned_file_path,
+            file_extension,
+            destination_root,
+            track_id,
+        )
+        if cover_fetched:
+            _embed_download_metadata(final_path, track, album, track_id, cover_data)
+        _remove_stale_codec_siblings(
+            planned_file_path,
+            final_path,
+            destination_root,
+            track_id,
+        )
+    return final_path
+
+
+def _build_download_result(
+    track: Any,
+    album: Any,
+    stream: Any,
+    track_id: int,
+    file_path: Path,
+    relative_file: Path,
+) -> JsonObject:
+    """Describe one installed track for the download API response."""
+    return {
+        "track_id": track_id,
+        "title": track.title,
+        "artist": track.artists[0].name if track.artists else "Unknown",
+        "album": album.title,
+        "quality": stream.audioQuality,
+        "file_path": str(file_path),
+        "relative_path": relative_file.as_posix(),
+        "file_size": file_path.stat().st_size,
+    }
 
 
 def _download_track_sync(
@@ -280,7 +564,7 @@ def _download_track_sync(
     urls, file_extension = parse_track_stream(stream)
     urls = _prepend_dash_init_segment(stream, urls, track_id)
 
-    relative_file, file_path, tmp_path = _build_download_file_path(
+    _relative_file, planned_file_path, tmp_path = _build_download_file_path(
         relative_stem,
         file_extension,
         dest_base,
@@ -292,50 +576,28 @@ def _download_track_sync(
     stream_data = download_bytes(urls)
 
     # 4. Write to disk
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    planned_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write to temp file first, then move (atomic-ish)
-    tmp_path.write_bytes(stream_data)
-
-    # 5. If FLAC, ffmpeg extraction may be needed
-    if file_extension == ".flac":
-        file_path = _finalize_flac_download(
-            tmp_path,
-            file_path,
-            dest_base.resolve(),
-            track_id,
-        )
-        relative_file = relative_file.with_suffix(file_path.suffix)
-    else:
-        shutil.move(str(tmp_path), str(file_path))
-
-    # 6. Embed metadata
     try:
-        # Fetch cover
-        cover = None
-        if album.cover:
-            cover = Cover(album.cover)
+        # The 33-byte ``.<uuid4 hex>`` infix is included in the 255-byte name budget.
+        tmp_path.write_bytes(stream_data)
 
-        add_track_metadata(
-            path=file_path,
-            track=track,
-            album_artist=track.artists[0].name if track.artists else "",
-            date=str(album.releaseDate.date()) if album.releaseDate else "",
-            cover_data=cover.fetch_data() if cover else None,
+        # 5-6. Install, embed identity, then clean only same-track codec siblings.
+        destination_root = dest_base.resolve()
+        file_path = _install_download_with_metadata(
+            tmp_path,
+            planned_file_path,
+            file_extension,
+            destination_root,
+            track_id,
+            track,
+            album,
         )
-    except Exception as error:
-        log.warning("Failed to embed metadata for track %s: %s", track_id, error)
-
-    return {
-        "track_id": track_id,
-        "title": track.title,
-        "artist": track.artists[0].name if track.artists else "Unknown",
-        "album": album.title,
-        "quality": stream.audioQuality,
-        "file_path": str(file_path),
-        "relative_path": relative_file.as_posix(),
-        "file_size": file_path.stat().st_size,
-    }
+    except Exception:
+        _cleanup_staged_download(tmp_path, track_id)
+        raise
+    relative_file = file_path.relative_to(destination_root)
+    return _build_download_result(track, album, stream, track_id, file_path, relative_file)
 
 
 # Maximum decoded manifest size we're willing to parse (1 MiB).
