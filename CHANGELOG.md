@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retrying a failed album download now uses the configured download source instead of always routing to Lidarr.
+
 ## [2.5.0] - 2026-08-23
 
 ### Added

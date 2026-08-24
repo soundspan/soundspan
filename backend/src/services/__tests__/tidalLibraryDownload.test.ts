@@ -138,6 +138,106 @@ describe("tidalLibraryDownload", () => {
         expect(mockDownloadAlbum).not.toHaveBeenCalled();
     });
 
+    it("hands a search miss to a manager fallback and records the hand-off", async () => {
+        mockFindAlbum.mockResolvedValueOnce(null);
+        mockSettings.mockResolvedValueOnce({
+            primaryFailureFallback: "soulseek",
+        });
+        mockFallback.mockResolvedValueOnce({
+            success: false,
+            error: "fallback failed",
+        });
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        expect(mockFallback).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "rg-1",
+            "user-1",
+        );
+        expect(mockUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "job-1" },
+                data: expect.objectContaining({
+                    metadata: expect.objectContaining({
+                        currentSource: "soulseek",
+                        statusText: "TIDAL not found → soulseek",
+                    }),
+                }),
+            }),
+        );
+    });
+
+    it("persists a sanitized failure when a TIDAL download throws", async () => {
+        const rawError =
+            "ECONNREFUSED http://tidal-internal:9999 token=secret123";
+        mockDownloadAlbum.mockRejectedValueOnce(new Error(rawError));
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        const failedUpdate = mockUpdate.mock.calls.find(
+            ([call]) => call.data?.status === "failed",
+        )?.[0];
+        expect(failedUpdate).toEqual(
+            expect.objectContaining({
+                where: { id: "job-1" },
+                data: expect.objectContaining({
+                    error: "TIDAL download failed",
+                }),
+            }),
+        );
+        expect(JSON.stringify(failedUpdate)).not.toContain(rawError);
+    });
+
+    it("marks a search miss failed when no fallback is configured", async () => {
+        mockFindAlbum.mockResolvedValueOnce(null);
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        expect(mockUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "job-1" },
+                data: expect.objectContaining({
+                    status: "failed",
+                    error: "TIDAL download failed",
+                }),
+            }),
+        );
+        expect(JSON.stringify(mockUpdate.mock.calls)).not.toContain(
+            "Album not found on TIDAL",
+        );
+    });
+
+    it("marks the job failed when TIDAL downloads zero tracks", async () => {
+        mockDownloadAlbum.mockResolvedValueOnce({
+            album_id: 123,
+            album_title: "Album",
+            artist: "Artist",
+            total_tracks: 10,
+            downloaded: 0,
+            failed: 10,
+            tracks: [],
+            errors: [],
+        });
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        expect(mockUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "job-1" },
+                data: expect.objectContaining({
+                    status: "failed",
+                    error: "TIDAL download failed",
+                }),
+            }),
+        );
+        expect(JSON.stringify(mockUpdate.mock.calls)).not.toContain(
+            "All 10 tracks failed to download",
+        );
+    });
+
     it("does not hand a youtube fallback back to youtube on another search miss", async () => {
         mockFindAlbum.mockResolvedValueOnce(null);
         mockSettings.mockResolvedValueOnce({

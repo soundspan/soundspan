@@ -73,13 +73,12 @@ export type RequestTransitionResult =
     | { kind: "conflict" }
     | { kind: "updated"; request: MusicRequest };
 
-/** Positional download processor input returned only for a fresh approval job. */
+/** Dispatcher input returned only for a fresh approval job. */
 export interface DownloadDispatch {
     jobId: string;
     type: "album";
     mbid: string;
     subject: string;
-    rootFolderPath: string;
     artistName?: string;
     albumTitle?: string;
 }
@@ -407,7 +406,6 @@ function approvalJobParams(
 
 function approvalDispatch(
     request: MusicRequest,
-    rootFolderPath: string,
     jobResult: AlbumDownloadJobResult,
 ): DownloadDispatch | null {
     if (jobResult.duplicate) return null;
@@ -416,7 +414,6 @@ function approvalDispatch(
         type: "album",
         mbid: request.rgMbid,
         subject: `${request.artistName} - ${request.albumTitle}`,
-        rootFolderPath,
         artistName: jobResult.verifiedArtistName,
         albumTitle: request.albumTitle,
     };
@@ -448,7 +445,7 @@ async function approveWithJob(
             kind: "updated",
             request: updated,
             duplicate: jobResult.duplicate,
-            dispatch: approvalDispatch(request, rootFolderPath, jobResult),
+            dispatch: approvalDispatch(request, jobResult),
         } as const;
     });
 }

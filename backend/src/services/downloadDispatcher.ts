@@ -1,0 +1,190 @@
+import { logger as rootLogger } from "../utils/logger";
+import { prisma } from "../utils/db";
+import { getSystemSettings } from "../utils/systemSettings";
+import {
+    type DownloadSource,
+    type DownloadSourceAvailability,
+    resolveDownloadSource,
+} from "./downloadSourcePolicy";
+import { lidarrService } from "./lidarr";
+import { simpleDownloadManager } from "./simpleDownloadManager";
+import { soulseekService } from "./soulseek";
+import { tidalService } from "./tidal";
+import { processTidalDownload } from "./tidalLibraryDownload";
+import { youtubeDownloadService } from "./youtubeDownload";
+import { processYoutubeDownload } from "./youtubeLibraryDownload";
+
+const logger = rootLogger.child("DownloadDispatcher");
+
+/** Parameters required to dispatch one existing album download job. */
+export interface AlbumDownloadDispatchParams {
+    jobId: string;
+    type: string;
+    mbid: string;
+    subject: string;
+    artistName?: string;
+    albumTitle?: string;
+}
+
+interface AlbumNames {
+    artist: string;
+    album: string;
+}
+
+function parseAlbumNames({
+    subject,
+    artistName,
+    albumTitle,
+}: Pick<
+    AlbumDownloadDispatchParams,
+    "subject" | "artistName" | "albumTitle"
+>): AlbumNames {
+    if (artistName && albumTitle) {
+        return { artist: artistName, album: albumTitle };
+    }
+    const parts = subject.split(" - ");
+    if (parts.length >= 2) {
+        return {
+            artist: parts[0].trim(),
+            album: parts.slice(1).join(" - ").trim(),
+        };
+    }
+    return { artist: subject, album: subject };
+}
+
+async function getDownloadSourceAvailability(): Promise<DownloadSourceAvailability> {
+    const [tidal, lidarr, soulseek, youtube] = await Promise.all([
+        tidalService.isAvailable(),
+        lidarrService.isEnabled(),
+        soulseekService.isAvailable(),
+        youtubeDownloadService.isAvailable(),
+    ]);
+    return { tidal, lidarr, soulseek, youtube };
+}
+
+async function failJobWithoutDispatch(
+    jobId: string,
+    jobMetadata: unknown,
+    source: string,
+    message: string,
+    statusText: string,
+): Promise<void> {
+    logger.error(`${message} — job ${jobId} not dispatched`);
+
+    // Metadata is a Prisma Json column and may contain a scalar. Only plain
+    // objects can be spread without corrupting the stored metadata shape.
+    const baseMetadata =
+        jobMetadata &&
+        typeof jobMetadata === "object" &&
+        !Array.isArray(jobMetadata)
+            ? (jobMetadata as Record<string, unknown>)
+            : {};
+
+    await prisma.downloadJob.update({
+        where: { id: jobId },
+        data: {
+            status: "failed",
+            error: message,
+            completedAt: new Date(),
+            metadata: {
+                ...baseMetadata,
+                currentSource: source,
+                statusText,
+                failedAt: new Date().toISOString(),
+            },
+        },
+    });
+}
+
+async function dispatchResolvedSource(
+    source: DownloadSource,
+    availability: DownloadSourceAvailability,
+    params: AlbumDownloadDispatchParams,
+    names: AlbumNames,
+    userId: string,
+): Promise<void> {
+    if (source === "tidal" && availability.tidal) {
+        await processTidalDownload(
+            params.jobId,
+            names.artist,
+            names.album,
+            userId,
+        );
+        return;
+    }
+    if (source === "youtube" && availability.youtube) {
+        await processYoutubeDownload(
+            params.jobId,
+            names.artist,
+            names.album,
+            userId,
+        );
+        return;
+    }
+
+    // Non-TIDAL dispatch goes through simpleDownloadManager, which is
+    // Lidarr-backed — there is no per-source dispatch below this point, so a
+    // "soulseek" selection is executed by the Lidarr manager (pre-existing
+    // pipeline limitation).
+    const result = await simpleDownloadManager.startDownload(
+        params.jobId,
+        names.artist,
+        names.album,
+        params.mbid,
+        userId,
+    );
+    if (!result.success) {
+        logger.error(`Failed to start download: ${result.error}`);
+    }
+}
+
+/**
+ * Dispatch an existing album download job through the configured source and
+ * fallback policy. Missing jobs and non-album types are left undispatched.
+ */
+export async function dispatchAlbumDownload(
+    params: AlbumDownloadDispatchParams,
+): Promise<void> {
+    const job = await prisma.downloadJob.findUnique({
+        where: { id: params.jobId },
+    });
+    if (!job) {
+        logger.error(`Job ${params.jobId} not found`);
+        return;
+    }
+    if (params.type !== "album") return;
+
+    const names = parseAlbumNames(params);
+    logger.debug(`Parsed: Artist="${names.artist}", Album="${names.album}"`);
+
+    const settings = await getSystemSettings();
+    const configuredSource = (settings?.downloadSource ||
+        "soulseek") as DownloadSource;
+    const availability = await getDownloadSourceAvailability();
+    const resolution = resolveDownloadSource({
+        configuredSource,
+        fallback: settings?.primaryFailureFallback,
+        availability,
+    });
+    if (resolution.kind === "fail") {
+        await failJobWithoutDispatch(
+            params.jobId,
+            job.metadata,
+            configuredSource,
+            resolution.error,
+            resolution.statusText,
+        );
+        return;
+    }
+
+    logger.debug(
+        `Download source: configured=${configuredSource}, effective=${resolution.source}`,
+    );
+    await dispatchResolvedSource(
+        resolution.source,
+        availability,
+        params,
+        names,
+        job.userId,
+    );
+}

@@ -14,8 +14,8 @@ import {
     MUSIC_REQUEST_STATUSES,
     MusicRequestServiceError,
 } from "../services/musicRequestService";
+import { dispatchAlbumDownload } from "../services/downloadDispatcher";
 import { logger } from "../utils/logger";
-import { processDownload } from "./downloads";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
@@ -121,15 +121,14 @@ async function handleListAll(req: Request, res: Response) {
 }
 
 function dispatchApprovedDownload(dispatch: DownloadDispatch): void {
-    processDownload(
-        dispatch.jobId,
-        dispatch.type,
-        dispatch.mbid,
-        dispatch.subject,
-        dispatch.rootFolderPath,
-        dispatch.artistName,
-        dispatch.albumTitle,
-    ).catch((error) => {
+    dispatchAlbumDownload({
+        jobId: dispatch.jobId,
+        type: dispatch.type,
+        mbid: dispatch.mbid,
+        subject: dispatch.subject,
+        artistName: dispatch.artistName,
+        albumTitle: dispatch.albumTitle,
+    }).catch((error) => {
         log.error(
             `Download processing failed for job ${dispatch.jobId}:`,
             error,

@@ -5,7 +5,7 @@ const mockListAllRequests = jest.fn();
 const mockApproveRequest = jest.fn();
 const mockDenyRequest = jest.fn();
 const mockGetRequestAvailability = jest.fn();
-const mockProcessDownload = jest.fn();
+const mockDispatchAlbumDownload = jest.fn();
 
 class MockMusicRequestServiceError extends Error {
     constructor(
@@ -50,10 +50,9 @@ jest.mock("../../services/musicRequestService", () => ({
     getRequestAvailability: (...args: unknown[]) =>
         mockGetRequestAvailability(...args),
 }));
-jest.mock("../downloads", () => ({
-    __esModule: true,
-    default: {},
-    processDownload: (...args: unknown[]) => mockProcessDownload(...args),
+jest.mock("../../services/downloadDispatcher", () => ({
+    dispatchAlbumDownload: (...args: unknown[]) =>
+        mockDispatchAlbumDownload(...args),
 }));
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -149,7 +148,7 @@ describe("requests route runtime", () => {
             remainingToday: 9,
             dailyCap: 10,
         });
-        mockProcessDownload.mockResolvedValue(undefined);
+        mockDispatchAlbumDownload.mockResolvedValue(undefined);
     });
 
     it("requires an interactive authenticated session for the router", async () => {
@@ -344,7 +343,6 @@ describe("requests route runtime", () => {
                 type: "album",
                 mbid: validBody.rgMbid,
                 subject: "Massive Attack - Mezzanine",
-                rootFolderPath: "/music",
                 artistName: "Massive Attack",
                 albumTitle: "Mezzanine",
             },
@@ -358,15 +356,14 @@ describe("requests route runtime", () => {
         );
 
         expect(res.body).toEqual({ id: "request-1", status: "approved" });
-        expect(mockProcessDownload).toHaveBeenCalledWith(
-            "job-1",
-            "album",
-            validBody.rgMbid,
-            "Massive Attack - Mezzanine",
-            "/music",
-            "Massive Attack",
-            "Mezzanine",
-        );
+        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+            jobId: "job-1",
+            type: "album",
+            mbid: validBody.rgMbid,
+            subject: "Massive Attack - Mezzanine",
+            artistName: "Massive Attack",
+            albumTitle: "Mezzanine",
+        });
     });
 
     it("does not dispatch a duplicate approval job", async () => {
@@ -378,7 +375,7 @@ describe("requests route runtime", () => {
         );
 
         expect(res.statusCode).toBe(200);
-        expect(mockProcessDownload).not.toHaveBeenCalled();
+        expect(mockDispatchAlbumDownload).not.toHaveBeenCalled();
     });
 
     it("rejects invalid admin status filters", async () => {

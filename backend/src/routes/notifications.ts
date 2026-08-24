@@ -4,6 +4,7 @@ import { notificationService } from "../services/notificationService";
 import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
+import { dispatchAlbumDownload } from "../services/downloadDispatcher";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
@@ -443,7 +444,7 @@ router.post(
  * /api/notifications/downloads/{id}/retry:
  *   post:
  *     summary: Retry a failed download (admin only)
- *     description: Retries a failed or exhausted download job. Supports pending-track-retry (Soulseek), spotify_import (Soulseek then Lidarr fallback), and generic album retry via Lidarr.
+ *     description: Retries a failed or exhausted download job. The generic album case schedules the retry through the configured download source. Validation failures, artist retries, and pending-track or spotify_import preconditions can still return a domain result with success false.
  *     tags: [Notifications]
  *     security:
  *       - apiKeyAuth: []
@@ -464,6 +465,7 @@ router.post(
  *               properties:
  *                 success:
  *                   type: boolean
+ *                   description: For generic album retries, true means the retry was scheduled rather than completed.
  *                 newJobId:
  *                   type: string
  *                   description: ID of the new download job created for the retry
@@ -708,6 +710,12 @@ router.post(
                                 completedAt: new Date(),
                             },
                         });
+                    })
+                    .catch((persistenceError) => {
+                        logger.error(
+                            `[Retry] Failed to persist download exception:`,
+                            persistenceError,
+                        );
                     });
 
                 return res.json({ success: true, newJobId: newJobRecord.id });
@@ -826,39 +834,43 @@ router.post(
                                 source: "retry-spotify-import",
                             });
                         } else {
-                            // Soulseek failed, try Lidarr if we have an MBID
+                            // Soulseek failed, try the configured source if we have an MBID
                             logger.debug(
-                                `[Retry] Soulseek failed, trying Lidarr for ${artistName} - ${albumTitle}`,
+                                `[Retry] Soulseek failed, trying configured source for ${artistName} - ${albumTitle}`,
                             );
 
                             if (
                                 failedJob.targetMbid &&
                                 !failedJob.targetMbid.startsWith("retry_")
                             ) {
-                                const { simpleDownloadManager } =
-                                    await import("../services/simpleDownloadManager");
-                                const lidarrResult =
-                                    await simpleDownloadManager.startDownload(
-                                        newJobRecord.id,
-                                        artistName,
-                                        albumTitle,
-                                        failedJob.targetMbid,
-                                        req.user!.id,
-                                        false,
+                                await dispatchAlbumDownload({
+                                    jobId: newJobRecord.id,
+                                    type: "album",
+                                    mbid: failedJob.targetMbid,
+                                    subject: `${artistName} - ${albumTitle}`,
+                                    artistName,
+                                    albumTitle,
+                                }).catch((error) => {
+                                    logger.error(
+                                        `[Retry] Album dispatch error:`,
+                                        error,
                                     );
-
-                                if (!lidarrResult.success) {
-                                    await prisma.downloadJob.update({
-                                        where: { id: newJobRecord.id },
-                                        data: {
-                                            status: "failed",
-                                            error:
-                                                lidarrResult.error ||
-                                                "Both Soulseek and Lidarr failed",
-                                            completedAt: new Date(),
-                                        },
-                                    });
-                                }
+                                    return prisma.downloadJob
+                                        .update({
+                                            where: { id: newJobRecord.id },
+                                            data: {
+                                                status: "failed",
+                                                error: "Download dispatch failed",
+                                                completedAt: new Date(),
+                                            },
+                                        })
+                                        .catch((persistenceError) => {
+                                            logger.error(
+                                                `[Retry] Failed to persist album dispatch failure:`,
+                                                persistenceError,
+                                            );
+                                        });
+                                });
                             } else {
                                 await prisma.downloadJob.update({
                                     where: { id: newJobRecord.id },
@@ -882,6 +894,12 @@ router.post(
                                 completedAt: new Date(),
                             },
                         });
+                    })
+                    .catch((persistenceError) => {
+                        logger.error(
+                            `[Retry] Failed to persist Soulseek error:`,
+                            persistenceError,
+                        );
                     });
 
                 return res.json({ success: true, newJobId: newJobRecord.id });
@@ -924,21 +942,51 @@ router.post(
                 },
             });
 
-            // Import the download manager dynamically to avoid circular deps
+            if (failedJob.type === "album") {
+                dispatchAlbumDownload({
+                    jobId: newJobRecord.id,
+                    type: failedJob.type,
+                    mbid: failedJob.targetMbid,
+                    subject: failedJob.subject,
+                    artistName,
+                    albumTitle,
+                }).catch((error) => {
+                    logger.error(`[Retry] Album dispatch error:`, error);
+                    return prisma.downloadJob
+                        .update({
+                            where: { id: newJobRecord.id },
+                            data: {
+                                status: "failed",
+                                error: "Download dispatch failed",
+                                completedAt: new Date(),
+                            },
+                        })
+                        .catch((persistenceError) => {
+                            logger.error(
+                                `[Retry] Failed to persist album dispatch failure:`,
+                                persistenceError,
+                            );
+                        });
+                });
+
+                return res.json({
+                    success: true,
+                    newJobId: newJobRecord.id,
+                    error: null,
+                });
+            }
+
+            // Artist retries preserve the existing Lidarr-backed path.
             const { simpleDownloadManager } =
                 await import("../services/simpleDownloadManager");
-
-            // Start download with the correct positional arguments
-            // startDownload(jobId, artistName, albumTitle, albumMbid, userId, isDiscovery)
             const result = await simpleDownloadManager.startDownload(
                 newJobRecord.id,
                 artistName,
                 albumTitle,
                 failedJob.targetMbid,
                 req.user!.id,
-                false, // isDiscovery
+                false,
             );
-
             if (!result.success) {
                 logger.warn(
                     `[Retry] Download failed for job ${newJobRecord.id}: ${result.error}`,
@@ -947,7 +995,6 @@ router.post(
             res.json({
                 success: result.success,
                 newJobId: newJobRecord.id,
-                // startDownload result.error carries raw downstream error text; return a static message (raw detail in server log).
                 error: result.success
                     ? null
                     : "Download failed (details in server log)",

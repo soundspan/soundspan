@@ -8,18 +8,13 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
 import { soulseekService } from "../services/soulseek";
 import { tidalService } from "../services/tidal";
-import { processTidalDownload } from "../services/tidalLibraryDownload";
 import { youtubeDownloadService } from "../services/youtubeDownload";
-import { processYoutubeDownload } from "../services/youtubeLibraryDownload";
-import {
-    type DownloadSource,
-    resolveDownloadSource,
-} from "../services/downloadSourcePolicy";
 import { musicBrainzService } from "../services/musicbrainz";
 import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { mapInteractiveRelease } from "../services/releaseContracts";
 import { createAlbumDownloadJob } from "../services/albumDownloadJobs";
+import { dispatchAlbumDownload } from "../services/downloadDispatcher";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import crypto from "crypto";
 
@@ -240,15 +235,14 @@ router.post("/", requireAdmin, async (req, res) => {
         );
 
         // Process in background
-        processDownload(
-            job.id,
+        dispatchAlbumDownload({
+            jobId: job.id,
             type,
             mbid,
             subject,
-            rootFolderPath,
-            jobResult.verifiedArtistName,
+            artistName: jobResult.verifiedArtistName,
             albumTitle,
-        ).catch((error) => {
+        }).catch((error) => {
             logger.error(
                 `Download processing failed for job ${job.id}:`,
                 error,
@@ -466,15 +460,14 @@ async function processArtistDownload(
             logger.debug(`   [JOB] Created job for: ${albumSubject}`);
 
             // Start the download in background
-            processDownload(
-                job.id,
-                "album",
-                albumMbid,
-                albumSubject,
-                rootFolderPath,
+            dispatchAlbumDownload({
+                jobId: job.id,
+                type: "album",
+                mbid: albumMbid,
+                subject: albumSubject,
                 artistName,
                 albumTitle,
-            ).catch((error) => {
+            }).catch((error) => {
                 logger.error(`Download failed for ${albumSubject}:`, error);
             });
         }
@@ -484,155 +477,6 @@ async function processArtistDownload(
     } catch (error: any) {
         logger.error(`   Failed to process artist download:`, error.message);
         throw error;
-    }
-}
-
-/**
- * Mark a download job failed before any source was contacted — used when
- * the configured source is unavailable and the fallback setting forbids
- * rerouting. Mirrors the failure shape of processTidalDownload's catch.
- */
-async function failJobWithoutDispatch(
-    jobId: string,
-    jobMetadata: unknown,
-    source: string,
-    message: string,
-    statusText: string,
-) {
-    logger.error(`[Downloads] ${message} — job ${jobId} not dispatched`);
-
-    // metadata is a Prisma Json column, so it can legally hold a string,
-    // array, or scalar — spreading those would corrupt the shape
-    // (e.g. "abc" → {0:"a",1:"b",2:"c"}). Only spread plain objects.
-    const baseMetadata =
-        jobMetadata &&
-        typeof jobMetadata === "object" &&
-        !Array.isArray(jobMetadata)
-            ? (jobMetadata as Record<string, unknown>)
-            : {};
-
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            status: "failed",
-            error: message,
-            completedAt: new Date(),
-            metadata: {
-                ...baseMetadata,
-                currentSource: source,
-                statusText,
-                failedAt: new Date().toISOString(),
-            },
-        },
-    });
-}
-
-/** Dispatch one album download through the configured source and fallback chain. */
-export async function processDownload(
-    jobId: string,
-    type: string,
-    mbid: string,
-    subject: string,
-    rootFolderPath: string,
-    artistName?: string,
-    albumTitle?: string,
-) {
-    const job = await prisma.downloadJob.findUnique({ where: { id: jobId } });
-    if (!job) {
-        logger.error(`Job ${jobId} not found`);
-        return;
-    }
-
-    if (type === "album") {
-        let parsedArtist = artistName;
-        let parsedAlbum = albumTitle;
-
-        if (!parsedArtist || !parsedAlbum) {
-            const parts = subject.split(" - ");
-            if (parts.length >= 2) {
-                parsedArtist = parts[0].trim();
-                parsedAlbum = parts.slice(1).join(" - ").trim();
-            } else {
-                parsedArtist = subject;
-                parsedAlbum = subject;
-            }
-        }
-
-        logger.debug(
-            `Parsed: Artist="${parsedArtist}", Album="${parsedAlbum}"`,
-        );
-
-        // Check configured download source and service availability
-        const settings = await getSystemSettings();
-        const configuredSource = (settings?.downloadSource ||
-            "soulseek") as DownloadSource;
-
-        const [tidalAvail, lidarrAvail, soulseekAvail, youtubeAvail] =
-            await Promise.all([
-                tidalService.isAvailable(),
-                lidarrService.isEnabled(),
-                soulseekService.isAvailable(),
-                youtubeDownloadService.isAvailable(),
-            ]);
-        const availability = {
-            tidal: tidalAvail,
-            lidarr: lidarrAvail,
-            soulseek: soulseekAvail,
-            youtube: youtubeAvail,
-        };
-
-        const resolution = resolveDownloadSource({
-            configuredSource,
-            fallback: settings?.primaryFailureFallback,
-            availability,
-        });
-        if (resolution.kind === "fail") {
-            await failJobWithoutDispatch(
-                jobId,
-                job.metadata,
-                configuredSource,
-                resolution.error,
-                resolution.statusText,
-            );
-            return;
-        }
-        const effectiveSource = resolution.source;
-
-        logger.debug(
-            `Download source: configured=${configuredSource}, effective=${effectiveSource}`,
-        );
-
-        if (effectiveSource === "tidal" && tidalAvail) {
-            await processTidalDownload(
-                jobId,
-                parsedArtist,
-                parsedAlbum,
-                job.userId,
-            );
-        } else if (effectiveSource === "youtube" && youtubeAvail) {
-            await processYoutubeDownload(
-                jobId,
-                parsedArtist,
-                parsedAlbum,
-                job.userId,
-            );
-        } else {
-            // Non-TIDAL dispatch goes through simpleDownloadManager, which
-            // is Lidarr-backed — there is no per-source dispatch below this
-            // point, so a "soulseek" selection is executed by the Lidarr
-            // manager (pre-existing pipeline limitation).
-            const result = await simpleDownloadManager.startDownload(
-                jobId,
-                parsedArtist,
-                parsedAlbum,
-                mbid,
-                job.userId,
-            );
-
-            if (!result.success) {
-                logger.error(`Failed to start download: ${result.error}`);
-            }
-        }
     }
 }
 

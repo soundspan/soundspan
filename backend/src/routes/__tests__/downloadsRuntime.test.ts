@@ -48,8 +48,6 @@ jest.mock("../../services/soulseek", () => ({
 jest.mock("../../services/tidal", () => ({
     tidalService: {
         isAvailable: jest.fn(),
-        findAlbum: jest.fn(),
-        downloadAlbum: jest.fn(),
     },
 }));
 
@@ -59,8 +57,10 @@ jest.mock("../../services/youtubeDownload", () => ({
     },
 }));
 
-jest.mock("../../services/youtubeLibraryDownload", () => ({
-    processYoutubeDownload: jest.fn(),
+const mockDispatchAlbumDownload = jest.fn();
+jest.mock("../../services/downloadDispatcher", () => ({
+    dispatchAlbumDownload: (...args: unknown[]) =>
+        mockDispatchAlbumDownload(...args),
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
@@ -79,21 +79,13 @@ jest.mock("../../services/lastfm", () => ({
 
 jest.mock("../../services/simpleDownloadManager", () => ({
     simpleDownloadManager: {
-        startDownload: jest.fn(),
         clearLidarrQueue: jest.fn(),
-    },
-}));
-
-jest.mock("../../workers/queues", () => ({
-    scanQueue: {
-        add: jest.fn(),
     },
 }));
 
 jest.mock("../../utils/db", () => ({
     prisma: {
         downloadJob: {
-            findUnique: jest.fn(),
             findMany: jest.fn(),
             findFirst: jest.fn(),
             update: jest.fn(),
@@ -123,11 +115,9 @@ import { lidarrService } from "../../services/lidarr";
 import { soulseekService } from "../../services/soulseek";
 import { tidalService } from "../../services/tidal";
 import { youtubeDownloadService } from "../../services/youtubeDownload";
-import { processYoutubeDownload } from "../../services/youtubeLibraryDownload";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { lastFmService } from "../../services/lastfm";
 import { simpleDownloadManager } from "../../services/simpleDownloadManager";
-import { scanQueue } from "../../workers/queues";
 import { logger } from "../../utils/logger";
 
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
@@ -139,22 +129,16 @@ const mockLidarrGrabRelease = lidarrService.grabRelease as jest.Mock;
 
 const mockSoulseekAvailable = soulseekService.isAvailable as jest.Mock;
 const mockTidalAvailable = tidalService.isAvailable as jest.Mock;
-const mockTidalFindAlbum = tidalService.findAlbum as jest.Mock;
-const mockTidalDownloadAlbum = tidalService.downloadAlbum as jest.Mock;
 const mockYoutubeAvailable = youtubeDownloadService.isAvailable as jest.Mock;
-const mockProcessYoutubeDownload = processYoutubeDownload as jest.Mock;
 
 const mockGetArtist = musicBrainzService.getArtist as jest.Mock;
 const mockGetReleaseGroups = musicBrainzService.getReleaseGroups as jest.Mock;
 const mockGetArtistCorrection = lastFmService.getArtistCorrection as jest.Mock;
 
-const mockStartDownload = simpleDownloadManager.startDownload as jest.Mock;
 const mockClearLidarrQueue =
     simpleDownloadManager.clearLidarrQueue as jest.Mock;
-const mockScanQueueAdd = scanQueue.add as jest.Mock;
 const mockLogger = logger as jest.Mocked<typeof logger>;
 
-const mockDownloadFindUnique = prisma.downloadJob.findUnique as jest.Mock;
 const mockDownloadFindMany = prisma.downloadJob.findMany as jest.Mock;
 const mockDownloadFindFirst = prisma.downloadJob.findFirst as jest.Mock;
 const mockDownloadUpdate = prisma.downloadJob.update as jest.Mock;
@@ -269,25 +253,12 @@ describe("downloads routes runtime", () => {
         mockSoulseekAvailable.mockResolvedValue(true);
         mockTidalAvailable.mockResolvedValue(false);
         mockYoutubeAvailable.mockResolvedValue(false);
-        mockProcessYoutubeDownload.mockResolvedValue(undefined);
-        mockTidalFindAlbum.mockResolvedValue(null);
-        mockTidalDownloadAlbum.mockResolvedValue({
-            downloaded: 0,
-            failed: 0,
-            total_tracks: 0,
-            artist: "",
-            album_title: "",
-        });
+        mockDispatchAlbumDownload.mockResolvedValue(undefined);
 
         mockGetArtist.mockResolvedValue(null);
         mockGetReleaseGroups.mockResolvedValue([]);
         mockGetArtistCorrection.mockResolvedValue(null);
 
-        mockDownloadFindUnique.mockResolvedValue({
-            id: "job-1",
-            userId: "user-1",
-            metadata: {},
-        });
         mockDownloadFindMany.mockResolvedValue([]);
         mockDownloadFindFirst.mockResolvedValue(null);
         mockDownloadUpdate.mockResolvedValue({});
@@ -305,9 +276,7 @@ describe("downloads routes runtime", () => {
 
         mockAlbumFindFirst.mockResolvedValue(null);
 
-        mockStartDownload.mockResolvedValue({ success: true });
         mockClearLidarrQueue.mockResolvedValue({ removed: 2, errors: [] });
-        mockScanQueueAdd.mockResolvedValue(undefined);
 
         mockTransaction.mockImplementation(async (callback: any) =>
             callback({
@@ -528,104 +497,6 @@ describe("downloads routes runtime", () => {
         });
     });
 
-    it("dispatches an available configured youtube source", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "youtube",
-            primaryFailureFallback: "none",
-            ytMusicEnabled: true,
-        });
-        mockYoutubeAvailable.mockResolvedValue(true);
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-youtube",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockProcessYoutubeDownload).toHaveBeenCalledWith(
-            "job-1",
-            "Artist",
-            "Album",
-            "user-1",
-        );
-        expect(mockStartDownload).not.toHaveBeenCalled();
-    });
-
-    it("uses youtube as an available fallback source", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "youtube",
-            ytMusicEnabled: true,
-        });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockYoutubeAvailable.mockResolvedValue(true);
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-youtube-fallback",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockProcessYoutubeDownload).toHaveBeenCalledWith(
-            "job-1",
-            "Artist",
-            "Album",
-            "user-1",
-        );
-    });
-
-    it("falls back from unavailable youtube to soulseek", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "youtube",
-            primaryFailureFallback: "soulseek",
-            ytMusicEnabled: true,
-        });
-        mockYoutubeAvailable.mockResolvedValue(false);
-        mockSoulseekAvailable.mockResolvedValue(true);
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-youtube-primary",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-1",
-            "Artist",
-            "Album",
-            "rg-youtube-primary",
-            "user-1",
-        );
-        expect(mockProcessYoutubeDownload).not.toHaveBeenCalled();
-    });
-
     it("returns duplicate details when album job already exists in transaction", async () => {
         mockTransaction.mockImplementationOnce(async (callback: any) =>
             callback({
@@ -667,7 +538,7 @@ describe("downloads routes runtime", () => {
         );
     });
 
-    it("creates an album job and triggers simple download manager", async () => {
+    it("creates an album job and wires it to the dispatcher", async () => {
         mockGetArtistCorrection.mockResolvedValueOnce({
             corrected: true,
             canonicalName: "Correct Artist",
@@ -683,11 +554,6 @@ describe("downloads routes runtime", () => {
                 },
             }),
         );
-
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-created",
-            userId: "user-1",
-        });
 
         const req = {
             body: {
@@ -712,155 +578,14 @@ describe("downloads routes runtime", () => {
                 message: "Download job created. Processing in background.",
             }),
         );
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-created",
-            "Correct Artist",
-            "Album",
-            "rg-1",
-            "user-1",
-        );
-    });
-
-    it("fails the job instead of rerouting when the primary source is unavailable and fallback is Skip", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "none",
+        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+            jobId: "job-created",
+            type: "album",
+            mbid: "rg-1",
+            subject: "Typo Artist - Album",
+            artistName: "Correct Artist",
+            albumTitle: "Album",
         });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockLidarrIsEnabled.mockResolvedValue(true);
-        mockSoulseekAvailable.mockResolvedValue(true);
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-skip",
-                subject: "Ella Langley - Hungover",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(res.statusCode).toBe(200);
-        expect(mockStartDownload).not.toHaveBeenCalled();
-        expect(mockTidalFindAlbum).not.toHaveBeenCalled();
-        expect(mockDownloadUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({
-                    status: "failed",
-                    error: expect.stringContaining("Skip"),
-                    metadata: expect.objectContaining({
-                        statusText: "tidal unavailable — skipped",
-                    }),
-                }),
-            }),
-        );
-    });
-
-    it("uses the explicitly configured fallback source when the primary is unavailable", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "lidarr",
-        });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockLidarrIsEnabled.mockResolvedValue(true);
-        mockSoulseekAvailable.mockResolvedValue(false);
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-fb",
-                subject: "Artist - Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-1",
-            "Artist",
-            "Album",
-            "rg-fb",
-            "user-1",
-        );
-    });
-
-    it("fails the job when both the primary and its configured fallback are unavailable", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "lidarr",
-        });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockLidarrIsEnabled.mockResolvedValue(false);
-        mockSoulseekAvailable.mockResolvedValue(true);
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-fb-down",
-                subject: "Artist - Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        // Soulseek being available must NOT rescue the job — the user chose lidarr
-        expect(mockStartDownload).not.toHaveBeenCalled();
-        expect(mockTidalFindAlbum).not.toHaveBeenCalled();
-        // The status text must say the fallback was unavailable — NOT "skipped",
-        // which would misrepresent a non-Skip failure in the UI
-        expect(mockDownloadUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({
-                    status: "failed",
-                    error: expect.stringContaining("unavailable"),
-                    metadata: expect.objectContaining({
-                        statusText: "tidal and fallback lidarr unavailable",
-                    }),
-                }),
-            }),
-        );
-    });
-
-    it("keeps legacy auto-detect rerouting when no fallback preference is stored", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-        });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockLidarrIsEnabled.mockResolvedValue(true);
-        mockSoulseekAvailable.mockResolvedValue(true);
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-legacy",
-                subject: "Artist - Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalled();
-        expect(mockDownloadUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({ status: "failed" }),
-            }),
-        );
     });
 
     it("returns existing active job for P2002 race-condition collisions", async () => {
@@ -1607,12 +1332,6 @@ describe("downloads routes runtime", () => {
                     },
                 }),
             );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-new",
-            userId: "user-1",
-            metadata: {},
-        });
-
         const req = {
             body: {
                 type: "artist",
@@ -1633,13 +1352,14 @@ describe("downloads routes runtime", () => {
                 jobs: [{ id: "job-new", subject: "Artist Name - New Album" }],
             }),
         );
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-new",
-            "Artist Name",
-            "New Album",
-            "rg-new",
-            "user-1",
-        );
+        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+            jobId: "job-new",
+            type: "album",
+            mbid: "rg-new",
+            subject: "Artist Name - New Album",
+            artistName: "Artist Name",
+            albumTitle: "New Album",
+        });
     });
 
     it("skips recently failed artist albums without creating new jobs", async () => {
@@ -1684,7 +1404,7 @@ describe("downloads routes runtime", () => {
                 jobs: [],
             }),
         );
-        expect(mockStartDownload).not.toHaveBeenCalled();
+        expect(mockDispatchAlbumDownload).not.toHaveBeenCalled();
     });
 
     it("returns 500 when listing failed albums throws", async () => {
@@ -1720,166 +1440,6 @@ describe("downloads routes runtime", () => {
         expect(res.body).toEqual({ error: "Failed to delete failed album" });
     });
 
-    it("ignores background album processing when job lookup misses", async () => {
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-missing",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockDownloadFindUnique.mockResolvedValueOnce(null);
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-missing-job",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(res.statusCode).toBe(200);
-        expect(mockStartDownload).not.toHaveBeenCalled();
-    });
-
-    it("parses artist/album from subject when album metadata is missing", async () => {
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-parse",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-parse",
-            userId: "user-1",
-            metadata: {},
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-parse",
-                subject: "SingleSubject",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-parse",
-            "SingleSubject",
-            "SingleSubject",
-            "rg-parse",
-            "user-1",
-        );
-    });
-
-    it("parses artist/album split from subject when delimiter is present", async () => {
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-parse-split",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-parse-split",
-            userId: "user-1",
-            metadata: {},
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-parse-split",
-                subject: "Split Artist - Split Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-parse-split",
-            "Split Artist",
-            "Split Album",
-            "rg-parse-split",
-            "user-1",
-        );
-    });
-
-    it("logs failed simple download starts without crashing create job flow", async () => {
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-simple-fail",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-simple-fail",
-            userId: "user-1",
-            metadata: {},
-        });
-        mockStartDownload.mockResolvedValueOnce({
-            success: false,
-            error: "unavailable indexer",
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-simple-fail",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(res.statusCode).toBe(200);
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-simple-fail",
-            "Artist",
-            "Album",
-            "rg-simple-fail",
-            "user-1",
-        );
-    });
-
     it("handles background processor rejections from single album jobs", async () => {
         mockTransaction.mockImplementationOnce(async (callback: any) =>
             callback({
@@ -1892,12 +1452,9 @@ describe("downloads routes runtime", () => {
                 },
             }),
         );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-throw",
-            userId: "user-1",
-            metadata: {},
-        });
-        mockStartDownload.mockRejectedValueOnce(new Error("start threw"));
+        mockDispatchAlbumDownload.mockRejectedValueOnce(
+            new Error("dispatch threw"),
+        );
 
         const req = {
             body: {
@@ -1915,6 +1472,10 @@ describe("downloads routes runtime", () => {
         await flushAsyncWork();
 
         expect(res.statusCode).toBe(200);
+        expect(mockLogger.error).toHaveBeenCalledWith(
+            "Download processing failed for job job-throw:",
+            expect.any(Error),
+        );
     });
 
     it("uses LastFM artist correction for artist downloads when MusicBrainz lookup fails", async () => {
@@ -1986,12 +1547,9 @@ describe("downloads routes runtime", () => {
                 },
             }),
         );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-batch-1",
-            userId: "user-1",
-            metadata: {},
-        });
-        mockStartDownload.mockRejectedValueOnce(new Error("batch failure"));
+        mockDispatchAlbumDownload.mockRejectedValueOnce(
+            new Error("batch failure"),
+        );
 
         const req = {
             body: {
@@ -2007,535 +1565,14 @@ describe("downloads routes runtime", () => {
         await flushAsyncWork();
 
         expect(res.statusCode).toBe(200);
-        expect(mockStartDownload).toHaveBeenCalled();
-    });
-
-    it("falls back to soulseek when configured tidal source is unavailable", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "soulseek",
+        expect(mockDispatchAlbumDownload).toHaveBeenCalledWith({
+            jobId: "job-batch-1",
+            type: "album",
+            mbid: "rg-batch-1",
+            subject: "Batch Artist - Batch Album",
+            artistName: "Batch Artist",
+            albumTitle: "Batch Album",
         });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockSoulseekAvailable.mockResolvedValue(true);
-        mockLidarrIsEnabled.mockResolvedValue(true);
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-fallback-1",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-fallback-1",
-            userId: "user-1",
-            metadata: {},
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-fallback-1",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-fallback-1",
-            "Artist",
-            "Album",
-            "rg-fallback-1",
-            "user-1",
-        );
-    });
-
-    it("falls back to tidal when configured soulseek source is unavailable", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "soulseek",
-            primaryFailureFallback: "tidal",
-        });
-        mockTidalAvailable.mockResolvedValue(true);
-        mockSoulseekAvailable.mockResolvedValue(false);
-        mockLidarrIsEnabled.mockResolvedValue(true);
-        mockTidalFindAlbum.mockResolvedValueOnce({
-            albumId: 789,
-            title: "Album",
-            artist: "Artist",
-            numberOfTracks: 6,
-        });
-        mockTidalDownloadAlbum.mockResolvedValueOnce({
-            downloaded: 6,
-            failed: 0,
-            total_tracks: 6,
-            artist: "Artist",
-            album_title: "Album",
-        });
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-fallback-3",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        let findUniqueCall = 0;
-        mockDownloadFindUnique.mockImplementation(async () => {
-            findUniqueCall += 1;
-            if (findUniqueCall === 1) {
-                return {
-                    id: "job-fallback-3",
-                    userId: "user-1",
-                    metadata: {},
-                };
-            }
-            return {
-                metadata: { albumMbid: "rg-fallback-3" },
-            };
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-fallback-3",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockTidalFindAlbum).toHaveBeenCalledWith("Artist", "Album");
-    });
-
-    it("falls back to soulseek when configured lidarr source is unavailable", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "lidarr",
-            primaryFailureFallback: "soulseek",
-        });
-        mockTidalAvailable.mockResolvedValue(false);
-        mockSoulseekAvailable.mockResolvedValue(true);
-        mockLidarrIsEnabled.mockResolvedValue(false);
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-fallback-2",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockDownloadFindUnique.mockResolvedValueOnce({
-            id: "job-fallback-2",
-            userId: "user-1",
-            metadata: {},
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-fallback-2",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-fallback-2",
-            "Artist",
-            "Album",
-            "rg-fallback-2",
-            "user-1",
-        );
-    });
-
-    it("completes tidal downloads and queues a library scan", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "none",
-        });
-        mockTidalAvailable.mockResolvedValue(true);
-        mockTidalFindAlbum.mockResolvedValueOnce({
-            albumId: 123,
-            title: "Album",
-            artist: "Artist",
-            numberOfTracks: 10,
-        });
-        mockTidalDownloadAlbum.mockResolvedValueOnce({
-            downloaded: 9,
-            failed: 1,
-            total_tracks: 10,
-            artist: "Artist",
-            album_title: "Album",
-        });
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-tidal",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        let findUniqueCall = 0;
-        mockDownloadFindUnique.mockImplementation(async () => {
-            findUniqueCall += 1;
-            if (findUniqueCall === 1) {
-                return {
-                    id: "job-tidal",
-                    userId: "user-1",
-                    metadata: {},
-                };
-            }
-            return {
-                metadata: { albumMbid: "rg-tidal" },
-            };
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-tidal",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockTidalFindAlbum).toHaveBeenCalledWith("Artist", "Album");
-        expect(mockTidalDownloadAlbum).toHaveBeenCalledWith(123);
-        expect(mockScanQueueAdd).toHaveBeenCalledWith(
-            "scan",
-            expect.objectContaining({
-                userId: "user-1",
-                source: "tidal-download",
-                artistName: "Artist",
-                albumTitle: "Album",
-            }),
-        );
-        expect(mockDownloadUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-tidal" },
-                data: expect.objectContaining({
-                    status: "completed",
-                }),
-            }),
-        );
-    });
-
-    it("persists a sanitized error when a tidal download throws", async () => {
-        const rawError =
-            "ECONNREFUSED http://tidal-internal:9999 token=secret123";
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "none",
-        });
-        mockTidalAvailable.mockResolvedValue(true);
-        mockTidalFindAlbum.mockResolvedValueOnce({
-            albumId: 321,
-            title: "Album",
-            artist: "Artist",
-            numberOfTracks: 10,
-        });
-        mockTidalDownloadAlbum.mockRejectedValueOnce(new Error(rawError));
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-tidal-error",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        let findUniqueCall = 0;
-        mockDownloadFindUnique.mockImplementation(async () => {
-            findUniqueCall += 1;
-            if (findUniqueCall === 1) {
-                return {
-                    id: "job-tidal-error",
-                    userId: "user-1",
-                    metadata: {},
-                };
-            }
-            return { metadata: { albumMbid: "rg-tidal-error" } };
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-tidal-error",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        const failedUpdate = mockDownloadUpdate.mock.calls.find(
-            ([call]) => call.data?.status === "failed",
-        )?.[0];
-        expect(failedUpdate).toEqual(
-            expect.objectContaining({
-                where: { id: "job-tidal-error" },
-                data: expect.objectContaining({
-                    error: "TIDAL download failed",
-                }),
-            }),
-        );
-        expect(JSON.stringify(failedUpdate)).not.toContain(rawError);
-    });
-
-    it("falls back when tidal cannot find album and reports fallback failures", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "soulseek",
-        });
-        mockTidalAvailable.mockResolvedValue(true);
-        mockTidalFindAlbum.mockResolvedValueOnce(null);
-        mockStartDownload.mockResolvedValueOnce({
-            success: false,
-            error: "fallback failed",
-        });
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-tidal-fallback",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        let findUniqueCall = 0;
-        mockDownloadFindUnique.mockImplementation(async () => {
-            findUniqueCall += 1;
-            if (findUniqueCall === 1) {
-                return {
-                    id: "job-tidal-fallback",
-                    userId: "user-1",
-                    metadata: {},
-                };
-            }
-            return {
-                metadata: { albumMbid: "rg-fallback" },
-            };
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-fallback",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockStartDownload).toHaveBeenCalledWith(
-            "job-tidal-fallback",
-            "Artist",
-            "Album",
-            "rg-fallback",
-            "user-1",
-        );
-        expect(mockDownloadUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-tidal-fallback" },
-                data: expect.objectContaining({
-                    metadata: expect.objectContaining({
-                        currentSource: "soulseek",
-                        statusText: "TIDAL not found → soulseek",
-                    }),
-                }),
-            }),
-        );
-    });
-
-    it("marks tidal jobs failed when album lookup misses and no fallback is configured", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "none",
-        });
-        mockTidalAvailable.mockResolvedValue(true);
-        mockTidalFindAlbum.mockResolvedValueOnce(null);
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-tidal-fail",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        let findUniqueCall = 0;
-        mockDownloadFindUnique.mockImplementation(async () => {
-            findUniqueCall += 1;
-            if (findUniqueCall === 1) {
-                return {
-                    id: "job-tidal-fail",
-                    userId: "user-1",
-                    metadata: {},
-                };
-            }
-            return {
-                metadata: {},
-            };
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-tidal-fail",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockDownloadUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-tidal-fail" },
-                data: expect.objectContaining({
-                    status: "failed",
-                    error: "TIDAL download failed",
-                }),
-            }),
-        );
-        expect(JSON.stringify(mockDownloadUpdate.mock.calls)).not.toContain(
-            "Album not found on TIDAL",
-        );
-    });
-
-    it("marks tidal jobs failed when zero tracks download", async () => {
-        mockGetSystemSettings.mockResolvedValue({
-            musicPath: "/music",
-            downloadSource: "tidal",
-            primaryFailureFallback: "none",
-        });
-        mockTidalAvailable.mockResolvedValue(true);
-        mockTidalFindAlbum.mockResolvedValueOnce({
-            albumId: 456,
-            title: "Album",
-            artist: "Artist",
-            numberOfTracks: 8,
-        });
-        mockTidalDownloadAlbum.mockResolvedValueOnce({
-            downloaded: 0,
-            failed: 8,
-            total_tracks: 8,
-            artist: "Artist",
-            album_title: "Album",
-        });
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest.fn().mockResolvedValue([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-tidal-zero",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        let findUniqueCall = 0;
-        mockDownloadFindUnique.mockImplementation(async () => {
-            findUniqueCall += 1;
-            if (findUniqueCall === 1) {
-                return {
-                    id: "job-tidal-zero",
-                    userId: "user-1",
-                    metadata: {},
-                };
-            }
-            return {
-                metadata: {},
-            };
-        });
-
-        const req = {
-            body: {
-                type: "album",
-                mbid: "rg-tidal-zero",
-                subject: "Artist - Album",
-                artistName: "Artist",
-                albumTitle: "Album",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(mockDownloadUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-tidal-zero" },
-                data: expect.objectContaining({
-                    status: "failed",
-                    error: "TIDAL download failed",
-                }),
-            }),
-        );
-        expect(JSON.stringify(mockDownloadUpdate.mock.calls)).not.toContain(
-            "All 8 tracks failed to download",
-        );
     });
 
     it("returns 500 when fetching a job throws", async () => {

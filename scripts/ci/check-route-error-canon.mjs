@@ -70,8 +70,8 @@ const LEAK_BASELINE = Object.freeze({
     // library/artists.ts remaining 1: admin-only Lidarr deletion diagnostics (lidarrError = err?.message) returned to the initiating admin, not a general-user 500 leak.
     "backend/src/routes/library/artists.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
-    // notifications.ts remaining 2: stored downloadJob.error strings from the soulseek retry result (~L702) and Lidarr fallback (~L864); stored-then-returned to the owning user via GET /api/downloads — client-reachable, flagged for follow-up sanitization under the slice-J scope guard (the POST retry response leak itself was sanitized).
-    "backend/src/routes/notifications.ts": 2,
+    // notifications.ts remaining 1: stored downloadJob.error from the soulseek retry result (~L702), returned to the owning user via GET /api/downloads — client-reachable and flagged for follow-up sanitization under the slice-J scope guard.
+    "backend/src/routes/notifications.ts": 1,
     "backend/src/routes/playbackState.ts": 0,
     // playlistImport.ts remaining 2: substring-guarded 400 echoes of playlistImportService's own thrown validation messages (~L434 preview, ~L516 "Invalid track reference" execute); code-owned text, not raw transport errors.
     "backend/src/routes/playlistImport.ts": 2,
