@@ -225,7 +225,7 @@ def _parse_ytmusic_identity(tag_values: object) -> str | None:
 def _read_mp3_video_id(path: Path) -> str | None:
     """Read ffmpeg's MP3 description/comment frames and conservative COMM variants."""
     # Mutagen 1.48.1 lacks complete annotations; ID3.getall owns these frame shapes.
-    tags = cast(_Id3Reader, ID3(path))  # type: ignore[no-untyped-call]
+    tags = cast(_Id3Reader, ID3(path))
     for raw_frame in tags.getall("TXXX")[:16]:
         frame = cast(_Id3UserTextFrame, raw_frame)
         if frame.desc.lower() not in {"description", "comment"}:
@@ -258,15 +258,15 @@ def _read_embedded_video_id(path: Path) -> str | None:
             return _read_mp3_video_id(path)
         if suffix in {".opus", ".ogg"}:
             # Mutagen 1.48.1 lacks complete annotations for Vorbis mapping access.
-            opus_tags = cast(_TagReader, OggOpus(path))  # type: ignore[no-untyped-call]
+            opus_tags = cast(_TagReader, OggOpus(path))
             return _read_mapping_video_id(opus_tags, ("description", "comment"))
         if suffix == ".flac":
             # Mutagen 1.48.1 lacks complete annotations for Vorbis mapping access.
-            flac_tags = cast(_TagReader, FLAC(path))  # type: ignore[no-untyped-call]
+            flac_tags = cast(_TagReader, FLAC(path))
             return _read_mapping_video_id(flac_tags, ("description", "comment"))
         if suffix == ".m4a":
             # Mutagen 1.48.1 lacks complete annotations for MP4 tag access.
-            mp4_audio = cast(_Mp4Reader, MP4(path))  # type: ignore[no-untyped-call]
+            mp4_audio = cast(_Mp4Reader, MP4(path))
             if mp4_audio.tags is None:
                 return None
             return _read_mapping_video_id(mp4_audio.tags, ("desc", "\xa9des", "\xa9cmt"))
