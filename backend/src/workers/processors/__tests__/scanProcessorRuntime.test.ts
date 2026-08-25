@@ -25,12 +25,12 @@ describe("scanProcessor runtime behavior", () => {
             metadata?: Record<string, unknown> | null;
         }>;
         candidateAlbums?: Array<{
+            id?: string;
             title: string;
-            tracks: Array<{ id: string }>;
-            artist: {
-                name: string;
-                enrichmentStatus?: string;
-            };
+            artistName?: string;
+            hasTracks?: boolean;
+            tracks?: Array<{ id: string }>;
+            artist?: { name: string; enrichmentStatus?: string };
         }>;
         fuzzyMatchImpl?: (
             artistName: string,
@@ -87,6 +87,15 @@ describe("scanProcessor runtime behavior", () => {
         };
 
         const prisma = {
+            $queryRaw: jest.fn(async () =>
+                (options.candidateAlbums ?? []).map((album, index) => ({
+                    id: album.id ?? `candidate-${index}`,
+                    title: album.title,
+                    artistName: album.artistName ?? album.artist?.name ?? "",
+                    hasTracks:
+                        album.hasTracks ?? (album.tracks?.length ?? 0) > 0,
+                })),
+            ),
             downloadJob: {
                 findMany: jest.fn(async () => options.activeJobs ?? []),
                 updateMany: jest.fn(async (args: any) => {
@@ -115,7 +124,6 @@ describe("scanProcessor runtime behavior", () => {
                 }),
             },
             album: {
-                findMany: jest.fn(async () => options.candidateAlbums ?? []),
                 findFirst: jest.fn(async () => options.albumByRgMbid ?? null),
             },
             artist: {
@@ -283,7 +291,7 @@ describe("scanProcessor runtime behavior", () => {
         );
 
         expect(prisma.downloadJob.findMany).toHaveBeenCalledTimes(1);
-        expect(prisma.album.findMany).not.toHaveBeenCalled();
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
         expect(matchAlbum).not.toHaveBeenCalled();
         expect(
             discoverWeeklyService.checkBatchCompletion,
@@ -320,7 +328,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(createJob());
 
         expect(prisma.downloadJob.findMany).toHaveBeenCalledTimes(1);
-        expect(prisma.album.findMany).not.toHaveBeenCalled();
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
         expect(matchAlbum).not.toHaveBeenCalled();
         expect(prisma.downloadJob.updateMany).not.toHaveBeenCalledWith(
             expect.objectContaining({
@@ -362,7 +370,7 @@ describe("scanProcessor runtime behavior", () => {
 
         await module.processScan(createJob());
 
-        expect(prisma.album.findMany).toHaveBeenCalledTimes(1);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
         expect(matchAlbum).toHaveBeenCalledWith(
             "Known Artist",
             "Known Album",
@@ -472,6 +480,56 @@ describe("scanProcessor runtime behavior", () => {
             ["batch-1"],
             ["batch-2"],
         ]);
+    });
+
+    it("bounds active jobs and candidate queries for a large queue", async () => {
+        const activeJobs = Array.from({ length: 501 }, (_unused, index) => ({
+            id: `dl-${index.toString().padStart(3, "0")}`,
+            metadata: {
+                artistName: `${index.toString().padStart(5, "0")} Artist`,
+                albumTitle: `Album ${index}`,
+            },
+        }));
+        const { module, prisma, logger } = loadScanProcessor({
+            scanResult: {
+                tracksAdded: 1,
+                tracksUpdated: 0,
+                tracksRemoved: 0,
+                errors: [],
+                duration: 1,
+            },
+            activeJobs,
+        });
+
+        await module.processScan(createJob());
+
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: { status: { in: ["pending", "processing"] } },
+            select: { id: true, metadata: true, discoveryBatchId: true },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            take: 501,
+        });
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(5);
+        const queryRawCalls = prisma.$queryRaw.mock.calls as unknown as Array<
+            [{ text: string; values: unknown[] }]
+        >;
+        const queryPatternCounts = queryRawCalls.map(
+            ([query]: [{ values: unknown[] }]) =>
+                (query.values[0] as string[]).length,
+        );
+        expect(queryPatternCounts).toEqual([100, 100, 100, 100, 100]);
+        for (const [query] of queryRawCalls) {
+            expect(query.text).toContain("ILIKE ANY($1::text[])");
+            expect(query.text).not.toContain(" OR ");
+            expect(query.values[1]).toBe(1001);
+        }
+        expect(logger.warn).toHaveBeenCalledWith(
+            "Scan reconciliation active-job cap truncated work",
+            expect.objectContaining({
+                processedJobs: 500,
+                deferredJobsAtLeast: 1,
+            }),
+        );
     });
 
     it("reports progress callback updates and logs callback progress failures", async () => {

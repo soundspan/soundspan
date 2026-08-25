@@ -2,148 +2,11 @@ import { Job } from "bull";
 import { logger } from "../../utils/logger";
 import { MusicScannerService } from "../../services/musicScanner";
 import { config } from "../../config";
-import { resolveDownloadJobMetadata } from "../../utils/downloadJobMetadata";
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";
+import { reconcileDownloadJobsWithScan } from "./scanReconcileQuery";
 import * as path from "path";
 
 const log = logger.child("ScanProcessor");
-
-/**
- * Reconcile pending/processing download jobs with newly scanned albums
- * This is called after every scan to catch downloads that completed but webhooks failed
- * Part of Phase 2 & 3 fix for #31
- *
- * Phase 3 enhancement: Uses fuzzy matching to catch more name variations
- * Phase 4 optimization: Batched queries instead of N+1 pattern
- */
-async function reconcileDownloadJobsWithScan(): Promise<number> {
-    const { prisma } = await import("../../utils/db");
-
-    // Get all pending/processing download jobs
-    const activeJobs = await prisma.downloadJob.findMany({
-        where: { status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES } },
-    });
-
-    if (activeJobs.length === 0) {
-        return 0;
-    }
-
-    // Extract job metadata for matching
-    const jobsWithMetadata = activeJobs
-        .map((job) => {
-            const { artistName, albumTitle } = resolveDownloadJobMetadata(
-                job.metadata,
-            );
-            return {
-                job,
-                artistName,
-                albumTitle,
-            };
-        })
-        .filter((j) => j.artistName && j.albumTitle);
-
-    if (jobsWithMetadata.length === 0) {
-        return 0;
-    }
-
-    // Batch fetch: Get all albums that might match any of our jobs
-    // Use OR conditions for all artist name prefixes (for fuzzy matching)
-    const artistPrefixes = [
-        ...new Set(
-            jobsWithMetadata.map((j) =>
-                j.artistName!.substring(0, 5).toLowerCase(),
-            ),
-        ),
-    ];
-
-    const candidateAlbums = await prisma.album.findMany({
-        where: {
-            OR: artistPrefixes.map((prefix) => ({
-                artist: {
-                    name: {
-                        contains: prefix,
-                        mode: "insensitive" as const,
-                    },
-                },
-            })),
-        },
-        include: {
-            tracks: {
-                select: { id: true },
-                take: 1,
-            },
-            artist: {
-                select: { name: true },
-            },
-        },
-    });
-
-    // Import fuzzy matcher once
-    const { matchAlbum } = await import("../../utils/fuzzyMatch");
-
-    // Match jobs to albums
-    const jobsToComplete: string[] = [];
-    const discoveryBatchIds: string[] = [];
-
-    for (const { job, artistName, albumTitle } of jobsWithMetadata) {
-        // Try exact/contains match first
-        let matchedAlbum = candidateAlbums.find(
-            (album) =>
-                album.tracks.length > 0 &&
-                album.artist.name
-                    .toLowerCase()
-                    .includes(artistName!.toLowerCase()) &&
-                album.title.toLowerCase().includes(albumTitle!.toLowerCase()),
-        );
-
-        // Fuzzy match if exact match failed
-        if (!matchedAlbum) {
-            matchedAlbum = candidateAlbums.find(
-                (album) =>
-                    album.tracks.length > 0 &&
-                    matchAlbum(
-                        artistName!,
-                        albumTitle!,
-                        album.artist.name,
-                        album.title,
-                        0.75,
-                    ),
-            );
-        }
-
-        if (matchedAlbum) {
-            jobsToComplete.push(job.id);
-            if (job.discoveryBatchId) {
-                discoveryBatchIds.push(job.discoveryBatchId);
-            }
-        }
-    }
-
-    if (jobsToComplete.length === 0) {
-        return 0;
-    }
-
-    // Batch update: Mark all matched jobs as completed
-    await prisma.downloadJob.updateMany({
-        where: { id: { in: jobsToComplete } },
-        data: {
-            status: "completed",
-            completedAt: new Date(),
-            error: null,
-        },
-    });
-
-    // Check batch completion for discovery jobs (deduplicated)
-    const uniqueBatchIds = [...new Set(discoveryBatchIds)];
-    if (uniqueBatchIds.length > 0) {
-        const { discoverWeeklyService } =
-            await import("../../services/discoverWeekly");
-        for (const batchId of uniqueBatchIds) {
-            await discoverWeeklyService.checkBatchCompletion(batchId);
-        }
-    }
-
-    return jobsToComplete.length;
-}
 
 export interface ScanJobData {
     userId: string | null;
@@ -604,4 +467,3 @@ export async function processScan(
         throw error;
     }
 }
-import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";

@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Post-scan download reconciliation no longer risks heavy database load when many downloads are queued.
 - Long track lists (Liked Songs, queue, large playlists) now render only the rows on screen instead of every row at once, so pages with thousands of tracks scroll smoothly and no longer stutter once per second during playback (#784).
 - The metrics endpoint now rate-limits failed access attempts, and internal Subsonic auth-type reporting no longer re-reads credential query parameters.
 - Album genres, label, and release year now populate during normal background enrichment instead of only via the admin per-album tool, and admin re-enrichment now applies the same rules as the background worker.
