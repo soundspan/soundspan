@@ -62,6 +62,9 @@ export function installTrackOverflowHarness(
                     : artist.name
                       ? `/artist/${encodeURIComponent(artist.name)}`
                       : null,
+            getArtistRouteParam: (artist: { id?: string; name?: string }) =>
+                artist.id ??
+                (artist.name ? encodeURIComponent(artist.name) : null),
         },
     });
 

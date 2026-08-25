@@ -18,7 +18,53 @@ mock.module("@/lib/api", {
     namedExports: {
         api: {
             getCoverArtUrl: (url: string) => `/proxied/${url}`,
+            getTidalStreamingStatus: async () => ({
+                enabled: false,
+                available: false,
+                authenticated: false,
+                credentialsConfigured: false,
+            }),
+            getYtMusicStatus: async () => ({
+                enabled: false,
+                available: false,
+                authenticated: false,
+                credentialsConfigured: false,
+            }),
+            matchTidalBatch: async () => ({ matches: [] }),
+            matchYtMusicBatch: async () => ({ matches: [] }),
+            addTrackToPlaylist: async () => undefined,
         },
+    },
+});
+
+mock.module("next/navigation", {
+    namedExports: {
+        useRouter: () => ({ push: () => undefined }),
+    },
+});
+
+mock.module("@/lib/audio-controls-context", {
+    namedExports: {
+        useAudioControls: () => ({
+            playTracks: () => undefined,
+            playNext: () => undefined,
+            addToQueue: () => undefined,
+            playTrack: () => undefined,
+            startVibeMode: async () => ({ success: true, trackCount: 0 }),
+        }),
+    },
+});
+
+mock.module("@/components/ui/TidalBadge", {
+    namedExports: { TidalBadge: () => null },
+});
+mock.module("@/components/ui/YouTubeBadge", {
+    namedExports: { YouTubeBadge: () => null },
+});
+mock.module("@/components/ui/TrackOverflowMenu", {
+    namedExports: {
+        TrackOverflowMenu: () =>
+            React.createElement("button", { "aria-haspopup": "menu" }),
     },
 });
 
@@ -98,9 +144,11 @@ test("discover tracks render artist links and album context", async () => {
         } as never),
     );
 
+    // Rows are play/navigate buttons now, not bare artist links; unmatched
+    // rows expose the artist destination through their accessible label.
     assert.match(html, /Headlines/);
     assert.match(html, /Drake — Take Care/);
-    assert.match(html, /href="\/artist\/Drake"/);
+    assert.match(html, /aria-label="Go to Drake"/);
     assert.match(html, /Orphan Song/);
-    assert.doesNotMatch(html, /href="\/artist\/"/);
+    assert.doesNotMatch(html, /href="\/artist\//);
 });

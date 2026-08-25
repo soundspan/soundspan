@@ -13,6 +13,9 @@ import { TrackList } from "@/components/track";
 import type { TrackRowItem, TrackRowSlots, RowState } from "@/components/track";
 import type { LibraryTrack } from "../types";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 
 interface LibraryTracksListProps {
     tracks: LibraryTrack[];
@@ -146,9 +149,48 @@ export function LibraryTracksList({
                     </p>
                 ),
                 trailingActions: (
-                    <span className="text-sm text-gray-400 flex-shrink-0">
-                        {formatTime(track.duration)}
-                    </span>
+                    <div
+                        className="flex items-center justify-end gap-1 flex-shrink-0"
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                    >
+                        <span className="text-sm text-gray-400">
+                            {formatTime(track.duration)}
+                        </span>
+                        <TrackPreferenceButtons
+                            trackId={track.id}
+                            mode="both"
+                            buttonSizeClassName="h-8 w-8"
+                            iconSizeClassName="h-4 w-4"
+                            metadata={buildPreferenceMetadata({
+                                id: track.id,
+                                title: track.title,
+                                duration: track.duration,
+                                artist: { name: track.album.artist.name },
+                                album: { title: track.album.title },
+                            })}
+                        />
+                        <TrackOverflowMenu
+                            track={{
+                                id: track.id,
+                                title: track.displayTitle ?? track.title,
+                                artist: {
+                                    id: track.album.artist.id,
+                                    name: track.album.artist.name,
+                                    mbid: track.album.artist.mbid,
+                                },
+                                album: {
+                                    id: track.album.id,
+                                    title: track.album.title,
+                                    coverArt: track.album.coverUrl,
+                                },
+                                duration: track.duration,
+                                source: track.source,
+                                peer: track.peer,
+                            }}
+                        />
+                    </div>
                 ),
             };
         },
