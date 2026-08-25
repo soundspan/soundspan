@@ -95,7 +95,9 @@ jest.mock("../../services/imageProvider", () => ({
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
-    musicBrainzService: {},
+    musicBrainzService: {
+        getReleaseGroups: jest.fn(),
+    },
 }));
 
 jest.mock("../../services/coverArt", () => ({
@@ -166,6 +168,7 @@ import { prisma } from "../../utils/db";
 import { lastFmService } from "../../services/lastfm";
 import { deezerService } from "../../services/deezer";
 import { dataCacheService } from "../../services/dataCache";
+import { musicBrainzService } from "../../services/musicbrainz";
 
 const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
 const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
@@ -174,6 +177,8 @@ const mockLastFmGetArtistTopTracks =
 const mockDeezerGetAlbumCover = deezerService.getAlbumCover as jest.Mock;
 const mockDataCacheGetArtistImage =
     dataCacheService.getArtistImage as jest.Mock;
+const mockMusicBrainzGetReleaseGroups =
+    musicBrainzService.getReleaseGroups as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
     const layer = flattenLibraryRouteLayers(router).find(
@@ -224,6 +229,7 @@ describe("library artist lookup compatibility", () => {
         mockLastFmGetArtistTopTracks.mockResolvedValue([]);
         mockDeezerGetAlbumCover.mockResolvedValue(null);
         mockDataCacheGetArtistImage.mockResolvedValue(null);
+        mockMusicBrainzGetReleaseGroups.mockResolvedValue([]);
     });
 
     it.each([
@@ -492,6 +498,125 @@ describe("library artist lookup compatibility", () => {
                 },
             }),
         ]);
+    });
+
+    it.each([
+        ["Song Title (2011 Remaster)", "Song Title"],
+        ["Song Title (feat. Guest)", "Song Title"],
+        ["Song: Title!", "Song Title"],
+    ])(
+        "matches normalized library title %p to Last.fm title %p",
+        async (libraryTitle, lastFmTitle) => {
+            mockArtistFindFirst.mockResolvedValueOnce({
+                ...createMockArtist(),
+                albums: [
+                    {
+                        id: "album-1",
+                        title: "Owned Album",
+                        rgMbid: "rg-owned",
+                        coverUrl: "owned-cover.jpg",
+                        tracks: [
+                            {
+                                id: "track-remaster",
+                                title: libraryTitle,
+                                album: {
+                                    id: "album-1",
+                                    title: "Owned Album",
+                                    coverUrl: "owned-cover.jpg",
+                                    albumLoudnessLufs: null,
+                                    albumTruePeakDb: null,
+                                    artist: {
+                                        id: "artist-1",
+                                        name: "AC/DC",
+                                        mbid: "mbid-artist-1",
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                ],
+            });
+            mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
+                {
+                    name: lastFmTitle,
+                    playcount: "12",
+                    listeners: "34",
+                    duration: "245",
+                    url: "https://last.fm/track/song-title",
+                    album: { "#text": "Owned Album" },
+                },
+            ]);
+            const req = {
+                params: { id: "artist-local-id-123" },
+                query: {
+                    includeDiscography: "false",
+                    includeTopTracks: "true",
+                    includeSimilarArtists: "false",
+                },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await artistHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.topTracks).toEqual([
+                expect.objectContaining({
+                    id: "track-remaster",
+                    title: libraryTitle,
+                    album: expect.objectContaining({ id: "album-1" }),
+                }),
+            ]);
+            expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+        },
+    );
+
+    it("folds a MusicBrainz base album into its owned deluxe edition", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce({
+            ...createMockArtist(),
+            albums: [
+                {
+                    id: "album-deluxe",
+                    title: "Album (Deluxe Edition)",
+                    rgMbid: "rg-owned-deluxe",
+                    coverUrl: "owned-cover.jpg",
+                    location: "LIBRARY",
+                    tracks: [],
+                },
+            ],
+        });
+        mockMusicBrainzGetReleaseGroups.mockResolvedValueOnce([
+            {
+                id: "rg-mb-base",
+                title: "Album",
+                "first-release-date": "2011-01-01",
+                "primary-type": "Album",
+                "secondary-types": [],
+            },
+        ]);
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.albums).toEqual([
+            expect.objectContaining({
+                id: "album-deluxe",
+                title: "Album (Deluxe Edition)",
+                owned: true,
+                source: "database",
+            }),
+        ]);
+        expect(res.body.discographyComplete).toBe(true);
     });
 
     it("hydrates unmatched Last.fm top tracks and skips Deezer lookup for unknown albums", async () => {

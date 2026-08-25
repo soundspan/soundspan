@@ -78,6 +78,7 @@ import {
     proxyLibraryPeerStream,
 } from "./libraryPeerStream";
 import { serveNativeLibraryTrack } from "./libraryNativeTrackStream";
+import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
 
 /**
  * Router segment for tracks routes registered at this position.
@@ -1637,6 +1638,7 @@ export async function handleDeleteTrack(
 
     // Delete from database (cascade will handle related records)
     await deleteTrackAndRecomputeAlbum(track.id, track.albumId);
+    await bumpSearchCacheVersion();
 
     logger.debug(`[DELETE] Deleted track: ${track.title}`);
 

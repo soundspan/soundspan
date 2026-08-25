@@ -30,6 +30,7 @@ const logger = {
     warn: jest.fn(),
     error: jest.fn(),
 };
+const getSearchCacheVersion = jest.fn();
 const MAX_SQL_FRAGMENT_VALUES = 128;
 
 interface SqlFragment {
@@ -86,6 +87,8 @@ jest.mock("../../utils/logger", () => ({
     logger,
 }));
 
+jest.mock("../searchCacheVersion", () => ({ getSearchCacheVersion }));
+
 import { normalizeCacheQuery, searchService } from "../search";
 
 describe("search service", () => {
@@ -101,6 +104,7 @@ describe("search service", () => {
         prisma.audiobook.findMany.mockResolvedValue([]);
         redisClient.get.mockResolvedValue(null);
         redisClient.setEx.mockResolvedValue("OK");
+        getSearchCacheVersion.mockResolvedValue(1);
     });
 
     it("normalizes cache queries", () => {
@@ -768,6 +772,9 @@ describe("search service", () => {
             query: "book",
             limit: 4,
         });
+        expect(redisClient.get).toHaveBeenCalledWith(
+            "search:all:v1:book:4::all",
+        );
         expect(cacheHit.audiobooks).toEqual([
             expect.objectContaining({
                 id: "book-9",
@@ -1022,13 +1029,56 @@ describe("search service", () => {
             offset: 40,
         });
 
-        const cacheKey = "search:artists:radiohead:10:40::all";
+        const cacheKey = "search:artists:v1:radiohead:10:40::all";
         expect(redisClient.get).toHaveBeenCalledWith(cacheKey);
         expect(redisClient.setEx).toHaveBeenCalledWith(
             cacheKey,
             120,
             expect.any(String),
         );
+    });
+
+    it("misses an old type-scoped cache entry after the version changes", async () => {
+        const oldResults = {
+            artists: [{ id: "artist-old" }],
+            albums: [],
+            tracks: [],
+            podcasts: [],
+            audiobooks: [],
+            episodes: [],
+        };
+        getSearchCacheVersion.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+        redisClient.get.mockImplementation(async (key: string) =>
+            key === "search:artists:v1:radiohead:20:0::all"
+                ? JSON.stringify(oldResults)
+                : null,
+        );
+        const searchArtists = jest
+            .spyOn(searchService, "searchArtists")
+            .mockResolvedValueOnce([]);
+
+        await expect(
+            searchService.searchByType({
+                query: "Radiohead",
+                type: "artists",
+            }),
+        ).resolves.toEqual(oldResults);
+        await expect(
+            searchService.searchByType({
+                query: "Radiohead",
+                type: "artists",
+            }),
+        ).resolves.toEqual(expect.objectContaining({ artists: [] }));
+
+        expect(redisClient.get).toHaveBeenNthCalledWith(
+            1,
+            "search:artists:v1:radiohead:20:0::all",
+        );
+        expect(redisClient.get).toHaveBeenNthCalledWith(
+            2,
+            "search:artists:v2:radiohead:20:0::all",
+        );
+        expect(searchArtists).toHaveBeenCalledTimes(1);
     });
 
     it("searchAudiobooksFTS falls back to local search when full-text results are empty", async () => {

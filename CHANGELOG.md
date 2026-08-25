@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Search results now reflect library changes immediately after a scan or deletion; artist-page popular tracks and discography now recognize remasters and editions you own (#758).
 - Artist-page popular tracks now show artist identity and use correct Last.fm durations for unowned tracks (#757).
 - Tracks you do not own on the artist page keep their row menu, so Go to artist and Go to album stay available (#757).
 - Artist-wide downloads now expand through the background album-download pipeline and no longer require Lidarr, allowing TIDAL- and YouTube-only deployments to queue the full discography.

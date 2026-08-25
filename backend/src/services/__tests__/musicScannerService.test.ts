@@ -92,6 +92,7 @@ const mockParseArtistFromPath = jest.fn((name: string) => name);
 const mockExtractCoverArt = jest.fn();
 const mockCreateMapping = jest.fn();
 const mockRecomputeAlbumLoudness = jest.fn();
+const mockBumpSearchCacheVersion = jest.fn();
 const mockConfig = {
     music: { transcodeCachePath: "/cache/transcodes" },
     scanFileConcurrency: 2,
@@ -242,6 +243,10 @@ jest.mock("../trackMappingService", () => ({
 
 jest.mock("../albumLoudness", () => ({
     recomputeAlbumLoudness: mockRecomputeAlbumLoudness,
+}));
+
+jest.mock("../searchCacheVersion", () => ({
+    bumpSearchCacheVersion: mockBumpSearchCacheVersion,
 }));
 
 jest.mock("../../config", () => ({
@@ -437,11 +442,21 @@ describe("MusicScannerService.scanLibrary", () => {
             "sha256:" + "ab".repeat(32),
         );
         mockCreateMapping.mockResolvedValue({ id: "mapping-1" });
+        mockBumpSearchCacheVersion.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
         jest.useRealTimers();
         jest.restoreAllMocks();
+    });
+
+    it("bumps the search cache version once after a completed scan", async () => {
+        const scanner = new MusicScannerService();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([]);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockBumpSearchCacheVersion).toHaveBeenCalledTimes(1);
     });
 
     it("starts multiple per-file tasks before the first one completes", async () => {

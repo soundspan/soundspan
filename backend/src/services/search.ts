@@ -8,6 +8,7 @@ import {
 } from "../utils/librarySorting";
 import { trackBrowseSql } from "../utils/libraryRadioPredicates";
 import { escapeLikePattern } from "../utils/likePattern";
+import { getSearchCacheVersion } from "./searchCacheVersion";
 
 const MAX_TRACK_SEARCH_TERMS = 6;
 
@@ -873,7 +874,8 @@ export class SearchService {
         }
 
         // Check Redis cache first
-        const cacheKey = `search:all:${normalizeCacheQuery(query)}:${limit}:${genre || ""}:${source}`;
+        const cacheVersion = await getSearchCacheVersion();
+        const cacheKey = `search:all:v${cacheVersion}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}:${source}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -988,7 +990,8 @@ export class SearchService {
         }
 
         // Check cache
-        const cacheKey = `search:${type}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}:${source}`;
+        const cacheVersion = await getSearchCacheVersion();
+        const cacheKey = `search:${type}:v${cacheVersion}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}:${source}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {

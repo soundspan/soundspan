@@ -34,6 +34,7 @@ import {
     resolveScannerAlbum,
     resolveScannerArtist,
 } from "./musicScannerIdentity";
+import { bumpSearchCacheVersion } from "./searchCacheVersion";
 
 const scanLogger = logger.child("MusicScannerService");
 const TRACK_IDENTITY_SELECT = {
@@ -694,6 +695,8 @@ export class MusicScannerService {
                 logger.error("[Scan] Artist counts update failed:", err);
             });
         }
+
+        await bumpSearchCacheVersion();
 
         return result;
     }

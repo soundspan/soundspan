@@ -47,6 +47,12 @@ import {
 import { findRouteNameMatch } from "../artistRouteName";
 import { deleteArtistCatalogEntry } from "../../services/artistCatalogDeletion";
 import { withFederatedTrackPlayback } from "../../services/federatedTrackPayload";
+import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
+import {
+    buildArtistTrackTitleIndex,
+    filterDistinctDiscographyAlbums,
+    findArtistTrackByTitle,
+} from "./artistPageMatching";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -728,11 +734,9 @@ export async function handleGetArtist(
 
                 // Merge database albums with MusicBrainz albums
                 // Database albums take precedence (they have actual files!)
-                const dbAlbumTitles = new Set(
-                    dbAlbums.map((a) => a.title.toLowerCase()),
-                );
-                const mbAlbumsFiltered = mbAlbums.filter(
-                    (a) => !dbAlbumTitles.has(a.title.toLowerCase()),
+                const mbAlbumsFiltered = filterDistinctDiscographyAlbums(
+                    dbAlbums,
+                    mbAlbums,
                 );
 
                 albumsWithOwnership = [...dbAlbums, ...mbAlbumsFiltered];
@@ -871,13 +875,7 @@ export async function handleGetArtist(
             }
 
             // Build lookup map for O(1) matching instead of O(n*m)
-            const tracksByTitle = new Map<string, (typeof allTracks)[0]>();
-            for (const track of allTracks) {
-                const key = track.title.toLowerCase();
-                if (!tracksByTitle.has(key)) {
-                    tracksByTitle.set(key, track);
-                }
-            }
+            const tracksByTitle = buildArtistTrackTitleIndex(allTracks);
 
             // For each Last.fm track, try to match with library track or add as unowned
             const combinedTracks: any[] = [];
@@ -890,9 +888,10 @@ export async function handleGetArtist(
             }> = [];
 
             for (const lfmTrack of lastfmTopTracks) {
-                // O(1) lookup instead of O(n) find
-                const key = lfmTrack.name.toLowerCase();
-                const matchedTrack = tracksByTitle.get(key);
+                const matchedTrack = findArtistTrackByTitle(
+                    tracksByTitle,
+                    lfmTrack.name,
+                );
 
                 if (matchedTrack) {
                     // Track exists in library - include user play count
@@ -1514,6 +1513,7 @@ export async function handleDeleteArtist(
             `[DELETE] Deleting artist from database: ${artist.name} (${artist.id})`,
         );
         await deleteArtistCatalogEntry(artist.id);
+        await bumpSearchCacheVersion();
 
         logger.debug(
             `[DELETE] Successfully deleted artist: ${

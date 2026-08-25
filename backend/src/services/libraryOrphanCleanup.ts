@@ -7,6 +7,7 @@ import {
     artistOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "./providerTrackRetention";
+import { bumpSearchCacheVersion } from "./searchCacheVersion";
 
 const cleanupLogger = logger.child("LibraryOrphanCleanup");
 /** Keeps each deletion transaction near the provider GC's 100-row write cost. */
@@ -267,6 +268,7 @@ export async function cleanupOrphanedLibraryEntities(
     const artistsDeleted = await cleanupArtistBatches(writeTombstones, cutoff);
 
     if (albumsDeleted > 0 || artistsDeleted > 0) {
+        await bumpSearchCacheVersion();
         cleanupLogger.info(
             `Deleted ${albumsDeleted} orphaned albums and ${artistsDeleted} orphaned artists`,
         );

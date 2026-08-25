@@ -5,6 +5,7 @@ describe("cleanupOrphanedLibraryEntities", () => {
     });
 
     function loadCleanup(federationEnabled = false) {
+        const bumpSearchCacheVersion = jest.fn().mockResolvedValue(undefined);
         const logger = {
             info: jest.fn(),
             error: jest.fn(),
@@ -55,14 +56,23 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 workers: { providerTrackRetentionDays: 30 },
             },
         }));
+        jest.doMock("../searchCacheVersion", () => ({
+            bumpSearchCacheVersion,
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../libraryOrphanCleanup");
-        return { logger, module, operations, prisma };
+        return {
+            bumpSearchCacheVersion,
+            logger,
+            module,
+            operations,
+            prisma,
+        };
     }
 
     it("deletes only peerless orphaned albums and artists", async () => {
-        const { module, prisma } = loadCleanup();
+        const { bumpSearchCacheVersion, module, prisma } = loadCleanup();
 
         await expect(module.cleanupOrphanedLibraryEntities()).resolves.toEqual({
             albumsDeleted: 1,
@@ -129,10 +139,11 @@ describe("cleanupOrphanedLibraryEntities", () => {
             { maxWait: 2000, timeout: 15000 },
         );
         expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(bumpSearchCacheVersion).toHaveBeenCalledTimes(1);
     });
 
     it("leaves peer-owned entities untouched during an empty sync window", async () => {
-        const { module, prisma } = loadCleanup();
+        const { bumpSearchCacheVersion, module, prisma } = loadCleanup();
         prisma.album.findMany.mockImplementationOnce(async (args: any) => {
             return args.where?.peerId === null
                 ? []
@@ -161,6 +172,7 @@ describe("cleanupOrphanedLibraryEntities", () => {
         );
         expect(prisma.album.deleteMany).not.toHaveBeenCalled();
         expect(prisma.artist.deleteMany).not.toHaveBeenCalled();
+        expect(bumpSearchCacheVersion).not.toHaveBeenCalled();
     });
 
     it("writes album and artist tombstones in the deletion transaction when federation is enabled", async () => {

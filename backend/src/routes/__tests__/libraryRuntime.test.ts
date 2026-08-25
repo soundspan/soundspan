@@ -13,6 +13,7 @@ const mockLoadPeerPlaybackFallback = jest.fn();
 const mockServeMappedProviderStream = jest.fn();
 const mockTerminateCommittedStream = jest.fn((res: Response) => res.end());
 const mockGetYtMusicUserIdOrPublic = jest.fn();
+const mockBumpSearchCacheVersion = jest.fn().mockResolvedValue(undefined);
 
 jest.mock("dns/promises", () => ({
     lookup: (...args: unknown[]) => mockLookup(...args),
@@ -353,6 +354,10 @@ jest.mock("../../services/imageProxy", () => ({
 
 jest.mock("../../services/imageStorage", () => ({
     downloadAndStoreImage: jest.fn(),
+}));
+
+jest.mock("../../services/searchCacheVersion", () => ({
+    bumpSearchCacheVersion: mockBumpSearchCacheVersion,
 }));
 
 const mockLidarrDeleteArtist = jest.fn();
@@ -5160,6 +5165,7 @@ describe("library catalog list runtime coverage", () => {
             lidarrDeleted: false,
             lidarrError: null,
         });
+        expect(mockBumpSearchCacheVersion).toHaveBeenCalledTimes(3);
         artistFsSpy.mockRestore();
     });
 

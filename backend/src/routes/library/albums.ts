@@ -50,6 +50,7 @@ import {
     isSafeRecursiveDeletionTarget,
     libraryDeletionLogger,
 } from "../../utils/libraryDeletion";
+import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
 
 /**
  * Router segment for albums routes registered at this position.
@@ -808,6 +809,7 @@ export async function handleDeleteAlbum(
             where: { id: album.id },
         });
     });
+    await bumpSearchCacheVersion();
 
     // Delete track files only after the database transaction commits.
     let deletedFiles = 0;
