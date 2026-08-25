@@ -9,6 +9,10 @@ import { musicBrainzService } from "../../services/musicbrainz";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { asPlainObject } from "../../utils/plainObject";
+import {
+    classifyReleaseGroup,
+    type ReleaseGroupEligibility,
+} from "./artistExpansionEligibility";
 
 const log = logger.child("ArtistDownloadExpansionProcessor");
 const payloadSchema = z
@@ -35,7 +39,18 @@ interface ExpansionCounts {
     skippedInLibrary: number;
     skippedQueued: number;
     skippedRecentlyFailed: number;
+    skippedIneligible: number;
 }
+
+interface ExpansionResult {
+    counts: ExpansionCounts;
+    filteredReasons: Record<string, number>;
+}
+
+type IneligibilityReason = Extract<
+    ReleaseGroupEligibility,
+    { eligible: false }
+>["reason"];
 
 interface ArtistAlbumJobInput {
     payload: ArtistExpansionPayload;
@@ -220,42 +235,79 @@ function enqueueCreatedAlbum(
     });
 }
 
+function createExpansionResult(): ExpansionResult {
+    return {
+        counts: {
+            albumCount: 0,
+            skippedInLibrary: 0,
+            skippedQueued: 0,
+            skippedRecentlyFailed: 0,
+            skippedIneligible: 0,
+        },
+        filteredReasons: {},
+    };
+}
+
+function recordIneligibleReleaseGroup(
+    expansion: ExpansionResult,
+    reason: IneligibilityReason,
+): void {
+    expansion.counts.skippedIneligible += 1;
+    expansion.filteredReasons[reason] =
+        (expansion.filteredReasons[reason] ?? 0) + 1;
+}
+
+function logExpansionSummary(
+    artistMbid: string,
+    total: number,
+    expansion: ExpansionResult,
+): void {
+    log.info("Artist expansion eligibility summarized", {
+        artistMbid,
+        total,
+        ...expansion.counts,
+        filteredReasons: expansion.filteredReasons,
+    });
+}
+
 async function expandReleaseGroups(
     payload: ArtistExpansionPayload,
     artistName: string,
     batchId: string,
-): Promise<ExpansionCounts> {
-    const releaseGroups = await musicBrainzService.getReleaseGroups(
+): Promise<ExpansionResult> {
+    const releaseGroups = await musicBrainzService.getReleaseGroupsWithCredits(
         payload.artistMbid,
         ["album", "ep"],
         MAX_RELEASE_GROUPS,
     );
-    const counts: ExpansionCounts = {
-        albumCount: 0,
-        skippedInLibrary: 0,
-        skippedQueued: 0,
-        skippedRecentlyFailed: 0,
-    };
-    for (
-        let index = 0;
-        index < releaseGroups.length && index < MAX_RELEASE_GROUPS;
-        index += 1
-    ) {
+    const expansion = createExpansionResult();
+    const total = Math.min(releaseGroups.length, MAX_RELEASE_GROUPS);
+    for (let index = 0; index < total; index += 1) {
         const releaseGroup = releaseGroups[index];
+        const eligibility = classifyReleaseGroup(
+            releaseGroup,
+            payload.artistMbid,
+        );
+        if (!eligibility.eligible) {
+            recordIneligibleReleaseGroup(expansion, eligibility.reason);
+            continue;
+        }
         const result = await processReleaseGroup(
             payload,
             artistName,
             batchId,
             releaseGroup,
         );
-        recordAlbumResult(result, counts);
+        recordAlbumResult(result, expansion.counts);
     }
-    return counts;
+    logExpansionSummary(payload.artistMbid, total, expansion);
+    return expansion;
 }
 
 async function completeExpansion(
     jobId: string,
     counts: ExpansionCounts,
+    filteredReasons: Record<string, number>,
 ): Promise<void> {
     const statusText =
         counts.albumCount === 0
@@ -263,7 +315,7 @@ async function completeExpansion(
             : `Queued ${counts.albumCount} albums`;
     await patchDownloadJobMetadata(
         jobId,
-        { ...counts, statusText },
+        { ...counts, filteredReasons, statusText },
         { status: "completed", completedAt: new Date() },
     );
 }
@@ -311,9 +363,17 @@ export async function processArtistDownloadExpansion(
             payload.artistMbid,
             payload.artistName,
         );
-        const counts = await expandReleaseGroups(payload, artistName, batchId);
+        const expansion = await expandReleaseGroups(
+            payload,
+            artistName,
+            batchId,
+        );
         await job.progress(100);
-        await completeExpansion(payload.jobId, counts);
+        await completeExpansion(
+            payload.jobId,
+            expansion.counts,
+            expansion.filteredReasons,
+        );
     } catch (error) {
         await failExpansion(payload.jobId, error);
         throw error;

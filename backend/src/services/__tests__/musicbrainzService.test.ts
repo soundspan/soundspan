@@ -341,11 +341,114 @@ describe("musicBrainzService", () => {
         );
     });
 
+    it("browses official release groups with artist credits under a versioned cache key", async () => {
+        const releaseGroups = [
+            {
+                id: "rg-credits",
+                title: "Credited Album",
+                "artist-credit": [
+                    { artist: { id: VALID_ARTIST_MBID, name: "Artist" } },
+                ],
+            },
+        ];
+        mockHttpGet.mockResolvedValueOnce({
+            data: { "release-groups": releaseGroups },
+        });
+
+        const result = await musicBrainzService.getReleaseGroupsWithCredits(
+            VALID_ARTIST_MBID,
+            ["album", "ep"],
+            25,
+        );
+
+        expect(result).toEqual(releaseGroups);
+        expect(mockRedisGet).toHaveBeenCalledWith(
+            `mb:rg:credits2:${VALID_ARTIST_MBID}:album,ep:25`,
+        );
+        expect(mockHttpGet).toHaveBeenCalledWith("/release-group", {
+            params: {
+                artist: VALID_ARTIST_MBID,
+                type: "album|ep",
+                limit: 25,
+                inc: "artist-credits",
+                "release-group-status": "website-default",
+                fmt: "json",
+            },
+        });
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            `mb:rg:credits2:${VALID_ARTIST_MBID}:album,ep:25`,
+            2592000,
+            JSON.stringify(releaseGroups),
+        );
+    });
+
+    it("propagates release-group browse failures without caching an empty discography", async () => {
+        const error = new Error("MusicBrainz unavailable");
+        mockRateLimiterExecute.mockRejectedValueOnce(error);
+
+        await expect(
+            musicBrainzService.getReleaseGroupsWithCredits(
+                VALID_ARTIST_MBID,
+                ["album", "ep"],
+                100,
+            ),
+        ).rejects.toBe(error);
+
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-array release-groups payload", async () => {
+        mockHttpGet.mockResolvedValueOnce({
+            data: { "release-groups": { id: "not-an-array" } },
+        });
+
+        await expect(
+            musicBrainzService.getReleaseGroupsWithCredits(VALID_ARTIST_MBID),
+        ).rejects.toThrow("Invalid MusicBrainz release-groups response");
+
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
+    });
+
+    it("drops release-group entries missing string ids or titles", async () => {
+        const validReleaseGroup = {
+            id: "rg-valid",
+            title: "Valid Album",
+            "primary-type": "Album",
+        };
+        mockHttpGet.mockResolvedValueOnce({
+            data: {
+                "release-groups": [
+                    validReleaseGroup,
+                    { title: "Missing ID" },
+                    { id: "rg-missing-title" },
+                ],
+            },
+        });
+
+        const result =
+            await musicBrainzService.getReleaseGroupsWithCredits(
+                VALID_ARTIST_MBID,
+            );
+
+        expect(result).toEqual([validReleaseGroup]);
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "MusicBrainz release-group response dropped malformed entries",
+            { droppedCount: 2 },
+        );
+    });
+
     it.each([
         ["artist", () => musicBrainzService.getArtist("../artist")],
         [
             "artist browse",
             () => musicBrainzService.getReleaseGroups("artist?limit=100"),
+        ],
+        [
+            "artist browse with credits",
+            () =>
+                musicBrainzService.getReleaseGroupsWithCredits(
+                    "artist?limit=100",
+                ),
         ],
         [
             "release group",

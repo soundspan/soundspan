@@ -8,6 +8,7 @@ import {
 } from "../utils/stringNormalization";
 import { BRAND_USER_AGENT } from "../config/brand";
 import { isValidMbid } from "../utils/musicIds";
+import { isPlainObject } from "../utils/plainObject";
 
 export { isValidMbid } from "../utils/musicIds";
 
@@ -26,7 +27,7 @@ export interface MusicBrainzArtistSearchResult {
 /** Artist-credit fields returned with a MusicBrainz release group. */
 export interface MusicBrainzArtistCredit {
     name?: string;
-    artist?: { name?: string };
+    artist?: { id?: string; name?: string };
 }
 
 /** Release-group fields returned by MusicBrainz search. */
@@ -38,6 +39,33 @@ export interface MusicBrainzReleaseGroupSearchResult {
     "first-release-date"?: string;
     "artist-credit"?: MusicBrainzArtistCredit[];
     score?: number | string;
+}
+
+function hasReleaseGroupIdentity(
+    value: unknown,
+): value is MusicBrainzReleaseGroupSearchResult {
+    return (
+        isPlainObject(value) &&
+        typeof value.id === "string" &&
+        typeof value.title === "string"
+    );
+}
+
+function parseReleaseGroupsWithCredits(
+    value: unknown,
+): MusicBrainzReleaseGroupSearchResult[] {
+    if (!Array.isArray(value)) {
+        throw new TypeError("Invalid MusicBrainz release-groups response");
+    }
+    const releaseGroups = value.filter(hasReleaseGroupIdentity);
+    const droppedCount = value.length - releaseGroups.length;
+    if (droppedCount > 0) {
+        logger.warn(
+            "MusicBrainz release-group response dropped malformed entries",
+            { droppedCount },
+        );
+    }
+    return releaseGroups;
 }
 
 function validateMbid(value: unknown, entity: MbidEntity): string {
@@ -220,6 +248,42 @@ class MusicBrainzService {
             2592000,
             [],
         );
+    }
+
+    /**
+     * Browse an artist's release groups with artist-credit data included.
+     * Uses a dedicated cache namespace so credit-less browse results cannot
+     * satisfy callers that require credit eligibility checks.
+     */
+    async getReleaseGroupsWithCredits(
+        artistMbid: string,
+        types: string[] = ["album", "ep"],
+        limit = 100,
+    ): Promise<MusicBrainzReleaseGroupSearchResult[]> {
+        const validatedArtistMbid = validateMbid(artistMbid, "artist");
+        const cacheKey = `mb:rg:credits2:${validatedArtistMbid}:${types.join(",")}:${limit}`;
+
+        const releaseGroups = await this.cachedRequest<unknown>(
+            cacheKey,
+            async () => {
+                const response = await this.client.get("/release-group", {
+                    params: {
+                        artist: validatedArtistMbid,
+                        type: types.join("|"),
+                        limit,
+                        inc: "artist-credits",
+                        "release-group-status": "website-default",
+                        fmt: "json",
+                    },
+                });
+                const payload = isPlainObject(response.data)
+                    ? response.data["release-groups"]
+                    : undefined;
+                return parseReleaseGroupsWithCredits(payload);
+            },
+            2592000,
+        );
+        return parseReleaseGroupsWithCredits(releaseGroups);
     }
 
     async getReleaseGroup(rgMbid: string) {

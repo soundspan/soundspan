@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - TIDAL downloads now tag ALBUMARTIST with the album artist instead of the per-track artist, preventing multi-artist album tracks from splitting into phantom single-track albums.
+- Artist "Download all missing albums" now skips promotion-, bootleg-, or pseudo-release-only groups, remix/live/demo/compilation groups, and releases where the artist is only a featured credit; MusicBrainz enumeration failures now fail the expansion instead of reporting no missing albums (#824).
 - Album downloads that select Soulseek, including TIDAL or YouTube Music runtime fallbacks and the default setting, now download through Soulseek instead of silently using Lidarr (#788).
 - Playing music no longer re-renders large parts of the app once per second: pages and controls now subscribe only to the playback details they actually show, and dragging the volume slider updates just the volume controls instead of rippling through every open page (#785).
 - Queued album downloads waiting on the deployment-wide claim now return to Bull with a delay instead of occupying an active worker slot for up to four hours.
