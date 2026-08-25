@@ -24,7 +24,6 @@ const BASELINE = Object.freeze({
     "backend/src/routes/discover/exclusions.ts": 1,
     "backend/src/routes/discover/shared.ts": 4,
     "backend/src/routes/downloads.ts": 1,
-    "backend/src/routes/enrichment.ts": 30,
     "backend/src/routes/homepage.ts": 2,
     "backend/src/routes/library/albums.ts": 1,
     "backend/src/routes/library/artists.ts": 2,
@@ -54,7 +53,6 @@ const BASELINE = Object.freeze({
     "backend/src/routes/trackMappings.ts": 2,
     "backend/src/routes/webhooks.ts": 0,
     "backend/src/routes/youtube.ts": 1,
-    "backend/src/routes/youtubeMusic.ts": 18,
 });
 
 // Raw error details can disclose internal implementation data to clients (OWASP).
@@ -85,8 +83,6 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/subsonic/mediaRetrieval.ts": 1,
     // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.
     "backend/src/routes/youtube.ts": 4,
-    // youtubeMusic.ts remaining 11: ytmusic sidecar err.response?.data?.detail echoes (10x) plus one result.error response (~L434); same sidecar-detail class as youtube.ts, frozen under the slice-J scope guard, flagged for follow-up.
-    "backend/src/routes/youtubeMusic.ts": 11,
     // acquisitionService.ts remaining 4: { success:false, error } acquisition result objects (~L482, ~L678, ~L767) consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E scope guard; plus a result.error passthrough in a { success:false, error } result object (~L748); frozen under the slice-J scope guard.
     "backend/src/services/acquisitionService.ts": 4,
     // artistCountsService.ts +2: numeric backfill error counters returned in result/progress objects (~L237 and ~L277); no error text; frozen under the ratchet-widening (slice-B2) scope guard.

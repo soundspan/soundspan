@@ -13,6 +13,33 @@ export { isValidMbid } from "../utils/musicIds";
 
 type MbidEntity = "artist" | "release group" | "release";
 
+/** Artist fields returned by MusicBrainz search. */
+export interface MusicBrainzArtistSearchResult {
+    id: string;
+    name: string;
+    disambiguation?: string;
+    country?: string;
+    type?: string;
+    score?: number | string;
+}
+
+/** Artist-credit fields returned with a MusicBrainz release group. */
+export interface MusicBrainzArtistCredit {
+    name?: string;
+    artist?: { name?: string };
+}
+
+/** Release-group fields returned by MusicBrainz search. */
+export interface MusicBrainzReleaseGroupSearchResult {
+    id: string;
+    title: string;
+    "primary-type"?: string;
+    "secondary-types"?: string[];
+    "first-release-date"?: string;
+    "artist-credit"?: MusicBrainzArtistCredit[];
+    score?: number | string;
+}
+
 function validateMbid(value: unknown, entity: MbidEntity): string {
     if (!isValidMbid(value)) {
         throw new TypeError(`Invalid ${entity} MBID`);

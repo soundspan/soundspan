@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { asyncHandler } from "../middleware/asyncHandler";
+import { validate } from "../middleware/validate";
 import { enrichmentService } from "../services/enrichment";
 import {
     getEnrichmentProgress,
@@ -20,16 +22,18 @@ import {
     type EnrichmentFailure,
 } from "../services/enrichmentFailureService";
 import { sanitizeEnrichmentErrorSummary } from "../utils/enrichmentErrorSummary";
-import { musicBrainzService } from "../services/musicbrainz";
+import {
+    musicBrainzService,
+    type MusicBrainzArtistSearchResult,
+    type MusicBrainzReleaseGroupSearchResult,
+} from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
 import {
     getSystemSettings,
     invalidateSystemSettingsCache,
 } from "../utils/systemSettings";
 import { rateLimiter } from "../services/rateLimiter";
-import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
 import { parseBoundedInt } from "../utils/queryParams";
@@ -38,7 +42,15 @@ import {
     sendRouteError,
 } from "../utils/routeErrorResponse";
 import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
-import { updateAlbumMetadataWithOwnership } from "../services/albumMetadataPersistence";
+import {
+    applyMetadataOverrides,
+    albumMetadataSchema,
+    artistMetadataSchema,
+    MetadataEntityNotFoundError,
+    resetMetadataOverrides,
+    trackMetadataSchema,
+    type MetadataFieldMap,
+} from "../services/metadataOverrideActions";
 import {
     applyArtistEnrichmentFields,
     enrichArtistFields,
@@ -52,15 +64,57 @@ router.use(requireAuth);
 const MBID_FORMAT_EXAMPLE = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
 const MBID_UUID_REGEX =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ARTIST_METADATA_FIELDS: MetadataFieldMap = {
+    name: { target: "displayName" },
+    bio: { target: "userSummary" },
+    genres: { target: "userGenres" },
+    heroUrl: { target: "userHeroUrl" },
+    mbid: { target: "mbid", marksOverride: false },
+};
+const ALBUM_METADATA_FIELDS: MetadataFieldMap = {
+    title: { target: "displayTitle" },
+    year: {
+        target: "displayYear",
+        transform: (value) => parseInt(String(value)),
+    },
+    genres: { target: "userGenres" },
+    coverUrl: { target: "userCoverUrl" },
+    rgMbid: { target: "rgMbid", marksOverride: false },
+};
+const TRACK_METADATA_FIELDS: MetadataFieldMap = {
+    title: { target: "displayTitle" },
+    trackNo: {
+        target: "displayTrackNo",
+        transform: (value) => parseInt(String(value)),
+    },
+};
 
 function isValidMusicBrainzId(value: string): boolean {
     return MBID_UUID_REGEX.test(value);
+}
+
+function getErrorCode(error: unknown): string | undefined {
+    if (typeof error !== "object" || error === null || !("code" in error)) {
+        return undefined;
+    }
+    return typeof error.code === "string" ? error.code : undefined;
 }
 
 type ClientSafeEnrichmentFailure = Omit<
     EnrichmentFailure,
     "errorMessage" | "metadata"
 > & { errorSummary: string | null };
+
+function isFailureEntityType(
+    value: unknown,
+): value is EnrichmentFailure["entityType"] {
+    return (
+        value === "artist" ||
+        value === "track" ||
+        value === "audio" ||
+        value === "vibe"
+    );
+}
 
 function toClientSafeEnrichmentFailure(
     failure: EnrichmentFailure,
@@ -101,15 +155,18 @@ function toClientSafeEnrichmentFailure(
  * GET /enrichment/progress
  * Get comprehensive enrichment progress (artists, track tags, audio analysis)
  */
-router.get("/progress", async (req, res) => {
-    try {
-        const progress = await getEnrichmentProgress();
-        res.json(progress);
-    } catch (error) {
-        logger.error("Get enrichment progress error:", error);
-        res.status(500).json({ error: "Failed to get progress" });
-    }
-});
+router.get(
+    "/progress",
+    asyncHandler(async (req, res) => {
+        try {
+            const progress = await getEnrichmentProgress();
+            res.json(progress);
+        } catch (error) {
+            logger.error("Get enrichment progress error:", error);
+            sendInternalRouteError(res, "Failed to get progress");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -129,23 +186,26 @@ router.get("/progress", async (req, res) => {
  * GET /enrichment/status
  * Get detailed enrichment state (running, paused, etc.)
  */
-router.get("/status", async (req, res) => {
-    try {
-        const state = await enrichmentStateService.getState();
-        const idleState: EnrichmentState = {
-            status: "idle",
-            currentPhase: null,
-            lastActivity: new Date().toISOString(),
-            artists: { total: 0, completed: 0, failed: 0 },
-            tracks: { total: 0, completed: 0, failed: 0 },
-            audio: { total: 0, completed: 0, failed: 0, processing: 0 },
-        };
-        res.json(state || idleState);
-    } catch (error) {
-        logger.error("Get enrichment status error:", error);
-        res.status(500).json({ error: "Failed to get status" });
-    }
-});
+router.get(
+    "/status",
+    asyncHandler(async (req, res) => {
+        try {
+            const state = await enrichmentStateService.getState();
+            const idleState: EnrichmentState = {
+                status: "idle",
+                currentPhase: null,
+                lastActivity: new Date().toISOString(),
+                artists: { total: 0, completed: 0, failed: 0 },
+                tracks: { total: 0, completed: 0, failed: 0 },
+                audio: { total: 0, completed: 0, failed: 0, processing: 0 },
+            };
+            res.json(state || idleState);
+        } catch (error) {
+            logger.error("Get enrichment status error:", error);
+            sendInternalRouteError(res, "Failed to get status");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -169,20 +229,24 @@ router.get("/status", async (req, res) => {
  * POST /enrichment/pause
  * Pause the enrichment process
  */
-router.post("/pause", requireAdmin, async (req, res) => {
-    try {
-        const state = await enrichmentStateService.pause();
-        res.json({
-            message: "Enrichment paused",
-            state,
-        });
-    } catch (error: any) {
-        logger.error("Pause enrichment error:", error);
-        res.status(400).json({
-            error: "Failed to pause enrichment",
-        });
-    }
-});
+router.post(
+    "/pause",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const state = await enrichmentStateService.pause();
+            res.json({
+                message: "Enrichment paused",
+                state,
+            });
+        } catch (error: unknown) {
+            logger.error("Pause enrichment error:", error);
+            res.status(400).json({
+                error: "Failed to pause enrichment",
+            });
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -206,20 +270,24 @@ router.post("/pause", requireAdmin, async (req, res) => {
  * POST /enrichment/resume
  * Resume a paused enrichment process
  */
-router.post("/resume", requireAdmin, async (req, res) => {
-    try {
-        const state = await enrichmentStateService.resume();
-        res.json({
-            message: "Enrichment resumed",
-            state,
-        });
-    } catch (error: any) {
-        logger.error("Resume enrichment error:", error);
-        res.status(400).json({
-            error: "Failed to resume enrichment",
-        });
-    }
-});
+router.post(
+    "/resume",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const state = await enrichmentStateService.resume();
+            res.json({
+                message: "Enrichment resumed",
+                state,
+            });
+        } catch (error: unknown) {
+            logger.error("Resume enrichment error:", error);
+            res.status(400).json({
+                error: "Failed to resume enrichment",
+            });
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -243,20 +311,24 @@ router.post("/resume", requireAdmin, async (req, res) => {
  * POST /enrichment/stop
  * Stop the enrichment process
  */
-router.post("/stop", requireAdmin, async (req, res) => {
-    try {
-        const state = await enrichmentStateService.stop();
-        res.json({
-            message: "Enrichment stopping...",
-            state,
-        });
-    } catch (error: any) {
-        logger.error("Stop enrichment error:", error);
-        res.status(400).json({
-            error: "Failed to stop enrichment",
-        });
-    }
-});
+router.post(
+    "/stop",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const state = await enrichmentStateService.stop();
+            res.json({
+                message: "Enrichment stopping...",
+                state,
+            });
+        } catch (error: unknown) {
+            logger.error("Stop enrichment error:", error);
+            res.status(400).json({
+                error: "Failed to stop enrichment",
+            });
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -291,33 +363,37 @@ router.post("/stop", requireAdmin, async (req, res) => {
  * Trigger full enrichment (re-enriches everything regardless of status)
  * Admin only
  */
-router.post("/full", requireAdmin, async (req, res) => {
-    try {
-        const forceVibeRebuild = req.body?.forceVibeRebuild === true;
-        const forceMoodBucketBackfill =
-            req.body?.forceMoodBucketBackfill === true;
+router.post(
+    "/full",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const forceVibeRebuild = req.body?.forceVibeRebuild === true;
+            const forceMoodBucketBackfill =
+                req.body?.forceMoodBucketBackfill === true;
 
-        // This runs in the background
-        runFullEnrichment({
-            forceVibeRebuild,
-            forceMoodBucketBackfill,
-        }).catch((err) => {
-            logger.error("Full enrichment error:", err);
-        });
+            // This runs in the background
+            runFullEnrichment({
+                forceVibeRebuild,
+                forceMoodBucketBackfill,
+            }).catch((err) => {
+                logger.error("Full enrichment error:", err);
+            });
 
-        res.json({
-            message: "Full enrichment started",
-            description: forceVibeRebuild
-                ? "All artists, track tags, audio analysis, and CLAP embeddings will be re-processed"
-                : "All artists, track tags, and audio analysis will be re-processed",
-            forceVibeRebuild,
-            forceMoodBucketBackfill,
-        });
-    } catch (error) {
-        logger.error("Trigger full enrichment error:", error);
-        res.status(500).json({ error: "Failed to start full enrichment" });
-    }
-});
+            res.json({
+                message: "Full enrichment started",
+                description: forceVibeRebuild
+                    ? "All artists, track tags, audio analysis, and CLAP embeddings will be re-processed"
+                    : "All artists, track tags, and audio analysis will be re-processed",
+                forceVibeRebuild,
+                forceMoodBucketBackfill,
+            });
+        } catch (error) {
+            logger.error("Trigger full enrichment error:", error);
+            sendInternalRouteError(res, "Failed to start full enrichment");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -340,20 +416,24 @@ router.post("/full", requireAdmin, async (req, res) => {
  * Reset only artist enrichment (keeps mood tags and audio analysis intact)
  * Admin only - selective re-enrichment for large libraries
  */
-router.post("/reset-artists", requireAdmin, async (req, res) => {
-    try {
-        const result = await reRunArtistsOnly();
+router.post(
+    "/reset-artists",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const result = await reRunArtistsOnly();
 
-        res.json({
-            message: "Artist enrichment reset",
-            description: `${result.count} artists queued for re-enrichment`,
-            count: result.count,
-        });
-    } catch (error) {
-        logger.error("Reset artists error:", error);
-        res.status(500).json({ error: "Failed to reset artist enrichment" });
-    }
-});
+            res.json({
+                message: "Artist enrichment reset",
+                description: `${result.count} artists queued for re-enrichment`,
+                count: result.count,
+            });
+        } catch (error) {
+            logger.error("Reset artists error:", error);
+            sendInternalRouteError(res, "Failed to reset artist enrichment");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -376,20 +456,24 @@ router.post("/reset-artists", requireAdmin, async (req, res) => {
  * Reset only mood tags (keeps artist metadata and audio analysis intact)
  * Admin only - selective re-enrichment for large libraries
  */
-router.post("/reset-mood-tags", requireAdmin, async (req, res) => {
-    try {
-        const result = await reRunMoodTagsOnly();
+router.post(
+    "/reset-mood-tags",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const result = await reRunMoodTagsOnly();
 
-        res.json({
-            message: "Mood tags reset",
-            description: `${result.count} tracks queued for mood tag re-enrichment`,
-            count: result.count,
-        });
-    } catch (error) {
-        logger.error("Reset mood tags error:", error);
-        res.status(500).json({ error: "Failed to reset mood tags" });
-    }
-});
+            res.json({
+                message: "Mood tags reset",
+                description: `${result.count} tracks queued for mood tag re-enrichment`,
+                count: result.count,
+            });
+        } catch (error) {
+            logger.error("Reset mood tags error:", error);
+            sendInternalRouteError(res, "Failed to reset mood tags");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -416,24 +500,28 @@ router.post("/reset-mood-tags", requireAdmin, async (req, res) => {
  * Gated on config.features.audioAnalysis so disabled deployments never queue
  * analysis work that no consumer will drain.
  */
-router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
-    if (!config.features.audioAnalysis) {
-        sendFeatureDisabled(res);
-        return;
-    }
-    try {
-        const queued = await reRunAudioAnalysisOnly();
+router.post(
+    "/reset-audio-analysis",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        if (!config.features.audioAnalysis) {
+            sendFeatureDisabled(res);
+            return;
+        }
+        try {
+            const queued = await reRunAudioAnalysisOnly();
 
-        res.json({
-            message: "Audio analysis reset",
-            description: `${queued} tracks queued for audio re-analysis`,
-            count: queued,
-        });
-    } catch (error) {
-        logger.error("Reset audio analysis error:", error);
-        res.status(500).json({ error: "Failed to reset audio analysis" });
-    }
-});
+            res.json({
+                message: "Audio analysis reset",
+                description: `${queued} tracks queued for audio re-analysis`,
+                count: queued,
+            });
+        } catch (error) {
+            logger.error("Reset audio analysis error:", error);
+            sendInternalRouteError(res, "Failed to reset audio analysis");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -460,24 +548,28 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
  * Gated on config.features.audioAnalysis (vibe/CLAP is part of the audio
  * analysis subsystem) so disabled deployments never queue undrained work.
  */
-router.post("/reset-vibe-embeddings", requireAdmin, async (req, res) => {
-    if (!config.features.audioAnalysis) {
-        sendFeatureDisabled(res);
-        return;
-    }
-    try {
-        const queued = await reRunVibeEmbeddingsOnly();
+router.post(
+    "/reset-vibe-embeddings",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        if (!config.features.audioAnalysis) {
+            sendFeatureDisabled(res);
+            return;
+        }
+        try {
+            const queued = await reRunVibeEmbeddingsOnly();
 
-        res.json({
-            message: "Vibe embeddings reset",
-            description: `${queued} tracks queued for vibe embedding re-analysis`,
-            count: queued,
-        });
-    } catch (error) {
-        logger.error("Reset vibe embeddings error:", error);
-        res.status(500).json({ error: "Failed to reset vibe embeddings" });
-    }
-});
+            res.json({
+                message: "Vibe embeddings reset",
+                description: `${queued} tracks queued for vibe embedding re-analysis`,
+                count: queued,
+            });
+        } catch (error) {
+            logger.error("Reset vibe embeddings error:", error);
+            sendInternalRouteError(res, "Failed to reset vibe embeddings");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -495,34 +587,38 @@ router.post("/reset-vibe-embeddings", requireAdmin, async (req, res) => {
  *       403:
  *         description: Admin access required
  */
-router.post("/repair-covers", requireAdmin, async (req, res) => {
-    try {
-        const albumsMissingCovers = await prisma.album.findMany({
-            where: {
-                OR: [{ coverUrl: null }, { coverUrl: "" }],
-            },
-            select: { id: true, rgMbid: true },
-        });
+router.post(
+    "/repair-covers",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const albumsMissingCovers = await prisma.album.findMany({
+                where: {
+                    OR: [{ coverUrl: null }, { coverUrl: "" }],
+                },
+                select: { id: true, rgMbid: true },
+            });
 
-        let cacheCleared = 0;
-        for (const album of albumsMissingCovers) {
-            if (album.rgMbid) {
-                await coverArtService.clearNotFoundCache(album.rgMbid);
-                cacheCleared++;
+            let cacheCleared = 0;
+            for (const album of albumsMissingCovers) {
+                if (album.rgMbid) {
+                    await coverArtService.clearNotFoundCache(album.rgMbid);
+                    cacheCleared++;
+                }
             }
-        }
 
-        res.json({
-            message: "Cover repair initiated",
-            description: `Found ${albumsMissingCovers.length} albums missing covers, cleared ${cacheCleared} stale cache entries. Covers will be re-fetched on next access.`,
-            albumsMissingCovers: albumsMissingCovers.length,
-            cacheEntriesCleared: cacheCleared,
-        });
-    } catch (error) {
-        logger.error("Cover repair error:", error);
-        res.status(500).json({ error: "Failed to repair covers" });
-    }
-});
+            res.json({
+                message: "Cover repair initiated",
+                description: `Found ${albumsMissingCovers.length} albums missing covers, cleared ${cacheCleared} stale cache entries. Covers will be re-fetched on next access.`,
+                albumsMissingCovers: albumsMissingCovers.length,
+                cacheEntriesCleared: cacheCleared,
+            });
+        } catch (error) {
+            logger.error("Cover repair error:", error);
+            sendInternalRouteError(res, "Failed to repair covers");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -545,22 +641,24 @@ router.post("/repair-covers", requireAdmin, async (req, res) => {
  * Trigger incremental enrichment (only processes pending items)
  * Fast sync that picks up new content without re-processing everything
  */
-router.post("/sync", requireAdmin, async (req, res) => {
-    try {
-        const result = await triggerEnrichmentNow();
+router.post(
+    "/sync",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const result = await triggerEnrichmentNow();
 
-        res.json({
-            message: "Incremental sync started",
-            description: "Processing new and pending items only",
-            result,
-        });
-    } catch (error: any) {
-        logger.error("Trigger sync error:", error);
-        res.status(500).json({
-            error: "Failed to start sync",
-        });
-    }
-});
+            res.json({
+                message: "Incremental sync started",
+                description: "Processing new and pending items only",
+                result,
+            });
+        } catch (error: unknown) {
+            logger.error("Trigger sync error:", error);
+            sendInternalRouteError(res, "Failed to start sync");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -580,16 +678,19 @@ router.post("/sync", requireAdmin, async (req, res) => {
  * GET /enrichment/settings
  * Get enrichment settings for current user
  */
-router.get("/settings", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const settings = await enrichmentService.getSettings(userId);
-        res.json(settings);
-    } catch (error) {
-        logger.error("Get enrichment settings error:", error);
-        res.status(500).json({ error: "Failed to get settings" });
-    }
-});
+router.get(
+    "/settings",
+    asyncHandler(async (req, res) => {
+        try {
+            const userId = req.user!.id;
+            const settings = await enrichmentService.getSettings(userId);
+            res.json(settings);
+        } catch (error) {
+            logger.error("Get enrichment settings error:", error);
+            sendInternalRouteError(res, "Failed to get settings");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -616,19 +717,22 @@ router.get("/settings", async (req, res) => {
  * PUT /enrichment/settings
  * Update enrichment settings for current user
  */
-router.put("/settings", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const settings = await enrichmentService.updateSettings(
-            userId,
-            req.body,
-        );
-        res.json(settings);
-    } catch (error) {
-        logger.error("Update enrichment settings error:", error);
-        res.status(500).json({ error: "Failed to update settings" });
-    }
-});
+router.put<{ id: string }>(
+    "/settings",
+    asyncHandler(async (req, res) => {
+        try {
+            const userId = req.user!.id;
+            const settings = await enrichmentService.updateSettings(
+                userId,
+                req.body,
+            );
+            res.json(settings);
+        } catch (error) {
+            logger.error("Update enrichment settings error:", error);
+            sendInternalRouteError(res, "Failed to update settings");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -662,35 +766,41 @@ router.put("/settings", async (req, res) => {
  * Enrich a single artist
  * Admin only - applies results library-wide and makes outbound metadata API calls
  */
-router.post<{ id: string }>("/artist/:id", requireAdmin, async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const settings = await enrichmentService.getSettings(userId);
+router.post<{ id: string }>(
+    "/artist/:id",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const userId = req.user!.id;
+            const settings = await enrichmentService.getSettings(userId);
 
-        if (!settings.enabled) {
-            return res.status(400).json({ error: "Enrichment is not enabled" });
+            if (!settings.enabled) {
+                return res
+                    .status(400)
+                    .json({ error: "Enrichment is not enabled" });
+            }
+
+            const enrichmentData = await enrichArtistFields(req.params.id);
+
+            if (!enrichmentData) {
+                return res
+                    .status(404)
+                    .json({ error: "No enrichment data found" });
+            }
+
+            await applyArtistEnrichmentFields(req.params.id, enrichmentData);
+
+            res.json({
+                success: true,
+                confidence: enrichmentData.confidence,
+                data: enrichmentData,
+            });
+        } catch (error: unknown) {
+            logger.error("Enrich artist error:", error);
+            sendInternalRouteError(res, "Failed to enrich artist");
         }
-
-        const enrichmentData = await enrichArtistFields(req.params.id);
-
-        if (!enrichmentData) {
-            return res.status(404).json({ error: "No enrichment data found" });
-        }
-
-        await applyArtistEnrichmentFields(req.params.id, enrichmentData);
-
-        res.json({
-            success: true,
-            confidence: enrichmentData.confidence,
-            data: enrichmentData,
-        });
-    } catch (error: any) {
-        logger.error("Enrich artist error:", error);
-        res.status(500).json({
-            error: "Failed to enrich artist",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -724,35 +834,41 @@ router.post<{ id: string }>("/artist/:id", requireAdmin, async (req, res) => {
  * Enrich a single album
  * Admin only - applies results library-wide and makes outbound metadata API calls
  */
-router.post<{ id: string }>("/album/:id", requireAdmin, async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const settings = await enrichmentService.getSettings(userId);
+router.post<{ id: string }>(
+    "/album/:id",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const userId = req.user!.id;
+            const settings = await enrichmentService.getSettings(userId);
 
-        if (!settings.enabled) {
-            return res.status(400).json({ error: "Enrichment is not enabled" });
+            if (!settings.enabled) {
+                return res
+                    .status(400)
+                    .json({ error: "Enrichment is not enabled" });
+            }
+
+            const enrichmentData = await enrichAlbumFields(req.params.id);
+
+            if (!enrichmentData) {
+                return res
+                    .status(404)
+                    .json({ error: "No enrichment data found" });
+            }
+
+            await applyAlbumEnrichmentFields(req.params.id, enrichmentData);
+
+            res.json({
+                success: true,
+                confidence: enrichmentData.confidence,
+                data: enrichmentData,
+            });
+        } catch (error: unknown) {
+            logger.error("Enrich album error:", error);
+            sendInternalRouteError(res, "Failed to enrich album");
         }
-
-        const enrichmentData = await enrichAlbumFields(req.params.id);
-
-        if (!enrichmentData) {
-            return res.status(404).json({ error: "No enrichment data found" });
-        }
-
-        await applyAlbumEnrichmentFields(req.params.id, enrichmentData);
-
-        res.json({
-            success: true,
-            confidence: enrichmentData.confidence,
-            data: enrichmentData,
-        });
-    } catch (error: any) {
-        logger.error("Enrich album error:", error);
-        res.status(500).json({
-            error: "Failed to enrich album",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -778,36 +894,37 @@ router.post<{ id: string }>("/album/:id", requireAdmin, async (req, res) => {
  * Delegates to the unified enrichment worker for consistent state tracking,
  * failure recording, and pause/stop support.
  */
-router.post("/start", requireAdmin, async (req, res) => {
-    try {
-        const { prisma } = await import("../utils/db");
-        const systemSettings = await prisma.systemSettings.findUnique({
-            where: { id: "default" },
-            select: { autoEnrichMetadata: true },
-        });
-
-        if (!systemSettings?.autoEnrichMetadata) {
-            return res.status(400).json({
-                error: "Enrichment is not enabled. Enable it in settings first.",
+router.post(
+    "/start",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const systemSettings = await prisma.systemSettings.findUnique({
+                where: { id: "default" },
+                select: { autoEnrichMetadata: true },
             });
+
+            if (!systemSettings?.autoEnrichMetadata) {
+                return res.status(400).json({
+                    error: "Enrichment is not enabled. Enable it in settings first.",
+                });
+            }
+
+            // Run via unified worker (handles state, failures, notifications)
+            runFullEnrichment().catch((err) => {
+                logger.error("Background enrichment failed:", err);
+            });
+
+            res.json({
+                success: true,
+                message: "Library enrichment started in background",
+            });
+        } catch (error: unknown) {
+            logger.error("Start enrichment error:", error);
+            sendInternalRouteError(res, "Failed to start enrichment");
         }
-
-        // Run via unified worker (handles state, failures, notifications)
-        runFullEnrichment().catch((err) => {
-            logger.error("Background enrichment failed:", err);
-        });
-
-        res.json({
-            success: true,
-            message: "Library enrichment started in background",
-        });
-    } catch (error: any) {
-        logger.error("Start enrichment error:", error);
-        res.status(500).json({
-            error: "Failed to start enrichment",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -838,36 +955,39 @@ router.post("/start", requireAdmin, async (req, res) => {
  * Search MusicBrainz for artists by name.
  * Used by metadata editing workflows to assist MBID correction.
  */
-router.get("/search/musicbrainz/artists", async (req, res) => {
-    try {
-        const query = String(req.query.q || "").trim();
-        if (query.length < 2) {
-            return res
-                .status(400)
-                .json({ error: "Query must be at least 2 characters" });
+router.get(
+    "/search/musicbrainz/artists",
+    asyncHandler(async (req, res) => {
+        try {
+            const query = String(req.query.q || "").trim();
+            if (query.length < 2) {
+                return res
+                    .status(400)
+                    .json({ error: "Query must be at least 2 characters" });
+            }
+
+            const results = await musicBrainzService.searchArtist(query, 10);
+            const artists = results.map(
+                (artist: MusicBrainzArtistSearchResult) => ({
+                    mbid: artist.id,
+                    name: artist.name,
+                    disambiguation: artist.disambiguation || null,
+                    country: artist.country || null,
+                    type: artist.type || null,
+                    score:
+                        typeof artist.score === "number"
+                            ? artist.score
+                            : Number.parseInt(artist.score || "0", 10),
+                }),
+            );
+
+            res.json({ artists });
+        } catch (error: unknown) {
+            logger.error("MusicBrainz artist search error:", error);
+            sendInternalRouteError(res, "Search failed");
         }
-
-        const results = await musicBrainzService.searchArtist(query, 10);
-        const artists = results.map((artist: any) => ({
-            mbid: artist.id,
-            name: artist.name,
-            disambiguation: artist.disambiguation || null,
-            country: artist.country || null,
-            type: artist.type || null,
-            score:
-                typeof artist.score === "number"
-                    ? artist.score
-                    : Number.parseInt(artist.score || "0", 10),
-        }));
-
-        res.json({ artists });
-    } catch (error: any) {
-        logger.error("MusicBrainz artist search error:", error);
-        res.status(500).json({
-            error: "Search failed",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -903,48 +1023,53 @@ router.get("/search/musicbrainz/artists", async (req, res) => {
  * Search MusicBrainz for release groups by title (optionally constrained by artist).
  * Used by metadata editing workflows to assist release-group MBID correction.
  */
-router.get("/search/musicbrainz/release-groups", async (req, res) => {
-    try {
-        const query = String(req.query.q || "").trim();
-        const artistName = String(req.query.artist || "").trim();
+router.get(
+    "/search/musicbrainz/release-groups",
+    asyncHandler(async (req, res) => {
+        try {
+            const query = String(req.query.q || "").trim();
+            const artistName = String(req.query.artist || "").trim();
 
-        if (query.length < 2) {
-            return res
-                .status(400)
-                .json({ error: "Query must be at least 2 characters" });
+            if (query.length < 2) {
+                return res
+                    .status(400)
+                    .json({ error: "Query must be at least 2 characters" });
+            }
+
+            const releaseGroups = await musicBrainzService.searchReleaseGroups(
+                query,
+                artistName || undefined,
+                10,
+            );
+
+            const albums = releaseGroups.map(
+                (rg: MusicBrainzReleaseGroupSearchResult) => ({
+                    rgMbid: rg.id,
+                    title: rg.title,
+                    primaryType: rg["primary-type"] || "Album",
+                    secondaryTypes: rg["secondary-types"] || [],
+                    firstReleaseDate: rg["first-release-date"] || null,
+                    artistCredit:
+                        rg["artist-credit"]
+                            ?.map(
+                                (credit) => credit.name || credit.artist?.name,
+                            )
+                            .filter(Boolean)
+                            .join(", ") || "Unknown Artist",
+                    score:
+                        typeof rg.score === "number"
+                            ? rg.score
+                            : Number.parseInt(rg.score || "0", 10),
+                }),
+            );
+
+            res.json({ albums });
+        } catch (error: unknown) {
+            logger.error("MusicBrainz release-group search error:", error);
+            sendInternalRouteError(res, "Search failed");
         }
-
-        const releaseGroups = await musicBrainzService.searchReleaseGroups(
-            query,
-            artistName || undefined,
-            10,
-        );
-
-        const albums = releaseGroups.map((rg: any) => ({
-            rgMbid: rg.id,
-            title: rg.title,
-            primaryType: rg["primary-type"] || "Album",
-            secondaryTypes: rg["secondary-types"] || [],
-            firstReleaseDate: rg["first-release-date"] || null,
-            artistCredit:
-                rg["artist-credit"]
-                    ?.map((credit: any) => credit.name || credit.artist?.name)
-                    .filter(Boolean)
-                    .join(", ") || "Unknown Artist",
-            score:
-                typeof rg.score === "number"
-                    ? rg.score
-                    : Number.parseInt(rg.score || "0", 10),
-        }));
-
-        res.json({ albums });
-    } catch (error: any) {
-        logger.error("MusicBrainz release-group search error:", error);
-        res.status(500).json({
-            error: "Search failed",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -999,28 +1124,41 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
  * GET /enrichment/failures
  * Get all enrichment failures with filtering (admin only)
  */
-router.get("/failures", requireAdmin, async (req, res) => {
-    try {
-        const { entityType, includeSkipped, includeResolved, limit, offset } =
-            req.query;
+router.get(
+    "/failures",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const {
+                entityType,
+                includeSkipped,
+                includeResolved,
+                limit,
+                offset,
+            } = req.query;
 
-        const options: any = {};
-        if (entityType) options.entityType = entityType as string;
-        if (includeSkipped === "true") options.includeSkipped = true;
-        if (includeResolved === "true") options.includeResolved = true;
-        options.limit = parseBoundedInt(req.query.limit, 100, 1, 100);
-        options.offset = parseBoundedInt(req.query.offset, 0, 0, 1_000_000);
+            const options: Parameters<
+                typeof enrichmentFailureService.getFailures
+            >[0] = {};
+            if (isFailureEntityType(entityType)) {
+                options.entityType = entityType;
+            }
+            if (includeSkipped === "true") options.includeSkipped = true;
+            if (includeResolved === "true") options.includeResolved = true;
+            options.limit = parseBoundedInt(req.query.limit, 100, 1, 100);
+            options.offset = parseBoundedInt(req.query.offset, 0, 0, 1_000_000);
 
-        const result = await enrichmentFailureService.getFailures(options);
-        res.json({
-            failures: result.failures.map(toClientSafeEnrichmentFailure),
-            total: result.total,
-        });
-    } catch (error) {
-        logger.error("Get failures error:", error);
-        res.status(500).json({ error: "Failed to get failures" });
-    }
-});
+            const result = await enrichmentFailureService.getFailures(options);
+            res.json({
+                failures: result.failures.map(toClientSafeEnrichmentFailure),
+                total: result.total,
+            });
+        } catch (error) {
+            logger.error("Get failures error:", error);
+            sendInternalRouteError(res, "Failed to get failures");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -1042,15 +1180,19 @@ router.get("/failures", requireAdmin, async (req, res) => {
  * GET /enrichment/failures/counts
  * Get failure counts by type (admin only)
  */
-router.get("/failures/counts", requireAdmin, async (req, res) => {
-    try {
-        const counts = await enrichmentFailureService.getFailureCounts();
-        res.json(counts);
-    } catch (error) {
-        logger.error("Get failure counts error:", error);
-        res.status(500).json({ error: "Failed to get failure counts" });
-    }
-});
+router.get(
+    "/failures/counts",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const counts = await enrichmentFailureService.getFailureCounts();
+            res.json(counts);
+        } catch (error) {
+            logger.error("Get failure counts error:", error);
+            sendInternalRouteError(res, "Failed to get failure counts");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -1072,15 +1214,20 @@ router.get("/failures/counts", requireAdmin, async (req, res) => {
  * POST /enrichment/failures/reconcile
  * Reconcile stale failure records with authoritative live state (admin only)
  */
-router.post("/failures/reconcile", requireAdmin, async (_req, res) => {
-    try {
-        const result = await enrichmentFailureService.reconcileWithLiveState();
-        res.json(result);
-    } catch (error) {
-        logger.error("Reconcile enrichment failures error:", error);
-        sendInternalRouteError(res, "Failed to reconcile failures");
-    }
-});
+router.post(
+    "/failures/reconcile",
+    requireAdmin,
+    asyncHandler(async (_req, res) => {
+        try {
+            const result =
+                await enrichmentFailureService.reconcileWithLiveState();
+            res.json(result);
+        } catch (error) {
+            logger.error("Reconcile enrichment failures error:", error);
+            sendInternalRouteError(res, "Failed to reconcile failures");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -1117,147 +1264,148 @@ router.post("/failures/reconcile", requireAdmin, async (_req, res) => {
  * POST /enrichment/retry
  * Retry specific failed items
  */
-router.post("/retry", requireAdmin, async (req, res) => {
-    try {
-        const { ids } = req.body;
+router.post(
+    "/retry",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const { ids } = req.body;
 
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
-            return res
-                .status(400)
-                .json({ error: "Must provide array of failure IDs" });
-        }
-
-        // Reset retry count for these failures
-        await enrichmentFailureService.resetRetryCount(ids);
-
-        // Get the failures to determine what to retry
-        const failures = await Promise.all(
-            ids.map((id) => enrichmentFailureService.getFailure(id)),
-        );
-
-        // Group by type and trigger appropriate re-enrichment
-        const { prisma } = await import("../utils/db");
-        let queued = 0;
-        let skipped = 0;
-
-        for (const failure of failures) {
-            if (!failure) continue;
-
-            try {
-                if (failure.entityType === "artist") {
-                    // Check if artist still exists
-                    const artist = await prisma.artist.findUnique({
-                        where: { id: failure.entityId },
-                        select: { id: true },
-                    });
-
-                    if (!artist) {
-                        // Entity was deleted - mark failure as resolved
-                        await enrichmentFailureService.resolveFailures([
-                            failure.id,
-                        ]);
-                        skipped++;
-                        continue;
-                    }
-
-                    // Reset artist enrichment status
-                    await prisma.artist.update({
-                        where: { id: failure.entityId },
-                        data: { enrichmentStatus: "pending" },
-                    });
-                    queued++;
-                } else if (failure.entityType === "track") {
-                    // Check if track still exists
-                    const track = await prisma.track.findUnique({
-                        where: { id: failure.entityId },
-                        select: { id: true },
-                    });
-
-                    if (!track) {
-                        // Entity was deleted - mark failure as resolved
-                        await enrichmentFailureService.resolveFailures([
-                            failure.id,
-                        ]);
-                        skipped++;
-                        continue;
-                    }
-
-                    // Reset track tag status
-                    await prisma.track.update({
-                        where: { id: failure.entityId },
-                        data: { lastfmTags: [] },
-                    });
-                    queued++;
-                } else if (failure.entityType === "audio") {
-                    // Check if track still exists
-                    const track = await prisma.track.findUnique({
-                        where: { id: failure.entityId },
-                        select: { id: true },
-                    });
-
-                    if (!track) {
-                        // Entity was deleted - mark failure as resolved
-                        await enrichmentFailureService.resolveFailures([
-                            failure.id,
-                        ]);
-                        skipped++;
-                        continue;
-                    }
-
-                    // Reset audio analysis status
-                    await prisma.track.update({
-                        where: { id: failure.entityId },
-                        data: {
-                            analysisStatus: "pending",
-                            analysisError: null,
-                            analysisRetryCount: 0,
-                            analysisStartedAt: null,
-                        },
-                    });
-                    queued++;
-                } else if (failure.entityType === "vibe") {
-                    const track = await prisma.track.findUnique({
-                        where: { id: failure.entityId },
-                        select: { id: true },
-                    });
-
-                    if (!track) {
-                        await enrichmentFailureService.resolveFailures([
-                            failure.id,
-                        ]);
-                        skipped++;
-                        continue;
-                    }
-
-                    const reset = await invalidateVibeAnalysis(
-                        prisma,
-                        { id: failure.entityId },
-                        new Date(),
-                    );
-                    if (reset === 1) queued++;
-                    else skipped++;
-                }
-            } catch (error) {
-                logger.error(
-                    `Failed to reset ${failure.entityType} ${failure.entityId}:`,
-                    error,
-                );
-                // Don't re-throw - continue processing other failures
+            if (!ids || !Array.isArray(ids) || ids.length === 0) {
+                return res
+                    .status(400)
+                    .json({ error: "Must provide array of failure IDs" });
             }
-        }
 
-        res.json({
-            message: `Queued ${queued} items for retry, ${skipped} skipped (entities no longer exist)`,
-            queued,
-            skipped,
-        });
-    } catch (error: any) {
-        logger.error("Retry failures error:", error);
-        res.status(500).json({
-            error: "Failed to retry failures",
-        });
-    }
-});
+            // Reset retry count for these failures
+            await enrichmentFailureService.resetRetryCount(ids);
+
+            // Get the failures to determine what to retry
+            const failures = await Promise.all(
+                ids.map((id) => enrichmentFailureService.getFailure(id)),
+            );
+
+            // Group by type and trigger appropriate re-enrichment
+            let queued = 0;
+            let skipped = 0;
+
+            for (const failure of failures) {
+                if (!failure) continue;
+
+                try {
+                    if (failure.entityType === "artist") {
+                        // Check if artist still exists
+                        const artist = await prisma.artist.findUnique({
+                            where: { id: failure.entityId },
+                            select: { id: true },
+                        });
+
+                        if (!artist) {
+                            // Entity was deleted - mark failure as resolved
+                            await enrichmentFailureService.resolveFailures([
+                                failure.id,
+                            ]);
+                            skipped++;
+                            continue;
+                        }
+
+                        // Reset artist enrichment status
+                        await prisma.artist.update({
+                            where: { id: failure.entityId },
+                            data: { enrichmentStatus: "pending" },
+                        });
+                        queued++;
+                    } else if (failure.entityType === "track") {
+                        // Check if track still exists
+                        const track = await prisma.track.findUnique({
+                            where: { id: failure.entityId },
+                            select: { id: true },
+                        });
+
+                        if (!track) {
+                            // Entity was deleted - mark failure as resolved
+                            await enrichmentFailureService.resolveFailures([
+                                failure.id,
+                            ]);
+                            skipped++;
+                            continue;
+                        }
+
+                        // Reset track tag status
+                        await prisma.track.update({
+                            where: { id: failure.entityId },
+                            data: { lastfmTags: [] },
+                        });
+                        queued++;
+                    } else if (failure.entityType === "audio") {
+                        // Check if track still exists
+                        const track = await prisma.track.findUnique({
+                            where: { id: failure.entityId },
+                            select: { id: true },
+                        });
+
+                        if (!track) {
+                            // Entity was deleted - mark failure as resolved
+                            await enrichmentFailureService.resolveFailures([
+                                failure.id,
+                            ]);
+                            skipped++;
+                            continue;
+                        }
+
+                        // Reset audio analysis status
+                        await prisma.track.update({
+                            where: { id: failure.entityId },
+                            data: {
+                                analysisStatus: "pending",
+                                analysisError: null,
+                                analysisRetryCount: 0,
+                                analysisStartedAt: null,
+                            },
+                        });
+                        queued++;
+                    } else if (failure.entityType === "vibe") {
+                        const track = await prisma.track.findUnique({
+                            where: { id: failure.entityId },
+                            select: { id: true },
+                        });
+
+                        if (!track) {
+                            await enrichmentFailureService.resolveFailures([
+                                failure.id,
+                            ]);
+                            skipped++;
+                            continue;
+                        }
+
+                        const reset = await invalidateVibeAnalysis(
+                            prisma,
+                            { id: failure.entityId },
+                            new Date(),
+                        );
+                        if (reset === 1) queued++;
+                        else skipped++;
+                    }
+                } catch (error) {
+                    logger.error(
+                        `Failed to reset ${failure.entityType} ${failure.entityId}:`,
+                        error,
+                    );
+                    // Don't re-throw - continue processing other failures
+                }
+            }
+
+            res.json({
+                message: `Queued ${queued} items for retry, ${skipped} skipped (entities no longer exist)`,
+                queued,
+                skipped,
+            });
+        } catch (error: unknown) {
+            logger.error("Retry failures error:", error);
+            sendInternalRouteError(res, "Failed to retry failures");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -1294,28 +1442,30 @@ router.post("/retry", requireAdmin, async (req, res) => {
  * POST /enrichment/skip
  * Skip specific failures (won't retry automatically)
  */
-router.post("/skip", requireAdmin, async (req, res) => {
-    try {
-        const { ids } = req.body;
+router.post(
+    "/skip",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const { ids } = req.body;
 
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
-            return res
-                .status(400)
-                .json({ error: "Must provide array of failure IDs" });
+            if (!ids || !Array.isArray(ids) || ids.length === 0) {
+                return res
+                    .status(400)
+                    .json({ error: "Must provide array of failure IDs" });
+            }
+
+            const count = await enrichmentFailureService.skipFailures(ids);
+            res.json({
+                message: `Skipped ${count} failures`,
+                count,
+            });
+        } catch (error: unknown) {
+            logger.error("Skip failures error:", error);
+            sendInternalRouteError(res, "Failed to skip failures");
         }
-
-        const count = await enrichmentFailureService.skipFailures(ids);
-        res.json({
-            message: `Skipped ${count} failures`,
-            count,
-        });
-    } catch (error: any) {
-        logger.error("Skip failures error:", error);
-        res.status(500).json({
-            error: "Failed to skip failures",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -1346,32 +1496,37 @@ router.post("/skip", requireAdmin, async (req, res) => {
  * DELETE /enrichment/failures
  * Clear all unresolved failures (optionally filtered by type)
  */
-router.delete("/failures", requireAdmin, async (req, res) => {
-    try {
-        const entityType = req.query.entityType as
-            | "artist"
-            | "track"
-            | "audio"
-            | undefined;
+router.delete(
+    "/failures",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const entityType = req.query.entityType as
+                | "artist"
+                | "track"
+                | "audio"
+                | undefined;
 
-        if (entityType && !["artist", "track", "audio"].includes(entityType)) {
-            return res.status(400).json({ error: "Invalid entityType" });
+            if (
+                entityType &&
+                !["artist", "track", "audio"].includes(entityType)
+            ) {
+                return res.status(400).json({ error: "Invalid entityType" });
+            }
+
+            const count =
+                await enrichmentFailureService.clearAllFailures(entityType);
+
+            res.json({
+                message: `Cleared ${count} failure${count !== 1 ? "s" : ""}`,
+                count,
+            });
+        } catch (error: unknown) {
+            logger.error("Clear all failures error:", error);
+            sendInternalRouteError(res, "Failed to clear failures");
         }
-
-        const count =
-            await enrichmentFailureService.clearAllFailures(entityType);
-
-        res.json({
-            message: `Cleared ${count} failure${count !== 1 ? "s" : ""}`,
-            count,
-        });
-    } catch (error: any) {
-        logger.error("Clear all failures error:", error);
-        res.status(500).json({
-            error: "Failed to clear failures",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -1403,7 +1558,7 @@ router.delete("/failures", requireAdmin, async (req, res) => {
 router.delete<{ id: string }>(
     "/failures/:id",
     requireAdmin,
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
         try {
             const count = await enrichmentFailureService.deleteFailures([
                 req.params.id,
@@ -1412,13 +1567,11 @@ router.delete<{ id: string }>(
                 message: "Failure deleted",
                 count,
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error("Delete failure error:", error);
-            res.status(500).json({
-                error: "Failed to delete failure",
-            });
+            sendInternalRouteError(res, "Failed to delete failure");
         }
-    },
+    }),
 );
 
 /**
@@ -1473,64 +1626,21 @@ router.delete<{ id: string }>(
  * Update artist metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved for API lookups
  */
-router.put("/artists/:id/metadata", async (req, res) => {
-    try {
-        const { name, bio, genres, heroUrl, mbid } = req.body;
+router.put<{ id: string }>(
+    "/artists/:id/metadata",
+    validate({ body: artistMetadataSchema }),
+    asyncHandler(async (req, res) => {
+        try {
+            const body = (req.valid?.body ?? req.body) as Record<
+                string,
+                unknown
+            >;
+            const overrideBody = { ...body };
+            const { mbid } = body;
 
-        const updateData: any = {};
-        let hasOverrides = false;
-
-        // Map user edits to override fields (non-destructive)
-        if (name !== undefined) {
-            updateData.displayName = name;
-            hasOverrides = true;
-        }
-        if (bio !== undefined) {
-            updateData.userSummary = bio;
-            hasOverrides = true;
-        }
-        if (heroUrl !== undefined) {
-            updateData.userHeroUrl = heroUrl;
-            hasOverrides = true;
-        }
-        if (genres !== undefined) {
-            updateData.userGenres = genres;
-            hasOverrides = true;
-        }
-        const { prisma } = await import("../utils/db");
-
-        // MBID changes are canonical-link corrections (not override fields).
-        if (mbid !== undefined) {
-            if (typeof mbid !== "string") {
-                return res.status(400).json({
-                    error: "Invalid MusicBrainz ID format",
-                    code: "INVALID_MBID_FORMAT",
-                    field: "mbid",
-                    expectedFormat: MBID_FORMAT_EXAMPLE,
-                });
-            }
-
-            const normalizedMbid = mbid.trim();
-            if (normalizedMbid) {
-                // Only validate strict UUID format when the value is actually being changed.
-                // Existing temporary MBIDs should not block unrelated override edits.
-                const existingArtist = await prisma.artist.findUnique({
-                    where: { id: req.params.id },
-                    select: { mbid: true },
-                });
-
-                if (!existingArtist) {
-                    return sendRouteError(
-                        res,
-                        404,
-                        "Artist not found (the artist may have been deleted)",
-                    );
-                }
-
-                if (
-                    existingArtist.mbid !== normalizedMbid &&
-                    !isValidMusicBrainzId(normalizedMbid)
-                ) {
+            // MBID changes are canonical-link corrections (not override fields).
+            if (mbid !== undefined) {
+                if (typeof mbid !== "string") {
                     return res.status(400).json({
                         error: "Invalid MusicBrainz ID format",
                         code: "INVALID_MBID_FORMAT",
@@ -1539,72 +1649,85 @@ router.put("/artists/:id/metadata", async (req, res) => {
                     });
                 }
 
-                if (existingArtist.mbid !== normalizedMbid) {
-                    const conflictingArtist = await prisma.artist.findFirst({
-                        where: {
-                            mbid: normalizedMbid,
-                            id: { not: req.params.id },
-                        },
-                        select: { id: true },
+                const normalizedMbid = mbid.trim();
+                if (normalizedMbid) {
+                    // Only validate strict UUID format when the value is actually being changed.
+                    // Existing temporary MBIDs should not block unrelated override edits.
+                    const existingArtist = await prisma.artist.findUnique({
+                        where: { id: req.params.id },
+                        select: { mbid: true },
                     });
 
-                    if (conflictingArtist) {
-                        return res.status(409).json({
-                            error: "MusicBrainz ID is already used by another artist",
-                            code: "MBID_CONFLICT",
+                    if (!existingArtist) {
+                        return sendRouteError(
+                            res,
+                            404,
+                            "Artist not found (the artist may have been deleted)",
+                        );
+                    }
+
+                    if (
+                        existingArtist.mbid !== normalizedMbid &&
+                        !isValidMusicBrainzId(normalizedMbid)
+                    ) {
+                        return res.status(400).json({
+                            error: "Invalid MusicBrainz ID format",
+                            code: "INVALID_MBID_FORMAT",
                             field: "mbid",
-                            hint: "Use MusicBrainz lookup to pick the correct artist MBID",
+                            expectedFormat: MBID_FORMAT_EXAMPLE,
                         });
                     }
 
-                    updateData.mbid = normalizedMbid;
+                    if (existingArtist.mbid !== normalizedMbid) {
+                        const conflictingArtist = await prisma.artist.findFirst(
+                            {
+                                where: {
+                                    mbid: normalizedMbid,
+                                    id: { not: req.params.id },
+                                },
+                                select: { id: true },
+                            },
+                        );
+
+                        if (conflictingArtist) {
+                            return res.status(409).json({
+                                error: "MusicBrainz ID is already used by another artist",
+                                code: "MBID_CONFLICT",
+                                field: "mbid",
+                                hint: "Use MusicBrainz lookup to pick the correct artist MBID",
+                            });
+                        }
+
+                        overrideBody.mbid = normalizedMbid;
+                    } else {
+                        delete overrideBody.mbid;
+                    }
+                } else {
+                    delete overrideBody.mbid;
                 }
             }
-        }
 
-        // Set override flag
-        if (hasOverrides) {
-            updateData.hasUserOverrides = true;
-        }
+            const artist = await applyMetadataOverrides(
+                { type: "artist", id: req.params.id },
+                overrideBody,
+                ARTIST_METADATA_FIELDS,
+            );
 
-        const artist = await prisma.artist.update({
-            where: { id: req.params.id },
-            data: updateData,
-            include: {
-                albums: {
-                    select: {
-                        id: true,
-                        title: true,
-                        year: true,
-                        coverUrl: true,
-                    },
-                },
-            },
-        });
-
-        // Invalidate Redis cache for artist hero image
-        try {
-            await redisClient.del(`hero:${req.params.id}`);
-        } catch (err) {
-            logger.warn("Failed to invalidate Redis cache:", err);
+            res.json(artist);
+        } catch (error: unknown) {
+            if (getErrorCode(error) === "P2002") {
+                return res.status(409).json({
+                    error: "MusicBrainz ID is already used by another artist",
+                    code: "MBID_CONFLICT",
+                    field: "mbid",
+                    hint: "Use MusicBrainz lookup to pick the correct artist MBID",
+                });
+            }
+            logger.error("Update artist metadata error:", error);
+            sendInternalRouteError(res, "Failed to update artist");
         }
-
-        res.json(artist);
-    } catch (error: any) {
-        if (error?.code === "P2002") {
-            return res.status(409).json({
-                error: "MusicBrainz ID is already used by another artist",
-                code: "MBID_CONFLICT",
-                field: "mbid",
-                hint: "Use MusicBrainz lookup to pick the correct artist MBID",
-            });
-        }
-        logger.error("Update artist metadata error:", error);
-        res.status(500).json({
-            error: "Failed to update artist",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -1658,108 +1781,92 @@ router.put("/artists/:id/metadata", async (req, res) => {
  * Update album metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved for API lookups
  */
-router.put("/albums/:id/metadata", async (req, res) => {
-    try {
-        const { title, year, genres, coverUrl, rgMbid } = req.body;
-
-        const updateData: any = {};
-        let hasOverrides = false;
-
-        // Map user edits to override fields (non-destructive)
-        if (title !== undefined) {
-            updateData.displayTitle = title;
-            hasOverrides = true;
-        }
-        if (year !== undefined) {
-            updateData.displayYear = parseInt(year);
-            hasOverrides = true;
-        }
-        if (coverUrl !== undefined) {
-            updateData.userCoverUrl = coverUrl;
-            hasOverrides = true;
-        }
-        if (genres !== undefined) {
-            updateData.userGenres = genres;
-            hasOverrides = true;
-        }
-        const normalizedRgMbid =
-            typeof rgMbid === "string" && rgMbid.trim() ? rgMbid.trim() : null;
-        if (normalizedRgMbid) {
-            updateData.rgMbid = normalizedRgMbid;
-        }
-
-        // Set override flag
-        if (hasOverrides) {
-            updateData.hasUserOverrides = true;
-        }
-
-        const { prisma } = await import("../utils/db");
-        let existingAlbum: { rgMbid: string } | null = null;
-
-        if (normalizedRgMbid) {
-            existingAlbum = await prisma.album.findUnique({
-                where: { id: req.params.id },
-                select: { rgMbid: true },
-            });
-
-            if (!existingAlbum) {
-                return sendRouteError(
-                    res,
-                    404,
-                    "Album not found (the album may have been deleted)",
-                );
+router.put<{ id: string }>(
+    "/albums/:id/metadata",
+    validate({ body: albumMetadataSchema }),
+    asyncHandler(async (req, res) => {
+        try {
+            const body = (req.valid?.body ?? req.body) as Record<
+                string,
+                unknown
+            >;
+            const overrideBody = { ...body };
+            const { rgMbid } = body;
+            const normalizedRgMbid =
+                typeof rgMbid === "string" && rgMbid.trim()
+                    ? rgMbid.trim()
+                    : null;
+            if (normalizedRgMbid) {
+                overrideBody.rgMbid = normalizedRgMbid;
+            } else {
+                delete overrideBody.rgMbid;
             }
+            let existingAlbum: { rgMbid: string } | null = null;
 
-            if (existingAlbum.rgMbid !== normalizedRgMbid) {
-                if (!isValidMusicBrainzId(normalizedRgMbid)) {
-                    return res.status(400).json({
-                        error: "Invalid release-group MBID format",
-                        code: "INVALID_RG_MBID_FORMAT",
-                        field: "rgMbid",
-                        expectedFormat: MBID_FORMAT_EXAMPLE,
-                    });
-                }
-
-                const conflictingAlbum = await prisma.album.findFirst({
-                    where: {
-                        rgMbid: normalizedRgMbid,
-                        id: { not: req.params.id },
-                    },
-                    select: { id: true },
+            if (normalizedRgMbid) {
+                existingAlbum = await prisma.album.findUnique({
+                    where: { id: req.params.id },
+                    select: { rgMbid: true },
                 });
 
-                if (conflictingAlbum) {
-                    return res.status(409).json({
-                        error: "Release-group MBID is already used by another album",
-                        code: "RG_MBID_CONFLICT",
-                        field: "rgMbid",
-                        hint: "Use MusicBrainz lookup to pick the correct release-group MBID",
+                if (!existingAlbum) {
+                    return sendRouteError(
+                        res,
+                        404,
+                        "Album not found (the album may have been deleted)",
+                    );
+                }
+
+                if (existingAlbum.rgMbid !== normalizedRgMbid) {
+                    if (!isValidMusicBrainzId(normalizedRgMbid)) {
+                        return res.status(400).json({
+                            error: "Invalid release-group MBID format",
+                            code: "INVALID_RG_MBID_FORMAT",
+                            field: "rgMbid",
+                            expectedFormat: MBID_FORMAT_EXAMPLE,
+                        });
+                    }
+
+                    const conflictingAlbum = await prisma.album.findFirst({
+                        where: {
+                            rgMbid: normalizedRgMbid,
+                            id: { not: req.params.id },
+                        },
+                        select: { id: true },
                     });
+
+                    if (conflictingAlbum) {
+                        return res.status(409).json({
+                            error: "Release-group MBID is already used by another album",
+                            code: "RG_MBID_CONFLICT",
+                            field: "rgMbid",
+                            hint: "Use MusicBrainz lookup to pick the correct release-group MBID",
+                        });
+                    }
                 }
             }
-        }
 
-        const album = await updateAlbumMetadataWithOwnership(
-            req.params.id,
-            updateData,
-        );
+            const album = await applyMetadataOverrides(
+                { type: "album", id: req.params.id },
+                overrideBody,
+                ALBUM_METADATA_FIELDS,
+            );
 
-        res.json(album);
-    } catch (error: any) {
-        if (error?.code === "P2002") {
-            return res.status(409).json({
-                error: "Release-group MBID is already used by another album",
-                code: "RG_MBID_CONFLICT",
-                field: "rgMbid",
-                hint: "Use MusicBrainz lookup to pick the correct release-group MBID",
-            });
+            res.json(album);
+        } catch (error: unknown) {
+            if (getErrorCode(error) === "P2002") {
+                return res.status(409).json({
+                    error: "Release-group MBID is already used by another album",
+                    code: "RG_MBID_CONFLICT",
+                    field: "rgMbid",
+                    hint: "Use MusicBrainz lookup to pick the correct release-group MBID",
+                });
+            }
+            logger.error("Update album metadata error:", error);
+            sendInternalRouteError(res, "Failed to update album");
         }
-        logger.error("Update album metadata error:", error);
-        res.status(500).json({
-            error: "Failed to update album",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -1798,56 +1905,24 @@ router.put("/albums/:id/metadata", async (req, res) => {
  * Update track metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved
  */
-router.put("/tracks/:id/metadata", async (req, res) => {
-    try {
-        const { title, trackNo } = req.body;
+router.put<{ id: string }>(
+    "/tracks/:id/metadata",
+    validate({ body: trackMetadataSchema }),
+    asyncHandler(async (req, res) => {
+        try {
+            const track = await applyMetadataOverrides(
+                { type: "track", id: req.params.id },
+                (req.valid?.body ?? req.body) as Record<string, unknown>,
+                TRACK_METADATA_FIELDS,
+            );
 
-        const updateData: any = {};
-        let hasOverrides = false;
-
-        // Map user edits to override fields (non-destructive)
-        if (title !== undefined) {
-            updateData.displayTitle = title;
-            hasOverrides = true;
+            res.json(track);
+        } catch (error: unknown) {
+            logger.error("Update track metadata error:", error);
+            sendInternalRouteError(res, "Failed to update track");
         }
-        if (trackNo !== undefined) {
-            updateData.displayTrackNo = parseInt(trackNo);
-            hasOverrides = true;
-        }
-
-        // Set override flag
-        if (hasOverrides) {
-            updateData.hasUserOverrides = true;
-        }
-
-        const { prisma } = await import("../utils/db");
-        const track = await prisma.track.update({
-            where: { id: req.params.id },
-            data: updateData,
-            include: {
-                album: {
-                    select: {
-                        id: true,
-                        title: true,
-                        artist: {
-                            select: {
-                                id: true,
-                                name: true,
-                            },
-                        },
-                    },
-                },
-            },
-        });
-
-        res.json(track);
-    } catch (error: any) {
-        logger.error("Update track metadata error:", error);
-        res.status(500).json({
-            error: "Failed to update track",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -1876,71 +1951,38 @@ router.put("/tracks/:id/metadata", async (req, res) => {
  * POST /enrichment/artists/:id/reset
  * Reset artist metadata to canonical values (clear all user overrides)
  */
-router.post("/artists/:id/reset", async (req, res) => {
-    try {
-        const { prisma } = await import("../utils/db");
-
-        // Check if artist exists first
-        const existingArtist = await prisma.artist.findUnique({
-            where: { id: req.params.id },
-            select: { id: true },
-        });
-
-        if (!existingArtist) {
-            return sendRouteError(
-                res,
-                404,
-                "Artist not found (the artist may have been deleted)",
-            );
-        }
-
-        const artist = await prisma.artist.update({
-            where: { id: req.params.id },
-            data: {
-                displayName: null,
-                userSummary: null,
-                userHeroUrl: null,
-                userGenres: [],
-                hasUserOverrides: false,
-            },
-            include: {
-                albums: {
-                    select: {
-                        id: true,
-                        title: true,
-                        year: true,
-                        coverUrl: true,
-                    },
-                },
-            },
-        });
-
-        // Invalidate Redis cache for artist hero image
+router.post(
+    "/artists/:id/reset",
+    asyncHandler(async (req, res) => {
         try {
-            await redisClient.del(`hero:${req.params.id}`);
-        } catch (err) {
-            logger.warn("Failed to invalidate Redis cache:", err);
-        }
+            const artist = await resetMetadataOverrides({
+                type: "artist",
+                id: req.params.id,
+            });
 
-        res.json({
-            message: "Artist metadata reset to original values",
-            artist,
-        });
-    } catch (error: any) {
-        // Handle P2025 specifically in case of race condition
-        if (error.code === "P2025") {
-            return sendRouteError(
-                res,
-                404,
-                "Artist not found (the artist may have been deleted)",
-            );
+            res.json({
+                message: "Artist metadata reset to original values",
+                artist,
+            });
+        } catch (error: unknown) {
+            if (
+                error instanceof MetadataEntityNotFoundError ||
+                (typeof error === "object" &&
+                    error !== null &&
+                    "code" in error &&
+                    error.code === "P2025")
+            ) {
+                return sendRouteError(
+                    res,
+                    404,
+                    "Artist not found (the artist may have been deleted)",
+                );
+            }
+            logger.error("Reset artist metadata error:", error);
+            sendInternalRouteError(res, "Failed to reset artist metadata");
         }
-        logger.error("Reset artist metadata error:", error);
-        res.status(500).json({
-            error: "Failed to reset artist metadata",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -1969,70 +2011,38 @@ router.post("/artists/:id/reset", async (req, res) => {
  * POST /enrichment/albums/:id/reset
  * Reset album metadata to canonical values (clear all user overrides)
  */
-router.post("/albums/:id/reset", async (req, res) => {
-    try {
-        const { prisma } = await import("../utils/db");
+router.post(
+    "/albums/:id/reset",
+    asyncHandler(async (req, res) => {
+        try {
+            const album = await resetMetadataOverrides({
+                type: "album",
+                id: req.params.id,
+            });
 
-        // Check if album exists first
-        const existingAlbum = await prisma.album.findUnique({
-            where: { id: req.params.id },
-            select: { id: true },
-        });
-
-        if (!existingAlbum) {
-            return sendRouteError(
-                res,
-                404,
-                "Album not found (the album may have been deleted)",
-            );
+            res.json({
+                message: "Album metadata reset to original values",
+                album,
+            });
+        } catch (error: unknown) {
+            if (
+                error instanceof MetadataEntityNotFoundError ||
+                (typeof error === "object" &&
+                    error !== null &&
+                    "code" in error &&
+                    error.code === "P2025")
+            ) {
+                return sendRouteError(
+                    res,
+                    404,
+                    "Album not found (the album may have been deleted)",
+                );
+            }
+            logger.error("Reset album metadata error:", error);
+            sendInternalRouteError(res, "Failed to reset album metadata");
         }
-
-        const album = await prisma.album.update({
-            where: { id: req.params.id },
-            data: {
-                displayTitle: null,
-                displayYear: null,
-                userCoverUrl: null,
-                userGenres: [],
-                hasUserOverrides: false,
-            },
-            include: {
-                artist: {
-                    select: {
-                        id: true,
-                        name: true,
-                    },
-                },
-                tracks: {
-                    select: {
-                        id: true,
-                        title: true,
-                        trackNo: true,
-                        duration: true,
-                    },
-                },
-            },
-        });
-
-        res.json({
-            message: "Album metadata reset to original values",
-            album,
-        });
-    } catch (error: any) {
-        // Handle P2025 specifically in case of race condition
-        if (error.code === "P2025") {
-            return sendRouteError(
-                res,
-                404,
-                "Album not found (the album may have been deleted)",
-            );
-        }
-        logger.error("Reset album metadata error:", error);
-        res.status(500).json({
-            error: "Failed to reset album metadata",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -2069,66 +2079,38 @@ router.post("/albums/:id/reset", async (req, res) => {
  * POST /enrichment/tracks/:id/reset
  * Reset track metadata to canonical values (clear all user overrides)
  */
-router.post("/tracks/:id/reset", async (req, res) => {
-    try {
-        const { prisma } = await import("../utils/db");
+router.post(
+    "/tracks/:id/reset",
+    asyncHandler(async (req, res) => {
+        try {
+            const track = await resetMetadataOverrides({
+                type: "track",
+                id: req.params.id,
+            });
 
-        // Check if track exists first
-        const existingTrack = await prisma.track.findFirst({
-            where: { id: req.params.id, ...TRACK_VISIBLE_WHERE },
-            select: { id: true },
-        });
-
-        if (!existingTrack) {
-            return sendRouteError(
-                res,
-                404,
-                "Track not found (the track may have been deleted)",
-            );
+            res.json({
+                message: "Track metadata reset to original values",
+                track,
+            });
+        } catch (error: unknown) {
+            if (
+                error instanceof MetadataEntityNotFoundError ||
+                (typeof error === "object" &&
+                    error !== null &&
+                    "code" in error &&
+                    error.code === "P2025")
+            ) {
+                return sendRouteError(
+                    res,
+                    404,
+                    "Track not found (the track may have been deleted)",
+                );
+            }
+            logger.error("Reset track metadata error:", error);
+            sendInternalRouteError(res, "Failed to reset track metadata");
         }
-
-        const track = await prisma.track.update({
-            where: { id: req.params.id },
-            data: {
-                displayTitle: null,
-                displayTrackNo: null,
-                hasUserOverrides: false,
-            },
-            include: {
-                album: {
-                    select: {
-                        id: true,
-                        title: true,
-                        artist: {
-                            select: {
-                                id: true,
-                                name: true,
-                            },
-                        },
-                    },
-                },
-            },
-        });
-
-        res.json({
-            message: "Track metadata reset to original values",
-            track,
-        });
-    } catch (error: any) {
-        // Handle P2025 specifically in case of race condition
-        if (error.code === "P2025") {
-            return sendRouteError(
-                res,
-                404,
-                "Track not found (the track may have been deleted)",
-            );
-        }
-        logger.error("Reset track metadata error:", error);
-        res.status(500).json({
-            error: "Failed to reset track metadata",
-        });
-    }
-});
+    }),
+);
 
 /**
  * @openapi
@@ -2148,26 +2130,29 @@ router.post("/tracks/:id/reset", async (req, res) => {
  * GET /enrichment/concurrency
  * Get current enrichment concurrency configuration
  */
-router.get("/concurrency", async (req, res) => {
-    try {
-        const settings = await getSystemSettings();
-        const concurrency = settings?.enrichmentConcurrency || 1;
+router.get(
+    "/concurrency",
+    asyncHandler(async (req, res) => {
+        try {
+            const settings = await getSystemSettings();
+            const concurrency = settings?.enrichmentConcurrency || 1;
 
-        // Calculate estimated speeds based on concurrency
-        const artistsPerMin = Math.round(10 * concurrency);
-        const tracksPerMin = Math.round(60 * concurrency);
+            // Calculate estimated speeds based on concurrency
+            const artistsPerMin = Math.round(10 * concurrency);
+            const tracksPerMin = Math.round(60 * concurrency);
 
-        res.json({
-            concurrency,
-            estimatedSpeed: `~${artistsPerMin} artists/min, ~${tracksPerMin} tracks/min`,
-            artistsPerMin,
-            tracksPerMin,
-        });
-    } catch (error) {
-        logger.error("Failed to get enrichment settings:", error);
-        res.status(500).json({ error: "Failed to get enrichment settings" });
-    }
-});
+            res.json({
+                concurrency,
+                estimatedSpeed: `~${artistsPerMin} artists/min, ~${tracksPerMin} tracks/min`,
+                artistsPerMin,
+                tracksPerMin,
+            });
+        } catch (error) {
+            logger.error("Failed to get enrichment settings:", error);
+            sendInternalRouteError(res, "Failed to get enrichment settings");
+        }
+    }),
+);
 
 /**
  * @openapi
@@ -2203,59 +2188,62 @@ router.get("/concurrency", async (req, res) => {
  * PUT /enrichment/concurrency
  * Update enrichment concurrency configuration
  */
-router.put("/concurrency", requireAdmin, async (req, res) => {
-    try {
-        const { concurrency } = req.body;
+router.put(
+    "/concurrency",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+        try {
+            const { concurrency } = req.body;
 
-        if (!concurrency || typeof concurrency !== "number") {
-            return res
-                .status(400)
-                .json({ error: "Missing or invalid 'concurrency' parameter" });
+            if (!concurrency || typeof concurrency !== "number") {
+                return res.status(400).json({
+                    error: "Missing or invalid 'concurrency' parameter",
+                });
+            }
+
+            // Clamp concurrency to 1-5
+            const clampedConcurrency = Math.max(
+                1,
+                Math.min(5, Math.floor(concurrency)),
+            );
+
+            // Update system settings in database
+            await prisma.systemSettings.upsert({
+                where: { id: "default" },
+                create: {
+                    id: "default",
+                    enrichmentConcurrency: clampedConcurrency,
+                },
+                update: {
+                    enrichmentConcurrency: clampedConcurrency,
+                },
+            });
+
+            // Invalidate cache so next read gets fresh value
+            invalidateSystemSettingsCache();
+
+            // Update rate limiter concurrency multiplier
+            rateLimiter.updateConcurrencyMultiplier(clampedConcurrency);
+
+            // Calculate estimated speeds
+            const artistsPerMin = Math.round(10 * clampedConcurrency);
+            const tracksPerMin = Math.round(60 * clampedConcurrency);
+
+            logger.debug(
+                `[Enrichment Settings] Updated concurrency to ${clampedConcurrency}`,
+            );
+
+            res.json({
+                concurrency: clampedConcurrency,
+                estimatedSpeed: `~${artistsPerMin} artists/min, ~${tracksPerMin} tracks/min`,
+                artistsPerMin,
+                tracksPerMin,
+            });
+        } catch (error) {
+            logger.error("Failed to update enrichment settings:", error);
+            sendInternalRouteError(res, "Failed to update enrichment settings");
         }
-
-        // Clamp concurrency to 1-5
-        const clampedConcurrency = Math.max(
-            1,
-            Math.min(5, Math.floor(concurrency)),
-        );
-
-        // Update system settings in database
-        const { prisma } = await import("../utils/db");
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: {
-                id: "default",
-                enrichmentConcurrency: clampedConcurrency,
-            },
-            update: {
-                enrichmentConcurrency: clampedConcurrency,
-            },
-        });
-
-        // Invalidate cache so next read gets fresh value
-        invalidateSystemSettingsCache();
-
-        // Update rate limiter concurrency multiplier
-        rateLimiter.updateConcurrencyMultiplier(clampedConcurrency);
-
-        // Calculate estimated speeds
-        const artistsPerMin = Math.round(10 * clampedConcurrency);
-        const tracksPerMin = Math.round(60 * clampedConcurrency);
-
-        logger.debug(
-            `[Enrichment Settings] Updated concurrency to ${clampedConcurrency}`,
-        );
-
-        res.json({
-            concurrency: clampedConcurrency,
-            estimatedSpeed: `~${artistsPerMin} artists/min, ~${tracksPerMin} tracks/min`,
-            artistsPerMin,
-            tracksPerMin,
-        });
-    } catch (error) {
-        logger.error("Failed to update enrichment settings:", error);
-        res.status(500).json({ error: "Failed to update enrichment settings" });
-    }
-});
+    }),
+);
 
 export default router;

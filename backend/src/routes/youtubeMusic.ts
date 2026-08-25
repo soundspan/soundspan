@@ -29,11 +29,40 @@ import {
 } from "../middleware/rateLimiter";
 import { coalesceInFlightByKey } from "../utils/singleflight";
 import { config } from "../config";
+import { sendInternalRouteError } from "../utils/routeErrorResponse";
+import { asyncHandler } from "../middleware/asyncHandler";
+import { parsePagination } from "../middleware/parsePagination";
+import { validate } from "../middleware/validate";
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = config.nodeEnv === "test" ? 0 : 60_000;
 const OAUTH_NEGATIVE_CACHE_TTL_MS = config.nodeEnv === "test" ? 0 : 15_000;
 const DEFAULT_YTMUSIC_STREAM_QUALITY = "high";
+const MATCH_SCHEMA = z.object({
+    artist: z.string().min(1),
+    title: z.string().min(1),
+    albumTitle: z.string().optional(),
+    duration: z.number().positive().optional(),
+    isrc: z.string().trim().min(6).max(20).optional(),
+});
+const MATCH_BATCH_SCHEMA = z.object({
+    tracks: z.array(MATCH_SCHEMA).min(1).max(50),
+});
+
+function getHttpErrorStatus(error: unknown): number | undefined {
+    if (typeof error !== "object" || error === null || !("response" in error)) {
+        return undefined;
+    }
+    const response = error.response;
+    if (
+        typeof response !== "object" ||
+        response === null ||
+        !("status" in response)
+    ) {
+        return undefined;
+    }
+    return typeof response.status === "number" ? response.status : undefined;
+}
 const ytOauthSessionCache = new Map<
     string,
     { authenticated: boolean; expiresAt: number }
@@ -144,7 +173,7 @@ async function requireYtMusicEnabled(
         next();
     } catch (err) {
         logger.error("[YTMusic Route] Failed to check settings:", err);
-        res.status(500).json({ error: "Internal server error" });
+        sendInternalRouteError(res, "Internal server error");
     }
 }
 
@@ -345,6 +374,14 @@ type YtOAuthPollOperationResult =
           response: YtMusicDeviceCodePollResult;
       };
 
+function sanitizeDevicePollError(
+    result: YtMusicDeviceCodePollResult,
+): string | null | undefined {
+    if (result.status === "error") return "Device authorization failed";
+    const rawError = (result as unknown as Record<string, unknown>)["error"];
+    return rawError === null ? null : undefined;
+}
+
 async function pollYtOAuthCredential(
     userId: string,
     generation: number,
@@ -386,7 +423,10 @@ async function pollYtOAuthCredential(
 
     return {
         credentialsConfigured: true,
-        response: { status: result.status, error: result.error },
+        response: {
+            status: result.status,
+            error: sanitizeDevicePollError(result),
+        },
     };
 }
 
@@ -418,10 +458,10 @@ export async function getUserIdOrPublic(userId: string): Promise<string> {
 
 function handleYtMusicAuthError(
     res: Response,
-    err: any,
+    err: unknown,
     userId?: string,
 ): boolean {
-    if (err?.response?.status !== 401) return false;
+    if (getHttpErrorStatus(err) !== 401) return false;
     if (userId) {
         setYtOAuthCache(userId, false);
     } else {
@@ -445,8 +485,8 @@ const YT_MUSIC_STREAM_PROXY_ERRORS: Record<number, StreamProxyErrorBody> = {
     503: { error: "YouTube Music streaming is busy" },
     504: { error: "YouTube Music stream timed out" },
 };
-function handleYtMusicStreamProxyError(res: Response, err: any): boolean {
-    const status = err?.response?.status;
+function handleYtMusicStreamProxyError(res: Response, err: unknown): boolean {
+    const status = getHttpErrorStatus(err);
     if (typeof status !== "number" || !YT_MUSIC_STREAM_PROXY_ERRORS[status])
         return false;
     res.status(status).json(YT_MUSIC_STREAM_PROXY_ERRORS[status]);
@@ -511,42 +551,46 @@ async function resolveYtMusicStreamQuality(
  *       401:
  *         description: Not authenticated
  */
-router.get("/status", requireAuth, async (req: Request, res: Response) => {
-    try {
-        const userId = req.user!.id;
-        const settings = await getSystemSettings();
-        const available = await ytMusicService.isAvailable();
+router.get(
+    "/status",
+    requireAuth,
+    asyncHandler(async (req: Request, res: Response) => {
+        try {
+            const userId = req.user!.id;
+            const settings = await getSystemSettings();
+            const available = await ytMusicService.isAvailable();
 
-        const oauthConfigured = !!(
-            settings?.ytMusicClientId && settings?.ytMusicClientSecret
-        );
+            const oauthConfigured = !!(
+                settings?.ytMusicClientId && settings?.ytMusicClientSecret
+            );
 
-        if (!available) {
+            if (!available) {
+                return res.json({
+                    enabled: settings.ytMusicEnabled,
+                    available: false,
+                    authenticated: false,
+                    credentialsConfigured: oauthConfigured,
+                    oauthConfigured,
+                });
+            }
+
+            // Try to restore OAuth if needed, then check status
+            await ensureUserOAuth(userId);
+            const authStatus = await ytMusicService.getAuthStatus(userId);
+
             return res.json({
                 enabled: settings.ytMusicEnabled,
-                available: false,
-                authenticated: false,
+                available: true,
                 credentialsConfigured: oauthConfigured,
                 oauthConfigured,
+                ...authStatus,
             });
+        } catch (err) {
+            logger.error("[YTMusic Route] Status check failed:", err);
+            sendInternalRouteError(res, "Failed to check YouTube Music status");
         }
-
-        // Try to restore OAuth if needed, then check status
-        await ensureUserOAuth(userId);
-        const authStatus = await ytMusicService.getAuthStatus(userId);
-
-        return res.json({
-            enabled: settings.ytMusicEnabled,
-            available: true,
-            credentialsConfigured: oauthConfigured,
-            oauthConfigured,
-            ...authStatus,
-        });
-    } catch (err) {
-        logger.error("[YTMusic Route] Status check failed:", err);
-        res.status(500).json({ error: "Failed to check YouTube Music status" });
-    }
-});
+    }),
+);
 
 // ── OAuth Device Code Flow (per-user) ──────────────────────────────
 
@@ -570,7 +614,7 @@ router.post(
     "/auth/device-code",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const settings = await getSystemSettings();
             if (!settings?.ytMusicClientId || !settings?.ytMusicClientSecret) {
@@ -585,15 +629,11 @@ router.post(
             );
 
             res.json(result);
-        } catch (err: any) {
+        } catch (err: unknown) {
             logger.error("[YTMusic Route] Device code initiation failed:", err);
-            res.status(500).json({
-                error:
-                    err.response?.data?.detail ||
-                    "Failed to initiate device code flow",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 /**
@@ -626,7 +666,7 @@ router.post(
     "/auth/device-code/poll",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
             const { deviceCode } = req.body;
@@ -648,14 +688,11 @@ router.post(
                 });
             }
             res.json(result.response);
-        } catch (err: any) {
+        } catch (err: unknown) {
             logger.error("[YTMusic Route] Device code poll failed:", err);
-            res.status(500).json({
-                error:
-                    err.response?.data?.detail || "Failed to poll device code",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 /**
@@ -689,7 +726,7 @@ router.post(
     "/auth/save-token",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
             const { oauthJson } = req.body;
@@ -722,14 +759,11 @@ router.post(
                 );
             }
             res.json({ success });
-        } catch (err: any) {
+        } catch (err: unknown) {
             logger.error("[YTMusic Route] Save OAuth token failed:", err);
-            res.status(500).json({
-                error:
-                    err.response?.data?.detail || "Failed to save OAuth token",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 /**
@@ -750,7 +784,7 @@ router.post(
     "/auth/clear",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
 
@@ -760,13 +794,11 @@ router.post(
                 `[YTMusic] OAuth credentials cleared for user ${userId}`,
             );
             res.json({ success: true });
-        } catch (err: any) {
+        } catch (err: unknown) {
             logger.error("[YTMusic Route] Clear auth failed:", err);
-            res.status(500).json({
-                error: err.response?.data?.detail || "Failed to clear auth",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 // ── Search ─────────────────────────────────────────────────────────
@@ -807,7 +839,7 @@ router.post(
     requireAuth,
     requireYtMusicEnabled,
     ytMusicSearchLimiter,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
 
@@ -821,14 +853,12 @@ router.post(
                 filter,
             );
             res.json(result);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Search failed:", err);
-            res.status(500).json({
-                error: err.response?.data?.detail || "Search failed",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 // ── Browse ─────────────────────────────────────────────────────────
@@ -857,7 +887,7 @@ router.get(
     "/album/:browseId",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request<{ browseId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ browseId: string }>, res: Response) => {
         try {
             const effectiveUserId = await getUserIdOrPublic(req.user!.id);
             const album = await ytMusicService.getAlbum(
@@ -865,14 +895,12 @@ router.get(
                 req.params.browseId,
             );
             res.json(album);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Get album failed:", err);
-            res.status(500).json({
-                error: err.response?.data?.detail || "Failed to get album",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 /**
@@ -899,7 +927,7 @@ router.get(
     "/artist/:channelId",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request<{ channelId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ channelId: string }>, res: Response) => {
         try {
             const effectiveUserId = await getUserIdOrPublic(req.user!.id);
             const artist = await ytMusicService.getArtist(
@@ -907,14 +935,12 @@ router.get(
                 req.params.channelId,
             );
             res.json(artist);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Get artist failed:", err);
-            res.status(500).json({
-                error: err.response?.data?.detail || "Failed to get artist",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 /**
@@ -941,7 +967,7 @@ router.get(
     "/song/:videoId",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request<{ videoId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const effectiveUserId = await getUserIdOrPublic(req.user!.id);
             const song = await ytMusicService.getSong(
@@ -949,14 +975,12 @@ router.get(
                 req.params.videoId,
             );
             res.json(song);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Get song failed:", err);
-            res.status(500).json({
-                error: err.response?.data?.detail || "Failed to get song",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 // ── Stream Info ────────────────────────────────────────────────────
@@ -1000,7 +1024,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request<{ videoId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const userId = req.user!.id;
             const effectiveUserId = await getUserIdOrPublic(userId);
@@ -1024,11 +1048,11 @@ router.get(
                 duration: info.duration,
                 content_type: info.content_type,
             });
-        } catch (err: any) {
-            if (err.response?.status === 404) {
+        } catch (err: unknown) {
+            if (getHttpErrorStatus(err) === 404) {
                 return res.status(404).json({ error: "Stream not found" });
             }
-            if (err.response?.status === 451) {
+            if (getHttpErrorStatus(err) === 451) {
                 return res.status(451).json({
                     error: "age_restricted",
                     message:
@@ -1037,11 +1061,9 @@ router.get(
             }
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Stream info failed:", err);
-            res.status(500).json({
-                error: "Failed to get stream info",
-            });
+            sendInternalRouteError(res, "Failed to get stream info");
         }
-    },
+    }),
 );
 
 // ── Stream Proxy ───────────────────────────────────────────────────
@@ -1092,7 +1114,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request<{ videoId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const userId = req.user!.id;
             const effectiveUserId = await getUserIdOrPublic(userId);
@@ -1149,15 +1171,13 @@ router.get(
                 }
             });
             proxyRes.data.pipe(res);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicStreamProxyError(res, err)) return;
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Stream proxy failed:", err);
-            res.status(500).json({
-                error: "Failed to stream audio",
-            });
+            sendInternalRouteError(res, "Failed to stream audio");
         }
-    },
+    }),
 );
 
 // ── Library ────────────────────────────────────────────────────────
@@ -1189,22 +1209,21 @@ router.get(
     "/library/songs",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    parsePagination(),
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
             if (!(await requireUserOAuth(userId, res))) return;
-            const limit = parseBoundedLimit(req.query.limit);
+            const limit =
+                req.pagination?.limit ?? parseBoundedLimit(req.query.limit);
             const songs = await ytMusicService.getLibrarySongs(userId, limit);
             res.json({ songs });
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Library songs failed:", err);
-            res.status(500).json({
-                error:
-                    err.response?.data?.detail || "Failed to get library songs",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 /**
@@ -1234,23 +1253,21 @@ router.get(
     "/library/albums",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    parsePagination(),
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
             if (!(await requireUserOAuth(userId, res))) return;
-            const limit = parseBoundedLimit(req.query.limit);
+            const limit =
+                req.pagination?.limit ?? parseBoundedLimit(req.query.limit);
             const albums = await ytMusicService.getLibraryAlbums(userId, limit);
             res.json({ albums });
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Library albums failed:", err);
-            res.status(500).json({
-                error:
-                    err.response?.data?.detail ||
-                    "Failed to get library albums",
-            });
+            sendInternalRouteError(res, "Internal server error");
         }
-    },
+    }),
 );
 
 // ── Gap-Fill Match ─────────────────────────────────────────────────
@@ -1294,18 +1311,12 @@ router.post(
     requireAuth,
     requireYtMusicEnabled,
     ytMusicSearchLimiter,
-    async (req: Request, res: Response) => {
+    validate({ body: MATCH_SCHEMA }),
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
 
-            const schema = z.object({
-                artist: z.string().min(1),
-                title: z.string().min(1),
-                albumTitle: z.string().optional(),
-                duration: z.number().positive().optional(),
-                isrc: z.string().trim().min(6).max(20).optional(),
-            });
-            const parsed = schema.safeParse(req.body);
+            const parsed = MATCH_SCHEMA.safeParse(req.valid?.body ?? req.body);
             if (!parsed.success) {
                 return res
                     .status(400)
@@ -1320,14 +1331,12 @@ router.post(
                 parsed.data.isrc,
             );
             res.json({ match });
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Match failed:", err);
-            res.status(500).json({
-                error: "Failed to find matching track",
-            });
+            sendInternalRouteError(res, "Failed to find matching track");
         }
-    },
+    }),
 );
 
 // ── Batch Gap-Fill Match ───────────────────────────────────────────
@@ -1378,25 +1387,14 @@ router.post(
     requireAuth,
     requireYtMusicEnabled,
     ytMusicSearchLimiter,
-    async (req: Request, res: Response) => {
+    validate({ body: MATCH_BATCH_SCHEMA }),
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
 
-            const schema = z.object({
-                tracks: z
-                    .array(
-                        z.object({
-                            artist: z.string(),
-                            title: z.string(),
-                            albumTitle: z.string().optional(),
-                            duration: z.number().positive().optional(),
-                            isrc: z.string().trim().min(6).max(20).optional(),
-                        }),
-                    )
-                    .min(1)
-                    .max(50),
-            });
-            const parsed = schema.safeParse(req.body);
+            const parsed = MATCH_BATCH_SCHEMA.safeParse(
+                req.valid?.body ?? req.body,
+            );
             if (!parsed.success) {
                 return res
                     .status(400)
@@ -1435,14 +1433,12 @@ router.post(
 
             // Return matches keyed by index for easy lookup
             res.json({ matches });
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Batch match failed:", err);
-            res.status(500).json({
-                error: "Failed to batch-match tracks",
-            });
+            sendInternalRouteError(res, "Failed to batch-match tracks");
         }
-    },
+    }),
 );
 
 // ── Public Stream Routes (no user OAuth required) ─────────────────
@@ -1478,7 +1474,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request<{ videoId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const quality = normalizeYtMusicStreamQuality(
@@ -1498,11 +1494,11 @@ router.get(
                 duration: info.duration,
                 content_type: info.content_type,
             });
-        } catch (err: any) {
-            if (err.response?.status === 404) {
+        } catch (err: unknown) {
+            if (getHttpErrorStatus(err) === 404) {
                 return res.status(404).json({ error: "Stream not found" });
             }
-            if (err.response?.status === 451) {
+            if (getHttpErrorStatus(err) === 451) {
                 return res.status(451).json({
                     error: "age_restricted",
                     message:
@@ -1510,11 +1506,9 @@ router.get(
                 });
             }
             logger.error("[YTMusic Route] Public stream info failed:", err);
-            res.status(500).json({
-                error: "Failed to get stream info",
-            });
+            sendInternalRouteError(res, "Failed to get stream info");
         }
-    },
+    }),
 );
 
 /**
@@ -1550,7 +1544,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request<{ videoId: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const quality = normalizeYtMusicStreamQuality(
@@ -1599,14 +1593,12 @@ router.get(
                 }
             });
             proxyRes.data.pipe(res);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (handleYtMusicStreamProxyError(res, err)) return;
             logger.error("[YTMusic Route] Public stream proxy failed:", err);
-            res.status(500).json({
-                error: "Failed to stream audio",
-            });
+            sendInternalRouteError(res, "Failed to stream audio");
         }
-    },
+    }),
 );
 
 export default router;

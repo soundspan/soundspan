@@ -501,7 +501,7 @@ describe("youtube music route runtime behavior", () => {
         const errorRes = createRes();
         await deviceCodeHandler(req, errorRes);
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "init failed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("polls device auth with validation, pending, success, and error branches", async () => {
@@ -569,7 +569,7 @@ describe("youtube music route runtime behavior", () => {
             errorRes,
         );
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "poll failed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("validates save-token payload and persists encrypted oauth", async () => {
@@ -625,7 +625,7 @@ describe("youtube music route runtime behavior", () => {
             errorRes,
         );
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "restore failed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("clears auth for sidecar and db and maps failures", async () => {
@@ -648,7 +648,7 @@ describe("youtube music route runtime behavior", () => {
         const errorRes = createRes();
         await clearAuthHandler(req, errorRes);
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "clear failed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("handles search validation, success, auth failures, and generic errors", async () => {
@@ -700,7 +700,7 @@ describe("youtube music route runtime behavior", () => {
             errorRes,
         );
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "search crashed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("covers album/artist/song auth and detail fallback branches", async () => {
@@ -747,7 +747,7 @@ describe("youtube music route runtime behavior", () => {
             albumDetailRes,
         );
         expect(albumDetailRes.statusCode).toBe(500);
-        expect(albumDetailRes.body).toEqual({ error: "album failed to load" });
+        expect(albumDetailRes.body).toEqual({ error: "Internal server error" });
 
         ytMusicService.getArtist.mockRejectedValueOnce({
             response: { status: 401 },
@@ -771,7 +771,9 @@ describe("youtube music route runtime behavior", () => {
             artistDetailRes,
         );
         expect(artistDetailRes.statusCode).toBe(500);
-        expect(artistDetailRes.body).toEqual({ error: "artist lookup failed" });
+        expect(artistDetailRes.body).toEqual({
+            error: "Internal server error",
+        });
 
         ytMusicService.getSong.mockRejectedValueOnce({
             response: { status: 401 },
@@ -795,7 +797,7 @@ describe("youtube music route runtime behavior", () => {
             songDetailRes,
         );
         expect(songDetailRes.statusCode).toBe(500);
-        expect(songDetailRes.body).toEqual({ error: "song failed to load" });
+        expect(songDetailRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("covers library albums auth and detail fallback branches", async () => {
@@ -829,7 +831,7 @@ describe("youtube music route runtime behavior", () => {
         );
         expect(albumsDetailRes.statusCode).toBe(500);
         expect(albumsDetailRes.body).toEqual({
-            error: "library albums failed",
+            error: "Internal server error",
         });
     });
 
@@ -1207,7 +1209,7 @@ describe("youtube music route runtime behavior", () => {
             songsErrorRes,
         );
         expect(songsErrorRes.statusCode).toBe(500);
-        expect(songsErrorRes.body).toEqual({ error: "library songs failed" });
+        expect(songsErrorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("covers match and match-batch validation, success, and failure paths", async () => {

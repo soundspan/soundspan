@@ -49,7 +49,7 @@ export interface YtMusicDeviceCode {
 
 export interface YtMusicDeviceCodePollResult {
     status: "pending" | "success" | "error";
-    error?: string;
+    error?: string | null;
     oauth_json?: string;
 }
 

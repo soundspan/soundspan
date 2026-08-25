@@ -54,13 +54,13 @@ const FIXED_SCAN_ROOTS = Object.freeze([
 
 const BASELINE = Object.freeze({
     "backend/src/routes/browse.ts": 1540,
-    "backend/src/routes/enrichment.ts": 2261,
+    "backend/src/routes/enrichment.ts": 2249,
     "backend/src/routes/library/radio.ts": 1563,
     "backend/src/routes/library/tracks.ts": 1655,
     "backend/src/routes/playlists.ts": 2262,
     "backend/src/routes/podcasts.ts": 2541,
     "backend/src/routes/systemSettings.ts": 1506,
-    "backend/src/routes/youtubeMusic.ts": 1612,
+    "backend/src/routes/youtubeMusic.ts": 1604,
     "backend/src/services/lidarr.ts": 2951,
     "backend/src/services/simpleDownloadManager.ts": 2306,
     "backend/src/services/spotify.ts": 1624,

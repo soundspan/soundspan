@@ -150,7 +150,7 @@ const mockRedisDel = redisClient.del as jest.Mock;
 function getHandler(
     path: string,
     method: "get" | "put" | "post",
-    stackIndex = 0,
+    stackIndex = -1,
 ) {
     const layer = (router as any).stack.find(
         (entry: any) =>
@@ -161,7 +161,9 @@ function getHandler(
         throw new Error(`Route not found: ${method.toUpperCase()} ${path}`);
     }
 
-    return layer.route.stack[stackIndex].handle;
+    const resolvedIndex =
+        stackIndex < 0 ? layer.route.stack.length - 1 : stackIndex;
+    return layer.route.stack[resolvedIndex].handle;
 }
 
 function createRes() {
