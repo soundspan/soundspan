@@ -1,6 +1,7 @@
 "use client";
 
 import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioVolumeMode } from "@/lib/audio-volume-mode-context";
 import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { PlaybackProgressSnapshot } from "@/components/player/PlaybackProgressSnapshot";
@@ -69,8 +70,6 @@ export const AudioPlaybackOrchestrator = memo(
             currentAudiobook,
             currentPodcast,
             playbackType,
-            volume,
-            isMuted,
             repeatMode,
             setCurrentAudiobook,
             setCurrentTrack,
@@ -81,6 +80,7 @@ export const AudioPlaybackOrchestrator = memo(
             isShuffle,
             shuffleIndices,
         } = useAudioState();
+        const { volume, isMuted } = useAudioVolumeMode();
         // Playback context
         const {
             isPlaying,

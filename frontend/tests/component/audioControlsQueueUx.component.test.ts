@@ -46,11 +46,30 @@ afterEach(() => {
     setPlaybackAutoRestartSuppressed(false);
 });
 
+mock.module("@/lib/audio-volume-mode-context", {
+    namedExports: {
+        useAudioVolumeMode: () => ({
+            volume: 1,
+            isMuted: false,
+            playerMode: "full",
+            previousPlayerMode: "full",
+            setVolume: () => undefined,
+            setIsMuted: () => undefined,
+            setPlayerMode: () => undefined,
+            setPreviousPlayerMode: () => undefined,
+        }),
+    },
+});
+
 mock.module("@/lib/audio-state-context", {
     namedExports: { useAudioState: () => stateHolder.current },
 });
 mock.module("@/lib/audio-playback-context", {
-    namedExports: { useAudioPlayback: () => playbackHolder.current },
+    namedExports: {
+        useAudioPlayback: () => playbackHolder.current,
+        usePlaybackStatus: () => playbackHolder.current,
+        usePlaybackProgress: () => playbackHolder.current,
+    },
 });
 mock.module("@/lib/api", {
     namedExports: {

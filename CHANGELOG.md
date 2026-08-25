@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Playing music no longer re-renders large parts of the app once per second: pages and controls now subscribe only to the playback details they actually show, and dragging the volume slider updates just the volume controls instead of rippling through every open page (#785).
 - Pressing get-all-missing-albums now queues the artist's albums immediately even while other downloads are running (#808).
 - Radio stations now start quickly on large libraries, and genre and decade stations load instantly without recounting the full library on every request (#776). Preferences now reorder the selected station without promoting liked tracks into it or displacing disliked tracks near the cutoff.
 - Provider matching now treats accents, punctuation, conjunctions, and album edition suffixes consistently, reducing wrong or missed album and track matches (#791).

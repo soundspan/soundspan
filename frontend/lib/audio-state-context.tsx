@@ -35,6 +35,7 @@ import {
 import { resolvePollingJitter } from "@/hooks/pollingCadence";
 import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
 import { resolveInitialAudioVolume } from "@/lib/audio-volume";
+import { AudioVolumeModeContext } from "@/lib/audio-volume-mode-context";
 import {
     findRemoteQueueTrackForRestore,
     isNonLibraryTrackId,
@@ -205,10 +206,6 @@ interface AudioStateContextType {
     shuffleIndices: number[];
 
     // UI state
-    playerMode: PlayerMode;
-    previousPlayerMode: PlayerMode;
-    volume: number;
-    isMuted: boolean;
 
     // Vibe mode state
     vibeMode: boolean;
@@ -232,10 +229,6 @@ interface AudioStateContextType {
     setIsShuffle: (shuffle: SetStateAction<boolean>) => void;
     setRepeatMode: (mode: SetStateAction<"off" | "one" | "all">) => void;
     setShuffleIndices: (indices: SetStateAction<number[]>) => void;
-    setPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
-    setPreviousPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
-    setVolume: (volume: SetStateAction<number>) => void;
-    setIsMuted: (muted: SetStateAction<boolean>) => void;
     setLastServerSync: (date: SetStateAction<Date | null>) => void;
     setRepeatOneCount: (count: SetStateAction<number>) => void;
     setVibeMode: (mode: SetStateAction<boolean>) => void;
@@ -1127,10 +1120,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             repeatMode,
             isRepeat: repeatMode !== "off",
             shuffleIndices,
-            playerMode,
-            previousPlayerMode,
-            volume,
-            isMuted,
             vibeMode,
             vibeSourceFeatures,
             vibeQueueIds,
@@ -1146,10 +1135,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setIsShuffle,
             setRepeatMode,
             setShuffleIndices,
-            setPlayerMode,
-            setPreviousPlayerMode,
-            setVolume,
-            setIsMuted,
             setLastServerSync,
             setRepeatOneCount,
             setVibeMode,
@@ -1166,10 +1151,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
-            playerMode,
-            previousPlayerMode,
-            volume,
-            isMuted,
             vibeMode,
             vibeSourceFeatures,
             vibeQueueIds,
@@ -1179,9 +1160,25 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         ],
     );
 
+    const volumeModeValue = useMemo(
+        () => ({
+            volume,
+            isMuted,
+            playerMode,
+            previousPlayerMode,
+            setVolume,
+            setIsMuted,
+            setPlayerMode,
+            setPreviousPlayerMode,
+        }),
+        [volume, isMuted, playerMode, previousPlayerMode],
+    );
+
     return (
         <AudioStateContext.Provider value={value}>
-            {children}
+            <AudioVolumeModeContext.Provider value={volumeModeValue}>
+                {children}
+            </AudioVolumeModeContext.Provider>
         </AudioStateContext.Provider>
     );
 }

@@ -3,7 +3,11 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAudio } from "@/lib/audio-context";
+import {
+    useAudioControls,
+    useAudioState,
+    usePlaybackStatus,
+} from "@/lib/audio-context";
 import { buildEpisodeQueueItem } from "@/lib/queue-item";
 import { api } from "@/lib/api";
 import { Podcast, Episode, PodcastPreview } from "../types";
@@ -42,8 +46,9 @@ function buildForwardEpisodeQueue(
 export function usePodcastActions(podcastId: string) {
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { playPodcast, currentPodcast, isPlaying, pause, resume } =
-        useAudio();
+    const { playPodcast, pause, resume } = useAudioControls();
+    const { currentPodcast } = useAudioState();
+    const { isPlaying } = usePlaybackStatus();
 
     const [isSubscribing, setIsSubscribing] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);

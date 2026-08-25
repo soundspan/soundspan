@@ -61,6 +61,34 @@ const eslintConfig = defineConfig([
         },
     },
     {
+        // The wide playback compat hooks re-coupled entire trees to the 1 Hz
+        // playback clock; they were removed in GH #785. Consume the narrow
+        // hooks (useAudioState / usePlaybackStatus / usePlaybackProgress /
+        // useAudioControls / useAudioVolumeMode) instead.
+        files: ["app/**", "components/**", "features/**", "hooks/**", "lib/**"],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    paths: [
+                        {
+                            name: "@/lib/audio-context",
+                            importNames: ["useAudio", "useAudioPlayback"],
+                            message:
+                                "Removed in GH #785 - use the narrow audio hooks.",
+                        },
+                        {
+                            name: "@/lib/audio-playback-context",
+                            importNames: ["useAudioPlayback"],
+                            message:
+                                "Removed in GH #785 - use usePlaybackStatus/usePlaybackProgress.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    {
         files: ["components/player/hooks/**/*.{ts,tsx}"],
         rules: {
             "no-restricted-imports": [

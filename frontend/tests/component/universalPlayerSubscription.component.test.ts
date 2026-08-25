@@ -30,6 +30,23 @@ const stubState: {
 
 const media = { isMobile: false, isTablet: false };
 
+mock.module("@/lib/audio-volume-mode-context", {
+    namedExports: {
+        useAudioVolumeMode: () => ({
+            volume: 1,
+            isMuted: false,
+            get playerMode() {
+                return stubState.playerMode;
+            },
+            previousPlayerMode: "full",
+            setVolume: () => undefined,
+            setIsMuted: () => undefined,
+            setPlayerMode: () => undefined,
+            setPreviousPlayerMode: () => undefined,
+        }),
+    },
+});
+
 mock.module("@/lib/audio-state-context", {
     namedExports: {
         useAudioState: () => {

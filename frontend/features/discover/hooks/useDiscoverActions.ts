@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioControls, usePlaybackStatus } from "@/lib/audio-context";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { shuffleArray } from "@/utils/shuffle";
@@ -67,8 +67,9 @@ export function useDiscoverActions(
     refreshBatchStatus?: () => Promise<unknown>,
     setPendingGeneration?: (pending: boolean) => void,
 ) {
-    const { playTracks, playNow, addTracksToQueue, isPlaying, pause, resume } =
-        useAudio();
+    const { playTracks, playNow, addTracksToQueue, pause, resume } =
+        useAudioControls();
+    const { isPlaying } = usePlaybackStatus();
 
     const handleGenerate = useCallback(async () => {
         if (isGenerating) {

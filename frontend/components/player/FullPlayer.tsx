@@ -1,7 +1,11 @@
 "use client";
 
 import { useAudioState } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import {
+    usePlaybackStatus,
+    usePlaybackProgress,
+} from "@/lib/audio-playback-context";
+import { useAudioVolumeMode } from "@/lib/audio-volume-mode-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useStreamBitrate } from "@/hooks/useStreamBitrate";
@@ -54,27 +58,26 @@ export function FullPlayer() {
         currentAudiobook,
         currentPodcast,
         playbackType,
-        volume,
-        isMuted,
         isShuffle,
         repeatMode,
         vibeMode,
         vibeSourceFeatures,
         queue,
         currentIndex,
-        playerMode,
     } = useAudioState();
+    const { volume, isMuted, playerMode } = useAudioVolumeMode();
 
     const {
         isPlaying,
         isBuffering,
-        currentTime,
         duration: playbackDuration,
         canSeek,
         downloadProgress,
         audioError,
         clearAudioError,
-    } = useAudioPlayback();
+    } = usePlaybackStatus();
+    // FullPlayer displays the position, so it is a legitimate clock consumer.
+    const { currentTime } = usePlaybackProgress();
 
     const {
         pause,

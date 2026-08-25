@@ -40,6 +40,21 @@ const Icon = (props: Record<string, unknown>) =>
 // Shared leaf mocks (specifiers used by both FullPlayer and OverlayPlayer)
 // ---------------------------------------------------------------------------
 
+mock.module("@/lib/audio-volume-mode-context", {
+    namedExports: {
+        useAudioVolumeMode: () => ({
+            volume: 1,
+            isMuted: false,
+            playerMode: "full",
+            previousPlayerMode: "full",
+            setVolume: () => undefined,
+            setIsMuted: () => undefined,
+            setPlayerMode: () => undefined,
+            setPreviousPlayerMode: () => undefined,
+        }),
+    },
+});
+
 mock.module("lucide-react", {
     namedExports: {
         Play: Icon,
@@ -234,6 +249,26 @@ mock.module("@/lib/audio-playback-context", {
             audioError: fullPlayerState.audioError,
             clearAudioError: () => undefined,
         }),
+        usePlaybackStatus: () => ({
+            isPlaying: fullPlayerState.isPlaying,
+            isBuffering: fullPlayerState.isBuffering,
+            currentTime: fullPlayerState.currentTime,
+            duration: fullPlayerState.duration,
+            canSeek: fullPlayerState.canSeek,
+            downloadProgress: fullPlayerState.downloadProgress,
+            audioError: fullPlayerState.audioError,
+            clearAudioError: () => undefined,
+        }),
+        usePlaybackProgress: () => ({
+            isPlaying: fullPlayerState.isPlaying,
+            isBuffering: fullPlayerState.isBuffering,
+            currentTime: fullPlayerState.currentTime,
+            duration: fullPlayerState.duration,
+            canSeek: fullPlayerState.canSeek,
+            downloadProgress: fullPlayerState.downloadProgress,
+            audioError: fullPlayerState.audioError,
+            clearAudioError: () => undefined,
+        }),
     },
 });
 
@@ -308,21 +343,27 @@ const overlayCalls = {
 
 mock.module("@/lib/audio-context", {
     namedExports: {
-        useAudio: () => ({
+        useAudioState: () => ({
             currentTrack: overlayState.currentTrack,
             currentAudiobook: overlayState.currentAudiobook,
             currentPodcast: overlayState.currentPodcast,
             playbackType: overlayState.playbackType,
-            isPlaying: overlayState.isPlaying,
-            isBuffering: overlayState.isBuffering,
-            currentTime: overlayState.currentTime,
-            canSeek: overlayState.canSeek,
-            downloadProgress: overlayState.downloadProgress,
             isShuffle: overlayState.isShuffle,
             repeatMode: overlayState.repeatMode,
             vibeMode: overlayState.vibeMode,
+            queue: overlayState.queue,
+            currentIndex: overlayState.currentIndex,
+        }),
+        usePlaybackStatus: () => ({
+            isPlaying: overlayState.isPlaying,
+            isBuffering: overlayState.isBuffering,
+            canSeek: overlayState.canSeek,
+            downloadProgress: overlayState.downloadProgress,
             audioError: overlayState.audioError,
             clearAudioError: () => undefined,
+            duration: overlayState.duration,
+        }),
+        useAudioControls: () => ({
             pause: () => undefined,
             resume: () => undefined,
             next: () => {
@@ -337,9 +378,6 @@ mock.module("@/lib/audio-context", {
             toggleRepeat: () => undefined,
             startVibeMode: async () => ({ success: false, trackCount: 0 }),
             stopVibeMode: () => undefined,
-            duration: overlayState.duration,
-            queue: overlayState.queue,
-            currentIndex: overlayState.currentIndex,
             playTrack: () => undefined,
             playQueueIndex: () => undefined,
             setUpcoming: () => undefined,

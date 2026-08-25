@@ -55,7 +55,7 @@ test("localStorage resume snapshot stores the full-precision engine clock, not t
     const { createRoot } = await import("react-dom/client");
     const { AudioStateProvider } =
         await import("../../lib/audio-state-context");
-    const { AudioPlaybackProvider, useAudioPlayback } =
+    const { AudioPlaybackProvider, usePlaybackStatus } =
         await import("../../lib/audio-playback-context");
     const { createMigratingStorageKey, readMigratingStorageItem } =
         await import("../../lib/storage-migration");
@@ -72,7 +72,7 @@ test("localStorage resume snapshot stores the full-precision engine clock, not t
     const capturedEngineTickRef = { current: null as EngineTickFn | null };
 
     const Probe = () => {
-        const playback = useAudioPlayback();
+        const playback = usePlaybackStatus();
         capturedEngineTickRef.current = playback.setCurrentTimeFromEngine;
         return null;
     };

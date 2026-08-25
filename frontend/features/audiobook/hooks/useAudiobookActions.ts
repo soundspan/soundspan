@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback } from "react";
-import { useAudio } from "@/lib/audio-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import {
+    useAudioControls,
+    useAudioState,
+    usePlaybackStatus,
+} from "@/lib/audio-context";
+import { usePlaybackProgress } from "@/lib/audio-playback-context";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api";
 import type { Audiobook } from "../types";
@@ -16,17 +20,12 @@ export function useAudiobookActions(
     audiobook: Audiobook | null,
     refetch: () => void,
 ) {
-    const {
-        currentAudiobook,
-        playbackType,
-        isPlaying,
-        pause,
-        resume,
-        playAudiobook,
-        currentTime,
-        updateCurrentTime,
-        seek,
-    } = useAudio();
+    const { currentAudiobook, playbackType } = useAudioState();
+    const { isPlaying } = usePlaybackStatus();
+    // Consumers display the live position, so this hook is a clock consumer.
+    const { currentTime } = usePlaybackProgress();
+    const { pause, resume, playAudiobook, updateCurrentTime, seek } =
+        useAudioControls();
     const { setCurrentAudiobook, setPlaybackType } = useAudioState();
     const { toast } = useToast();
 

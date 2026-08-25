@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
 import { useAudioState } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { useCollectionLikeAll } from "@/hooks/useCollectionLikeAll";
@@ -27,7 +27,7 @@ export function useBrowseCollectionActions(
 ) {
     const { toast } = useToast();
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, playNow, addTracksToQueue, pause, resume } =
         useAudioControls();
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);

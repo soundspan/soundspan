@@ -1,6 +1,6 @@
 "use client";
 
-import { useAudio } from "@/lib/audio-context";
+import { useOverlayPlayerAudio } from "./hooks/useOverlayPlayerAudio";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useLyrics } from "@/hooks/useLyrics";
 import { resolvePlaybackQualityBadgeFromStreamSource } from "@/hooks/useStreamBitrate";
@@ -132,16 +132,19 @@ export function OverlayPlayer() {
         currentAudiobook,
         currentPodcast,
         playbackType,
-        isPlaying,
-        isBuffering,
-        currentTime,
-        canSeek,
-        downloadProgress,
         isShuffle,
         repeatMode,
         vibeMode,
+        queue,
+        currentIndex,
+        isPlaying,
+        isBuffering,
+        canSeek,
+        downloadProgress,
         audioError,
         clearAudioError,
+        playbackDuration,
+        currentTime,
         pause,
         resume,
         next,
@@ -152,9 +155,6 @@ export function OverlayPlayer() {
         toggleRepeat,
         startVibeMode,
         stopVibeMode,
-        duration: playbackDuration,
-        queue,
-        currentIndex,
         playTrack,
         playQueueIndex,
         setUpcoming,
@@ -162,7 +162,7 @@ export function OverlayPlayer() {
         clearQueue,
         skipForward,
         skipBackward,
-    } = useAudio();
+    } = useOverlayPlayerAudio();
 
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();

@@ -1,11 +1,16 @@
 "use client";
 
+import {
+    useAudioControls,
+    useAudioState,
+    usePlaybackStatus,
+} from "@/lib/audio-context";
+import { usePlaybackProgress } from "@/lib/audio-playback-context";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import { cn } from "@/utils/cn";
-import { useAudio } from "@/lib/audio-context";
 import { useFeatures } from "@/lib/features-context";
 import { getTvNavigation } from "./tvNavigation";
 import { api } from "@/lib/api";
@@ -57,19 +62,14 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
         currentAudiobook,
         currentPodcast,
         playbackType,
-        isPlaying,
-        pause,
-        resume,
-        currentTime,
-        duration,
-        next,
-        previous,
         isShuffle,
-        toggleShuffle,
         repeatMode,
-        toggleRepeat,
-        seek,
-    } = useAudio();
+    } = useAudioState();
+    const { isPlaying, duration } = usePlaybackStatus();
+    // The TV chrome shows the playback position: legitimate clock consumer.
+    const { currentTime } = usePlaybackProgress();
+    const { pause, resume, next, previous, toggleShuffle, toggleRepeat, seek } =
+        useAudioControls();
 
     // Add tv-mode class to body on mount
     useEffect(() => {

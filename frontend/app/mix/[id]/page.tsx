@@ -6,7 +6,7 @@ import Image from "next/image";
 import { api } from "@/lib/api";
 import {
     useAudioState,
-    useAudioPlayback,
+    usePlaybackStatus,
     useAudioControls,
 } from "@/lib/audio-context";
 import { CoverMosaic } from "@/components/ui/CoverMosaic";
@@ -87,7 +87,7 @@ function MixPageContent() {
     const mixId = params.id as string;
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, addToQueue, pause, resume } = useAudioControls();
     const queuedTrackIds = useQueuedTrackIds();
 

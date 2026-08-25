@@ -1,5 +1,10 @@
 import { useEffect } from "react";
-import { useAudio } from "@/lib/audio-context";
+import {
+    useAudioControls,
+    useAudioState,
+    useAudioVolumeMode,
+    usePlaybackStatus,
+} from "@/lib/audio-context";
 import { useIsTV } from "@/lib/tv-utils";
 
 /**
@@ -18,23 +23,21 @@ import { useIsTV } from "@/lib/tv-utils";
  */
 export function useKeyboardShortcuts() {
     const isTV = useIsTV();
+    const { playbackType, currentTrack, currentAudiobook, currentPodcast } =
+        useAudioState();
+    const { volume } = useAudioVolumeMode();
+    const { isPlaying } = usePlaybackStatus();
     const {
-        isPlaying,
         resume,
         pause,
         next,
         previous,
-        seek,
-        currentTime,
+        skipForward,
+        skipBackward,
         setVolume,
-        volume,
         toggleMute,
         toggleShuffle,
-        playbackType,
-        currentTrack,
-        currentAudiobook,
-        currentPodcast,
-    } = useAudio();
+    } = useAudioControls();
 
     useEffect(() => {
         // Disable keyboard shortcuts on TV - use remote's media keys instead
@@ -82,12 +85,7 @@ export function useKeyboardShortcuts() {
                         playbackType === "audiobook" ||
                         playbackType === "podcast"
                     ) {
-                        const duration =
-                            currentTrack?.duration ||
-                            currentAudiobook?.duration ||
-                            currentPodcast?.duration ||
-                            0;
-                        seek(Math.min(currentTime + 10, duration));
+                        skipForward(10);
                     }
                     break;
 
@@ -97,7 +95,7 @@ export function useKeyboardShortcuts() {
                         playbackType === "audiobook" ||
                         playbackType === "podcast"
                     ) {
-                        seek(Math.max(currentTime - 10, 0));
+                        skipBackward(10);
                     }
                     break;
 
@@ -146,8 +144,8 @@ export function useKeyboardShortcuts() {
         resume,
         next,
         previous,
-        seek,
-        currentTime,
+        skipForward,
+        skipBackward,
         setVolume,
         volume,
         toggleMute,

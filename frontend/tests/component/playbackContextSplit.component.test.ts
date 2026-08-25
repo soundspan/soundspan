@@ -1,6 +1,6 @@
 /**
  * Guards the playback-context split so high-frequency clock updates re-render
- * progress and composite consumers without re-rendering status consumers.
+ * progress consumers without re-rendering status consumers.
  */
 
 import assert from "node:assert/strict";
@@ -36,16 +36,11 @@ test("playback status consumers do not re-render on clock ticks after the contex
     const { createRoot } = await import("react-dom/client");
     const { AudioStateProvider } =
         await import("../../lib/audio-state-context");
-    const {
-        AudioPlaybackProvider,
-        usePlaybackStatus,
-        usePlaybackProgress,
-        useAudioPlayback,
-    } = await import("../../lib/audio-playback-context");
+    const { AudioPlaybackProvider, usePlaybackStatus, usePlaybackProgress } =
+        await import("../../lib/audio-playback-context");
 
     const statusRendersRef = { current: 0 };
     const progressRendersRef = { current: 0 };
-    const compositeRendersRef = { current: 0 };
     const capturedEngineTickRef = { current: null as EngineTickFn | null };
 
     const StatusProbe = () => {
@@ -63,14 +58,6 @@ test("playback status consumers do not re-render on clock ticks after the contex
         return null;
     };
 
-    const CompositeProbe = () => {
-        const composite = useAudioPlayback();
-        void composite.currentTime;
-        void composite.isPlaying;
-        compositeRendersRef.current += 1;
-        return null;
-    };
-
     const tree = React.createElement(
         AudioStateProvider,
         null,
@@ -79,7 +66,6 @@ test("playback status consumers do not re-render on clock ticks after the contex
             null,
             React.createElement(StatusProbe),
             React.createElement(ProgressProbe),
-            React.createElement(CompositeProbe),
         ),
     );
 
@@ -97,7 +83,6 @@ test("playback status consumers do not re-render on clock ticks after the contex
 
     const mountStatusRenders = statusRendersRef.current;
     const mountProgressRenders = progressRendersRef.current;
-    const mountCompositeRenders = compositeRendersRef.current;
     assert.ok(
         capturedEngineTickRef.current,
         "expected the playback provider's engine-tick setter to be captured",
@@ -113,8 +98,6 @@ test("playback status consumers do not re-render on clock ticks after the contex
     const tickStatusRenders = statusRendersRef.current - mountStatusRenders;
     const tickProgressRenders =
         progressRendersRef.current - mountProgressRenders;
-    const tickCompositeRenders =
-        compositeRendersRef.current - mountCompositeRenders;
 
     assert.equal(
         tickStatusRenders,
@@ -125,11 +108,6 @@ test("playback status consumers do not re-render on clock ticks after the contex
         tickProgressRenders,
         2,
         `progress consumers must render exactly at the 2 display-second boundaries (got ${tickProgressRenders})`,
-    );
-    assert.equal(
-        tickCompositeRenders,
-        2,
-        `backward-compatible composite consumers must track the 2 clock publishes (got ${tickCompositeRenders})`,
     );
 
     await React.act(async () => {

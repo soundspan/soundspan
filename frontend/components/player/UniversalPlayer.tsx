@@ -1,6 +1,7 @@
 "use client";
 
 import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioVolumeMode } from "@/lib/audio-volume-mode-context";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { MiniPlayer } from "./MiniPlayer";
 import { FullPlayer } from "./FullPlayer";
@@ -24,8 +25,8 @@ export function UniversalPlayer() {
     // clock and re-render this AnimatePresence/LayoutGroup render root — and the
     // OverlayPlayer/MiniPlayer/FullPlayer subtree it mounts — 4x/second during
     // playback (roadmap F12, item A).
-    const { playerMode, currentTrack, currentAudiobook, currentPodcast } =
-        useAudioState();
+    const { currentTrack, currentAudiobook, currentPodcast } = useAudioState();
+    const { playerMode } = useAudioVolumeMode();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;

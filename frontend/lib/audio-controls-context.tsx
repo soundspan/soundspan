@@ -14,10 +14,12 @@ import {
     Track,
     Audiobook,
     Podcast,
-    PlayerMode,
 } from "./audio-state-context";
 import type { AudioControlsContextType } from "./audio-controls-types";
-import { useAudioPlayback } from "./audio-playback-context";
+import { usePlaybackStatus } from "./audio-playback-context";
+import { buildPlaybackView, PlaybackClockBridge } from "./audio-playback-view";
+import { useAudioVolumeMode } from "./audio-volume-mode-context";
+import { useVolumeModeControls } from "./audio-volume-controls";
 import { api } from "@/lib/api";
 import { audioSeekEmitter } from "./audio-seek-emitter";
 import {
@@ -54,7 +56,6 @@ import { resolveQueueAdvance } from "./audio/queue-advance-policy";
 import type { Episode } from "@/features/podcast/types";
 import { separateArtists } from "./separate-artists";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
-import { clampAudioVolume } from "@/lib/audio-volume";
 import {
     clampPlaybackTimeToUpperBound,
     resolvePlaybackTimeUpperBound,
@@ -285,8 +286,18 @@ const AudioControlsContext = createContext<
  */
 export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const state = useAudioState();
-    const playback = useAudioPlayback();
-    const playbackRef = useRef(playback);
+    const volumeMode = useAudioVolumeMode();
+    // Non-ticking status subscription; the clock reaches callbacks through
+    // currentTimeRef via the bridge below, so the 2,000-line provider body no
+    // longer re-renders 4x/second during playback (GH #785).
+    const playbackStatus = usePlaybackStatus();
+    const statusRef = useRef(playbackStatus);
+    const currentTimeRef = useRef(0);
+    // Built lazily in the sync effect below: the react-hooks compiler forbids
+    // touching refs during render, and callbacks only run after mount.
+    const playbackRef = useRef<ReturnType<typeof buildPlaybackView> | null>(
+        null,
+    );
     const upNextInsertRef = useRef<number>(0);
     const shuffleInsertPosRef = useRef<number>(0);
     const lastQueueInsertAtRef = useRef<number | null>(null);
@@ -329,8 +340,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        playbackRef.current = playback;
-    }, [playback]);
+        statusRef.current = playbackStatus;
+    }, [playbackStatus]);
+
+    // Built on first use: refs are only touched at call time, which both
+    // satisfies the react-hooks compiler and keeps static test renders
+    // (no effects) working.
+    const getPlaybackView = useCallback(() => {
+        playbackRef.current ??= buildPlaybackView(statusRef, currentTimeRef);
+        return playbackRef.current;
+    }, []);
 
     // Keep a stable "Up Next" insertion cursor like Spotify:
     // - When the current track changes, reset to "right after current"
@@ -417,7 +436,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const applyOptimisticListenTogetherTrackSelection = useCallback(
         (targetIndex: number): void => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const targetTrack = state.queue[targetIndex];
             // Listen Together queues are music-only; ignore episode entries.
             if (!targetTrack || isEpisodeQueueItem(targetTrack)) return;
@@ -443,7 +462,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playbackState.setCurrentTime(0);
             playbackState.setIsPlaying(true);
         },
-        [state],
+        [state, getPlaybackView],
     );
 
     const playTrack = useCallback(
@@ -452,7 +471,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 "manual",
                 state.currentTrack?.id ?? null,
             );
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 const queueTrack = toListenTogetherQueueTrack(track);
@@ -500,7 +519,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setShuffleIndices([0]);
             state.setRepeatOneCount(0);
         },
-        [state, getActiveListenTogetherSession],
+        [state, getActiveListenTogetherSession, getPlaybackView],
     );
 
     const playTracks = useCallback(
@@ -509,7 +528,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 "manual",
                 state.currentTrack?.id ?? null,
             );
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             if (tracks.length === 0) {
                 return;
             }
@@ -608,7 +627,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 generateShuffleIndices(tracks.length, normalizedStartIndex),
             );
         },
-        [state, generateShuffleIndices, getActiveListenTogetherSession],
+        [
+            state,
+            generateShuffleIndices,
+            getActiveListenTogetherSession,
+            getPlaybackView,
+        ],
     );
 
     const playAudiobook = useCallback(
@@ -623,7 +647,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             state.setPlaybackType("audiobook");
             state.setCurrentAudiobook(audiobook);
             state.setCurrentTrack(null);
@@ -639,7 +663,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 playbackState.setCurrentTime(0);
             }
         },
-        [state, getActiveListenTogetherSession],
+        [state, getActiveListenTogetherSession, getPlaybackView],
     );
 
     // Persists the playing episode's listening position before the player
@@ -649,7 +673,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // position (and later resumes would restart from the stale point).
     const persistEpisodeProgressBeforeSwitch = useCallback(
         (nextMediaId: string | null) => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const save = resolveEpisodeProgressSaveOnSwitch({
                 playbackType: state.playbackType,
                 currentPodcastId: state.currentPodcast?.id ?? null,
@@ -677,7 +701,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     );
                 });
         },
-        [state],
+        [state, getPlaybackView],
     );
 
     const playPodcast = useCallback(
@@ -696,7 +720,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             // media; keep the outgoing episode's position first.
             persistEpisodeProgressBeforeSwitch(podcast.id);
 
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const episodeItem = episodeQueueItemFromPodcast(podcast);
             state.setPlaybackType("podcast");
             state.setCurrentPodcast(podcast);
@@ -757,12 +781,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             generateShuffleIndices,
             getActiveListenTogetherSession,
             persistEpisodeProgressBeforeSwitch,
+            getPlaybackView,
         ],
     );
 
     const pause = useCallback(
         (options?: { suppressListenTogetherBroadcast?: boolean }) => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const ltSession = getActiveListenTogetherSession();
             playbackState.setIsPlaying(false);
             if (
@@ -772,14 +797,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 listenTogetherSocket.pause().catch(() => {});
             }
         },
-        [getActiveListenTogetherSession],
+        [getActiveListenTogetherSession, getPlaybackView],
     );
 
     // Makes the queue item at `index` the current media and starts playback,
     // dispatching to the track or podcast playback path by item type.
     const startQueueItemAtIndex = useCallback(
         (index: number, item: QueueItem) => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             // Skipping away from a playing episode must keep its position.
             persistEpisodeProgressBeforeSwitch(item.id);
             // Record the new active media synchronously so any in-flight
@@ -821,7 +846,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                         duration: item.duration,
                     });
                     if (!start) return;
-                    const currentPlayback = playbackRef.current;
+                    const currentPlayback = getPlaybackView();
                     state.setCurrentTrack(null);
                     state.setCurrentAudiobook(null);
                     state.setPlaybackType("podcast");
@@ -870,7 +895,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playbackState.setCurrentTime(0);
             playbackState.setIsPlaying(true);
         },
-        [state, persistEpisodeProgressBeforeSwitch],
+        [state, persistEpisodeProgressBeforeSwitch, getPlaybackView],
     );
 
     const resume = useCallback(
@@ -880,7 +905,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             listenTogetherPositionMs?: number;
             listenTogetherServerTimeMs?: number;
         }) => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             if (!options?.suppressListenTogetherBroadcast) {
                 writePlaybackAdvanceOrigin(
                     "manual",
@@ -936,7 +961,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             playbackState.setIsPlaying(true);
         },
-        [state, getActiveListenTogetherSession],
+        [state, getActiveListenTogetherSession, getPlaybackView],
     );
 
     const play = useCallback(() => {
@@ -946,7 +971,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const advanceQueue = useCallback(
         (origin: PlaybackAdvanceOrigin) => {
             writePlaybackAdvanceOrigin(origin, state.currentTrack?.id ?? null);
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 if (!ltSession.isHost) return;
@@ -980,7 +1005,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 }
                 // Short delay for audio element state synchronization
                 repeatTimeoutRef.current = setTimeout(
-                    () => playbackRef.current.setIsPlaying(true),
+                    () => getPlaybackView().setIsPlaying(true),
                     10,
                 );
                 return;
@@ -1029,13 +1054,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             getActiveListenTogetherSession,
             emitListenTogetherHostTrackOperation,
             applyOptimisticListenTogetherTrackSelection,
+            getPlaybackView,
         ],
     );
     const next = useCallback(() => advanceQueue("manual"), [advanceQueue]);
 
     const previous = useCallback(() => {
         writePlaybackAdvanceOrigin("manual", state.currentTrack?.id ?? null);
-        const playbackState = playbackRef.current;
+        const playbackState = getPlaybackView();
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) {
             if (!ltSession.isHost) return;
@@ -1082,6 +1108,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         getActiveListenTogetherSession,
         emitListenTogetherHostTrackOperation,
         applyOptimisticListenTogetherTrackSelection,
+        getPlaybackView,
     ]);
 
     const addTracksToQueue = useCallback(
@@ -1090,7 +1117,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 "manual",
                 state.currentTrack?.id ?? null,
             );
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const shouldToastSuccess = !options?.silent;
             const validTracks = tracks.filter((track) => Boolean(track?.id));
             if (validTracks.length === 0) {
@@ -1282,7 +1309,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 }
             }
         },
-        [state, generateShuffleIndices, getActiveListenTogetherSession],
+        [
+            state,
+            generateShuffleIndices,
+            getActiveListenTogetherSession,
+            getPlaybackView,
+        ],
     );
 
     const addToQueue = useCallback(
@@ -1299,7 +1331,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.currentTrack?.id ?? null,
             );
             if (!track?.id) return;
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
 
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
@@ -1400,7 +1432,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 queueLen: state.queue.length + 1,
             });
         },
-        [state, generateShuffleIndices, getActiveListenTogetherSession],
+        [
+            state,
+            generateShuffleIndices,
+            getActiveListenTogetherSession,
+            getPlaybackView,
+        ],
     );
 
     const playNow = useCallback(
@@ -1411,7 +1448,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             );
             if (!track?.id) return;
 
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const ltSession = getActiveListenTogetherSession();
 
             // Listen Together: add only this single track to the shared queue
@@ -1511,6 +1548,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             generateShuffleIndices,
             getActiveListenTogetherSession,
             persistEpisodeProgressBeforeSwitch,
+            getPlaybackView,
         ],
     );
 
@@ -1728,7 +1766,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     state.setCurrentIndex(0);
                     state.setCurrentTrack(null);
                     state.setCurrentPodcast(null);
-                    playbackRef.current.setIsPlaying(false);
+                    getPlaybackView().setIsPlaying(false);
                 } else {
                     // Removing the currently playing LAST item: hand off to
                     // the shared start path so the outgoing episode's
@@ -1753,6 +1791,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             getActiveListenTogetherSession,
             persistEpisodeProgressBeforeSwitch,
             startQueueItemAtIndex,
+            getPlaybackView,
         ],
     );
 
@@ -1798,7 +1837,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentTrack(null);
         state.setCurrentPodcast(null);
         state.setPlaybackType(null);
-        playbackRef.current.setIsPlaying(false);
+        getPlaybackView().setIsPlaying(false);
         state.setShuffleIndices([]);
 
         // Persist to server so the next playback-state poll sees an empty
@@ -1809,13 +1848,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         writeMigratingStorageItem(LAST_PLAYBACK_STATE_SAVE_AT_KEY, now);
         writeMigratingStorageItem(QUEUE_CLEARED_AT_KEY, now);
         void api.clearPlaybackState().catch(() => undefined);
-    }, [state, getActiveListenTogetherSession]);
+    }, [state, getActiveListenTogetherSession, getPlaybackView]);
 
     // Set upcoming tracks without interrupting current playback
     // preserveOrder=true will skip shuffle index generation (used for vibe mode)
     const setUpcoming = useCallback(
         (tracks: Track[], preserveOrder = false) => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 // Avoid large synchronous queue mutations through global controls.
@@ -1871,7 +1910,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setShuffleIndices([]);
             }
         },
-        [state, generateShuffleIndices, getActiveListenTogetherSession],
+        [
+            state,
+            generateShuffleIndices,
+            getActiveListenTogetherSession,
+            getPlaybackView,
+        ],
     );
 
     const toggleShuffle = useCallback(() => {
@@ -1911,9 +1955,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setRepeatOneCount(0);
     }, [state, getActiveListenTogetherSession]);
 
-    const updateCurrentTime = useCallback((time: number) => {
-        playbackRef.current.setCurrentTime(time);
-    }, []);
+    const updateCurrentTime = useCallback(
+        (time: number) => {
+            getPlaybackView().setCurrentTime(time);
+        },
+        [getPlaybackView],
+    );
 
     const seek = useCallback(
         (
@@ -1923,7 +1970,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 suppressListenTogetherBroadcast?: boolean;
             },
         ) => {
-            const playbackState = playbackRef.current;
+            const playbackState = getPlaybackView();
             const ltSession = getActiveListenTogetherSession();
             if (
                 ltSession &&
@@ -2007,62 +2054,29 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 listenTogetherSocket.seek(clampedTime * 1000).catch(() => {});
             }
         },
-        [state, getActiveListenTogetherSession],
+        [state, getActiveListenTogetherSession, getPlaybackView],
     );
 
     const skipForward = useCallback(
         (seconds: number = 30) => {
-            seek(playbackRef.current.currentTime + seconds);
+            seek(getPlaybackView().currentTime + seconds);
         },
-        [seek],
+        [seek, getPlaybackView],
     );
 
     const skipBackward = useCallback(
         (seconds: number = 30) => {
-            seek(playbackRef.current.currentTime - seconds);
+            seek(getPlaybackView().currentTime - seconds);
         },
-        [seek],
+        [seek, getPlaybackView],
     );
 
-    const setPlayerModeWithHistory = useCallback(
-        (mode: PlayerMode) => {
-            state.setPreviousPlayerMode(state.playerMode);
-            state.setPlayerMode(mode);
-        },
-        [state],
-    );
-
-    const returnToPreviousMode = useCallback(() => {
-        // Closing overlay should restore the platform-appropriate compact mode.
-        // Mobile/tablet => mini, desktop => full.
-        const deviceDefaultMode: PlayerMode =
-            typeof window !== "undefined" &&
-            window.matchMedia("(max-width: 1024px)").matches
-                ? "mini"
-                : "full";
-        const targetMode =
-            state.playerMode === "overlay"
-                ? deviceDefaultMode
-                : state.previousPlayerMode;
-        const temp = state.playerMode;
-        state.setPlayerMode(targetMode);
-        state.setPreviousPlayerMode(temp);
-    }, [state]);
-
-    const setVolumeControl = useCallback(
-        (newVolume: number) => {
-            const clampedVolume = clampAudioVolume(newVolume);
-            state.setVolume(clampedVolume);
-            if (clampedVolume > 0) {
-                state.setIsMuted(false);
-            }
-        },
-        [state],
-    );
-
-    const toggleMute = useCallback(() => {
-        state.setIsMuted((prev) => !prev);
-    }, [state]);
+    const {
+        setPlayerModeWithHistory,
+        returnToPreviousMode,
+        setVolumeControl,
+        toggleMute,
+    } = useVolumeModeControls(volumeMode);
 
     // Vibe mode controls - uses CLAP similarity API
     const startVibeMode = useCallback(async (): Promise<{
@@ -2271,6 +2285,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     return (
         <AudioControlsContext.Provider value={value}>
+            <PlaybackClockBridge currentTimeRef={currentTimeRef} />
             {children}
         </AudioControlsContext.Provider>
     );

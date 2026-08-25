@@ -257,55 +257,14 @@ test("audio-controls helper exports cover queue and listen-together session bran
     assert.equal(deterministic.includes(3), true);
 });
 
-test("useAudioPlayback throws when rendered outside provider", async () => {
-    const { useAudioPlayback } =
-        await import("../../lib/audio-playback-context");
+test("the deprecated composite playback hook is gone", async () => {
+    const playbackModule = await import("../../lib/audio-playback-context");
 
-    const HookProbe = () => {
-        useAudioPlayback();
-        return React.createElement("div", null, "ok");
-    };
-
-    assertHookGuardError(
-        () => renderToStaticMarkup(React.createElement(HookProbe)),
-        "useAudioPlayback must be used within AudioPlaybackProvider",
-    );
-});
-
-test("useAudioPlayback resolves within provider stack", async () => {
-    const { AudioStateProvider } =
-        await import("../../lib/audio-state-context");
-    const { AudioPlaybackProvider, useAudioPlayback } =
-        await import("../../lib/audio-playback-context");
-
-    const capturedRef = {
-        current: null as ReturnType<typeof useAudioPlayback> | null,
-    };
-    const HookProbe = () => {
-        capturedRef.current = useAudioPlayback();
-        return React.createElement("div", null, "playback-ready");
-    };
-
-    const html = renderToStaticMarkup(
-        React.createElement(
-            AudioStateProvider,
-            null,
-            React.createElement(
-                AudioPlaybackProvider,
-                null,
-                React.createElement(HookProbe),
-            ),
-        ),
-    );
-
-    assert.ok(html.includes("playback-ready"));
-    assert.ok(capturedRef.current);
-    assert.equal(typeof capturedRef.current.setCurrentTime, "function");
     assert.equal(
-        typeof capturedRef.current.setCurrentTimeFromEngine,
-        "function",
+        "useAudioPlayback" in playbackModule,
+        false,
+        "useAudioPlayback was removed in GH #785; use usePlaybackStatus/usePlaybackProgress",
     );
-    assert.equal(typeof capturedRef.current.clearAudioError, "function");
 });
 
 test("useListenTogether resolves within provider with deterministic mocked dependencies", async () => {

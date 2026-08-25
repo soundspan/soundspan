@@ -3,7 +3,10 @@
 import { useCallback } from "react";
 import { useAudioState, type Track } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import {
+    usePlaybackStatus,
+    usePlaybackProgress,
+} from "@/lib/audio-playback-context";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { NowPlayingCard } from "./NowPlayingCard";
@@ -34,7 +37,9 @@ export function NowPlayingConnected({
     moodColor: string | null;
     onFlyTo: () => void;
 }) {
-    const { isPlaying, currentTime, duration } = useAudioPlayback();
+    const { isPlaying, duration } = usePlaybackStatus();
+    // Now-playing card shows the position; it is a legitimate clock consumer.
+    const { currentTime } = usePlaybackProgress();
     const { pause, play } = useAudioControls();
     const { playbackType } = useAudioState();
     const onTogglePlay = useCallback(

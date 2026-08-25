@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { useAudio } from "@/lib/audio-context";
+import {
+    useAudioControls,
+    useAudioState,
+    useAudioVolumeMode,
+} from "@/lib/audio-context";
 
 /**
  * Hook that promotes mini -> full when viewing the currently playing media page.
@@ -8,13 +12,9 @@ import { useAudio } from "@/lib/audio-context";
  */
 export function usePlayerMode(): void {
     const pathname = usePathname();
-    const {
-        currentTrack,
-        currentAudiobook,
-        currentPodcast,
-        playerMode,
-        setPlayerMode,
-    } = useAudio();
+    const { currentTrack, currentAudiobook, currentPodcast } = useAudioState();
+    const { playerMode } = useAudioVolumeMode();
+    const { setPlayerMode } = useAudioControls();
 
     useEffect(() => {
         // Don't auto-switch if in overlay mode (user manually opened it)

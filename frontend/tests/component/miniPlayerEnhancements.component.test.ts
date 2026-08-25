@@ -52,6 +52,21 @@ const Icon = (props: Record<string, unknown>) =>
     React.createElement("i", props);
 
 // Mock lucide-react
+mock.module("@/lib/audio-volume-mode-context", {
+    namedExports: {
+        useAudioVolumeMode: () => ({
+            volume: 1,
+            isMuted: false,
+            playerMode: "full",
+            previousPlayerMode: "full",
+            setVolume: () => undefined,
+            setIsMuted: () => undefined,
+            setPlayerMode: () => undefined,
+            setPreviousPlayerMode: () => undefined,
+        }),
+    },
+});
+
 mock.module("lucide-react", {
     namedExports: {
         Play: Icon,
@@ -84,17 +99,20 @@ mock.module("@/utils/formatTime", {
 // Mock audio context (useAudio)
 mock.module("@/lib/audio-context", {
     namedExports: {
-        useAudio: () => ({
+        useAudioState: () => ({
             currentTrack: state.currentTrack,
             currentAudiobook: state.currentAudiobook,
             currentPodcast: state.currentPodcast,
             playbackType: state.playbackType,
+        }),
+        usePlaybackStatus: () => ({
             isPlaying: state.isPlaying,
             isBuffering: state.isBuffering,
-            currentTime: state.currentTime,
             duration: state.duration,
             audioError: state.audioError,
             clearAudioError: () => undefined,
+        }),
+        useAudioControls: () => ({
             pause: () => undefined,
             resume: () => undefined,
             next: () => undefined,
@@ -185,6 +203,9 @@ mock.module("@/lib/audio-playback-context", {
         }),
         usePlaybackStatus: () => ({
             streamProfile: null,
+        }),
+        usePlaybackProgress: () => ({
+            currentTime: state.currentTime,
         }),
     },
 });

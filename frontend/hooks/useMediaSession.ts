@@ -1,5 +1,10 @@
+import {
+    useAudioControls,
+    useAudioState,
+    usePlaybackStatus,
+} from "@/lib/audio-context";
+import { usePlaybackProgress } from "@/lib/audio-playback-context";
 import { useEffect, useCallback, useRef } from "react";
-import { useAudio } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
@@ -14,19 +19,14 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
  * - Seek controls (on supported platforms)
  */
 export function useMediaSession() {
-    const {
-        currentTrack,
-        currentAudiobook,
-        currentPodcast,
-        playbackType,
-        isPlaying,
-        pause,
-        resume,
-        next,
-        previous,
-        seek,
-        currentTime,
-    } = useAudio();
+    const { currentTrack, currentAudiobook, currentPodcast, playbackType } =
+        useAudioState();
+    const { isPlaying } = usePlaybackStatus();
+    // The OS media UI shows the playback position: legitimate clock consumer
+    // (this hook's host renders null, so the tick re-render is cheap).
+    const { currentTime } = usePlaybackProgress();
+    const { pause, resume, next, previous, seek, skipForward, skipBackward } =
+        useAudioControls();
 
     // Track if this device has initiated playback locally
     // Prevents cross-device media session interference from state sync
@@ -243,7 +243,7 @@ export function useMediaSession() {
                 previous();
             } else {
                 // For audiobooks/podcasts, seek backward 30s
-                seek(Math.max(currentTime - 30, 0));
+                skipBackward(30);
             }
         });
 
@@ -252,9 +252,7 @@ export function useMediaSession() {
                 next();
             } else {
                 // For audiobooks/podcasts, seek forward 30s
-                const duration =
-                    currentAudiobook?.duration || currentPodcast?.duration || 0;
-                seek(Math.min(currentTime + 30, duration));
+                skipForward(30);
             }
         });
 
@@ -263,21 +261,14 @@ export function useMediaSession() {
             navigator.mediaSession.setActionHandler(
                 "seekbackward",
                 (details) => {
-                    const skipTime = details.seekOffset || 10;
-                    seek(Math.max(currentTime - skipTime, 0));
+                    skipBackward(details.seekOffset || 10);
                 },
             );
 
             navigator.mediaSession.setActionHandler(
                 "seekforward",
                 (details) => {
-                    const skipTime = details.seekOffset || 10;
-                    const duration =
-                        currentTrack?.duration ||
-                        currentAudiobook?.duration ||
-                        currentPodcast?.duration ||
-                        0;
-                    seek(Math.min(currentTime + skipTime, duration));
+                    skipForward(details.seekOffset || 10);
                 },
             );
 
@@ -318,6 +309,8 @@ export function useMediaSession() {
         next,
         previous,
         seek,
+        skipForward,
+        skipBackward,
         currentTime,
         playbackType,
         currentTrack,

@@ -12,7 +12,7 @@ import { formatDuration } from "@/utils/formatTime";
 import { useAuth } from "@/lib/auth-context";
 import {
     useAudioState,
-    useAudioPlayback,
+    usePlaybackStatus,
     useAudioControls,
 } from "@/lib/audio-context";
 import { useToast } from "@/lib/toast-context";
@@ -57,7 +57,7 @@ export default function SeriesDetailPage() {
     const { isAuthenticated } = useAuth();
     const { toast } = useToast();
     const { currentAudiobook, playbackType } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playAudiobook, pause, resume } = useAudioControls();
 
     const seriesName = decodeURIComponent(params.name as string);

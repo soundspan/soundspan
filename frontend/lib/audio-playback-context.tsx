@@ -808,26 +808,3 @@ export function usePlaybackProgress(): PlaybackProgressContextType {
     }
     return context;
 }
-
-/**
- * Reads the composite playback context.
- *
- * @deprecated Use usePlaybackStatus and usePlaybackProgress instead.
- */
-export function useAudioPlayback(): AudioPlaybackContextType {
-    const status = useContext(PlaybackStatusContext);
-    const progress = useContext(PlaybackProgressContext);
-    const composite = useMemo(
-        () =>
-            status && progress
-                ? { ...status, currentTime: progress.currentTime }
-                : null,
-        [status, progress],
-    );
-    if (!composite) {
-        throw new Error(
-            "useAudioPlayback must be used within AudioPlaybackProvider",
-        );
-    }
-    return composite;
-}

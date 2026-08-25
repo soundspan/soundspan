@@ -1,6 +1,11 @@
 "use client";
 
-import { useAudio } from "@/lib/audio-context";
+import {
+    useAudioControls,
+    useAudioState,
+    usePlaybackStatus,
+} from "@/lib/audio-context";
+import { usePlaybackProgress } from "@/lib/audio-playback-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useStreamBitrate } from "@/hooks/useStreamBitrate";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
@@ -25,22 +30,18 @@ import { PlaybackQualityBadgeWithStats } from "@/components/player/PlaybackQuali
  * Renders the MiniPlayer component.
  */
 export function MiniPlayer() {
+    const { currentTrack, currentAudiobook, currentPodcast, playbackType } =
+        useAudioState();
     const {
-        currentTrack,
-        currentAudiobook,
-        currentPodcast,
-        playbackType,
         isPlaying,
         isBuffering,
-        currentTime,
         duration: playbackDuration,
         audioError,
         clearAudioError,
-        pause,
-        resume,
-        next,
-        setPlayerMode,
-    } = useAudio();
+    } = usePlaybackStatus();
+    // The mini player renders the progress bar: legitimate clock consumer.
+    const { currentTime } = usePlaybackProgress();
+    const { pause, resume, next, setPlayerMode } = useAudioControls();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;

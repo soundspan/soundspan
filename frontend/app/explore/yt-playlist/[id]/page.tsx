@@ -18,7 +18,7 @@ import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useAudioState, type Track } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { useCollectionLikeAll } from "@/hooks/useCollectionLikeAll";
@@ -321,7 +321,7 @@ function YtMusicPlaylistDetailPageContent() {
 
     // Audio context
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, playNow, addTracksToQueue, pause, resume } =
         useAudioControls();
 

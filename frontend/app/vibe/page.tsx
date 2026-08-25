@@ -1,11 +1,11 @@
 "use client";
 
+import { useAudioControls } from "@/lib/audio-context";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/cn";
 import { api, vibeErrorMessage } from "@/lib/api";
 import { useFeatures } from "@/lib/features-context";
-import { useAudio } from "@/lib/audio-context";
 import { useAudioState } from "@/lib/audio-state-context";
 import Image from "next/image";
 import Link from "next/link";
@@ -685,7 +685,7 @@ export default function VibePage() {
 }
 
 function VibePageContent() {
-    const { playTracks } = useAudio();
+    const { playTracks } = useAudioControls();
     const {
         setVibeMode,
         setVibeSourceFeatures,

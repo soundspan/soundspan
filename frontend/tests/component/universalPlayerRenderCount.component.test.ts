@@ -124,7 +124,7 @@ test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publis
     const { createRoot } = await import("react-dom/client");
     const { AudioStateProvider } =
         await import("../../lib/audio-state-context");
-    const { AudioPlaybackProvider, useAudioPlayback } =
+    const { AudioPlaybackProvider, usePlaybackStatus, usePlaybackProgress } =
         await import("../../lib/audio-playback-context");
     const { UniversalPlayer } =
         await import("../../components/player/UniversalPlayer");
@@ -142,7 +142,9 @@ test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publis
     // state changes (otherwise a "0 UniversalPlayer renders" result would be
     // vacuous). UniversalPlayer must NOT track this counter.
     const Probe = () => {
-        const playback = useAudioPlayback();
+        const playback = usePlaybackStatus();
+        const progress = usePlaybackProgress();
+        void progress.currentTime;
         capturedEngineTickRef.current = playback.setCurrentTimeFromEngine;
         playbackRendersRef.current += 1;
         return null;

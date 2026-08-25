@@ -47,6 +47,21 @@ const state = {
     audioError: null as string | null,
 };
 
+mock.module("@/lib/audio-volume-mode-context", {
+    namedExports: {
+        useAudioVolumeMode: () => ({
+            volume: 1,
+            isMuted: false,
+            playerMode: "full",
+            previousPlayerMode: "full",
+            setVolume: () => undefined,
+            setIsMuted: () => undefined,
+            setPlayerMode: () => undefined,
+            setPreviousPlayerMode: () => undefined,
+        }),
+    },
+});
+
 mock.module("lucide-react", {
     namedExports: {
         Play: Icon,
@@ -127,6 +142,26 @@ mock.module("@/lib/audio-state-context", {
 mock.module("@/lib/audio-playback-context", {
     namedExports: {
         useAudioPlayback: () => ({
+            isPlaying: state.isPlaying,
+            isBuffering: state.isBuffering,
+            currentTime: state.currentTime,
+            duration: state.duration,
+            canSeek: state.canSeek,
+            downloadProgress: state.downloadProgress,
+            audioError: state.audioError,
+            clearAudioError: () => undefined,
+        }),
+        usePlaybackStatus: () => ({
+            isPlaying: state.isPlaying,
+            isBuffering: state.isBuffering,
+            currentTime: state.currentTime,
+            duration: state.duration,
+            canSeek: state.canSeek,
+            downloadProgress: state.downloadProgress,
+            audioError: state.audioError,
+            clearAudioError: () => undefined,
+        }),
+        usePlaybackProgress: () => ({
             isPlaying: state.isPlaying,
             isBuffering: state.isBuffering,
             currentTime: state.currentTime,

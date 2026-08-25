@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
     useAudioState,
-    useAudioPlayback,
+    usePlaybackStatus,
     useAudioControls,
 } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
@@ -87,7 +87,7 @@ export default function ArtistPage() {
     const router = useRouter();
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, playNow, pause, addTracksToQueue } = useAudioControls();
     const { isPendingByMbid, downloadsEnabled } = useDownloadContext();
     const { isInGroup } = useListenTogether();

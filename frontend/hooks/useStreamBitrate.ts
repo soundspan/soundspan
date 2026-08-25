@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
+import { useAudioState, usePlaybackStatus } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 
 // ── TIDAL stream quality info ──────────────────────────────────────
@@ -375,7 +375,7 @@ export function useStreamBitrate(): {
     qualityBadge: PlaybackQualityBadge | null;
 } {
     const { currentTrack, playbackType } = useAudioState();
-    const { streamProfile } = useAudioPlayback();
+    const { streamProfile } = usePlaybackStatus();
     const [bitrate, setBitrate] = useState<number | null>(null);
     const [codec, setCodec] = useState<string | null>(null);
     const [tidalQuality, setTidalQuality] = useState<TidalStreamQuality | null>(
