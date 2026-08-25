@@ -68,7 +68,7 @@ const BASELINE = Object.freeze({
     "frontend/app/playlist/[id]/page.tsx": 1506,
     "frontend/app/vibe/page.tsx": 1524,
     "frontend/components/player/AudioPlaybackOrchestrator.tsx": 1595,
-    "frontend/components/player/OverlayPlayer.tsx": 2865,
+    "frontend/components/player/OverlayPlayer.tsx": 2719,
     "frontend/hooks/useQueries.ts": 1453,
     "frontend/lib/audio-controls-context.tsx": 2305,
     "frontend/lib/listen-together-context.tsx": 2063,

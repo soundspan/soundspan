@@ -20,7 +20,7 @@
         "format:check": "prettier --check .",
         "start": "node server.js",
         "prelint": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
-        "lint": "eslint --max-warnings=183",
+        "lint": "eslint --max-warnings=182",
         "lint:hex": "node scripts/check-hardcoded-hex.mjs",
         "typecheck": "tsc --noEmit --incremental false",
         "pretest:unit": "tsc -p ../packages/media-metadata-contract/tsconfig.json",

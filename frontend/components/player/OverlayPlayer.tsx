@@ -1,5 +1,6 @@
 "use client";
 
+import { useOverlayGestures } from "./hooks/useOverlayGestures";
 import { useOverlayPlayerAudio } from "./hooks/useOverlayPlayerAudio";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useLyrics } from "@/hooks/useLyrics";
@@ -172,21 +173,9 @@ export function OverlayPlayer() {
 
     // Swipe state for track skipping
     const overlayRef = useRef<HTMLDivElement | null>(null);
-    const touchStartX = useRef<number | null>(null);
-    const overlayCloseTouchStartY = useRef<number | null>(null);
-    const overlayCloseTouchStartX = useRef<number | null>(null);
-    const overlayCloseTouchStartTime = useRef<number | null>(null);
-    const drawerTouchStartY = useRef<number | null>(null);
-    const drawerTouchStartX = useRef<number | null>(null);
-    const drawerTouchStartTime = useRef<number | null>(null);
     const queueListRef = useRef<HTMLDivElement | null>(null);
     const wasQueueTabVisibleRef = useRef(false);
     const previousQueueIndexRef = useRef<number | null>(null);
-    const [swipeOffset, setSwipeOffset] = useState(0);
-    const [overlayDragOffset, setOverlayDragOffset] = useState(0);
-    const [isOverlayDragActive, setIsOverlayDragActive] = useState(false);
-    const [drawerDragOffset, setDrawerDragOffset] = useState(0);
-    const [isDrawerDragActive, setIsDrawerDragActive] = useState(false);
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const [isRadioLoading, setIsRadioLoading] = useState(false);
     const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
@@ -212,6 +201,23 @@ export function OverlayPlayer() {
     );
     // Skip is queue-based: the unified queue can mix tracks and episodes.
     const canSkip = queue.length > 0;
+    const {
+        swipeOffset,
+        overlayDragOffset,
+        isOverlayDragActive,
+        overlayHeaderHandlers,
+        drawerDragOffset,
+        isDrawerDragActive,
+        drawerHandleHandlers,
+        resetDrawerDrag,
+        trackSwipeHandlers,
+    } = useOverlayGestures({
+        canSkip,
+        onPrevious: previous,
+        onNext: next,
+        onCloseOverlay: returnToPreviousMode,
+        onCloseDrawer: () => setIsDrawerOpen(false),
+    });
     const isTrackMode = playbackType === "track";
     const preferenceTrackId = isTrackMode ? currentTrack?.id : undefined;
     const isDesktopOverlayLayout = canSkip && !isMobileOrTablet;
@@ -617,12 +623,8 @@ export function OverlayPlayer() {
 
     useEffect(() => {
         if (isDrawerOpen) return;
-        setDrawerDragOffset(0);
-        setIsDrawerDragActive(false);
-        drawerTouchStartY.current = null;
-        drawerTouchStartX.current = null;
-        drawerTouchStartTime.current = null;
-    }, [isDrawerOpen]);
+        resetDrawerDrag();
+    }, [isDrawerOpen, resetDrawerDrag]);
 
     useEffect(() => {
         const wasQueueVisible = wasQueueTabVisibleRef.current;
@@ -919,166 +921,6 @@ export function OverlayPlayer() {
         [getRelatedTrackKey, playTrack, relatedStreamMatches],
     );
 
-    // Swipe handlers for track skipping
-    const handleTouchStart = (e: React.TouchEvent) => {
-        touchStartX.current = e.touches[0].clientX;
-    };
-
-    const handleTouchMove = (e: React.TouchEvent) => {
-        if (touchStartX.current === null) return;
-        const deltaX = e.touches[0].clientX - touchStartX.current;
-        setSwipeOffset(Math.max(-100, Math.min(100, deltaX)));
-    };
-
-    const handleTouchEnd = () => {
-        if (touchStartX.current === null) return;
-
-        if (canSkip) {
-            if (swipeOffset > 60) {
-                previous();
-            } else if (swipeOffset < -60) {
-                next();
-            }
-        }
-
-        setSwipeOffset(0);
-        touchStartX.current = null;
-    };
-
-    const handleDrawerHandleTouchStart = (e: React.TouchEvent) => {
-        drawerTouchStartY.current = e.touches[0].clientY;
-        drawerTouchStartX.current = e.touches[0].clientX;
-        drawerTouchStartTime.current = Date.now();
-        setDrawerDragOffset(0);
-        setIsDrawerDragActive(true);
-        e.stopPropagation();
-    };
-
-    const handleDrawerHandleTouchMove = (e: React.TouchEvent) => {
-        if (
-            drawerTouchStartY.current === null ||
-            drawerTouchStartX.current === null
-        )
-            return;
-
-        const deltaY = e.touches[0].clientY - drawerTouchStartY.current;
-        const deltaX = Math.abs(
-            e.touches[0].clientX - drawerTouchStartX.current,
-        );
-
-        if (deltaY > 0 && deltaY > deltaX * 0.9) {
-            setDrawerDragOffset(Math.min(240, deltaY));
-            e.preventDefault();
-        } else if (deltaY <= 0) {
-            setDrawerDragOffset(0);
-        }
-        e.stopPropagation();
-    };
-
-    const handleDrawerHandleTouchEnd = (e: React.TouchEvent) => {
-        if (
-            drawerTouchStartY.current === null ||
-            drawerTouchStartX.current === null
-        ) {
-            setDrawerDragOffset(0);
-            setIsDrawerDragActive(false);
-            return;
-        }
-
-        const endY = e.changedTouches[0].clientY;
-        const endX = e.changedTouches[0].clientX;
-        const deltaY = endY - drawerTouchStartY.current;
-        const deltaX = Math.abs(endX - drawerTouchStartX.current);
-        const elapsedMs = Math.max(
-            1,
-            Date.now() - (drawerTouchStartTime.current ?? Date.now()),
-        );
-        const velocityY = deltaY / elapsedMs;
-        const isVerticalSwipe = deltaY > 0 && deltaY > deltaX * 1.2;
-        const isDistanceClose = deltaY > 44;
-        const isVelocityClose = deltaY > 20 && velocityY > 0.25;
-
-        if (isVerticalSwipe && (isDistanceClose || isVelocityClose)) {
-            setDrawerDragOffset((prev) => Math.max(prev, 140));
-            setIsDrawerDragActive(false);
-            setIsDrawerOpen(false);
-        } else {
-            setDrawerDragOffset(0);
-            setIsDrawerDragActive(false);
-        }
-        drawerTouchStartY.current = null;
-        drawerTouchStartX.current = null;
-        drawerTouchStartTime.current = null;
-        e.stopPropagation();
-    };
-
-    const handleOverlayHeaderTouchStart = (e: React.TouchEvent) => {
-        overlayCloseTouchStartY.current = e.touches[0].clientY;
-        overlayCloseTouchStartX.current = e.touches[0].clientX;
-        overlayCloseTouchStartTime.current = Date.now();
-        setOverlayDragOffset(0);
-        setIsOverlayDragActive(true);
-        e.stopPropagation();
-    };
-
-    const handleOverlayHeaderTouchMove = (e: React.TouchEvent) => {
-        if (
-            overlayCloseTouchStartY.current === null ||
-            overlayCloseTouchStartX.current === null
-        )
-            return;
-        const deltaY = e.touches[0].clientY - overlayCloseTouchStartY.current;
-        const deltaX = Math.abs(
-            e.touches[0].clientX - overlayCloseTouchStartX.current,
-        );
-
-        if (deltaY > 0 && deltaY > deltaX * 0.9) {
-            setOverlayDragOffset(Math.min(220, deltaY));
-            e.preventDefault();
-        } else if (deltaY <= 0) {
-            setOverlayDragOffset(0);
-        }
-        e.stopPropagation();
-    };
-
-    const handleOverlayHeaderTouchEnd = (e: React.TouchEvent) => {
-        if (
-            overlayCloseTouchStartY.current === null ||
-            overlayCloseTouchStartX.current === null
-        ) {
-            setOverlayDragOffset(0);
-            setIsOverlayDragActive(false);
-            return;
-        }
-
-        const endY = e.changedTouches[0].clientY;
-        const endX = e.changedTouches[0].clientX;
-        const deltaY = endY - overlayCloseTouchStartY.current;
-        const deltaX = Math.abs(endX - overlayCloseTouchStartX.current);
-        const elapsedMs = Math.max(
-            1,
-            Date.now() - (overlayCloseTouchStartTime.current ?? Date.now()),
-        );
-        const velocityY = deltaY / elapsedMs;
-        const isVerticalSwipe = deltaY > 0 && deltaY > deltaX * 1.2;
-        const isDistanceClose = deltaY > 44;
-        const isVelocityClose = deltaY > 20 && velocityY > 0.25;
-
-        if (isVerticalSwipe && (isDistanceClose || isVelocityClose)) {
-            setOverlayDragOffset((prev) => Math.max(prev, 140));
-            setIsOverlayDragActive(false);
-            e.preventDefault();
-            returnToPreviousMode();
-        } else {
-            setOverlayDragOffset(0);
-            setIsOverlayDragActive(false);
-        }
-        overlayCloseTouchStartY.current = null;
-        overlayCloseTouchStartX.current = null;
-        overlayCloseTouchStartTime.current = null;
-        e.stopPropagation();
-    };
-
     // Handle Vibe toggle
     const handleVibeToggle = async () => {
         if (!currentTrack?.id) return;
@@ -1209,22 +1051,34 @@ export function OverlayPlayer() {
                 "fixed inset-0 bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] z-[9999] flex flex-col overflow-hidden",
                 !isMobileOrTablet && "bottom-24",
             )}
-            onTouchStart={isMobileOrTablet ? handleTouchStart : undefined}
-            onTouchMove={isMobileOrTablet ? handleTouchMove : undefined}
-            onTouchEnd={isMobileOrTablet ? handleTouchEnd : undefined}
+            onTouchStart={
+                isMobileOrTablet ? trackSwipeHandlers.onTouchStart : undefined
+            }
+            onTouchMove={
+                isMobileOrTablet ? trackSwipeHandlers.onTouchMove : undefined
+            }
+            onTouchEnd={
+                isMobileOrTablet ? trackSwipeHandlers.onTouchEnd : undefined
+            }
         >
             {/* Header */}
             <div
                 className="flex-shrink-0 px-4 pt-3 pb-2"
                 style={{ paddingTop: "calc(12px + env(safe-area-inset-top))" }}
                 onTouchStart={
-                    isMobileOrTablet ? handleOverlayHeaderTouchStart : undefined
+                    isMobileOrTablet
+                        ? overlayHeaderHandlers.onTouchStart
+                        : undefined
                 }
                 onTouchMove={
-                    isMobileOrTablet ? handleOverlayHeaderTouchMove : undefined
+                    isMobileOrTablet
+                        ? overlayHeaderHandlers.onTouchMove
+                        : undefined
                 }
                 onTouchEnd={
-                    isMobileOrTablet ? handleOverlayHeaderTouchEnd : undefined
+                    isMobileOrTablet
+                        ? overlayHeaderHandlers.onTouchEnd
+                        : undefined
                 }
             >
                 <div className="flex items-center justify-between">
@@ -1890,13 +1744,13 @@ export function OverlayPlayer() {
                                         <div
                                             className="mb-2 flex h-12 w-full items-center justify-center"
                                             onTouchStart={
-                                                handleDrawerHandleTouchStart
+                                                drawerHandleHandlers.onTouchStart
                                             }
                                             onTouchMove={
-                                                handleDrawerHandleTouchMove
+                                                drawerHandleHandlers.onTouchMove
                                             }
                                             onTouchEnd={
-                                                handleDrawerHandleTouchEnd
+                                                drawerHandleHandlers.onTouchEnd
                                             }
                                             style={{ touchAction: "none" }}
                                             aria-label="Swipe down to close panel"

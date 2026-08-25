@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The full-screen player's swipe gestures (track skip, swipe-down to close, drawer handle) now run through one tested gesture module, in preparation for further player decomposition.
 - Subsonic search and artist views now share the main library's data layer.
 - Internal route handling now shares validation, pagination, and ownership middleware, and enrichment and YouTube Music administrator errors use the documented response format.
 - App screens now share one catalog of data-cache keys, so library, playlist, download, and notification views refresh reliably after changes instead of occasionally showing stale lists.
