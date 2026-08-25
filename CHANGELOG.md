@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Internal TIDAL and YouTube provider plumbing now uses shared types and routing adapters, and Deezer API calls now use the shared rate limiter.
 - Subsonic apps load artist lists much faster on large libraries, and genre shuffle pages now load consistently fast.
 - TIDAL and YouTube Music downloads now use identical filename and collision handling, and loudness backfills now measure tracks with multiple workers.
 - Backend Jest tests now use transpile-only TypeScript transforms, six workers, and smaller runtime suites for faster test runs.

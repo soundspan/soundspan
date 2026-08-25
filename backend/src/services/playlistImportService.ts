@@ -24,6 +24,7 @@ import {
     type LocalTrackCandidate,
 } from "../utils/trackMatching";
 import { parseM3U } from "./m3uParser";
+import { remoteProviderAdapters } from "./remoteProviders/adapters";
 
 const log = logger.child("PlaylistImportService");
 const MATCH_BATCH_SIZE = 25;
@@ -31,12 +32,6 @@ const MATCH_BATCH_CONCURRENCY = 2;
 const UPSERT_CONCURRENCY = 6;
 const MAPPING_CREATE_CONCURRENCY = 8;
 const TIDAL_IMPORT_QUALITY = "HIGH";
-
-function getErrorStatusCode(error: unknown): number | null {
-    const status = (error as { response?: { status?: number } })?.response
-        ?.status;
-    return typeof status === "number" ? status : null;
-}
 
 function parseProviderUrlCandidate(rawUrl: string): URL | null {
     try {
@@ -259,87 +254,24 @@ class PlaylistImportService {
                 userId && (await this.checkYtMusicAuth(userId))
                     ? userId
                     : "__public__";
-            const playlist = await ytMusicService.getBrowsePlaylist(
+            return remoteProviderAdapters.youtube.fetchPlaylist({
                 sourceId,
-                100,
-                ytBrowseUserId,
-            );
-            return {
-                name: playlist.title,
-                tracks: playlist.tracks.map((t) => ({
-                    artist: t.artist || "Unknown",
-                    title: t.title || "Unknown",
-                    album: t.album || undefined,
-                    duration: t.duration,
-                    videoId: t.videoId,
-                })),
-            };
+                userId: ytBrowseUserId,
+                authenticated: ytBrowseUserId !== "__public__",
+                quality: TIDAL_IMPORT_QUALITY,
+            });
         }
 
         if (source === "tidal") {
-            const loadPublicPlaylist = async () => {
-                try {
-                    return await tidalStreamingService.getPublicBrowsePlaylist(
-                        sourceId,
-                        TIDAL_IMPORT_QUALITY,
-                    );
-                } catch (error) {
-                    const statusCode = getErrorStatusCode(error);
-                    if (statusCode === 404) {
-                        throw new Error("Tidal playlist not found");
-                    }
-                    if (statusCode === 401 || statusCode === 403) {
-                        throw new Error("Tidal import requires authentication");
-                    }
-                    throw error;
-                }
-            };
-
-            let playlist = null as Awaited<
-                ReturnType<typeof tidalStreamingService.getBrowsePlaylist>
-            > | null;
-
-            if (userId) {
-                const hasTidalAuth = await this.checkTidalAuth(userId);
-                if (hasTidalAuth) {
-                    try {
-                        playlist =
-                            await tidalStreamingService.getBrowsePlaylist(
-                                userId,
-                                sourceId,
-                                TIDAL_IMPORT_QUALITY,
-                            );
-                    } catch (error) {
-                        const statusCode = getErrorStatusCode(error);
-                        if (
-                            statusCode &&
-                            statusCode !== 401 &&
-                            statusCode !== 403
-                        ) {
-                            if (statusCode === 404) {
-                                throw new Error("Tidal playlist not found");
-                            }
-                            throw error;
-                        }
-                    }
-                }
-            }
-
-            if (!playlist) {
-                playlist = await loadPublicPlaylist();
-            }
-
-            return {
-                name: playlist.title,
-                tracks: playlist.tracks.map((t) => ({
-                    artist: t.artist || "Unknown",
-                    title: t.title || "Unknown",
-                    album: t.album || undefined,
-                    duration: t.duration,
-                    isrc: t.isrc || undefined,
-                    tidalId: t.trackId,
-                })),
-            };
+            const authenticated = userId
+                ? await this.checkTidalAuth(userId)
+                : false;
+            return remoteProviderAdapters.tidal.fetchPlaylist({
+                sourceId,
+                userId,
+                authenticated,
+                quality: TIDAL_IMPORT_QUALITY,
+            });
         }
 
         throw new Error(`Unsupported source: ${source}`);

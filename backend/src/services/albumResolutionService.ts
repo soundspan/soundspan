@@ -7,6 +7,7 @@ import {
 } from "../utils/artistNormalization";
 import type { ExternalTrackAlbumResolution } from "./trackAlbumResolution";
 import { isGenericAlbumTitle } from "./albumTitleGuards";
+import type { MappingProvider } from "./remoteProviders/types";
 
 const log =
     typeof (logger as { child?: unknown }).child === "function"
@@ -61,7 +62,7 @@ export async function applyRemoteAlbumCoverIfMissing(
 export async function resolveAlbumForRemoteTrack(
     rawAlbumTitle: string | null | undefined,
     artistId: string,
-    provider: "tidal" | "youtube",
+    provider: MappingProvider,
     track?: RemoteTrackAlbumContext,
 ): Promise<AlbumResolutionResult | null> {
     if (isGenericAlbumTitle(rawAlbumTitle)) {
@@ -140,7 +141,7 @@ async function findExistingAlbum(
 async function resolveGenericAlbum(
     rawAlbumTitle: string | null | undefined,
     artistId: string,
-    provider: "tidal" | "youtube",
+    provider: MappingProvider,
     track?: RemoteTrackAlbumContext,
 ): Promise<AlbumResolutionResult | null> {
     if (!track) return null;
@@ -193,7 +194,7 @@ export function buildSyntheticRgMbid(
 async function createRemoteAlbum(
     title: string,
     artistId: string,
-    provider: "tidal" | "youtube",
+    provider: MappingProvider,
     resolvedRgMbid?: string,
 ): Promise<AlbumResolutionResult> {
     const normalizedTitle = normalizeAlbumTitle(title);
@@ -233,7 +234,7 @@ async function createRemoteAlbum(
 async function resolveExternalAlbum(
     external: ExternalTrackAlbumResolution,
     artistId: string,
-    provider: "tidal" | "youtube",
+    provider: MappingProvider,
 ): Promise<AlbumResolutionResult> {
     const existing = await findExistingAlbum(external.albumTitle, artistId);
     if (existing) return existing;

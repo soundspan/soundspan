@@ -1,6 +1,7 @@
-import axios from "axios";
+import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
+import { rateLimiter } from "./rateLimiter";
 
 /**
  * Deezer Service
@@ -67,6 +68,13 @@ export interface DeezerGenreWithRadios {
 class DeezerService {
     private readonly cachePrefix = "deezer:";
     private readonly cacheTTL = 86400; // 24 hours
+
+    private get(
+        url: string,
+        config?: AxiosRequestConfig,
+    ): Promise<AxiosResponse> {
+        return rateLimiter.execute("deezer", () => axios.get(url, config));
+    }
 
     private normalizeArtistIdentity(name: string): string {
         return name
@@ -214,7 +222,7 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/artist`, {
+            const response = await this.get(`${DEEZER_API}/search/artist`, {
                 params: { q: artistName, limit: 1 },
                 timeout: 5000,
             });
@@ -254,7 +262,7 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/artist`, {
+            const response = await this.get(`${DEEZER_API}/search/artist`, {
                 params: { q: artistName, limit: 5 },
                 timeout: 5000,
             });
@@ -313,7 +321,7 @@ class DeezerService {
 
             for (const query of searchQueries) {
                 try {
-                    const response = await axios.get(
+                    const response = await this.get(
                         `${DEEZER_API}/search/album`,
                         {
                             params: { q: query, limit: 10 },
@@ -382,7 +390,7 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/track`, {
+            const response = await this.get(`${DEEZER_API}/search/track`, {
                 params: {
                     q: `artist:"${artistName}" track:"${trackName}"`,
                     limit: 1,
@@ -436,7 +444,7 @@ class DeezerService {
             // Use simple space-separated search - more reliable than structured queries
             const query = `${artistName} ${cleanTrackName}`;
 
-            const response = await axios.get(`${DEEZER_API}/search/track`, {
+            const response = await this.get(`${DEEZER_API}/search/track`, {
                 params: { q: query, limit: 5 },
                 timeout: 5000,
             });
@@ -512,7 +520,7 @@ class DeezerService {
         try {
             logger.debug(`Deezer: Fetching playlist ${playlistId}...`);
 
-            const response = await axios.get(
+            const response = await this.get(
                 `${DEEZER_API}/playlist/${playlistId}`,
                 {
                     timeout: 15000,
@@ -567,13 +575,10 @@ class DeezerService {
         limit: number = 20,
     ): Promise<DeezerPlaylistPreview[]> {
         try {
-            const response = await axios.get(
-                `${DEEZER_API}/chart/0/playlists`,
-                {
-                    params: { limit },
-                    timeout: 10000,
-                },
-            );
+            const response = await this.get(`${DEEZER_API}/chart/0/playlists`, {
+                params: { limit },
+                timeout: 10000,
+            });
 
             return (response.data?.data || []).map((playlist: any) => ({
                 id: String(playlist.id),
@@ -598,7 +603,7 @@ class DeezerService {
         limit: number = 20,
     ): Promise<DeezerPlaylistPreview[]> {
         try {
-            const response = await axios.get(`${DEEZER_API}/search/playlist`, {
+            const response = await this.get(`${DEEZER_API}/search/playlist`, {
                 params: { q: query, limit },
                 timeout: 10000,
             });
@@ -719,7 +724,7 @@ class DeezerService {
 
         try {
             logger.debug("Deezer: Fetching genres from API...");
-            const response = await axios.get(`${DEEZER_API}/genre`, {
+            const response = await this.get(`${DEEZER_API}/genre`, {
                 timeout: 10000,
             });
 
@@ -764,7 +769,7 @@ class DeezerService {
 
         try {
             logger.debug("Deezer: Fetching radio stations from API...");
-            const response = await axios.get(`${DEEZER_API}/radio`, {
+            const response = await this.get(`${DEEZER_API}/radio`, {
                 timeout: 10000,
             });
 
@@ -804,7 +809,7 @@ class DeezerService {
 
         try {
             logger.debug("Deezer: Fetching radios by genre from API...");
-            const response = await axios.get(`${DEEZER_API}/radio/genres`, {
+            const response = await this.get(`${DEEZER_API}/radio/genres`, {
                 timeout: 10000,
             });
 
@@ -839,7 +844,7 @@ class DeezerService {
             logger.debug(`Deezer: Fetching radio ${radioId} tracks...`);
 
             // First get radio info
-            const infoResponse = await axios.get(
+            const infoResponse = await this.get(
                 `${DEEZER_API}/radio/${radioId}`,
                 {
                     timeout: 10000,
@@ -848,7 +853,7 @@ class DeezerService {
             const radioInfo = infoResponse.data;
 
             // Then get tracks
-            const tracksResponse = await axios.get(
+            const tracksResponse = await this.get(
                 `${DEEZER_API}/radio/${radioId}/tracks`,
                 {
                     params: { limit: 100 },
@@ -901,7 +906,7 @@ class DeezerService {
     }> {
         try {
             // Get genre-specific playlists via search
-            const genreResponse = await axios.get(
+            const genreResponse = await this.get(
                 `${DEEZER_API}/genre/${genreId}`,
                 {
                     timeout: 10000,
@@ -915,7 +920,7 @@ class DeezerService {
                 : [];
 
             // Get radios for this genre from the genres endpoint
-            const radiosResponse = await axios.get(
+            const radiosResponse = await this.get(
                 `${DEEZER_API}/radio/genres`,
                 {
                     timeout: 10000,

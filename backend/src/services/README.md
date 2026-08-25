@@ -181,6 +181,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/remoteTrackMetadataRefresh.ts` | Core |
 | `backend/src/services/scannedTrackPersistence.ts` | Scanner track persistence, audio-change invalidation, and album loudness refresh |
 | `backend/src/services/remoteTrackMetadataResolver.ts` | Core |
+| `backend/src/services/remoteProviders/adapters.ts` | Shared remote playback, playlist-import, and playlist-row provider routing |
+| `backend/src/services/remoteProviders/types.ts` | Canonical remote-provider identities and mapping/streaming translators |
 | `backend/src/services/rssParser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
 | `backend/src/services/simpleDownloadManager.ts` | Core |

@@ -20,6 +20,14 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
+jest.mock("../rateLimiter", () => ({
+    rateLimiter: {
+        execute: jest.fn(async (_bucket: string, fn: () => Promise<unknown>) =>
+            fn(),
+        ),
+    },
+}));
+
 const mockAxiosGet = axios.get as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;

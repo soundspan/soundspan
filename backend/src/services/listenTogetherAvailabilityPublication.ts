@@ -14,6 +14,7 @@ import {
 } from "./listenTogetherAvailability";
 import { enqueueGroupAvailabilityPublication } from "./listenTogetherCallbacks";
 import { withListenTogetherDeadline } from "./listenTogetherDeadline";
+import type { MappingProvider } from "./remoteProviders/types";
 
 const log = logger.child("ListenTogetherAvailability");
 const MAX_AVAILABILITY_SOCKETS = 10_000;
@@ -27,7 +28,7 @@ interface AvailabilitySocket {
 interface AvailabilityPayloadItem {
     queueIndex: number;
     available: boolean;
-    source?: "local" | "tidal" | "youtube";
+    source?: "local" | MappingProvider;
     localTrackId?: string;
     tidalTrackId?: number;
     youtubeVideoId?: string;

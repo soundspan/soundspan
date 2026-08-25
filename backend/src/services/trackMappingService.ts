@@ -8,6 +8,7 @@ import {
     resolveAlbumForRemoteTrack,
 } from "./albumResolutionService";
 import { updateArtistCounts } from "./artistCountsService";
+import type { MappingProvider } from "./remoteProviders/types";
 
 const log =
     typeof (logger as { child?: unknown }).child === "function"
@@ -64,7 +65,7 @@ export interface CreateMappingData {
 }
 
 export interface EnsureRemoteTrackData {
-    provider: "tidal" | "youtube";
+    provider: MappingProvider;
     tidalId?: number;
     videoId?: string;
     title: string;
@@ -78,7 +79,7 @@ export interface EnsureRemoteTrackData {
 }
 
 export interface EnsuredRemoteTrackResult {
-    provider: "tidal" | "youtube";
+    provider: MappingProvider;
     id: string;
     created: boolean;
 }
@@ -626,7 +627,7 @@ class TrackMappingService {
      * Creates a remote-only mapping if no active (non-stale) mapping exists.
      */
     private async ensureMapping(
-        provider: "tidal" | "youtube",
+        provider: MappingProvider,
         providerRowId: string,
     ): Promise<void> {
         try {

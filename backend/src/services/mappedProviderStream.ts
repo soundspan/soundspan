@@ -1,6 +1,8 @@
 import { pipeline } from "node:stream/promises";
 import type { Request, Response } from "express";
 import type { PeerPlaybackFallback } from "./peerPlaybackFallback";
+import { remoteProviderAdapters } from "./remoteProviders/adapters";
+import { toMappingProvider } from "./remoteProviders/types";
 
 const FORWARDED_STREAM_HEADERS = [
     "content-type",
@@ -71,24 +73,22 @@ export async function serveMappedProviderStream(input: {
             ? input.req.headers.range
             : undefined;
     try {
-        let response = null;
-        if (input.fallback.source === "tidal") {
-            const { tidalStreamingService } = await import("./tidalStreaming");
-            response = await tidalStreamingService.getStreamProxy(
-                input.userId,
-                input.fallback.tidalTrackId,
-                input.quality,
-                range,
-            );
-        } else if (input.fallback.source === "ytmusic") {
-            const { ytMusicService } = await import("./youtubeMusic");
-            response = await ytMusicService.getStreamProxy(
-                input.youtubeUserId ?? "__public__",
-                input.fallback.youtubeVideoId,
-                input.quality,
-                range,
-            );
+        if (input.fallback.source === "library") {
+            return { status: "unavailable" };
         }
+        const adapter =
+            remoteProviderAdapters[toMappingProvider(input.fallback.source)];
+        const response = await adapter.streamTrack({
+            userId:
+                input.fallback.source === "ytmusic"
+                    ? (input.youtubeUserId ?? "__public__")
+                    : input.userId,
+            quality: input.quality,
+            range,
+            ...(input.fallback.source === "tidal"
+                ? { tidalTrackId: input.fallback.tidalTrackId }
+                : { youtubeVideoId: input.fallback.youtubeVideoId }),
+        });
         if (!response) return { status: "unavailable" };
         input.res.status(response.status);
         forwardStreamHeaders(input.res, response.headers);

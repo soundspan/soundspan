@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { resolveArtistForRemoteTrack } from "./artistResolutionService";
 import { resolveAlbumForRemoteTrack } from "./albumResolutionService";
 import { backfillAllArtistCounts } from "./artistCountsService";
+import type { MappingProvider } from "./remoteProviders/types";
 
 const log =
     typeof (logger as { child?: unknown }).child === "function"
@@ -23,7 +24,7 @@ interface RemoteTrackRow {
 
 interface BackfillPhaseConfig {
     label: "TrackTidal" | "TrackYtMusic";
-    albumSource: "tidal" | "youtube";
+    albumSource: MappingProvider;
     findBatch: (lastId: string) => Promise<RemoteTrackRow[]>;
     update: (
         id: string,

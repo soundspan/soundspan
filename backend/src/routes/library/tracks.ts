@@ -464,7 +464,7 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
         token: string;
         cursorId: string;
         likedAt: Date;
-        source: "tidal" | "youtube";
+        source: import("../../services/remoteProviders/types").MappingProvider;
         trackTidalId: string | null;
         trackYtMusicId: string | null;
         remote: (typeof remoteEntries)[number];

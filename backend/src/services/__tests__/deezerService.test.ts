@@ -76,6 +76,18 @@ describe("deezerService", () => {
         mockMusicBrainzExtractPrimaryArtist.mockReturnValue("Unknown Artist");
     });
 
+    it("routes Deezer HTTP requests through the shared limiter", async () => {
+        mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } });
+
+        await deezerService.getArtistImage("Limited Artist");
+
+        expect(mockRateLimiterExecute).toHaveBeenCalledWith(
+            "deezer",
+            expect.any(Function),
+        );
+        expect(mockAxiosGet).toHaveBeenCalledTimes(1);
+    });
+
     it("serves artist image from cache and cache-miss API with fallback image fields", async () => {
         mockRedisGet.mockResolvedValueOnce("https://cache.example/a.jpg");
         await expect(deezerService.getArtistImage("Artist A")).resolves.toBe(

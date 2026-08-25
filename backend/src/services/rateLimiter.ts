@@ -25,8 +25,6 @@ interface ServiceConfig {
     lastfm: RateLimitConfig;
     musicbrainz: RateLimitConfig;
     deezer: RateLimitConfig;
-    fanart: RateLimitConfig;
-    lidarr: RateLimitConfig;
     coverart: RateLimitConfig;
 }
 
@@ -50,20 +48,6 @@ const SERVICE_CONFIGS: ServiceConfig = {
         intervalCap: 25, // Deezer is more lenient
         interval: 5000,
         concurrency: 5,
-        maxRetries: 2,
-        baseDelay: 500,
-    },
-    fanart: {
-        intervalCap: 5,
-        interval: 1000,
-        concurrency: 2,
-        maxRetries: 2,
-        baseDelay: 1000,
-    },
-    lidarr: {
-        intervalCap: 10, // Local service, can be faster
-        interval: 1000,
-        concurrency: 3,
         maxRetries: 2,
         baseDelay: 500,
     },

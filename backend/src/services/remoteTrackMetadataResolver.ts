@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import type { MappingProvider } from "./remoteProviders/types";
 
 const log =
     typeof (logger as { child?: unknown }).child === "function"
@@ -46,7 +47,7 @@ export interface ResolvedRemoteTrackMetadata {
  * Route-facing lookup descriptor for a remote provider track.
  */
 export interface RemoteTrackLookup {
-    provider: "tidal" | "youtube";
+    provider: MappingProvider;
     userId: string;
     tidalId?: number;
     videoId?: string;

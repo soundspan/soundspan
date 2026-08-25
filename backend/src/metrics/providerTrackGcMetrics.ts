@@ -1,6 +1,7 @@
 import { Counter, Gauge, Histogram, type Registry } from "prom-client";
+import type { MappingProvider } from "../services/remoteProviders/types";
 
-export type ProviderTrackGcProvider = "tidal" | "youtube";
+export type ProviderTrackGcProvider = MappingProvider;
 export type ProviderTrackGcOutcome = "success" | "failure";
 
 /** Current provider-track garbage collection backlog measurements. */

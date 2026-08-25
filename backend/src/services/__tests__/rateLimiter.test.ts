@@ -54,7 +54,7 @@ describe("rateLimiter", () => {
         const { rateLimiter } = await loadRateLimiterModule();
         const queues = (rateLimiter as any).queues as Map<string, any>;
 
-        expect(queues.size).toBe(6);
+        expect(queues.size).toBe(4);
         expect(queues.get("lastfm").intervalCap).toBe(3);
         expect(queues.get("musicbrainz").concurrency).toBe(1);
         expect(queues.get("deezer").interval).toBe(5000);
@@ -167,7 +167,7 @@ describe("rateLimiter", () => {
 
         rateLimiter.pauseAll(5000);
         const result = await rateLimiter.execute(
-            "fanart",
+            "coverart",
             async () => "during-pause",
         );
 

@@ -9,9 +9,13 @@ import {
 import type {
     UnifiedLocalTrackRecord,
     UnifiedPlaylistItemRecord,
-    UnifiedTrackTidalRecord,
-    UnifiedTrackYtMusicRecord,
 } from "./unifiedTrackResponse";
+import {
+    REMOTE_PROVIDERS,
+    remoteProviderAdapters,
+    type RemoteProviderTrackRecord,
+} from "./remoteProviders/adapters";
+import type { RemoteProvider } from "./remoteProviders/types";
 
 interface MappingLinkageRow {
     id: string;
@@ -261,44 +265,45 @@ export async function resolvePlaylistItemsForUser(
     const resolvedByIndex = await resolveQueueForUser(resolutionInputs, userId);
 
     const localById = new Map<string, UnifiedLocalTrackRecord>();
-    const tidalById = new Map<string, UnifiedTrackTidalRecord>();
-    const ytById = new Map<string, UnifiedTrackYtMusicRecord>();
+    const remoteByProvider: Record<
+        RemoteProvider,
+        Map<string, RemoteProviderTrackRecord>
+    > = {
+        tidal: new Map(),
+        youtube: new Map(),
+    };
 
     for (const item of items) {
         if (item.track?.id) {
             localById.set(item.track.id, item.track);
         }
-        if (item.trackTidal?.id) {
-            tidalById.set(item.trackTidal.id, item.trackTidal);
-        }
-        if (item.trackYtMusic?.id) {
-            ytById.set(item.trackYtMusic.id, item.trackYtMusic);
+        for (const provider of REMOTE_PROVIDERS) {
+            const track = remoteProviderAdapters[provider].itemTrack(item);
+            if (track?.id) remoteByProvider[provider].set(track.id, track);
         }
     }
 
     const missingLocalIds = new Set<string>();
-    const missingTidalIds = new Set<string>();
-    const missingYtIds = new Set<string>();
+    const missingRemoteIds: Record<RemoteProvider, Set<string>> = {
+        tidal: new Set(),
+        youtube: new Set(),
+    };
 
     for (let index = 0; index < items.length; index += 1) {
         const resolved = resolvedByIndex.get(index);
         if (!resolved || !resolved.available) continue;
         if (resolved.source === "local" && !localById.has(resolved.trackId)) {
             missingLocalIds.add(resolved.trackId);
-        } else if (
-            resolved.source === "tidal" &&
-            !tidalById.has(resolved.trackTidalId)
-        ) {
-            missingTidalIds.add(resolved.trackTidalId);
-        } else if (
-            resolved.source === "youtube" &&
-            !ytById.has(resolved.trackYtMusicId)
-        ) {
-            missingYtIds.add(resolved.trackYtMusicId);
+        } else if (resolved.source !== "local") {
+            const adapter = remoteProviderAdapters[resolved.source];
+            const trackId = adapter.resolvedTrackId(resolved);
+            if (trackId && !remoteByProvider[resolved.source].has(trackId)) {
+                missingRemoteIds[resolved.source].add(trackId);
+            }
         }
     }
 
-    const [localRows, tidalRows, ytRows] = await Promise.all([
+    const [localRows, remoteRows] = await Promise.all([
         missingLocalIds.size > 0
             ? prisma.track.findMany({
                   where: { id: { in: Array.from(missingLocalIds) } },
@@ -324,26 +329,27 @@ export async function resolvePlaylistItemsForUser(
                   },
               })
             : Promise.resolve([]),
-        missingTidalIds.size > 0
-            ? prisma.trackTidal.findMany({
-                  where: { id: { in: Array.from(missingTidalIds) } },
-              })
-            : Promise.resolve([]),
-        missingYtIds.size > 0
-            ? prisma.trackYtMusic.findMany({
-                  where: { id: { in: Array.from(missingYtIds) } },
-              })
-            : Promise.resolve([]),
+        Promise.all(
+            REMOTE_PROVIDERS.map(async (provider) => {
+                const ids = Array.from(missingRemoteIds[provider]);
+                const rows =
+                    ids.length > 0
+                        ? await remoteProviderAdapters[
+                              provider
+                          ].findTracksByIds(ids)
+                        : [];
+                return [provider, rows] as const;
+            }),
+        ),
     ]);
 
     for (const row of localRows) {
         localById.set(row.id, row as unknown as UnifiedLocalTrackRecord);
     }
-    for (const row of tidalRows) {
-        tidalById.set(row.id, row as unknown as UnifiedTrackTidalRecord);
-    }
-    for (const row of ytRows) {
-        ytById.set(row.id, row as unknown as UnifiedTrackYtMusicRecord);
+    for (const [provider, rows] of remoteRows) {
+        for (const row of rows) {
+            remoteByProvider[provider].set(row.id, row);
+        }
     }
 
     return items.map((item, index) => {
@@ -368,33 +374,14 @@ export async function resolvePlaylistItemsForUser(
                 } else {
                     resolution = { available: false, reason: "no-mapping" };
                 }
-            } else if (baseResolution.source === "tidal") {
-                const tidalTrack = tidalById.get(baseResolution.trackTidalId);
-                if (tidalTrack) {
-                    effective = {
-                        ...item,
-                        trackId: null,
-                        trackTidalId: baseResolution.trackTidalId,
-                        trackYtMusicId: null,
-                        track: null,
-                        trackTidal: tidalTrack,
-                        trackYtMusic: null,
-                    };
-                } else {
-                    resolution = { available: false, reason: "no-mapping" };
-                }
             } else {
-                const ytTrack = ytById.get(baseResolution.trackYtMusicId);
-                if (ytTrack) {
-                    effective = {
-                        ...item,
-                        trackId: null,
-                        trackTidalId: null,
-                        trackYtMusicId: baseResolution.trackYtMusicId,
-                        track: null,
-                        trackTidal: null,
-                        trackYtMusic: ytTrack,
-                    };
+                const adapter = remoteProviderAdapters[baseResolution.source];
+                const trackId = adapter.resolvedTrackId(baseResolution);
+                const track = trackId
+                    ? remoteByProvider[baseResolution.source].get(trackId)
+                    : undefined;
+                if (trackId && track) {
+                    effective = adapter.applyTrack(item, trackId, track);
                 } else {
                     resolution = { available: false, reason: "no-mapping" };
                 }
