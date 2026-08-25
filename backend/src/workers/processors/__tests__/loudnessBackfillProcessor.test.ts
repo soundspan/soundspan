@@ -64,7 +64,9 @@ describe("loudnessBackfillProcessor", () => {
         jest.doMock("../../enrichmentQueue", () => ({
             enqueueReservedWork,
         }));
-        jest.doMock("../../queues", () => ({ schedulerQueue }));
+        jest.doMock("../../queues", () => ({
+            schedulerMaintenanceQueue: schedulerQueue,
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../loudnessBackfillProcessor");

@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger";
 import { randomUUID } from "crypto";
+import pLimit from "p-limit";
 import { trackJobStart, trackJobEnd } from "../services/workerEventLoopMonitor";
 import type Bull from "bull";
 import {
@@ -8,6 +9,7 @@ import {
     imageQueue,
     validationQueue,
     schedulerQueue,
+    schedulerMaintenanceQueue,
     genericImportQueue,
     federationQueue,
     albumDownloadQueue,
@@ -31,7 +33,12 @@ import {
     processAlbumDownload,
 } from "./processors/albumDownloadProcessor";
 import { processArtistDownloadExpansion } from "./processors/artistDownloadExpansionProcessor";
-import { recordAlbumDownloadOutcome } from "../metrics";
+import {
+    recordAlbumDownloadOutcome,
+    recordSchedulerJobDuration,
+    recordSchedulerJobSuccess,
+    recordSchedulerTimeout,
+} from "../metrics";
 import {
     ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
     recoverUnqueuedAlbumDownloads,
@@ -100,6 +107,16 @@ import {
     consumeCoalescedScanFollowUp,
 } from "../services/coalescedLibraryScan";
 import { registerQueueProcessorEvents } from "./queueEvents";
+import {
+    ConsecutiveFailureCircuitBreaker,
+    RedisCircuitBreakerStore,
+} from "../utils/circuitBreaker";
+import { jitterFiveMinuteRepeat, schedulerLaneForJob } from "./schedulerPolicy";
+import {
+    SCHEDULER_METRIC_JOBS,
+    type SchedulerMetricJob,
+    type SchedulerTimeoutOperation,
+} from "../metrics/schedulerMetrics";
 
 const log = logger.child("WorkerScheduler");
 const queueProcessorLog = log.child("QueueProcessor");
@@ -116,6 +133,58 @@ const queueProcessorCounters = {
     failed: 0,
 };
 const coalescedFollowUpConsumptions = new Set<Promise<void>>();
+const fastSchedulerLane = pLimit(1);
+const slowSchedulerLane = pLimit(1);
+const reconciliationCircuitBreakerStore = new RedisCircuitBreakerStore(
+    {
+        eval: (script, numberOfKeys, key, ...args) =>
+            withSchedulerClaimRedisRetry(
+                "reconciliation circuit breaker transition",
+                (client) => client.eval(script, numberOfKeys, key, ...args),
+            ),
+    },
+    "scheduler:circuit-breaker:reconciliation:v1",
+    30 * ONE_MINUTE_MS,
+);
+const reconciliationCircuitBreaker = new ConsecutiveFailureCircuitBreaker({
+    failureThreshold: 3,
+    cooldownMs: 5 * ONE_MINUTE_MS,
+    store: reconciliationCircuitBreakerStore,
+    logger: log,
+});
+
+class SchedulerOperationTimeoutError extends Error {
+    constructor(readonly operation: SchedulerTimeoutOperation) {
+        super(`Scheduler operation timed out: ${operation}`);
+        this.name = "SchedulerOperationTimeoutError";
+    }
+}
+
+async function runSchedulerTimedOperation<T>(
+    operation: SchedulerTimeoutOperation,
+    timeoutMs: number,
+    work: (signal: AbortSignal) => Promise<T>,
+    timeoutLogger = log,
+): Promise<T | undefined> {
+    const result = await withTimeout(work, timeoutMs, operation, {
+        result: true,
+        logger: timeoutLogger,
+    });
+    if (result.ok) return result.value;
+    recordSchedulerTimeout(operation);
+    return undefined;
+}
+
+async function requireSchedulerTimedOperation<T>(
+    operation: SchedulerTimeoutOperation,
+    timeoutMs: number,
+    work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+    const value = await runSchedulerTimedOperation(operation, timeoutMs, work);
+    if (value === undefined)
+        throw new SchedulerOperationTimeoutError(operation);
+    return value;
+}
 
 function consumeCoalescedFollowUpAfterSettlement(job: Bull.Job<any>): void {
     if (String(job.id) !== COALESCED_SCAN_JOB_ID) return;
@@ -151,6 +220,7 @@ function recordQueueProcessorEvent(
         // long-running album downloads need this; other queues stay sampled.
         if (
             queueName === "worker-scheduler" ||
+            queueName === "worker-scheduler-maintenance" ||
             queueName === "library-scan" ||
             queueName === "album-download"
         ) {
@@ -239,8 +309,8 @@ async function saveReconciliationCursor(
     );
 }
 
-async function processDataIntegrityJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processDataIntegrityJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:data-integrity",
         30 * ONE_MINUTE_MS,
         "data integrity check",
@@ -248,70 +318,96 @@ async function processDataIntegrityJob(): Promise<void> {
             await runDataIntegrityCheck();
         },
     );
+    return claim.acquired;
 }
 
-async function processReconciliationJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processReconciliationJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:reconciliation-cycle",
         10 * ONE_MINUTE_MS,
         "download reconciliation cycle",
         async () => {
-            const { lidarrService } = await import("../services/lidarr");
-            const snapshot = await withTimeout(
-                () => lidarrService.getReconciliationSnapshot(),
-                30_000,
-                "getReconciliationSnapshot",
-            );
-
-            const staleCount = await withTimeout(
-                () => simpleDownloadManager.markStaleJobsAsFailed(snapshot),
-                120_000,
-                "markStaleJobsAsFailed",
-            );
-            if (staleCount && staleCount > 0) {
-                log.debug(
-                    `Periodic cleanup: marked ${staleCount} stale download(s) as failed`,
+            if (!(await reconciliationCircuitBreaker.tryAcquire())) {
+                log.warn(
+                    "Skipping reconciliation while circuit breaker is open",
+                    {
+                        circuit: await reconciliationCircuitBreaker.snapshot(),
+                    },
                 );
+                return false;
             }
-
-            const lidarrResult = await withTimeout(
-                () => simpleDownloadManager.reconcileWithLidarr(snapshot),
-                120_000,
-                "reconcileWithLidarr",
-            );
-            if (lidarrResult && lidarrResult.reconciled > 0) {
-                log.debug(
-                    `Periodic reconcile: ${lidarrResult.reconciled} job(s) matched in Lidarr`,
-                );
-            }
-
-            const localResult = await withTimeout(
-                () => queueCleaner.reconcileWithLocalLibrary(),
-                120_000,
-                "reconcileWithLocalLibrary",
-            );
-            if (localResult && localResult.reconciled > 0) {
-                log.debug(
-                    `Periodic reconcile: ${localResult.reconciled} job(s) matched in local library`,
-                );
-            }
-
-            const syncResult = await withTimeout(
-                () => simpleDownloadManager.syncWithLidarrQueue(snapshot),
-                120_000,
-                "syncWithLidarrQueue",
-            );
-            if (syncResult && syncResult.cancelled > 0) {
-                log.debug(
-                    `Periodic sync: ${syncResult.cancelled} job(s) synced with Lidarr queue`,
-                );
+            try {
+                await runReconciliationCycle();
+                await reconciliationCircuitBreaker.recordSuccess();
+                return true;
+            } catch (error) {
+                await reconciliationCircuitBreaker.recordFailure();
+                log.warn("Reconciliation failure recorded by circuit breaker", {
+                    circuit: await reconciliationCircuitBreaker.snapshot(),
+                    error,
+                });
+                throw error;
             }
         },
     );
+    return claim.acquired && claim.value;
 }
 
-async function processAlbumDownloadRecoveryJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function runReconciliationCycle(): Promise<void> {
+    const { lidarrService } = await import("../services/lidarr");
+    const snapshot = await requireSchedulerTimedOperation(
+        "getReconciliationSnapshot",
+        30_000,
+        (signal) => lidarrService.getReconciliationSnapshot(signal),
+    );
+
+    const staleCount = await requireSchedulerTimedOperation(
+        "markStaleJobsAsFailed",
+        120_000,
+        () => simpleDownloadManager.markStaleJobsAsFailed(snapshot),
+    );
+    if (staleCount > 0) {
+        log.debug(
+            `Periodic cleanup: marked ${staleCount} stale download(s) as failed`,
+        );
+    }
+
+    const lidarrResult = await requireSchedulerTimedOperation(
+        "reconcileWithLidarr",
+        120_000,
+        () => simpleDownloadManager.reconcileWithLidarr(snapshot),
+    );
+    if (lidarrResult.reconciled > 0) {
+        log.debug(
+            `Periodic reconcile: ${lidarrResult.reconciled} job(s) matched in Lidarr`,
+        );
+    }
+
+    const localResult = await requireSchedulerTimedOperation(
+        "reconcileWithLocalLibrary",
+        120_000,
+        () => queueCleaner.reconcileWithLocalLibrary(),
+    );
+    if (localResult.reconciled > 0) {
+        log.debug(
+            `Periodic reconcile: ${localResult.reconciled} job(s) matched in local library`,
+        );
+    }
+
+    const syncResult = await requireSchedulerTimedOperation(
+        "syncWithLidarrQueue",
+        120_000,
+        () => simpleDownloadManager.syncWithLidarrQueue(snapshot),
+    );
+    if (syncResult.cancelled > 0) {
+        log.debug(
+            `Periodic sync: ${syncResult.cancelled} job(s) synced with Lidarr queue`,
+        );
+    }
+}
+
+async function processAlbumDownloadRecoveryJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:album-download-recovery",
         5 * ONE_MINUTE_MS,
         "album download recovery",
@@ -329,21 +425,23 @@ async function processAlbumDownloadRecoveryJob(): Promise<void> {
             }
         },
     );
+    return claim.acquired;
 }
 
-async function processCatalogRetentionJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processCatalogRetentionJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:catalog-retention",
         30 * ONE_MINUTE_MS,
         "catalog retention sweep",
         processCatalogRetention,
     );
+    return claim.acquired;
 }
 
 async function processLidarrCleanupJob(
     mode: "startup" | "repeat",
-): Promise<void> {
-    await runWithSchedulerClaim(
+): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:lidarr-cleanup-cycle",
         5 * ONE_MINUTE_MS,
         mode === "startup"
@@ -354,14 +452,14 @@ async function processLidarrCleanupJob(
                 log.debug("Running initial Lidarr queue cleanup...");
             }
 
-            const result = await withTimeout(
-                () => simpleDownloadManager.clearLidarrQueue(),
-                180_000,
+            const result = await runSchedulerTimedOperation(
                 "clearLidarrQueue",
+                180_000,
+                () => simpleDownloadManager.clearLidarrQueue(),
             );
 
             if (!result) {
-                return;
+                return false;
             }
 
             if (result.removed > 0) {
@@ -375,29 +473,36 @@ async function processLidarrCleanupJob(
             } else if (mode === "startup") {
                 log.debug("Initial cleanup: queue is clean");
             }
+            return true;
         },
     );
+    return claim.acquired && claim.value;
 }
 
-async function processCacheWarmupJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processCacheWarmupJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:cache-warmup-startup",
         30 * ONE_MINUTE_MS,
         "startup cache warmup",
         async () => {
-            await withTimeout(
-                () => dataCacheService.warmupCache(),
-                15 * ONE_MINUTE_MS,
+            const result = await runSchedulerTimedOperation(
                 "warmupCache",
+                15 * ONE_MINUTE_MS,
+                async () => {
+                    await dataCacheService.warmupCache();
+                    return true;
+                },
             );
+            return result === true;
         },
     );
+    return claim.acquired && claim.value;
 }
 
 async function processPodcastCleanupJob(
     mode: "startup" | "repeat",
-): Promise<void> {
-    await runWithSchedulerClaim(
+): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:podcast-cleanup",
         30 * ONE_MINUTE_MS,
         mode === "startup"
@@ -406,13 +511,18 @@ async function processPodcastCleanupJob(
         async () => {
             const { cleanupExpiredCache } =
                 await import("../services/podcastDownload");
-            await withTimeout(
-                () => cleanupExpiredCache(),
-                10 * ONE_MINUTE_MS,
+            const result = await runSchedulerTimedOperation(
                 "cleanupExpiredCache",
+                10 * ONE_MINUTE_MS,
+                async () => {
+                    await cleanupExpiredCache();
+                    return true;
+                },
             );
+            return result === true;
         },
     );
+    return claim.acquired && claim.value;
 }
 
 const REPEAT_SYNC_FAILURE_WARN_INTERVAL_MS = ONE_HOUR_MS;
@@ -420,7 +530,7 @@ let lastAudiobookRepeatFailureWarnAt = 0;
 
 async function processAudiobookAutoSyncJob(
     mode: "startup" | "repeat",
-): Promise<void> {
+): Promise<boolean> {
     const { getSystemSettings } = await import("../utils/systemSettings");
     const settings = await getSystemSettings();
     if (!settings?.audiobookshelfEnabled || !settings?.audiobookshelfUrl) {
@@ -429,16 +539,16 @@ async function processAudiobookAutoSyncJob(
                 "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
             );
         }
-        return;
+        return false;
     }
     const { audiobookCacheService } =
         await import("../services/audiobookCache");
     let result;
     try {
-        result = await withTimeout(
-            () => audiobookCacheService.syncMissing(),
-            AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+        result = await runSchedulerTimedOperation(
             "audiobookCacheService.syncMissing",
+            AUDIOBOOK_SYNC_WORK_TIMEOUT_MS,
+            () => audiobookCacheService.syncMissing(),
             log,
         );
     } catch (error) {
@@ -455,25 +565,26 @@ async function processAudiobookAutoSyncJob(
         } else {
             startupLog.debug(message, error);
         }
-        return;
+        return false;
     }
     if (result && (mode === "startup" || result.synced || result.failed)) {
         startupLog.debug(
             `Audiobook auto-sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
         );
     }
+    return result !== undefined;
 }
 
-async function processDownloadQueueReconcileJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processDownloadQueueReconcileJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:download-queue-reconcile-startup",
         30 * ONE_MINUTE_MS,
         "startup download queue reconciliation",
         async () => {
-            const result = await withTimeout(
-                () => downloadQueueManager.reconcileOnStartup(),
-                20 * ONE_MINUTE_MS,
+            const result = await runSchedulerTimedOperation(
                 "downloadQueueManager.reconcileOnStartup",
+                20 * ONE_MINUTE_MS,
+                () => downloadQueueManager.reconcileOnStartup(),
             );
 
             if (result) {
@@ -481,12 +592,14 @@ async function processDownloadQueueReconcileJob(): Promise<void> {
                     `Download queue reconciled: ${result.loaded} active, ${result.failed} marked failed`,
                 );
             }
+            return result !== undefined;
         },
     );
+    return claim.acquired && claim.value;
 }
 
-async function processArtistCountsBackfillJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processArtistCountsBackfillJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:artist-counts-backfill-startup",
         3 * ONE_HOUR_MS,
         "startup artist-counts backfill",
@@ -496,17 +609,17 @@ async function processArtistCountsBackfillJob(): Promise<void> {
             const needsBackfill = await isBackfillNeeded();
             if (!needsBackfill) {
                 startupLog.debug("Artist counts already populated");
-                return;
+                return true;
             }
 
             startupLog.info(
                 "Artist counts need backfilling, starting in background...",
             );
 
-            const result = await withTimeout(
-                () => backfillAllArtistCounts(),
-                3 * ONE_HOUR_MS,
+            const result = await runSchedulerTimedOperation(
                 "backfillAllArtistCounts",
+                3 * ONE_HOUR_MS,
+                () => backfillAllArtistCounts(),
             );
 
             if (result) {
@@ -514,12 +627,14 @@ async function processArtistCountsBackfillJob(): Promise<void> {
                     `Artist counts backfill complete: ${result.processed} processed, ${result.errors} errors`,
                 );
             }
+            return result !== undefined;
         },
     );
+    return claim.acquired && claim.value;
 }
 
-async function processImageBackfillJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processImageBackfillJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:image-backfill-startup",
         6 * ONE_HOUR_MS,
         "startup image backfill",
@@ -529,31 +644,33 @@ async function processImageBackfillJob(): Promise<void> {
             const status = await isImageBackfillNeeded();
             if (!status.needed) {
                 startupLog.debug("All images already stored locally");
-                return;
+                return true;
             }
 
             startupLog.info(
                 `Image backfill needed: ${status.artistsWithExternalUrls} artists, ${status.albumsWithExternalUrls} albums with external URLs`,
             );
 
-            const completed = await withTimeout(
+            const completed = await runSchedulerTimedOperation(
+                "backfillAllImages",
+                6 * ONE_HOUR_MS,
                 async () => {
                     await backfillAllImages();
                     return true;
                 },
-                6 * ONE_HOUR_MS,
-                "backfillAllImages",
             );
 
             if (completed) {
                 startupLog.info("Image backfill complete");
             }
+            return completed === true;
         },
     );
+    return claim.acquired && claim.value;
 }
 
-async function processTrackMappingReconcileJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processTrackMappingReconcileJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:track-mapping-reconcile",
         ONE_HOUR_MS,
         "track mapping reconciliation",
@@ -595,10 +712,11 @@ async function processTrackMappingReconcileJob(): Promise<void> {
             }
         },
     );
+    return claim.acquired;
 }
 
-async function processRemoteTrackMetadataRefreshJob(): Promise<void> {
-    await runWithSchedulerClaim(
+async function processRemoteTrackMetadataRefreshJob(): Promise<boolean> {
+    const claim = await runWithSchedulerClaim(
         "scheduler-claim:remote-track-metadata-refresh",
         ONE_HOUR_MS,
         "remote track metadata refresh",
@@ -614,27 +732,135 @@ async function processRemoteTrackMetadataRefreshJob(): Promise<void> {
             }
         },
     );
+    return claim.acquired;
 }
 
 async function registerSchedulerJobs(): Promise<void> {
     await schedulerQueue.isReady();
+    await schedulerMaintenanceQueue.isReady();
+    registerSchedulerProcessors();
 
     const schedulerJobs = buildSchedulerJobs();
     for (const job of schedulerJobs) {
-        await schedulerQueue.add(job.type, job.data, job.opts);
+        await registerSchedulerJob(job);
     }
     if (config.features.requests) {
-        const job = requestFulfillmentRepeatSchedule;
-        await schedulerQueue.add(job.type, job.data, job.opts);
+        await registerSchedulerJob(requestFulfillmentRepeatSchedule);
         return;
     }
-    await schedulerQueue.removeRepeatable(REQUEST_FULFILLMENT_JOB_NAME, {
-        every: REQUEST_FULFILLMENT_INTERVAL_MS,
-        jobId: REQUEST_FULFILLMENT_JOB_ID,
-    });
+    await removeRequestFulfillmentSchedules();
     log.info(
         "Music requests disabled (FEATURE_REQUESTS=false); fulfillment scheduler not registered",
     );
+}
+
+type SchedulerRegistrationInput = {
+    type: string;
+    data: Record<string, unknown>;
+    opts: Bull.JobOptions;
+};
+
+type SchedulerBullQueue = typeof schedulerQueue;
+
+function isFiveMinuteRepeat(opts: Bull.JobOptions): boolean {
+    return Boolean(
+        opts.repeat &&
+        "every" in opts.repeat &&
+        opts.repeat.every === REQUEST_FULFILLMENT_INTERVAL_MS,
+    );
+}
+
+function prepareSchedulerRegistration<T extends SchedulerRegistrationInput>(
+    job: T,
+): T {
+    if (!isFiveMinuteRepeat(job.opts)) return job;
+    const jobId = String(job.opts.jobId);
+    return {
+        ...job,
+        opts: {
+            ...job.opts,
+            repeat: jitterFiveMinuteRepeat(jobId, job.opts.repeat!),
+        },
+    };
+}
+
+async function removeLegacyFiveMinuteRepeat(
+    job: SchedulerRegistrationInput,
+): Promise<void> {
+    if (!isFiveMinuteRepeat(job.opts)) return;
+    await schedulerQueue.removeRepeatable(job.type, {
+        every: REQUEST_FULFILLMENT_INTERVAL_MS,
+        jobId: job.opts.jobId,
+    });
+}
+
+function schedulerQueueForJob(jobName: string): SchedulerBullQueue {
+    return schedulerLaneForJob(jobName) === "fast"
+        ? schedulerQueue
+        : schedulerMaintenanceQueue;
+}
+
+async function runSchedulerRegistrationStep(
+    step: string,
+    operation: () => Promise<unknown>,
+): Promise<void> {
+    try {
+        await operation();
+    } catch (error) {
+        log.warn(`Failed scheduler registration step: ${step}`, { error });
+    }
+}
+
+async function removeSlowRepeatFromFastQueue(
+    job: SchedulerRegistrationInput,
+): Promise<void> {
+    if (schedulerLaneForJob(job.type) !== "slow" || !job.opts.repeat) return;
+    await schedulerQueue.removeRepeatable(job.type, {
+        ...job.opts.repeat,
+        jobId: job.opts.jobId,
+    });
+}
+
+async function registerSchedulerJob(
+    job: SchedulerRegistrationInput,
+): Promise<void> {
+    const prepared = prepareSchedulerRegistration(job);
+    const targetQueue = schedulerQueueForJob(prepared.type);
+    await runSchedulerRegistrationStep(
+        `remove legacy repeat for ${job.type}`,
+        () => removeLegacyFiveMinuteRepeat(job),
+    );
+    await runSchedulerRegistrationStep(
+        `remove old fast-queue repeat for ${prepared.type}`,
+        () => removeSlowRepeatFromFastQueue(prepared),
+    );
+    await runSchedulerRegistrationStep(`register ${prepared.type}`, () =>
+        targetQueue.add(prepared.type, prepared.data, prepared.opts),
+    );
+}
+
+async function removeRequestFulfillmentSchedules(): Promise<void> {
+    const jittered = jitterFiveMinuteRepeat(REQUEST_FULFILLMENT_JOB_ID, {
+        every: REQUEST_FULFILLMENT_INTERVAL_MS,
+    });
+    for (const queue of [schedulerQueue, schedulerMaintenanceQueue]) {
+        await runSchedulerRegistrationStep(
+            `remove disabled request interval from ${queue.name}`,
+            () =>
+                queue.removeRepeatable(REQUEST_FULFILLMENT_JOB_NAME, {
+                    every: REQUEST_FULFILLMENT_INTERVAL_MS,
+                    jobId: REQUEST_FULFILLMENT_JOB_ID,
+                }),
+        );
+        await runSchedulerRegistrationStep(
+            `remove disabled request cron from ${queue.name}`,
+            () =>
+                queue.removeRepeatable(REQUEST_FULFILLMENT_JOB_NAME, {
+                    ...jittered,
+                    jobId: REQUEST_FULFILLMENT_JOB_ID,
+                }),
+        );
+    }
 }
 
 // Register processors with named job types
@@ -676,92 +902,148 @@ if (config.features.federation) {
         "Federation disabled (FEDERATION_ENABLED=false); federation processors and schedules not registered",
     );
 }
-async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
-    const mode = job?.data?.mode === "startup" ? "startup" : "repeat";
-
+async function processPrimarySchedulerJob(
+    job: Bull.Job<any>,
+    mode: "startup" | "repeat",
+): Promise<boolean | null> {
     switch (job?.name) {
         case SCHEDULER_JOB_TYPES.dataIntegrity:
-            await processDataIntegrityJob();
-            break;
+            return processDataIntegrityJob();
         case SCHEDULER_JOB_TYPES.reconciliation:
-            await processReconciliationJob();
-            break;
+            return processReconciliationJob();
         case SCHEDULER_JOB_TYPES.albumDownloadRecovery:
-            await processAlbumDownloadRecoveryJob();
-            break;
+            return processAlbumDownloadRecoveryJob();
         case SCHEDULER_JOB_TYPES.catalogRetention:
-            await processCatalogRetentionJob();
-            break;
+            return processCatalogRetentionJob();
         case SCHEDULER_JOB_TYPES.lidarrCleanup:
-            await processLidarrCleanupJob(mode);
-            break;
+            return processLidarrCleanupJob(mode);
         case SCHEDULER_JOB_TYPES.cacheWarmup:
-            await processCacheWarmupJob();
-            break;
+            return processCacheWarmupJob();
         case SCHEDULER_JOB_TYPES.podcastCleanup:
         case "podcast-cleanup":
-            await processPodcastCleanupJob(mode);
-            break;
+            return processPodcastCleanupJob(mode);
         case SCHEDULER_JOB_TYPES.audiobookAutoSync:
         case "audiobook-auto-sync":
-            await processAudiobookAutoSyncJob(mode);
-            break;
-        case SCHEDULER_JOB_TYPES.downloadQueueReconcile:
-        case "download-queue-reconcile":
-            await processDownloadQueueReconcileJob();
-            break;
-        case SCHEDULER_JOB_TYPES.artistCountsBackfill:
-        case "artist-counts-backfill":
-            await processArtistCountsBackfillJob();
-            break;
-        case SCHEDULER_JOB_TYPES.imageBackfill:
-        case "image-backfill":
-            await processImageBackfillJob();
-            break;
-        case SCHEDULER_JOB_TYPES.audioHashBackfill:
-            await processAudioHashBackfill(job);
-            break;
-        case SCHEDULER_JOB_TYPES.loudnessBackfill:
-            await processLoudnessBackfill(job);
-            break;
-        case SCHEDULER_JOB_TYPES.trackRemovalPurge:
-            await processTrackRemovalPurge(job);
-            break;
-        case SCHEDULER_JOB_TYPES.trackMappingReconcile:
-        case "track-mapping-reconcile":
-            await processTrackMappingReconcileJob();
-            break;
-        case SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh:
-        case "remote-track-metadata-refresh":
-            await processRemoteTrackMetadataRefreshJob();
-            break;
-        case REQUEST_FULFILLMENT_JOB_NAME:
-            if (config.features.requests) {
-                await processRequestFulfillmentBatch();
-            }
-            break;
+            return processAudiobookAutoSyncJob(mode);
         default:
-            log.warn(
-                `Scheduler wildcard received unknown job type "${job?.name ?? "unknown"}" (jobId=${job?.id ?? "unknown"}); skipping`,
-            );
-            break;
+            return null;
     }
 }
 
-// Safety net + primary scheduler processor:
-// Use a single wildcard processor so startup does not attach many pre-ready listeners
-// on the same queue client (which can trip Node's max-listener warning threshold).
-schedulerQueue.process("*", async (job: Bull.Job<any>) => {
+async function processMaintenanceSchedulerJob(
+    job: Bull.Job<any>,
+): Promise<boolean | null> {
+    switch (job?.name) {
+        case SCHEDULER_JOB_TYPES.downloadQueueReconcile:
+        case "download-queue-reconcile":
+            return processDownloadQueueReconcileJob();
+        case SCHEDULER_JOB_TYPES.artistCountsBackfill:
+        case "artist-counts-backfill":
+            return processArtistCountsBackfillJob();
+        case SCHEDULER_JOB_TYPES.imageBackfill:
+        case "image-backfill":
+            return processImageBackfillJob();
+        case SCHEDULER_JOB_TYPES.audioHashBackfill:
+            await processAudioHashBackfill(job);
+            return true;
+        case SCHEDULER_JOB_TYPES.loudnessBackfill:
+            await processLoudnessBackfill(job);
+            return true;
+        case SCHEDULER_JOB_TYPES.trackRemovalPurge:
+            await processTrackRemovalPurge(job);
+            return true;
+        case SCHEDULER_JOB_TYPES.trackMappingReconcile:
+        case "track-mapping-reconcile":
+            return processTrackMappingReconcileJob();
+        case SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh:
+        case "remote-track-metadata-refresh":
+            return processRemoteTrackMetadataRefreshJob();
+        case REQUEST_FULFILLMENT_JOB_NAME:
+            if (config.features.requests) {
+                await processRequestFulfillmentBatch();
+                return true;
+            }
+            return false;
+        default:
+            return null;
+    }
+}
+
+async function processSchedulerJob(job: Bull.Job<any>): Promise<boolean> {
+    const mode = job?.data?.mode === "startup" ? "startup" : "repeat";
+    const primary = await processPrimarySchedulerJob(job, mode);
+    if (primary !== null) return primary;
+    const maintenance = await processMaintenanceSchedulerJob(job);
+    if (maintenance !== null) return maintenance;
+    log.warn(
+        `Scheduler wildcard received unknown job type "${job?.name ?? "unknown"}" (jobId=${job?.id ?? "unknown"}); skipping`,
+    );
+    return false;
+}
+
+function canonicalSchedulerMetricJob(
+    jobName: string,
+): SchedulerMetricJob | null {
+    const aliases: Record<string, SchedulerMetricJob> = {
+        "podcast-cleanup": SCHEDULER_JOB_TYPES.podcastCleanup,
+        "audiobook-auto-sync": SCHEDULER_JOB_TYPES.audiobookAutoSync,
+        "download-queue-reconcile": SCHEDULER_JOB_TYPES.downloadQueueReconcile,
+        "artist-counts-backfill": SCHEDULER_JOB_TYPES.artistCountsBackfill,
+        "image-backfill": SCHEDULER_JOB_TYPES.imageBackfill,
+        "track-mapping-reconcile": SCHEDULER_JOB_TYPES.trackMappingReconcile,
+        "remote-track-metadata-refresh":
+            SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh,
+    };
+    if (aliases[jobName]) return aliases[jobName];
+    return SCHEDULER_METRIC_JOBS.includes(jobName as SchedulerMetricJob)
+        ? (jobName as SchedulerMetricJob)
+        : null;
+}
+
+async function processSchedulerJobWithMetrics(
+    job: Bull.Job<any>,
+): Promise<void> {
+    const metricJob = canonicalSchedulerMetricJob(String(job?.name ?? ""));
+    const startedAt = process.hrtime.bigint();
     try {
-        await processSchedulerJob(job);
+        const executed = await processSchedulerJob(job);
+        if (metricJob && executed) {
+            recordSchedulerJobSuccess(metricJob, Date.now() / 1_000);
+        }
     } catch (err) {
         log.error(
             `Scheduler processor failed (${job?.name ?? "unknown"}):`,
             err,
         );
         throw err;
+    } finally {
+        if (metricJob) {
+            const durationSeconds =
+                Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+            recordSchedulerJobDuration(metricJob, durationSeconds);
+        }
     }
-});
+}
+
+function processSchedulerLaneJob(job: Bull.Job<any>): Promise<void> {
+    const lane = schedulerLaneForJob(String(job?.name ?? ""));
+    if (lane === "fast") {
+        return fastSchedulerLane(() => processSchedulerJobWithMetrics(job));
+    }
+    return slowSchedulerLane(() => processSchedulerJobWithMetrics(job));
+}
+
+function registerSchedulerProcessors(): void {
+    for (const jobName of SCHEDULER_METRIC_JOBS) {
+        schedulerQueueForJob(jobName).process(
+            jobName,
+            1,
+            processSchedulerLaneJob,
+        );
+    }
+    // Retain the wildcard as a compatibility fallback for legacy persisted names.
+    schedulerQueue.process("*", processSchedulerLaneJob);
+}
 
 // Register download queue callback for unavailable albums
 downloadQueueManager.onUnavailableAlbum(async (info) => {
@@ -1003,6 +1285,25 @@ registerQueueProcessorEvents(schedulerQueue, "worker-scheduler", {
     },
 });
 
+registerQueueProcessorEvents(
+    schedulerMaintenanceQueue,
+    "worker-scheduler-maintenance",
+    {
+        record: recordQueueProcessorEvent,
+        completed: (job) => {
+            log.debug(
+                `Scheduler maintenance job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        failed: (job, error) => {
+            log.error(
+                `Scheduler maintenance job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
+                error.message,
+            );
+        },
+    },
+);
+
 // analysisQueue has no processor in this module, so processor-event wiring remains owner-local.
 // federationQueue processing is owned by federationJobs; no generic wiring is added here.
 
@@ -1096,6 +1397,7 @@ export async function shutdownWorkers(): Promise<void> {
     imageQueue.removeAllListeners();
     validationQueue.removeAllListeners();
     schedulerQueue.removeAllListeners();
+    schedulerMaintenanceQueue.removeAllListeners();
     genericImportQueue.removeAllListeners();
     federationQueue.removeAllListeners();
     albumDownloadQueue.removeAllListeners();
@@ -1106,6 +1408,7 @@ export async function shutdownWorkers(): Promise<void> {
         imageQueue.close(),
         validationQueue.close(),
         schedulerQueue.close(),
+        schedulerMaintenanceQueue.close(),
         genericImportQueue.close(),
         federationQueue.close(),
     ]);
@@ -1147,6 +1450,7 @@ export {
     imageQueue,
     validationQueue,
     schedulerQueue,
+    schedulerMaintenanceQueue,
     genericImportQueue,
     federationQueue,
     albumDownloadQueue,

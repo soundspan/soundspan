@@ -1,30 +1,56 @@
-import fs from "fs";
-import path from "path";
+jest.mock("../workers/loudnessBackfillSchedule", () => ({
+    loudnessBackfillRepeatSchedule: {
+        type: "track-loudness-backfill",
+        data: { mode: "repeat" },
+        opts: {
+            jobId: "scheduler:loudness-backfill:repeat",
+            repeat: { every: 6 * 60 * 60 * 1_000 },
+        },
+    },
+}));
 
-describe("worker scheduler claim contract", () => {
-    it("registers queue-backed repeatable scheduler jobs", () => {
-        const workersPath = path.resolve(__dirname, "../workers/index.ts");
-        const workersSource = fs.readFileSync(workersPath, "utf8");
-        const registryPath = path.resolve(
-            __dirname,
-            "../workers/schedulerJobRegistry.ts",
-        );
-        const registrySource = fs.readFileSync(registryPath, "utf8");
+import {
+    buildSchedulerJobs,
+    ONE_HOUR_MS,
+    ONE_MINUTE_MS,
+    SCHEDULER_JOB_IDS,
+    SCHEDULER_JOB_TYPES,
+} from "../workers/schedulerJobRegistry";
 
-        expect(workersSource).toContain("schedulerQueue.add(");
-        expect(workersSource).toContain("buildSchedulerJobs()");
-        expect(registrySource).toContain("repeat: { every: 24 * ONE_HOUR_MS }");
-        expect(registrySource).toContain(
-            "repeat: { every: 2 * ONE_MINUTE_MS }",
+describe("worker scheduler registration contract", () => {
+    it("returns stable queue-backed repeat schedules", () => {
+        const repeatJobs = buildSchedulerJobs().filter(
+            (job) => job.data.mode === "repeat",
         );
-        expect(registrySource).toContain(
-            "repeat: { every: 5 * ONE_MINUTE_MS }",
+        const repeatById = new Map(
+            repeatJobs.map((job) => [job.opts.jobId, job]),
         );
-        expect(workersSource).toContain(
-            'schedulerQueue.process("*", async (job: Bull.Job<any>) =>',
+
+        expect(repeatById.get(SCHEDULER_JOB_IDS.dataIntegrityRepeat)).toEqual(
+            expect.objectContaining({
+                type: SCHEDULER_JOB_TYPES.dataIntegrity,
+                opts: expect.objectContaining({
+                    repeat: { every: 24 * ONE_HOUR_MS },
+                }),
+            }),
         );
-        expect(workersSource).toContain("await processSchedulerJob(job);");
-        expect(workersSource).not.toContain("runReconciliationCycle");
-        expect(workersSource).not.toContain("runLidarrCleanupCycle");
+        expect(repeatById.get(SCHEDULER_JOB_IDS.reconciliationRepeat)).toEqual(
+            expect.objectContaining({
+                type: SCHEDULER_JOB_TYPES.reconciliation,
+                opts: expect.objectContaining({
+                    repeat: { every: 2 * ONE_MINUTE_MS },
+                }),
+            }),
+        );
+        expect(
+            repeatById.get(SCHEDULER_JOB_IDS.albumDownloadRecoveryRepeat),
+        ).toEqual(
+            expect.objectContaining({
+                type: SCHEDULER_JOB_TYPES.albumDownloadRecovery,
+                opts: expect.objectContaining({
+                    repeat: { every: 5 * ONE_MINUTE_MS },
+                }),
+            }),
+        );
     });
 });

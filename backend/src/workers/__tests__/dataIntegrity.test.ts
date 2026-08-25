@@ -22,7 +22,9 @@ describe("dataIntegrity worker", () => {
             debug: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
         const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
             albumsDeleted: 0,
             artistsDeleted: 0,
@@ -63,6 +65,7 @@ describe("dataIntegrity worker", () => {
             },
             ownedAlbum: {
                 findFirst: jest.fn(async () => null),
+                findMany: jest.fn(async () => []),
                 deleteMany: jest.fn(async () => ({ count: 0 })),
             },
             discoveryAlbum: {
@@ -225,6 +228,9 @@ describe("dataIntegrity worker", () => {
             .mockResolvedValueOnce([]); // empty albums
         (prisma.ownedAlbum.findFirst as jest.Mock).mockResolvedValue(null);
         (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValue(null);
+        (prisma.album.updateMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
+        });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
             expect.objectContaining({
@@ -232,13 +238,13 @@ describe("dataIntegrity worker", () => {
             }),
         );
 
-        expect(prisma.album.update).toHaveBeenCalledWith({
-            where: { id: "album-1" },
+        expect(prisma.album.updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["album-1"] }, location: "LIBRARY" },
             data: { location: "DISCOVER" },
         });
         expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
             where: {
-                rgMbid: "rg-1",
+                rgMbid: { in: ["rg-1"] },
                 source: { not: "native_scan" },
             },
         });
@@ -271,9 +277,11 @@ describe("dataIntegrity worker", () => {
                 },
             ]) // library albums
             .mockResolvedValueOnce([]); // empty albums
-        (prisma.ownedAlbum.findFirst as jest.Mock).mockResolvedValueOnce({
-            id: "owned-1",
-            source: "native_scan",
+        (prisma.ownedAlbum.findMany as jest.Mock).mockResolvedValueOnce([
+            { artistId: "artist-1" },
+        ]);
+        (prisma.album.updateMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
         });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
@@ -282,11 +290,7 @@ describe("dataIntegrity worker", () => {
             }),
         );
 
-        expect(prisma.album.update).not.toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: { location: "DISCOVER" },
-            }),
-        );
+        expect(prisma.album.updateMany).not.toHaveBeenCalled();
     });
 
     it("delegates orphaned parent deletion to shared tombstone-aware cleanup", async () => {
@@ -329,11 +333,19 @@ describe("dataIntegrity worker", () => {
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
-            include: { artist: true },
+            orderBy: { id: "asc" },
+            take: 250,
+            select: {
+                id: true,
+                rgMbid: true,
+                title: true,
+                artistId: true,
+                artist: { select: { name: true, mbid: true } },
+            },
         });
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: {
-                albumId: "discover-album-1",
+                albumId: { in: ["discover-album-1"] },
                 album: expect.objectContaining({
                     NOT: expect.any(Object),
                     discoveryRecords: {
@@ -363,10 +375,12 @@ describe("dataIntegrity worker", () => {
                     normalizedName: "artist name",
                 },
             ]); // temp artists
-        (prisma.artist.findFirst as jest.Mock).mockResolvedValueOnce({
-            id: "real-artist-1",
-            mbid: "real-mbid",
-        });
+        (prisma.artist.findMany as jest.Mock).mockResolvedValueOnce([
+            {
+                id: "real-artist-1",
+                normalizedName: "artist name",
+            },
+        ]);
         cleanupOrphanedLibraryEntities.mockResolvedValueOnce({
             albumsDeleted: 0,
             artistsDeleted: 1,
@@ -501,6 +515,9 @@ describe("dataIntegrity worker", () => {
             .mockResolvedValueOnce([]); // empty albums
         (prisma.ownedAlbum.findFirst as jest.Mock).mockResolvedValue(null);
         (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValue(null);
+        (prisma.album.updateMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
+        });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
             expect.objectContaining({
@@ -528,6 +545,13 @@ describe("dataIntegrity worker", () => {
             id: "active-record-1",
             status: "ACTIVE",
         });
+        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValueOnce([
+            {
+                rgMbid: "rg-active-1",
+                albumTitle: "Still Active",
+                artistName: "Artist Active",
+            },
+        ]);
         (prisma.ownedAlbum.findFirst as jest.Mock).mockResolvedValueOnce(null);
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
@@ -610,6 +634,9 @@ describe("dataIntegrity worker", () => {
         (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValueOnce(
             null,
         );
+        (prisma.album.updateMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
+        });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
             expect.objectContaining({
@@ -650,14 +677,20 @@ describe("dataIntegrity worker", () => {
         (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValueOnce(
             null,
         );
+        (prisma.album.updateMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
+        });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
             expect.objectContaining({
                 mislocatedAlbums: 1,
             }),
         );
-        expect(prisma.album.update).toHaveBeenCalledWith({
-            where: { id: "album-discovery-table-1" },
+        expect(prisma.album.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["album-discovery-table-1"] },
+                location: "LIBRARY",
+            },
             data: { location: "DISCOVER" },
         });
     });
@@ -694,9 +727,11 @@ describe("dataIntegrity worker", () => {
             ])
             .mockResolvedValueOnce([]);
         (prisma.ownedAlbum.findFirst as jest.Mock).mockResolvedValueOnce(null);
-        (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValueOnce({
-            id: "liked-1",
-            status: "LIKED",
+        (prisma.discoveryAlbum.findMany as jest.Mock)
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([{ artistMbid: "artist-mbid-liked" }]);
+        (prisma.album.updateMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
         });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
@@ -704,11 +739,7 @@ describe("dataIntegrity worker", () => {
                 mislocatedAlbums: 0,
             }),
         );
-        expect(prisma.album.update).not.toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "album-liked-1" },
-            }),
-        );
+        expect(prisma.album.updateMany).not.toHaveBeenCalled();
     });
 
     it("does not consolidate temp artists when no real artist match exists", async () => {
@@ -734,6 +765,49 @@ describe("dataIntegrity worker", () => {
             expect.objectContaining({
                 where: { artistId: "temp-artist-no-real" },
             }),
+        );
+    });
+
+    it("completes when a bounded scan contains exactly the maximum rows", async () => {
+        const { module, prisma, logger } = loadDataIntegrity();
+        const fullPage = Array.from({ length: 250 }, (_, index) => ({
+            id: `download-${index.toString().padStart(3, "0")}`,
+            metadata: {},
+        }));
+        (prisma.downloadJob.findMany as jest.Mock).mockImplementation(
+            async () =>
+                prisma.downloadJob.findMany.mock.calls.length <= 1_000
+                    ? fullPage
+                    : [],
+        );
+
+        await expect(module.runDataIntegrityCheck()).resolves.toEqual(
+            expect.objectContaining({ oldDownloadJobs: 3 }),
+        );
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledTimes(1_001);
+        expect(logger.warn).not.toHaveBeenCalledWith(
+            expect.stringContaining("truncated at 250000 rows"),
+        );
+    });
+
+    it("truncates and warns only when rows exist beyond the scan bound", async () => {
+        const { module, prisma, logger } = loadDataIntegrity();
+        const fullPage = Array.from({ length: 250 }, (_, index) => ({
+            id: `download-${index.toString().padStart(3, "0")}`,
+            metadata: {},
+        }));
+        (prisma.downloadJob.findMany as jest.Mock).mockImplementation(
+            async () =>
+                prisma.downloadJob.findMany.mock.calls.length <= 1_000
+                    ? fullPage
+                    : [{ id: "download-over-bound", metadata: {} }],
+        );
+
+        await expect(module.runDataIntegrityCheck()).resolves.toEqual(
+            expect.objectContaining({ oldDownloadJobs: 3 }),
+        );
+        expect(logger.warn).toHaveBeenCalledWith(
+            "runDataIntegrityCheck.downloadJob.findMany.discoveryBatch truncated at 250000 rows",
         );
     });
 });

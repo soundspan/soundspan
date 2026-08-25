@@ -121,6 +121,15 @@ export const schedulerQueue = new Bull("worker-scheduler", {
     settings: defaultQueueSettings,
 });
 
+/** Durable slow lane for scheduler maintenance and backfill jobs. */
+export const schedulerMaintenanceQueue = new Bull(
+    "worker-scheduler-maintenance",
+    {
+        redis: redisConfig,
+        settings: defaultQueueSettings,
+    },
+);
+
 /** Durable Redis queue for persisted generic playlist-import jobs. */
 export const genericImportQueue = new Bull("generic-import", {
     redis: redisConfig,
@@ -163,6 +172,7 @@ export const queues = [
     validationQueue,
     analysisQueue,
     schedulerQueue,
+    schedulerMaintenanceQueue,
     genericImportQueue,
     federationQueue,
     albumDownloadQueue,

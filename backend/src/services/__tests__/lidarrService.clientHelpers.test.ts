@@ -198,7 +198,7 @@ describe("lidarr service behavior", () => {
         ).toEqual({ active: false, progress: 30 });
     });
 
-    it("keeps queue state when album indexing fails during snapshot creation", async () => {
+    it("fails closed when album indexing fails during snapshot creation", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
 
@@ -219,9 +219,9 @@ describe("lidarr service behavior", () => {
             })
             .mockRejectedValueOnce(new Error("album index down"));
 
-        const snapshot = await lidarrService.getReconciliationSnapshot();
-        expect(snapshot.queue.size).toBe(1);
-        expect(snapshot.albumsByMbid.size).toBe(0);
+        await expect(lidarrService.getReconciliationSnapshot()).rejects.toThrow(
+            "album index down",
+        );
     });
 
     it("deletes artists/albums and checks availability helpers", async () => {
@@ -886,7 +886,7 @@ describe("lidarr service behavior", () => {
         });
     });
 
-    it("getReconciliationSnapshot tolerates queue failures and uses album fallback", async () => {
+    it("getReconciliationSnapshot fails closed on queue failures", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
 
@@ -904,9 +904,9 @@ describe("lidarr service behavior", () => {
                 ],
             });
 
-        const snapshot = await lidarrService.getReconciliationSnapshot();
-        expect(snapshot.queue.size).toBe(0);
-        expect(snapshot.albumsByMbid.has("album-fallback")).toBe(true);
+        await expect(lidarrService.getReconciliationSnapshot()).rejects.toThrow(
+            "queue fail",
+        );
     });
 
     it("searchArtist returns direct results when Lidarr lookup is populated", async () => {
@@ -1806,7 +1806,7 @@ describe("lidarr service behavior", () => {
         );
     });
 
-    it("returns empty snapshot when reconciliation snapshot enrichment fails", async () => {
+    it("rejects when reconciliation snapshot enrichment is malformed", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
 
@@ -1822,11 +1822,9 @@ describe("lidarr service behavior", () => {
                 },
             });
 
-        const snapshot = await lidarrService.getReconciliationSnapshot();
-
-        expect(snapshot.queue.size).toBe(0);
-        expect(snapshot.albumsByMbid.size).toBe(0);
-        expect(snapshot.albumsByTitle.size).toBe(0);
+        await expect(lidarrService.getReconciliationSnapshot()).rejects.toThrow(
+            "not readable",
+        );
         expect(logger.error).toHaveBeenCalledWith(
             "[LIDARR] Failed to create reconciliation snapshot:",
             expect.any(String),

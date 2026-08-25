@@ -8,7 +8,7 @@ import { computeAudioStreamHash } from "../../services/audioHash";
 import { extractTrackIdentityTags } from "../../services/trackIdentityTags";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { schedulerQueue } from "../queues";
+import { schedulerMaintenanceQueue } from "../queues";
 
 const log = logger.child("AudioHashBackfillProcessor");
 const BATCH_SIZE = 50;
@@ -126,7 +126,7 @@ async function enqueueContinuation(
     startAfterId: string,
     sweepStartedAt: string,
 ): Promise<void> {
-    await schedulerQueue.add(
+    await schedulerMaintenanceQueue.add(
         AUDIO_HASH_BACKFILL_JOB_NAME,
         { startAfterId, sweepStartedAt },
         {

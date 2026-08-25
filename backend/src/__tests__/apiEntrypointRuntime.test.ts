@@ -260,6 +260,13 @@ describe("api entrypoint runtime behavior", () => {
             scanQueue: { name: "scan" },
             discoverQueue: { name: "discover" },
             imageQueue: { name: "image" },
+            validationQueue: { name: "validation" },
+            analysisQueue: { name: "analysis" },
+            schedulerQueue: { name: "scheduler" },
+            schedulerMaintenanceQueue: { name: "scheduler-maintenance" },
+            genericImportQueue: { name: "generic-import" },
+            federationQueue: { name: "federation" },
+            albumDownloadQueue: { name: "album-download" },
         };
         const queueRegistry = Object.values(workersQueues);
         const registerQueueMetrics = jest.fn();
@@ -398,6 +405,7 @@ describe("api entrypoint runtime behavior", () => {
             compressionFilter,
             createMetricsRouter,
             registerQueueMetrics,
+            queueRegistry,
             metricsRegistry,
             metricsRouter,
             httpMetricsMiddleware,
@@ -501,7 +509,13 @@ describe("api entrypoint runtime behavior", () => {
             token: "metrics-token",
             publicAccess: false,
         });
-        expect(mocks.registerQueueMetrics).toHaveBeenCalled();
+        expect(mocks.registerQueueMetrics).toHaveBeenCalledWith(
+            mocks.metricsRegistry,
+            mocks.queueRegistry,
+        );
+        expect(mocks.queueRegistry).toContainEqual({
+            name: "scheduler-maintenance",
+        });
         expect(mocks.server.listen).toHaveBeenCalledWith(
             3006,
             "0.0.0.0",
@@ -536,6 +550,7 @@ describe("api entrypoint runtime behavior", () => {
         expect(socket.setKeepAlive).toHaveBeenCalledWith(true, 30_000);
         expect(mocks.startPersistLoop).toHaveBeenCalledTimes(1);
         expect(mocks.createBullBoard).toHaveBeenCalledTimes(1);
+        expect(mocks.BullAdapter).toHaveBeenCalledTimes(10);
         expect(mocks.app.get).toHaveBeenCalledWith(
             "/api/docs.json",
             expect.any(Function),

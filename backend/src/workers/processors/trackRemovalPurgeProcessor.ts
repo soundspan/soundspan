@@ -13,7 +13,7 @@ import {
 } from "../../services/libraryHealthDashboard/purgeMarker";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { schedulerQueue } from "../queues";
+import { schedulerMaintenanceQueue } from "../queues";
 
 const log = logger.child("TrackRemovalPurgeProcessor");
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -238,7 +238,7 @@ async function enqueueContinuation(
     progress: SweepProgress,
 ): Promise<void> {
     const cursorKey = startAfterId ?? `restart-${progress.pageNumber}`;
-    await schedulerQueue.add(
+    await schedulerMaintenanceQueue.add(
         TRACK_REMOVAL_PURGE_JOB_NAME,
         {
             ...(startAfterId ? { startAfterId } : {}),

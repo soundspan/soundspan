@@ -63,6 +63,11 @@ import {
     type AlbumDownloadOutcome,
 } from "./albumDownloadMetrics";
 import { createCatalogMetrics, type CatalogWriteKind } from "./catalogMetrics";
+import {
+    createSchedulerMetrics,
+    type SchedulerMetricJob,
+    type SchedulerTimeoutOperation,
+} from "./schedulerMetrics";
 
 export type {
     FederationAuthFailureReason,
@@ -92,6 +97,7 @@ const providerTrackGcMetrics = createProviderTrackGcMetrics(metricsRegistry);
 const requestMetrics = createRequestMetrics(metricsRegistry);
 const albumDownloadMetrics = createAlbumDownloadMetrics(metricsRegistry);
 const catalogMetrics = createCatalogMetrics(metricsRegistry);
+const schedulerMetrics = createSchedulerMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -154,6 +160,29 @@ export function recordAlbumDownloadOutcome(
     outcome: AlbumDownloadOutcome,
 ): void {
     albumDownloadMetrics.downloads.inc({ outcome });
+}
+
+/** Records one scheduler-owned operation timeout. */
+export function recordSchedulerTimeout(
+    operation: SchedulerTimeoutOperation,
+): void {
+    schedulerMetrics.timeouts.inc({ operation });
+}
+
+/** Records one completed scheduler job duration. */
+export function recordSchedulerJobDuration(
+    job: SchedulerMetricJob,
+    durationSeconds: number,
+): void {
+    schedulerMetrics.jobDuration.observe({ job }, durationSeconds);
+}
+
+/** Replaces the last-success timestamp for one scheduler job. */
+export function recordSchedulerJobSuccess(
+    job: SchedulerMetricJob,
+    timestampSeconds: number,
+): void {
+    schedulerMetrics.lastSuccess.set({ job }, timestampSeconds);
 }
 
 /** Records one successful metadata catalog write-through operation. */

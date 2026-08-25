@@ -68,6 +68,7 @@ jest.mock("../../utils/logger", () => ({
 
 jest.mock("../../workers/queues", () => ({
     schedulerQueue: mockSchedulerQueue,
+    schedulerMaintenanceQueue: mockSchedulerQueue,
 }));
 
 jest.mock("../../config", () => ({

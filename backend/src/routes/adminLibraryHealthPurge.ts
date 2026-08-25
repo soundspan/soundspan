@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { schedulerQueue } from "../workers/queues";
+import { schedulerMaintenanceQueue } from "../workers/queues";
 import { TRACK_REMOVAL_PURGE_JOB_NAME } from "../workers/processors/trackRemovalPurgeProcessor";
 import { readLibraryHealthPurgeMarker } from "../services/libraryHealthDashboard/purgeMarker";
 import { sendInternalRouteError } from "../utils/routeErrorResponse";
@@ -27,7 +27,7 @@ async function countRemovedLocalTracks(): Promise<number> {
 }
 
 async function addPurgeAt(cutoff: Date): Promise<void> {
-    await schedulerQueue.add(
+    await schedulerMaintenanceQueue.add(
         TRACK_REMOVAL_PURGE_JOB_NAME,
         { cutoffAt: cutoff.toISOString() },
         PURGE_NOW_JOB_OPTIONS,
@@ -35,7 +35,8 @@ async function addPurgeAt(cutoff: Date): Promise<void> {
 }
 
 async function enqueuePurgeAt(cutoff: Date): Promise<void> {
-    const existingJob = await schedulerQueue.getJob(PURGE_NOW_JOB_ID);
+    const existingJob =
+        await schedulerMaintenanceQueue.getJob(PURGE_NOW_JOB_ID);
     if (!existingJob) {
         await addPurgeAt(cutoff);
         return;
@@ -98,7 +99,10 @@ function boundedFailureReason(reason: string | undefined): string {
 const FAILURE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 async function findLatestPurgeFailure(): Promise<string | null> {
-    const failed = await schedulerQueue.getFailed(0, FAILED_SCAN_LIMIT);
+    const failed = await schedulerMaintenanceQueue.getFailed(
+        0,
+        FAILED_SCAN_LIMIT,
+    );
     const cutoff = Date.now() - FAILURE_MAX_AGE_MS;
     for (const job of failed) {
         if (job?.name !== TRACK_REMOVAL_PURGE_JOB_NAME) continue;
@@ -124,7 +128,8 @@ function isPurgeContinuation(job: {
 }
 
 async function isPurgeInFlight(): Promise<boolean> {
-    const purgeNowJob = await schedulerQueue.getJob(PURGE_NOW_JOB_ID);
+    const purgeNowJob =
+        await schedulerMaintenanceQueue.getJob(PURGE_NOW_JOB_ID);
     if (purgeNowJob) {
         const state = await purgeNowJob.getState();
         if (PURGE_STATES_IN_FLIGHT.has(state)) return true;
@@ -132,8 +137,12 @@ async function isPurgeInFlight(): Promise<boolean> {
     // The marker is the primary signal. This bounded queue fallback covers
     // marker loss during Redis flaps, with residual risk beyond 500 jobs.
     const [active, waitingOrDelayed] = await Promise.all([
-        schedulerQueue.getJobs(["active"], 0, IN_FLIGHT_SCAN_LIMIT),
-        schedulerQueue.getJobs(["waiting", "delayed"], 0, IN_FLIGHT_SCAN_LIMIT),
+        schedulerMaintenanceQueue.getJobs(["active"], 0, IN_FLIGHT_SCAN_LIMIT),
+        schedulerMaintenanceQueue.getJobs(
+            ["waiting", "delayed"],
+            0,
+            IN_FLIGHT_SCAN_LIMIT,
+        ),
     ]);
     return (
         active.some((job) => job?.name === TRACK_REMOVAL_PURGE_JOB_NAME) ||

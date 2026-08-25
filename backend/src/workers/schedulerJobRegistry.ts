@@ -1,34 +1,14 @@
 import type Bull from "bull";
 import { loudnessBackfillRepeatSchedule } from "./loudnessBackfillSchedule";
-import { AUDIO_HASH_BACKFILL_JOB_NAME } from "./processors/audioHashBackfillProcessor";
-import { LOUDNESS_BACKFILL_JOB_NAME } from "./processors/loudnessBackfillProcessor";
-import { TRACK_REMOVAL_PURGE_JOB_NAME } from "./processors/trackRemovalPurgeProcessor";
+import { SCHEDULER_JOB_TYPES } from "./schedulerJobTypes";
+
+export { SCHEDULER_JOB_TYPES } from "./schedulerJobTypes";
 
 /** Milliseconds in one minute for scheduler intervals and timeouts. */
 export const ONE_MINUTE_MS = 60_000;
 
 /** Milliseconds in one hour for scheduler intervals and timeouts. */
 export const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
-
-/** Bull job names handled by the worker scheduler. */
-export const SCHEDULER_JOB_TYPES = {
-    dataIntegrity: "data-integrity-check",
-    reconciliation: "download-reconciliation-cycle",
-    albumDownloadRecovery: "album-download-recovery-cycle",
-    catalogRetention: "catalog-retention-sweep",
-    lidarrCleanup: "lidarr-cleanup-cycle",
-    cacheWarmup: "cache-warmup-startup",
-    podcastCleanup: "podcast-cache-cleanup",
-    audiobookAutoSync: "audiobook-auto-sync-startup",
-    downloadQueueReconcile: "download-queue-reconcile-startup",
-    artistCountsBackfill: "artist-counts-backfill-startup",
-    imageBackfill: "image-backfill-startup",
-    audioHashBackfill: AUDIO_HASH_BACKFILL_JOB_NAME,
-    loudnessBackfill: LOUDNESS_BACKFILL_JOB_NAME,
-    trackRemovalPurge: TRACK_REMOVAL_PURGE_JOB_NAME,
-    trackMappingReconcile: "track-mapping-reconcile",
-    remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
-} as const;
 
 /** Stable Bull job IDs used to deduplicate scheduler registrations. */
 export const SCHEDULER_JOB_IDS = {

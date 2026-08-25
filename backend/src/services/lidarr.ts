@@ -5,6 +5,7 @@ import { BRAND_SLUG } from "../config/brand";
 import { getSystemSettings } from "../utils/systemSettings";
 import { stripAlbumEdition } from "../utils/artistNormalization";
 import { stripDelimitedSegments } from "../utils/stripDelimitedSegments";
+import { fetchReconciliationAlbumMaps } from "./lidarr/reconciliationAlbumStream";
 
 /**
  * Error types for music acquisition failures
@@ -2430,7 +2431,9 @@ class LidarrService {
      *
      * This replaces multiple per-job API calls with a single snapshot fetch.
      */
-    async getReconciliationSnapshot(): Promise<ReconciliationSnapshot> {
+    async getReconciliationSnapshot(
+        signal?: AbortSignal,
+    ): Promise<ReconciliationSnapshot> {
         await this.ensureInitialized();
 
         const snapshot: ReconciliationSnapshot = {
@@ -2444,31 +2447,25 @@ class LidarrService {
             return snapshot;
         }
 
+        const ownedController = new AbortController();
+        const requestSignal = signal
+            ? AbortSignal.any([signal, ownedController.signal])
+            : ownedController.signal;
         try {
-            // Fetch queue and albums in parallel
-            const [queueResponse, albumsResponse] = await Promise.all([
-                this.client
-                    .get("/api/v1/queue", {
-                        params: {
-                            page: 1,
-                            pageSize: 1000,
-                            includeUnknownArtistItems: true,
-                        },
-                    })
-                    .catch((err) => {
-                        logger.error(
-                            "[LIDARR] Failed to fetch queue for snapshot:",
-                            err.message,
-                        );
-                        return { data: { records: [] } };
-                    }),
-                this.client.get("/api/v1/album").catch((err) => {
-                    logger.error(
-                        "[LIDARR] Failed to fetch albums for snapshot:",
-                        err.message,
-                    );
-                    return { data: [] };
+            const [queueResponse] = await Promise.all([
+                this.client.get("/api/v1/queue", {
+                    params: {
+                        page: 1,
+                        pageSize: 1000,
+                        includeUnknownArtistItems: true,
+                    },
+                    signal: requestSignal,
                 }),
+                fetchReconciliationAlbumMaps(
+                    this.client,
+                    snapshot,
+                    requestSignal,
+                ),
             ]);
 
             // Index queue items by downloadId
@@ -2492,43 +2489,18 @@ class LidarrService {
                 }
             }
 
-            // Index albums by MBID and normalized title
-            const albums = albumsResponse.data || [];
-            for (const album of albums) {
-                const hasFiles = album.statistics?.percentOfTracks > 0;
-                if (!hasFiles) continue; // Only index albums with files
-
-                const albumInfo: AlbumSnapshotInfo = {
-                    id: album.id,
-                    title: album.title,
-                    foreignAlbumId: album.foreignAlbumId,
-                    artistName: album.artist?.artistName || "",
-                    hasFiles: true,
-                };
-
-                // Index by MBID
-                if (album.foreignAlbumId) {
-                    snapshot.albumsByMbid.set(album.foreignAlbumId, albumInfo);
-                }
-
-                // Index by normalized "artist|title" for title-based lookups
-                if (albumInfo.artistName && album.title) {
-                    const key = `${albumInfo.artistName.toLowerCase().trim()}|${album.title.toLowerCase().trim()}`;
-                    snapshot.albumsByTitle.set(key, albumInfo);
-                }
-            }
-
             logger.debug(
                 `[LIDARR] Snapshot fetched: ${snapshot.queue.size} queue items, ${snapshot.albumsByMbid.size} albums with files`,
             );
 
             return snapshot;
         } catch (error: any) {
+            ownedController.abort(error);
             logger.error(
                 "[LIDARR] Failed to create reconciliation snapshot:",
                 error.message,
             );
-            return snapshot;
+            throw error;
         }
     }
 

@@ -5,7 +5,7 @@ import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { enqueueReservedWork } from "../enrichmentQueue";
-import { schedulerQueue } from "../queues";
+import { schedulerMaintenanceQueue } from "../queues";
 
 const log = logger.child("LoudnessBackfillProcessor");
 const AUDIO_ANALYSIS_QUEUE = "audio:analysis:queue";
@@ -131,7 +131,7 @@ async function loadBackfillPage(
 
 async function enqueueTrack(track: BackfillTrack, attemptKey: string) {
     if (track.filePath === null) return "skipped" as const;
-    return enqueueReservedWork(schedulerQueue.client, {
+    return enqueueReservedWork(schedulerMaintenanceQueue.client, {
         queueKey: AUDIO_ANALYSIS_QUEUE,
         trackId: track.id,
         payload: JSON.stringify({
@@ -150,7 +150,9 @@ async function loadFailureCounts(
     tracks: readonly BackfillTrack[],
 ): Promise<Array<string | null>> {
     if (tracks.length === 0) return [];
-    return schedulerQueue.client.mget(...tracks.map(buildAttemptKey));
+    return schedulerMaintenanceQueue.client.mget(
+        ...tracks.map(buildAttemptKey),
+    );
 }
 
 type FailureState = number | typeof PERMANENT_FAILURE_MARKER;
@@ -169,7 +171,7 @@ function parseFailureState(value: string | null | undefined): FailureState {
 }
 
 async function claimSweep(sweepStartedAt: string): Promise<boolean> {
-    const result = await schedulerQueue.client.eval(
+    const result = await schedulerMaintenanceQueue.client.eval(
         CLAIM_SWEEP_SCRIPT,
         1,
         LOUDNESS_SWEEP_LOCK_KEY,
@@ -180,7 +182,7 @@ async function claimSweep(sweepStartedAt: string): Promise<boolean> {
 }
 
 async function releaseSweep(sweepStartedAt: string): Promise<void> {
-    await schedulerQueue.client.eval(
+    await schedulerMaintenanceQueue.client.eval(
         RELEASE_SWEEP_SCRIPT,
         1,
         LOUDNESS_SWEEP_LOCK_KEY,
@@ -193,7 +195,7 @@ async function deferPeriodicSweep(
 ): Promise<void> {
     const sweepStartedAt = new Date().toISOString();
     const delay = Math.floor(Math.random() * LOUDNESS_SWEEP_JITTER_MS);
-    await schedulerQueue.add(
+    await schedulerMaintenanceQueue.add(
         LOUDNESS_BACKFILL_JOB_NAME,
         { mode: "periodic", sweepStartedAt },
         {
@@ -222,7 +224,11 @@ async function enqueueContinuation(
                   jobId: `scheduler:loudness-backfill:${sweepStartedAt}:${startAfterId}`,
               }),
     };
-    await schedulerQueue.add(LOUDNESS_BACKFILL_JOB_NAME, data, options);
+    await schedulerMaintenanceQueue.add(
+        LOUDNESS_BACKFILL_JOB_NAME,
+        data,
+        options,
+    );
 }
 
 async function processBackfillBatch(
@@ -241,7 +247,7 @@ async function processBackfillBatch(
             result.processed += 1;
             result.skipped += 1;
             nextCursor = track.id;
-            await schedulerQueue.client.expire(
+            await schedulerMaintenanceQueue.client.expire(
                 attemptKey,
                 LOUDNESS_ATTEMPT_TTL_SECONDS,
             );

@@ -37,13 +37,14 @@ jest.mock("../../utils/redis", () => ({
     redisClient: { eval: mockRedisEval },
 }));
 
+const mockSchedulerMaintenanceQueue = {
+    add: jest.fn(),
+    getJob: jest.fn(),
+    getJobs: jest.fn(),
+    getFailed: jest.fn(),
+};
 jest.mock("../../workers/queues", () => ({
-    schedulerQueue: {
-        add: jest.fn(),
-        getJob: jest.fn(),
-        getJobs: jest.fn(),
-        getFailed: jest.fn(),
-    },
+    schedulerMaintenanceQueue: mockSchedulerMaintenanceQueue,
 }));
 
 jest.mock("../../config", () => ({
@@ -52,7 +53,7 @@ jest.mock("../../config", () => ({
 
 import router from "../admin";
 import { prisma } from "../../utils/db";
-import { schedulerQueue } from "../../workers/queues";
+import { schedulerMaintenanceQueue as schedulerQueue } from "../../workers/queues";
 
 const mockFindMany = prisma.libraryHealthRecord.findMany as jest.Mock;
 const mockCount = prisma.libraryHealthRecord.count as jest.Mock;

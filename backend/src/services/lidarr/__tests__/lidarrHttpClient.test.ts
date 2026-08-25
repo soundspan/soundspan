@@ -97,9 +97,23 @@ describe("LidarrHttpClient", () => {
             url: "/api/v1/queue",
             params: undefined,
             data: undefined,
+            signal: undefined,
         });
         expect(allLogOutput()).not.toContain(API_KEY);
         expect(allLogOutput()).not.toContain("lidarr.internal.example");
+    });
+
+    it("threads caller cancellation through Axios without retrying aborts", async () => {
+        const controller = new AbortController();
+        mockRequest.mockRejectedValueOnce({ code: "ERR_CANCELED" });
+
+        await expect(
+            createClient().get("/api/v1/album", undefined, controller.signal),
+        ).rejects.toMatchObject({ attempts: 1, isTransient: false });
+        expect(mockRequest).toHaveBeenCalledWith(
+            expect.objectContaining({ signal: controller.signal }),
+        );
+        expect(mockSleep).not.toHaveBeenCalled();
     });
 
     it("retries a transient GET failure and returns the second result", async () => {

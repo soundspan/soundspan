@@ -108,7 +108,9 @@ describe("trackRemovalPurgeProcessor", () => {
                 },
             },
         }));
-        jest.doMock("../../queues", () => ({ schedulerQueue }));
+        jest.doMock("../../queues", () => ({
+            schedulerMaintenanceQueue: schedulerQueue,
+        }));
         jest.doMock("../../../utils/redis", () => ({ redisClient }));
         jest.doMock("../../../services/libraryOrphanCleanup", () => ({
             cleanupOrphanedLibraryEntities,

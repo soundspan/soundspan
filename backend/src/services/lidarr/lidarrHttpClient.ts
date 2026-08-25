@@ -69,6 +69,7 @@ export interface LidarrRequestConfig {
     params?: Record<string, unknown>;
     data?: unknown;
     retryable?: boolean;
+    signal?: AbortSignal;
 }
 
 interface ResolvedOptions {
@@ -100,10 +101,16 @@ function getStatus(error: unknown): number | undefined {
 }
 
 function isTransient(error: unknown): boolean {
+    if (isAbortError(error)) return false;
     const response = getErrorResponse(error);
     if (!response) return true;
     const status = getStatus(error);
     return status !== undefined && TRANSIENT_STATUSES.has(status);
+}
+
+function isAbortError(error: unknown): boolean {
+    if (!isRecord(error)) return false;
+    return error.code === "ERR_CANCELED" || error.name === "CanceledError";
 }
 
 function classifyRetry(config: LidarrRequestConfig, error: unknown): boolean {
@@ -222,6 +229,7 @@ async function executeAttempt<T>(
         url: config.path,
         params: config.params,
         data: config.data,
+        signal: config.signal,
     });
 }
 
@@ -250,9 +258,11 @@ export class LidarrHttpClient {
     async request<T>(requestConfig: LidarrRequestConfig): Promise<T> {
         assertRelativePath(requestConfig.path);
         return this.limit(async () => {
+            requestConfig.signal?.throwIfAborted();
             const maxAttempts = this.options.maxRetries + 1;
             for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
                 try {
+                    requestConfig.signal?.throwIfAborted();
                     const response = await executeAttempt<T>(
                         this.instance,
                         requestConfig,
@@ -293,6 +303,7 @@ export class LidarrHttpClient {
                         delayMs: delay,
                     });
                     await this.options.sleep(delay);
+                    requestConfig.signal?.throwIfAborted();
                 }
             }
             throw new Error("Lidarr request attempt bound was violated");
@@ -300,23 +311,31 @@ export class LidarrHttpClient {
     }
 
     /** Sends a typed GET request. */
-    get<T>(path: string, params?: Record<string, unknown>): Promise<T> {
-        return this.request<T>({ method: "GET", path, params });
+    get<T>(
+        path: string,
+        params?: Record<string, unknown>,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        return this.request<T>({ method: "GET", path, params, signal });
     }
 
     /** Sends a typed POST request. */
-    post<T>(path: string, data?: unknown): Promise<T> {
-        return this.request<T>({ method: "POST", path, data });
+    post<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T> {
+        return this.request<T>({ method: "POST", path, data, signal });
     }
 
     /** Sends a typed PUT request. */
-    put<T>(path: string, data?: unknown): Promise<T> {
-        return this.request<T>({ method: "PUT", path, data });
+    put<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T> {
+        return this.request<T>({ method: "PUT", path, data, signal });
     }
 
     /** Sends a typed DELETE request. */
-    delete<T>(path: string, params?: Record<string, unknown>): Promise<T> {
-        return this.request<T>({ method: "DELETE", path, params });
+    delete<T>(
+        path: string,
+        params?: Record<string, unknown>,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        return this.request<T>({ method: "DELETE", path, params, signal });
     }
 }
 

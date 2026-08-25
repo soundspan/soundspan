@@ -641,8 +641,7 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
         const { createBullBoard } = await import("@bull-board/api");
         const { BullAdapter } = await import("@bull-board/api/bullAdapter");
         const { ExpressAdapter } = await import("@bull-board/express");
-        const { scanQueue, discoverQueue, imageQueue, queues } =
-            await import("./workers/queues");
+        const { queues } = await import("./workers/queues");
 
         registerQueueMetrics(metricsRegistry, queues);
 
@@ -650,11 +649,7 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
         serverAdapter.setBasePath("/api/admin/queues");
 
         createBullBoard({
-            queues: [
-                new BullAdapter(scanQueue),
-                new BullAdapter(discoverQueue),
-                new BullAdapter(imageQueue),
-            ],
+            queues: queues.map((queue) => new BullAdapter(queue)),
             serverAdapter,
         });
 

@@ -13,18 +13,30 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { Prisma } from "@prisma/client";
-import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
 import { config } from "../config";
 import { cleanupOrphanedLibraryEntities } from "../services/libraryOrphanCleanup";
 import { DISCOVERY_LIKED_OWNERSHIP_SOURCE } from "../services/albumOwnershipPromotion";
 import {
     albumOrphanRetentionGuardWhere,
     artistOrphanRetentionGuardWhere,
-    discoveryAlbumTracksOrphanRetentionGuardWhere,
+    discoveryAlbumOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "../services/providerTrackRetention";
+import {
+    addDiscoveryAlbumMarkers,
+    addDownloadJobMarkers,
+    createDiscoveryMarkers,
+    findMislocatedAlbums,
+    findUnprotectedDiscoverAlbumIds,
+    type AlbumCandidate,
+    type DiscoveryMarkers,
+} from "./dataIntegrityBatches";
 
 const DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS = 3;
+const DATA_INTEGRITY_BATCH_SIZE = 250;
+const DATA_INTEGRITY_MAX_PAGES = 1_000;
+const DATA_INTEGRITY_MAX_MARKERS = 250_000;
+const log = logger.child("DataIntegrity");
 
 function isRetryableDataIntegrityPrismaError(error: unknown): boolean {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -77,8 +89,8 @@ export async function withDataIntegrityPrismaRetry<T>(
                 throw error;
             }
 
-            logger.warn(
-                `[DataIntegrity/Prisma] ${operationName} failed (attempt ${attempt}/${DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS}), retrying`,
+            log.warn(
+                `${operationName} failed (attempt ${attempt}/${DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS}), retrying`,
                 error,
             );
             await prisma.$connect().catch(() => {});
@@ -98,11 +110,372 @@ interface IntegrityReport {
     oldDownloadJobs: number;
 }
 
-/**
- * Executes runDataIntegrityCheck.
- */
+type CursorRow = { id: string };
+type BatchLoader<T extends CursorRow> = (cursor?: string) => Promise<T[]>;
+
+async function scanBatches<T extends CursorRow>(
+    operationName: string,
+    load: BatchLoader<T>,
+    consume: (rows: T[]) => Promise<void> | void,
+): Promise<void> {
+    let cursor: string | undefined;
+    for (let page = 0; page < DATA_INTEGRITY_MAX_PAGES; page += 1) {
+        const rows = await withDataIntegrityPrismaRetry(operationName, () =>
+            load(cursor),
+        );
+        if (rows.length === 0) return;
+        await consume(rows);
+        if (rows.length < DATA_INTEGRITY_BATCH_SIZE) return;
+        cursor = rows[rows.length - 1].id;
+    }
+    const overflow = await withDataIntegrityPrismaRetry(operationName, () =>
+        load(cursor),
+    );
+    if (overflow.length > 0) {
+        log.warn(
+            `${operationName} truncated at ${DATA_INTEGRITY_MAX_PAGES * DATA_INTEGRITY_BATCH_SIZE} rows`,
+        );
+    }
+}
+
+async function removeExpiredRows(
+    report: IntegrityReport,
+    now: Date,
+): Promise<void> {
+    const exclusions = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.discoverExclusion.deleteMany",
+        () =>
+            prisma.discoverExclusion.deleteMany({
+                where: { expiresAt: { lt: now } },
+            }),
+    );
+    report.expiredExclusions = exclusions.count;
+    const tracks = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.discoveryTrack.deleteMany",
+        () => prisma.discoveryTrack.deleteMany({ where: { trackId: null } }),
+    );
+    report.orphanedDiscoveryTracks = tracks.count;
+}
+
+async function findDiscoveryReferences(albums: AlbumCandidate[]) {
+    return withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.discoveryAlbum.findMany.activeBatch",
+        () =>
+            prisma.discoveryAlbum.findMany({
+                where: {
+                    status: { in: ["ACTIVE", "LIKED", "MOVED"] },
+                    OR: [
+                        { rgMbid: { in: albums.map((album) => album.rgMbid) } },
+                        ...albums.map((album) => ({
+                            albumTitle: {
+                                equals: album.title,
+                                mode: "insensitive" as const,
+                            },
+                            artistName: {
+                                equals: album.artist.name,
+                                mode: "insensitive" as const,
+                            },
+                        })),
+                    ],
+                },
+                select: { rgMbid: true, albumTitle: true, artistName: true },
+            }),
+    );
+}
+
+async function findOwnedReferences(albums: AlbumCandidate[]) {
+    return withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.ownedAlbum.findMany.batch",
+        () =>
+            prisma.ownedAlbum.findMany({
+                where: {
+                    OR: albums.map((album) => ({
+                        artistId: album.artistId,
+                        rgMbid: album.rgMbid,
+                    })),
+                },
+                select: { artistId: true, rgMbid: true },
+            }),
+    );
+}
+
+async function removeOrphanedDiscoverTracks(
+    albumRetentionWhere: Prisma.AlbumWhereInput,
+    cutoff: Date,
+): Promise<void> {
+    await scanBatches(
+        "runDataIntegrityCheck.album.findMany.discoverBatch",
+        (cursor) =>
+            prisma.album.findMany({
+                where: {
+                    location: "DISCOVER",
+                    ...albumRetentionWhere,
+                    ...(cursor ? { id: { gt: cursor } } : {}),
+                },
+                orderBy: { id: "asc" },
+                take: DATA_INTEGRITY_BATCH_SIZE,
+                select: {
+                    id: true,
+                    rgMbid: true,
+                    title: true,
+                    artistId: true,
+                    artist: { select: { name: true, mbid: true } },
+                },
+            }),
+        async (albums) => {
+            const [discovery, owned] = await Promise.all([
+                findDiscoveryReferences(albums),
+                findOwnedReferences(albums),
+            ]);
+            const orphanIds = findUnprotectedDiscoverAlbumIds(
+                albums,
+                discovery,
+                owned,
+            );
+            if (orphanIds.length === 0) return;
+            await withDataIntegrityPrismaRetry(
+                "runDataIntegrityCheck.track.deleteMany.orphanedAlbumBatch",
+                () =>
+                    prisma.track.deleteMany({
+                        where: {
+                            albumId: { in: orphanIds },
+                            album: discoveryAlbumOrphanRetentionGuardWhere(
+                                cutoff,
+                            ),
+                        },
+                    }),
+            );
+        },
+    );
+}
+
+async function collectDiscoveryMarkers(): Promise<DiscoveryMarkers> {
+    const markers = createDiscoveryMarkers(DATA_INTEGRITY_MAX_MARKERS);
+    await scanBatches(
+        "runDataIntegrityCheck.downloadJob.findMany.discoveryBatch",
+        (cursor) =>
+            prisma.downloadJob.findMany({
+                where: {
+                    discoveryBatchId: { not: null },
+                    status: { in: ["pending", "processing", "completed"] },
+                    ...(cursor ? { id: { gt: cursor } } : {}),
+                },
+                orderBy: { id: "asc" },
+                take: DATA_INTEGRITY_BATCH_SIZE,
+                select: { id: true, metadata: true },
+            }),
+        (jobs) => addDownloadJobMarkers(markers, jobs),
+    );
+    await scanBatches(
+        "runDataIntegrityCheck.discoveryAlbum.findMany.markerBatch",
+        (cursor) =>
+            prisma.discoveryAlbum.findMany({
+                where: cursor ? { id: { gt: cursor } } : undefined,
+                orderBy: { id: "asc" },
+                take: DATA_INTEGRITY_BATCH_SIZE,
+                select: {
+                    id: true,
+                    albumTitle: true,
+                    artistName: true,
+                    artistMbid: true,
+                },
+            }),
+        (albums) => addDiscoveryAlbumMarkers(markers, albums),
+    );
+    return markers;
+}
+
+async function findProtectedArtistIds(albums: AlbumCandidate[]) {
+    const rows = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.ownedAlbum.findMany.protectedBatch",
+        () =>
+            prisma.ownedAlbum.findMany({
+                where: {
+                    artistId: { in: albums.map((album) => album.artistId) },
+                    source: {
+                        in: ["native_scan", DISCOVERY_LIKED_OWNERSHIP_SOURCE],
+                    },
+                },
+                select: { artistId: true },
+                distinct: ["artistId"],
+            }),
+    );
+    return new Set(rows.map((row) => row.artistId));
+}
+
+async function findLikedArtistMbids(albums: AlbumCandidate[]) {
+    const mbids = albums.flatMap((album) =>
+        album.artist.mbid ? [album.artist.mbid] : [],
+    );
+    if (mbids.length === 0) return new Set<string>();
+    const rows = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.discoveryAlbum.findMany.likedBatch",
+        () =>
+            prisma.discoveryAlbum.findMany({
+                where: {
+                    artistMbid: { in: mbids },
+                    status: { in: ["LIKED", "MOVED"] },
+                },
+                select: { artistMbid: true },
+                distinct: ["artistMbid"],
+            }),
+    );
+    return new Set(
+        rows.flatMap((row) => (row.artistMbid ? [row.artistMbid] : [])),
+    );
+}
+
+async function relocateLibraryBatch(
+    albums: AlbumCandidate[],
+    markers: DiscoveryMarkers,
+): Promise<number> {
+    const [protectedArtists, likedMbids] = await Promise.all([
+        findProtectedArtistIds(albums),
+        findLikedArtistMbids(albums),
+    ]);
+    const mislocated = findMislocatedAlbums(
+        albums,
+        markers,
+        protectedArtists,
+        likedMbids,
+    );
+    if (mislocated.length === 0) return 0;
+    const ids = mislocated.map((album) => album.id);
+    const rgMbids = mislocated.map((album) => album.rgMbid);
+    const updated = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.album.updateMany.mislocatedBatch",
+        () =>
+            prisma.album.updateMany({
+                where: { id: { in: ids }, location: "LIBRARY" },
+                data: { location: "DISCOVER" },
+            }),
+    );
+    await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.ownedAlbum.deleteMany.mislocatedBatch",
+        () =>
+            prisma.ownedAlbum.deleteMany({
+                where: {
+                    rgMbid: { in: rgMbids },
+                    source: { not: "native_scan" },
+                },
+            }),
+    );
+    return updated.count;
+}
+
+async function fixMislocatedAlbums(markers: DiscoveryMarkers): Promise<number> {
+    let fixed = 0;
+    await scanBatches(
+        "runDataIntegrityCheck.album.findMany.libraryBatch",
+        (cursor) =>
+            prisma.album.findMany({
+                where: {
+                    location: "LIBRARY",
+                    ...(cursor ? { id: { gt: cursor } } : {}),
+                },
+                orderBy: { id: "asc" },
+                take: DATA_INTEGRITY_BATCH_SIZE,
+                select: {
+                    id: true,
+                    rgMbid: true,
+                    title: true,
+                    artistId: true,
+                    artist: { select: { name: true, mbid: true } },
+                },
+            }),
+        async (albums) => {
+            fixed += await relocateLibraryBatch(albums, markers);
+        },
+    );
+    return fixed;
+}
+
+async function consolidateArtistBatch(
+    artists: Array<{ id: string; normalizedName: string }>,
+): Promise<number> {
+    const realArtists = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.artist.findMany.realBatch",
+        () =>
+            prisma.artist.findMany({
+                where: {
+                    normalizedName: {
+                        in: artists.map((row) => row.normalizedName),
+                    },
+                    mbid: { not: { startsWith: "temp-" } },
+                },
+                orderBy: { id: "asc" },
+                select: { id: true, normalizedName: true },
+            }),
+    );
+    const realByName = new Map<string, string>();
+    for (const artist of realArtists) {
+        if (!realByName.has(artist.normalizedName)) {
+            realByName.set(artist.normalizedName, artist.id);
+        }
+    }
+    let consolidated = 0;
+    for (const artist of artists) {
+        const realId = realByName.get(artist.normalizedName);
+        if (!realId) continue;
+        await withDataIntegrityPrismaRetry(
+            "runDataIntegrityCheck.album.updateMany.consolidateArtist",
+            () =>
+                prisma.album.updateMany({
+                    where: { artistId: artist.id },
+                    data: { artistId: realId },
+                }),
+        );
+        consolidated += 1;
+    }
+    return consolidated;
+}
+
+async function consolidateTempArtists(
+    artistRetentionWhere: Prisma.ArtistWhereInput,
+): Promise<number> {
+    let consolidated = 0;
+    await scanBatches(
+        "runDataIntegrityCheck.artist.findMany.tempBatch",
+        (cursor) =>
+            prisma.artist.findMany({
+                where: {
+                    mbid: { startsWith: "temp-" },
+                    ...artistRetentionWhere,
+                    ...(cursor ? { id: { gt: cursor } } : {}),
+                },
+                orderBy: { id: "asc" },
+                take: DATA_INTEGRITY_BATCH_SIZE,
+                select: { id: true, normalizedName: true },
+            }),
+        async (artists) => {
+            consolidated += await consolidateArtistBatch(artists);
+        },
+    );
+    return consolidated;
+}
+
+async function removeOldDownloadJobs(now: Date): Promise<number> {
+    const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000);
+    const result = await withDataIntegrityPrismaRetry(
+        "runDataIntegrityCheck.downloadJob.deleteMany.oldJobs",
+        () =>
+            prisma.downloadJob.deleteMany({
+                where: {
+                    status: { in: ["completed", "failed"] },
+                    completedAt: { lt: cutoff },
+                },
+            }),
+    );
+    return result.count;
+}
+
+function logReport(report: IntegrityReport): void {
+    log.debug("Data integrity check complete", report);
+}
+
+/** Runs bounded, cursor-paginated database integrity maintenance. */
 export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
-    logger.debug("\nRunning data integrity check...");
+    log.debug("Running data integrity check");
     const now = new Date();
     const cutoff = providerTrackRetentionCutoff(
         now,
@@ -121,343 +494,16 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         oldDownloadJobs: 0,
     };
 
-    // 1. Remove expired DiscoverExclusion records
-    const expiredExclusions = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.discoverExclusion.deleteMany",
-        () =>
-            prisma.discoverExclusion.deleteMany({
-                where: {
-                    expiresAt: { lt: new Date() },
-                },
-            }),
-    );
-    report.expiredExclusions = expiredExclusions.count;
-    if (expiredExclusions.count > 0) {
-        logger.debug(
-            `     Removed ${expiredExclusions.count} expired exclusions`,
-        );
-    }
-
-    // 2. Clean up orphaned DiscoveryTrack records (tracks whose Track record was deleted)
-    const orphanedDiscoveryTracks = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.discoveryTrack.deleteMany",
-        () =>
-            prisma.discoveryTrack.deleteMany({
-                where: {
-                    trackId: null,
-                },
-            }),
-    );
-    report.orphanedDiscoveryTracks = orphanedDiscoveryTracks.count;
-    if (orphanedDiscoveryTracks.count > 0) {
-        logger.debug(
-            `     Removed ${orphanedDiscoveryTracks.count} orphaned discovery track records`,
-        );
-    }
-
-    // 3. Clean up orphaned DISCOVER albums (no active DiscoveryAlbum record AND no OwnedAlbum)
-    const discoverAlbums = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.album.findMany.discover",
-        () =>
-            prisma.album.findMany({
-                where: {
-                    location: "DISCOVER",
-                    ...albumRetentionWhere,
-                },
-                include: { artist: true },
-            }),
-    );
-
-    for (const album of discoverAlbums) {
-        // Check if there's an ACTIVE, LIKED, or MOVED DiscoveryAlbum record
-        const hasActiveRecord = await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.discoveryAlbum.findFirst.activeRecord",
-            () =>
-                prisma.discoveryAlbum.findFirst({
-                    where: {
-                        OR: [
-                            { rgMbid: album.rgMbid },
-                            {
-                                albumTitle: {
-                                    equals: album.title,
-                                    mode: "insensitive",
-                                },
-                                artistName: {
-                                    equals: album.artist.name,
-                                    mode: "insensitive",
-                                },
-                            },
-                        ],
-                        status: { in: ["ACTIVE", "LIKED", "MOVED"] },
-                    },
-                }),
-        );
-
-        // Also check if there's an OwnedAlbum record (user liked it)
-        const hasOwnedRecord = await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.ownedAlbum.findFirst.ownedRecord",
-            () =>
-                prisma.ownedAlbum.findFirst({
-                    where: {
-                        artistId: album.artistId,
-                        rgMbid: album.rgMbid,
-                    },
-                }),
-        );
-
-        if (!hasActiveRecord && !hasOwnedRecord) {
-            // Delete tracks first
-            await withDataIntegrityPrismaRetry(
-                "runDataIntegrityCheck.track.deleteMany.orphanedAlbumTracks",
-                () =>
-                    prisma.track.deleteMany({
-                        where: discoveryAlbumTracksOrphanRetentionGuardWhere(
-                            album.id,
-                            cutoff,
-                        ),
-                    }),
-            );
-            logger.debug(
-                `     Removed tracks from orphaned album: ${album.artist.name} - ${album.title}`,
-            );
-        }
-    }
-
-    // 4. Fix mislocated LIBRARY albums that should be DISCOVER
-    // This happens when:
-    // - Discovery tracks have featured artists that don't match the download job
-    // - Lidarr downloads a different album than requested (e.g., "Broods" album vs "Evergreen" album)
-    // - Album title metadata differs from the requested album
-    // - Scanner ran before DiscoveryAlbum records were created
-
-    const discoveryJobs = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.downloadJob.findMany.discoveryJobs",
-        () =>
-            prisma.downloadJob.findMany({
-                where: {
-                    discoveryBatchId: { not: null },
-                    status: { in: ["pending", "processing", "completed"] },
-                },
-            }),
-    );
-
-    // Build sets of discovery album titles AND artist names (normalized)
-    const discoveryAlbumTitles = new Set<string>();
-    const discoveryArtistNames = new Set<string>();
-    const discoveryArtistMbids = new Set<string>();
-
-    for (const job of discoveryJobs) {
-        const {
-            normalizedAlbumTitle: albumTitle,
-            normalizedArtistName: artistName,
-            artistMbid,
-        } = resolveDownloadJobMetadata(job.metadata);
-        if (albumTitle) discoveryAlbumTitles.add(albumTitle);
-        if (artistName) discoveryArtistNames.add(artistName);
-        if (artistMbid) discoveryArtistMbids.add(artistMbid);
-    }
-
-    // Also check DiscoveryAlbum table for ALL discoveries (not just active)
-    // This catches albums where Lidarr downloaded a different album than requested
-    const allDiscoveryAlbums = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.discoveryAlbum.findMany.all",
-        () => prisma.discoveryAlbum.findMany(),
-    );
-    for (const da of allDiscoveryAlbums) {
-        discoveryAlbumTitles.add(da.albumTitle.toLowerCase().trim());
-        discoveryArtistNames.add(da.artistName.toLowerCase().trim());
-        if (da.artistMbid) discoveryArtistMbids.add(da.artistMbid);
-    }
-
-    // Find LIBRARY albums that might be discovery
-    const libraryAlbums = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.album.findMany.library",
-        () =>
-            prisma.album.findMany({
-                where: { location: "LIBRARY" },
-                include: { artist: true },
-            }),
-    );
-
-    let mislocatedAlbumsFixed = 0;
-    for (const album of libraryAlbums) {
-        const normalizedTitle = album.title.toLowerCase().trim();
-        const normalizedArtist = album.artist.name.toLowerCase().trim();
-
-        // Match criteria:
-        // 1. Album title matches a discovery download, OR
-        // 2. Artist name matches a discovery download (catches Lidarr downloading wrong album), OR
-        // 3. Artist MBID matches a discovery download
-        const albumMatches = discoveryAlbumTitles.has(normalizedTitle);
-        const artistNameMatches = discoveryArtistNames.has(normalizedArtist);
-        const artistMbidMatches = album.artist.mbid
-            ? discoveryArtistMbids.has(album.artist.mbid)
-            : false;
-
-        if (!albumMatches && !artistNameMatches && !artistMbidMatches) continue;
-
-        // KEY FIX: Check if artist has ANY protected OwnedAlbum records:
-        // - native_scan = real user library from before discovery
-        // - discovery_liked = user liked a discovery album (should be kept!)
-        const hasProtectedOwnedAlbum = await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.ownedAlbum.findFirst.protected",
-            () =>
-                prisma.ownedAlbum.findFirst({
-                    where: {
-                        artistId: album.artistId,
-                        source: {
-                            in: [
-                                "native_scan",
-                                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
-                            ],
-                        },
-                    },
-                }),
-        );
-
-        if (hasProtectedOwnedAlbum) {
-            // Artist has protected content - this album should stay as LIBRARY
-            continue;
-        }
-
-        // Also check if artist has any LIKED discovery albums (double-check)
-        const hasLikedDiscovery = await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.discoveryAlbum.findFirst.liked",
-            () =>
-                prisma.discoveryAlbum.findFirst({
-                    where: {
-                        artistMbid: album.artist.mbid || undefined,
-                        status: { in: ["LIKED", "MOVED"] },
-                    },
-                }),
-        );
-
-        if (hasLikedDiscovery) {
-            // User liked albums from this artist - don't touch
-            continue;
-        }
-
-        const reason = albumMatches
-            ? `album title "${album.title}" matches discovery`
-            : artistNameMatches
-              ? `artist "${album.artist.name}" matches discovery`
-              : `artist MBID matches discovery`;
-        logger.debug(
-            `     Fixing mislocated album: ${album.artist.name} - ${album.title} (LIBRARY -> DISCOVER, ${reason})`,
-        );
-
-        // Update album location
-        await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.album.update.mislocated",
-            () =>
-                prisma.album.update({
-                    where: { id: album.id },
-                    data: { location: "DISCOVER" },
-                }),
-        );
-
-        // Remove OwnedAlbum record (but only non-native ones)
-        await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.ownedAlbum.deleteMany.mislocated",
-            () =>
-                prisma.ownedAlbum.deleteMany({
-                    where: {
-                        rgMbid: album.rgMbid,
-                        source: { not: "native_scan" },
-                    },
-                }),
-        );
-
-        mislocatedAlbumsFixed++;
-    }
-
-    report.mislocatedAlbums = mislocatedAlbumsFixed;
-    if (mislocatedAlbumsFixed > 0) {
-        logger.debug(`     Fixed ${mislocatedAlbumsFixed} mislocated albums`);
-    }
-
-    // 5. Consolidate duplicate artists (same name, one with temp MBID, one with real)
-    const tempArtists = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.artist.findMany.temp",
-        () =>
-            prisma.artist.findMany({
-                where: {
-                    mbid: { startsWith: "temp-" },
-                    ...artistRetentionWhere,
-                },
-                include: { albums: true },
-            }),
-    );
-
-    for (const tempArtist of tempArtists) {
-        // Find a real artist with the same normalized name
-        const realArtist = await withDataIntegrityPrismaRetry(
-            "runDataIntegrityCheck.artist.findFirst.realMatch",
-            () =>
-                prisma.artist.findFirst({
-                    where: {
-                        normalizedName: tempArtist.normalizedName,
-                        mbid: { not: { startsWith: "temp-" } },
-                    },
-                }),
-        );
-
-        if (realArtist) {
-            // Move all albums from temp artist to real artist
-            await withDataIntegrityPrismaRetry(
-                "runDataIntegrityCheck.album.updateMany.consolidateArtist",
-                () =>
-                    prisma.album.updateMany({
-                        where: { artistId: tempArtist.id },
-                        data: { artistId: realArtist.id },
-                    }),
-            );
-
-            report.consolidatedArtists++;
-            logger.debug(
-                `     Consolidated "${tempArtist.name}" (temp) into real artist`,
-            );
-        }
-    }
-
-    // 6. Delete catalog parents through the tombstone-aware shared transaction.
+    await removeExpiredRows(report, now);
+    await removeOrphanedDiscoverTracks(albumRetentionWhere, cutoff);
+    const markers = await collectDiscoveryMarkers();
+    report.mislocatedAlbums = await fixMislocatedAlbums(markers);
+    report.consolidatedArtists =
+        await consolidateTempArtists(artistRetentionWhere);
     const orphanedParents = await cleanupOrphanedLibraryEntities(now);
     report.orphanedAlbums = orphanedParents.albumsDeleted;
     report.orphanedArtists = orphanedParents.artistsDeleted;
-
-    // 7. Clean up old DownloadJob records (older than 30 days, completed/failed)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const oldJobs = await withDataIntegrityPrismaRetry(
-        "runDataIntegrityCheck.downloadJob.deleteMany.oldJobs",
-        () =>
-            prisma.downloadJob.deleteMany({
-                where: {
-                    // Exhausted jobs are deliberately retained by this cleanup.
-                    status: { in: ["completed", "failed"] },
-                    completedAt: { lt: thirtyDaysAgo },
-                },
-            }),
-    );
-    report.oldDownloadJobs = oldJobs.count;
-    if (oldJobs.count > 0) {
-        logger.debug(`     Removed ${oldJobs.count} old download jobs`);
-    }
-
-    // Summary
-    logger.debug("\nData integrity check complete:");
-    logger.debug(`   - Expired exclusions: ${report.expiredExclusions}`);
-    logger.debug(
-        `   - Orphaned discovery tracks: ${report.orphanedDiscoveryTracks}`,
-    );
-    logger.debug(
-        `   - Mislocated albums (LIBRARY->DISCOVER): ${report.mislocatedAlbums}`,
-    );
-    logger.debug(`   - Orphaned albums: ${report.orphanedAlbums}`);
-    logger.debug(`   - Consolidated artists: ${report.consolidatedArtists}`);
-    logger.debug(`   - Orphaned artists: ${report.orphanedArtists}`);
-    logger.debug(`   - Old download jobs: ${report.oldDownloadJobs}`);
-
+    report.oldDownloadJobs = await removeOldDownloadJobs(now);
+    logReport(report);
     return report;
 }
