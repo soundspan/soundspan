@@ -204,6 +204,7 @@ describe("search route runtime behavior", () => {
                 q: "  radiohead ",
                 type: "all",
                 limit: "999",
+                offset: "50",
                 genre: "alt",
             },
         } as any;
@@ -272,10 +273,45 @@ describe("search route runtime behavior", () => {
             query: "dj",
             type: "artists",
             limit: 1,
+            offset: 0,
             genre: undefined,
         });
         expect(res.statusCode).toBe(200);
     });
+
+    it("passes a validated offset to type-scoped search", async () => {
+        const req = {
+            query: { q: "creep", type: "tracks", offset: "25" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchByType).toHaveBeenCalledWith({
+            query: "creep",
+            type: "tracks",
+            limit: 20,
+            offset: 25,
+            genre: undefined,
+        });
+        expect(res.statusCode).toBe(200);
+    });
+
+    it.each(["-1", "10001", "1.5", "not-a-number"])(
+        "rejects invalid offset %s",
+        async (offset) => {
+            const req = {
+                query: { q: "creep", type: "tracks", offset },
+            } as any;
+            const res = createRes();
+
+            await rootHandler(req, res);
+
+            expect(mockSearchByType).not.toHaveBeenCalled();
+            expect(res.statusCode).toBe(400);
+            expect(res.body).toEqual({ error: "Invalid search query" });
+        },
+    );
 
     it("passes a validated peers source filter to the search service", async () => {
         const req = {
@@ -289,6 +325,7 @@ describe("search route runtime behavior", () => {
             query: "shared",
             type: "tracks",
             limit: 20,
+            offset: 0,
             genre: undefined,
             source: "peers",
         });
@@ -325,6 +362,7 @@ describe("search route runtime behavior", () => {
             query: "shared",
             type: "tracks",
             limit: 20,
+            offset: 0,
             genre: undefined,
         });
     });
@@ -354,6 +392,7 @@ describe("search route runtime behavior", () => {
             query: "jazz",
             type: "albums",
             limit: 20,
+            offset: 0,
             genre: undefined,
         });
         expect(res.statusCode).toBe(500);

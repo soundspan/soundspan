@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Popular tracks on the artist page now show the album name as a clickable link, including for tracks that are not in your library (#757).
+- Search API supports offset pagination for type-scoped searches.
 
 ### Changed
 
+- Search now matches songs by artist and album name, tolerates typos, and ranks fallback results by similarity instead of alphabetically.
 - Download job metadata updates now flow through guarded helpers instead of ad-hoc merges scattered across the backend.
 - TIDAL and YouTube Music library downloads now run through one shared processor with per-source steps, so fixes apply to both sources at once.
 - Consolidated repeated backend error handling, download-job state transitions, availability probes, queue event wiring, and value parsing behind shared internal helpers.

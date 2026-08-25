@@ -30,6 +30,49 @@ const logger = {
     warn: jest.fn(),
     error: jest.fn(),
 };
+const MAX_SQL_FRAGMENT_VALUES = 128;
+
+interface SqlFragment {
+    strings: readonly string[];
+    values: readonly unknown[];
+}
+
+function isSqlFragment(value: unknown): value is SqlFragment {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        Array.isArray((value as Partial<SqlFragment>).strings) &&
+        Array.isArray((value as Partial<SqlFragment>).values)
+    );
+}
+
+function collectSql(fragment: SqlFragment): {
+    text: string;
+    values: unknown[];
+} {
+    const pending: unknown[] = [fragment];
+    const values: unknown[] = [];
+    let text = "";
+    for (
+        let index = 0;
+        index < pending.length && index < MAX_SQL_FRAGMENT_VALUES;
+        index += 1
+    ) {
+        const value = pending[index];
+        if (isSqlFragment(value)) {
+            text += value.strings.join("");
+            pending.push(...value.values);
+        } else if (Array.isArray(value)) {
+            pending.push(...value);
+        } else {
+            values.push(value);
+        }
+    }
+    if (pending.length > MAX_SQL_FRAGMENT_VALUES) {
+        throw new Error("SQL fragment exceeded the test inspection bound");
+    }
+    return { text, values };
+}
 
 jest.mock("../../utils/db", () => ({
     prisma,
@@ -126,12 +169,13 @@ describe("search service", () => {
             expect.objectContaining({ id: "artist-1", rank: 0.91 }),
         ]);
 
-        prisma.artist.findMany.mockResolvedValueOnce([
+        prisma.$queryRaw.mockResolvedValueOnce([
             {
                 id: "artist-2",
                 name: "Fallback Artist",
                 mbid: "mbid-2",
                 heroUrl: "https://hero",
+                rank: 0.72,
             },
         ]);
         await expect(
@@ -142,19 +186,21 @@ describe("search service", () => {
                 name: "Fallback Artist",
                 mbid: "mbid-2",
                 heroUrl: "https://hero",
-                rank: 0,
+                rank: 0.72,
             },
         ]);
 
-        prisma.$queryRaw.mockRejectedValueOnce(new Error("artist fts failed"));
-        prisma.artist.findMany.mockResolvedValueOnce([
-            {
-                id: "artist-3",
-                name: "Recovered Artist",
-                mbid: "mbid-3",
-                heroUrl: null,
-            },
-        ]);
+        prisma.$queryRaw
+            .mockRejectedValueOnce(new Error("artist fts failed"))
+            .mockResolvedValueOnce([
+                {
+                    id: "artist-3",
+                    name: "Recovered Artist",
+                    mbid: "mbid-3",
+                    heroUrl: null,
+                    rank: 0.64,
+                },
+            ]);
         await expect(
             searchService.searchArtists({
                 query: "recovered",
@@ -167,7 +213,7 @@ describe("search service", () => {
                 name: "Recovered Artist",
                 mbid: "mbid-3",
                 heroUrl: null,
-                rank: 0,
+                rank: 0.64,
             },
         ]);
         expect(logger.error).toHaveBeenCalled();
@@ -219,17 +265,19 @@ describe("search service", () => {
             }),
         ]);
 
-        prisma.$queryRaw.mockRejectedValueOnce(new Error("album fts failed"));
-        prisma.album.findMany.mockResolvedValueOnce([
-            {
-                id: "album-2",
-                title: "Album Fallback",
-                artistId: "artist-2",
-                year: null,
-                coverUrl: null,
-                artist: { name: "Artist 2" },
-            },
-        ]);
+        prisma.$queryRaw
+            .mockRejectedValueOnce(new Error("album fts failed"))
+            .mockResolvedValueOnce([
+                {
+                    id: "album-2",
+                    title: "Album Fallback",
+                    artistId: "artist-2",
+                    artistName: "Artist 2",
+                    year: null,
+                    coverUrl: null,
+                    rank: 0.58,
+                },
+            ]);
         await expect(
             searchService.searchAlbums({
                 query: "fallback",
@@ -244,25 +292,24 @@ describe("search service", () => {
                 artistName: "Artist 2",
                 year: null,
                 coverUrl: null,
-                rank: 0,
+                rank: 0.58,
             },
         ]);
 
-        prisma.track.findMany.mockResolvedValueOnce([
+        prisma.$queryRaw.mockResolvedValueOnce([
             {
                 id: "track-2",
                 title: "Track Fallback",
                 albumId: "album-2",
+                albumTitle: "Album Fallback",
+                artistId: "artist-2",
+                artistName: "Artist 2",
                 duration: 180,
                 loudnessLufs: null,
                 truePeakDb: null,
-                album: {
-                    title: "Album Fallback",
-                    artistId: "artist-2",
-                    albumLoudnessLufs: null,
-                    albumTruePeakDb: null,
-                    artist: { name: "Artist 2" },
-                },
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+                rank: 0.81,
             },
         ]);
         await expect(
@@ -280,60 +327,141 @@ describe("search service", () => {
                 truePeakDb: null,
                 albumLoudnessLufs: null,
                 albumTruePeakDb: null,
-                rank: 0,
+                rank: 0.81,
             },
         ]);
     });
 
+    it.each([
+        [
+            "artists",
+            () => searchService.searchArtists({ query: "radiahead" }),
+            {
+                id: "artist-fuzzy",
+                name: "Radiohead",
+                mbid: "mbid-fuzzy",
+                heroUrl: null,
+                rank: 0.73,
+            },
+        ],
+        [
+            "albums",
+            () => searchService.searchAlbums({ query: "pablo hony" }),
+            {
+                id: "album-fuzzy",
+                title: "Pablo Honey",
+                artistId: "artist-fuzzy",
+                artistName: "Radiohead",
+                year: 1993,
+                coverUrl: null,
+                rank: 0.68,
+            },
+        ],
+        [
+            "tracks",
+            () => searchService.searchTracks({ query: "crepe" }),
+            {
+                id: "track-fuzzy",
+                title: "Creep",
+                albumId: "album-fuzzy",
+                albumTitle: "Pablo Honey",
+                artistId: "artist-fuzzy",
+                artistName: "Radiohead",
+                duration: 238,
+                loudnessLufs: null,
+                truePeakDb: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+                rank: 0.61,
+            },
+        ],
+    ])(
+        "uses ranked raw SQL for %s fallback results",
+        async (_type, run, row) => {
+            prisma.$queryRaw
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([row]);
+
+            await expect(run()).resolves.toEqual([row]);
+
+            expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+            expect(prisma.artist.findMany).not.toHaveBeenCalled();
+            expect(prisma.album.findMany).not.toHaveBeenCalled();
+            expect(prisma.track.findMany).not.toHaveBeenCalled();
+        },
+    );
+
+    it("caps cross-column track FTS at six terms", async () => {
+        prisma.$queryRaw.mockResolvedValueOnce([
+            {
+                id: "track-six-terms",
+                title: "Six Terms",
+                albumId: "album-six-terms",
+                albumTitle: "Six Terms Album",
+                artistId: "artist-six-terms",
+                artistName: "Six Terms Artist",
+                duration: 180,
+                rank: 1,
+            },
+        ]);
+
+        await searchService.searchTracks({
+            query: "one two three four five six seven eight",
+        });
+
+        expect(logger.debug).toHaveBeenCalledWith(
+            "[SEARCH] Dropped 2 track search terms after the 6-term limit",
+        );
+    });
+
+    it.each([
+        [
+            "artists",
+            () =>
+                searchService.searchArtists({ query: "***", source: "peers" }),
+        ],
+        [
+            "albums",
+            () => searchService.searchAlbums({ query: "***", source: "peers" }),
+        ],
+        [
+            "tracks",
+            () => searchService.searchTracks({ query: "***", source: "peers" }),
+        ],
+    ])(
+        "preserves peers-only visibility in %s fallback SQL",
+        async (_type, run) => {
+            await run();
+
+            const [strings, ...values] = prisma.$queryRaw.mock.calls[0];
+            const query = collectSql({ strings: [...strings], values });
+            expect(query.values).toContain("FEDERATED");
+            expect(query.values).not.toContain("LOCAL");
+            expect(query.text).toContain('"dedupOfTrackId" IS NULL');
+        },
+    );
+
     it("keeps remote-only albums, hides removed-only albums, and keeps mixed albums", async () => {
-        prisma.album.findMany.mockImplementationOnce(async (args) => {
-            expect(args.where.AND[0]).toEqual({
-                OR: [
-                    { tracks: { none: {} } },
-                    {
-                        tracks: {
-                            some: {
-                                removedAt: null,
-                                OR: [
-                                    { origin: "LOCAL" },
-                                    {
-                                        origin: "FEDERATED",
-                                        OR: [
-                                            { dedupOfTrackId: null },
-                                            {
-                                                federationPeer: {
-                                                    showDedupedCopies: true,
-                                                },
-                                            },
-                                            {
-                                                dedupOfTrack: {
-                                                    removedAt: { not: null },
-                                                },
-                                            },
-                                        ],
-                                    },
-                                ],
-                            },
-                        },
-                    },
-                ],
-            });
+        prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) => {
+            expect(strings.join(" ")).toContain('t."removedAt" IS NULL AND');
             return [
                 {
                     id: "album-remote",
                     title: "Remote Album",
                     artistId: "artist-1",
+                    artistName: "Remote Artist",
                     year: 2026,
                     coverUrl: null,
-                    artist: { name: "Remote Artist" },
+                    rank: 0.8,
                 },
                 {
                     id: "album-mixed",
                     title: "Mixed Album",
                     artistId: "artist-2",
+                    artistName: "Mixed Artist",
                     year: 2025,
                     coverUrl: null,
-                    artist: { name: "Mixed Artist" },
+                    rank: 0.7,
                 },
             ];
         });
@@ -390,33 +518,18 @@ describe("search service", () => {
                       },
                   ],
         );
-        prisma.track.findMany.mockResolvedValueOnce([]);
-
         await expect(
             searchService.searchTracks({ query: "removed" }),
         ).resolves.toEqual([]);
 
-        prisma.track.findMany.mockImplementationOnce(
-            async ({ where }: { where: { removedAt?: null } }) =>
-                where.removedAt === null
-                    ? []
-                    : [
-                          {
-                              id: "removed-ilike",
-                              title: "Removed ILIKE",
-                              albumId: "album-1",
-                              duration: 180,
-                              album: {
-                                  title: "Album",
-                                  artistId: "artist-1",
-                                  artist: { name: "Artist" },
-                              },
-                          },
-                      ],
-        );
         await expect(
             searchService.searchTracks({ query: "***" }),
         ).resolves.toEqual([]);
+        expect(
+            prisma.$queryRaw.mock.calls.every(([strings]) =>
+                strings.join(" ").includes('t."removedAt" IS NULL'),
+            ),
+        ).toBe(true);
     });
 
     it("searches podcasts, episodes, and audiobooks with fallback behavior", async () => {
@@ -899,6 +1012,25 @@ describe("search service", () => {
         expect(redisClient.setEx).toHaveBeenCalled();
     });
 
+    it("separates type-scoped cache entries by offset", async () => {
+        jest.spyOn(searchService, "searchArtists").mockResolvedValueOnce([]);
+
+        await searchService.searchByType({
+            query: "Radiohead",
+            type: "artists",
+            limit: 10,
+            offset: 40,
+        });
+
+        const cacheKey = "search:artists:radiohead:10:40::all";
+        expect(redisClient.get).toHaveBeenCalledWith(cacheKey);
+        expect(redisClient.setEx).toHaveBeenCalledWith(
+            cacheKey,
+            120,
+            expect.any(String),
+        );
+    });
+
     it("searchAudiobooksFTS falls back to local search when full-text results are empty", async () => {
         prisma.$queryRaw.mockResolvedValueOnce([]);
         prisma.audiobook.findMany.mockResolvedValueOnce([
@@ -931,12 +1063,13 @@ describe("search service", () => {
     });
 
     it("searchArtistsFallback includes remote-only artists via OR condition", async () => {
-        prisma.artist.findMany.mockResolvedValueOnce([
+        prisma.$queryRaw.mockResolvedValueOnce([
             {
                 id: "artist-remote",
                 name: "Remote Only Artist",
                 mbid: "mbid-remote",
                 heroUrl: null,
+                rank: 0.76,
             },
         ]);
 
@@ -952,59 +1085,16 @@ describe("search service", () => {
                 name: "Remote Only Artist",
                 mbid: "mbid-remote",
                 heroUrl: null,
-                rank: 0,
+                rank: 0.76,
             },
         ]);
 
-        expect(prisma.artist.findMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    OR: [
-                        {
-                            albums: {
-                                some: {
-                                    tracks: {
-                                        some: {
-                                            removedAt: null,
-                                            OR: [
-                                                { origin: "LOCAL" },
-                                                {
-                                                    origin: "FEDERATED",
-                                                    OR: [
-                                                        {
-                                                            dedupOfTrackId:
-                                                                null,
-                                                        },
-                                                        {
-                                                            federationPeer: {
-                                                                showDedupedCopies: true,
-                                                            },
-                                                        },
-                                                        {
-                                                            dedupOfTrack: {
-                                                                removedAt: {
-                                                                    not: null,
-                                                                },
-                                                            },
-                                                        },
-                                                    ],
-                                                },
-                                            ],
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        { remoteTrackCount: { gt: 0 } },
-                    ],
-                }),
-            }),
-        );
+        const [strings, ...values] = prisma.$queryRaw.mock.calls[0];
+        expect(strings.join(" ")).toContain('a."remoteTrackCount" > 0');
+        expect(values).toContain(true);
     });
 
     it("searchArtistsFallback excludes artists with no albums and zero remoteTrackCount", async () => {
-        prisma.artist.findMany.mockResolvedValueOnce([]);
-
         const results = await searchService.searchArtists({
             query: "###",
             limit: 5,
@@ -1015,50 +1105,9 @@ describe("search service", () => {
 
         // Verify the OR filter is passed so Prisma excludes artists
         // that have neither albums nor remote tracks
-        expect(prisma.artist.findMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    OR: [
-                        {
-                            albums: {
-                                some: {
-                                    tracks: {
-                                        some: {
-                                            removedAt: null,
-                                            OR: [
-                                                { origin: "LOCAL" },
-                                                {
-                                                    origin: "FEDERATED",
-                                                    OR: [
-                                                        {
-                                                            dedupOfTrackId:
-                                                                null,
-                                                        },
-                                                        {
-                                                            federationPeer: {
-                                                                showDedupedCopies: true,
-                                                            },
-                                                        },
-                                                        {
-                                                            dedupOfTrack: {
-                                                                removedAt: {
-                                                                    not: null,
-                                                                },
-                                                            },
-                                                        },
-                                                    ],
-                                                },
-                                            ],
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        { remoteTrackCount: { gt: 0 } },
-                    ],
-                }),
-            }),
-        );
+        const [strings, ...values] = prisma.$queryRaw.mock.calls[0];
+        expect(strings.join(" ")).toContain('a."remoteTrackCount" > 0');
+        expect(values).toContain(true);
     });
 
     it("searchArtists FTS SQL includes remoteTrackCount condition", async () => {

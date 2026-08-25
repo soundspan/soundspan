@@ -46,13 +46,14 @@ describe("search stop-word fallback", () => {
         prisma.track.findMany.mockResolvedValue([]);
     });
 
-    it("falls back to ILIKE when artist FTS returns zero rows", async () => {
-        prisma.artist.findMany.mockResolvedValueOnce([
+    it("falls back to trigram-ranked SQL when artist FTS returns zero rows", async () => {
+        prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
             {
                 id: "artist-1",
                 name: "The Artist",
                 mbid: "mbid-1",
                 heroUrl: null,
+                rank: 0.77,
             },
         ]);
 
@@ -64,12 +65,21 @@ describe("search stop-word fallback", () => {
                 name: "The Artist",
                 mbid: "mbid-1",
                 heroUrl: null,
-                rank: 0,
+                rank: 0.77,
             },
         ]);
         expect(logger.debug).toHaveBeenCalledWith(
             '[SEARCH] FTS returned 0 results for "the", falling back to ILIKE',
         );
-        expect(prisma.artist.findMany).toHaveBeenCalled();
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+        expect(prisma.artist.findMany).not.toHaveBeenCalled();
+    });
+
+    it("binds an escaped literal ILIKE pattern for fallback search", async () => {
+        prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+        await searchService.searchArtists({ query: "50%_r\\ock" });
+
+        expect(prisma.$queryRaw.mock.calls[1]).toContain("%50\\%\\_r\\\\ock%");
     });
 });

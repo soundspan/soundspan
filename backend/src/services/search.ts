@@ -4,10 +4,12 @@ import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import {
     type LibraryOriginFilter,
-    trackBrowseWhere,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { trackBrowseSql } from "../utils/libraryRadioPredicates";
+import { escapeLikePattern } from "../utils/likePattern";
+
+const MAX_TRACK_SEARCH_TERMS = 6;
 
 /**
  * Executes normalizeCacheQuery.
@@ -112,10 +114,6 @@ export interface SearchByTypeOptions {
     source?: LibraryOriginFilter;
 }
 
-function visibleBrowseTracks(source: LibraryOriginFilter) {
-    return { ...TRACK_VISIBLE_WHERE, ...trackBrowseWhere(source) };
-}
-
 function trackSourceSql(source: LibraryOriginFilter): Prisma.Sql {
     return trackBrowseSql("t", source);
 }
@@ -139,18 +137,22 @@ export interface SearchResults {
  * Represents the SearchService class.
  */
 export class SearchService {
+    private queryToTerms(query: string): string[] {
+        return query
+            .trim()
+            .replace(/&/g, " and ")
+            .split(/\s+/)
+            .map((term) => term.replace(/[^\w]/g, ""))
+            .filter((term) => term.length > 0);
+    }
+
     /**
      * Convert user query to PostgreSQL tsquery format
      * Splits on whitespace and adds prefix matching (:*)
      * Example: "radio head" -> "radio:* & head:*"
      */
     private queryToTsquery(query: string): string {
-        const terms = query
-            .trim()
-            .replace(/&/g, " and ")
-            .split(/\s+/)
-            .map((term) => term.replace(/[^\w]/g, ""))
-            .filter((term) => term.length > 0);
+        const terms = this.queryToTerms(query);
 
         if (terms.length === 0) return "";
 
@@ -163,59 +165,40 @@ export class SearchService {
         offset = 0,
         source = "all",
     }: SearchOptions): Promise<ArtistSearchResult[]> {
-        const trackWhere = visibleBrowseTracks(source);
-        const results = await prisma.artist.findMany({
-            where: {
-                name: {
-                    contains: query,
-                    mode: "insensitive",
-                },
-                ...(source === "all"
-                    ? {
-                          OR: [
-                              {
-                                  albums: {
-                                      some: { tracks: { some: trackWhere } },
-                                  },
-                              },
-                              { remoteTrackCount: { gt: 0 } },
-                          ],
-                      }
-                    : {
-                          albums: {
-                              some: { tracks: { some: trackWhere } },
-                          },
-                      }),
-            },
-            select: {
-                id: true,
-                name: true,
-                mbid: true,
-                heroUrl: true,
-                peerId: true,
-                federationPeer: {
-                    select: { id: true, name: true, outboundStatus: true },
-                },
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                name: "asc",
-            },
-        });
-
-        return results.map(({ federationPeer, peerId, ...result }) => ({
-            ...result,
-            rank: 0,
-            ...(peerId && federationPeer
-                ? {
-                      source: "federated" as const,
-                      peer: {
-                          id: federationPeer.id,
-                          name: federationPeer.name,
-                          online: federationPeer.outboundStatus === "ACTIVE",
-                      },
-                  }
+        const pattern = `%${escapeLikePattern(query)}%`;
+        const sourceSql = trackSourceSql(source);
+        const peerSql = peerProjectionSql("a");
+        const rows = await prisma.$queryRaw<
+            Array<
+                ArtistSearchResult & {
+                    source: "federated" | null;
+                    peer: SearchPeerResult | null;
+                }
+            >
+        >`
+            SELECT a.id, a.name, a.mbid, a."heroUrl",
+                   CASE WHEN a."peerId" IS NOT NULL THEN 'federated' END AS source,
+                   ${peerSql} AS peer,
+                   similarity(a.name, ${query}) AS rank
+            FROM "Artist" a
+            LEFT JOIN "FederationPeer" fp ON fp.id = a."peerId"
+            WHERE (a.name ILIKE ${pattern} ESCAPE '\\' OR a.name % ${query})
+              AND (
+                EXISTS (
+                  SELECT 1 FROM "Album" alb
+                  JOIN "Track" t ON t."albumId" = alb.id
+                  WHERE alb."artistId" = a.id AND t."removedAt" IS NULL AND ${sourceSql}
+                )
+                OR (${source === "all"} AND a."remoteTrackCount" > 0)
+              )
+            ORDER BY rank DESC, a.name ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+        `;
+        return rows.map(({ source: rowSource, peer, ...row }) => ({
+            ...row,
+            ...(rowSource === "federated" && peer
+                ? { source: rowSource, peer }
                 : {}),
         }));
     }
@@ -289,78 +272,42 @@ export class SearchService {
         offset = 0,
         source = "all",
     }: SearchOptions): Promise<AlbumSearchResult[]> {
-        const trackWhere = visibleBrowseTracks(source);
-        const results = await prisma.album.findMany({
-            where: {
-                AND: [
-                    {
-                        OR: [
-                            ...(source === "peers"
-                                ? []
-                                : [{ tracks: { none: {} } }]),
-                            { tracks: { some: trackWhere } },
-                        ],
-                    },
-                    {
-                        OR: [
-                            {
-                                title: {
-                                    contains: query,
-                                    mode: "insensitive",
-                                },
-                            },
-                            {
-                                artist: {
-                                    name: {
-                                        contains: query,
-                                        mode: "insensitive",
-                                    },
-                                },
-                            },
-                        ],
-                    },
-                ],
-            },
-            select: {
-                id: true,
-                title: true,
-                artistId: true,
-                year: true,
-                coverUrl: true,
-                artist: {
-                    select: {
-                        name: true,
-                    },
-                },
-                peerId: true,
-                federationPeer: {
-                    select: { id: true, name: true, outboundStatus: true },
-                },
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                title: "asc",
-            },
-        });
-
-        return results.map((r) => ({
-            id: r.id,
-            title: r.title,
-            artistId: r.artistId,
-            artistName: r.artist.name,
-            year: r.year,
-            coverUrl: r.coverUrl,
-            rank: 0,
-            ...(r.peerId && r.federationPeer
-                ? {
-                      source: "federated" as const,
-                      peer: {
-                          id: r.federationPeer.id,
-                          name: r.federationPeer.name,
-                          online: r.federationPeer.outboundStatus === "ACTIVE",
-                      },
-                  }
+        const pattern = `%${escapeLikePattern(query)}%`;
+        const sourceSql = trackSourceSql(source);
+        const peerSql = peerProjectionSql("a");
+        const includeEmpty = source !== "peers";
+        const rows = await prisma.$queryRaw<
+            Array<
+                AlbumSearchResult & {
+                    source: "federated" | null;
+                    peer: SearchPeerResult | null;
+                }
+            >
+        >`
+            SELECT a.id, a.title, a."artistId", ar.name AS "artistName",
+                   a.year, a."coverUrl",
+                   CASE WHEN a."peerId" IS NOT NULL THEN 'federated' END AS source,
+                   ${peerSql} AS peer,
+                   similarity(a.title, ${query}) AS rank
+            FROM "Album" a
+            INNER JOIN "Artist" ar ON ar.id = a."artistId"
+            LEFT JOIN "FederationPeer" fp ON fp.id = a."peerId"
+            WHERE (a.title ILIKE ${pattern} ESCAPE '\\' OR a.title % ${query})
+              AND (
+                (${includeEmpty} AND NOT EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id))
+                OR EXISTS (
+                  SELECT 1 FROM "Track" t
+                  WHERE t."albumId" = a.id AND t."removedAt" IS NULL AND ${sourceSql}
+                )
+              )
+            ORDER BY rank DESC, a.title ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+        `;
+        return rows.map(({ source: rowSource, peer, ...row }) => ({
+            ...row,
+            ...(rowSource === "federated" && peer
+                ? { source: rowSource, peer }
                 : {}),
         }));
     }
@@ -460,69 +407,39 @@ export class SearchService {
         offset = 0,
         source = "all",
     }: SearchOptions): Promise<TrackSearchResult[]> {
-        const results = await prisma.track.findMany({
-            where: {
-                ...TRACK_VISIBLE_WHERE,
-                ...trackBrowseWhere(source),
-                title: {
-                    contains: query,
-                    mode: "insensitive",
-                },
-            },
-            select: {
-                id: true,
-                title: true,
-                albumId: true,
-                duration: true,
-                loudnessLufs: true,
-                truePeakDb: true,
-                album: {
-                    select: {
-                        title: true,
-                        artistId: true,
-                        albumLoudnessLufs: true,
-                        albumTruePeakDb: true,
-                        artist: {
-                            select: {
-                                name: true,
-                            },
-                        },
-                    },
-                },
-                origin: true,
-                federationPeer: {
-                    select: { id: true, name: true, outboundStatus: true },
-                },
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                title: "asc",
-            },
-        });
-
-        return results.map((r) => ({
-            id: r.id,
-            title: r.title,
-            albumId: r.albumId,
-            albumTitle: r.album.title,
-            artistId: r.album.artistId,
-            artistName: r.album.artist.name,
-            duration: r.duration,
-            loudnessLufs: r.loudnessLufs,
-            truePeakDb: r.truePeakDb,
-            albumLoudnessLufs: r.album.albumLoudnessLufs,
-            albumTruePeakDb: r.album.albumTruePeakDb,
-            rank: 0,
-            ...(r.origin === "FEDERATED" && r.federationPeer
-                ? {
-                      source: "federated" as const,
-                      peer: {
-                          id: r.federationPeer.id,
-                          name: r.federationPeer.name,
-                          online: r.federationPeer.outboundStatus === "ACTIVE",
-                      },
-                  }
+        const pattern = `%${escapeLikePattern(query)}%`;
+        const sourceSql = trackSourceSql(source);
+        const peerSql = peerProjectionSql("t");
+        const rows = await prisma.$queryRaw<
+            Array<
+                TrackSearchResult & {
+                    source: "federated" | null;
+                    peer: SearchPeerResult | null;
+                }
+            >
+        >`
+            SELECT t.id, t.title, t."albumId", t.duration,
+                   t."loudnessLufs", t."truePeakDb",
+                   a.title AS "albumTitle", a."albumLoudnessLufs",
+                   a."albumTruePeakDb", a."artistId", ar.name AS "artistName",
+                   CASE WHEN t.origin = ${"FEDERATED"}::"TrackOrigin" THEN 'federated' END AS source,
+                   ${peerSql} AS peer,
+                   similarity(t.title, ${query}) AS rank
+            FROM "Track" t
+            LEFT JOIN "Album" a ON a.id = t."albumId"
+            LEFT JOIN "Artist" ar ON ar.id = a."artistId"
+            LEFT JOIN "FederationPeer" fp ON fp.id = t."peerId"
+            WHERE t."removedAt" IS NULL
+              AND ${sourceSql}
+              AND (t.title ILIKE ${pattern} ESCAPE '\\' OR t.title % ${query})
+            ORDER BY rank DESC, t.title ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+        `;
+        return rows.map(({ source: rowSource, peer, ...row }) => ({
+            ...row,
+            ...(rowSource === "federated" && peer
+                ? { source: rowSource, peer }
                 : {}),
         }));
     }
@@ -537,10 +454,29 @@ export class SearchService {
             return [];
         }
 
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
+        const queryTerms = this.queryToTerms(query);
+        if (queryTerms.length === 0) {
             return this.searchTracksFallback({ query, limit, offset, source });
         }
+
+        const terms = queryTerms.slice(0, MAX_TRACK_SEARCH_TERMS);
+        if (queryTerms.length > terms.length) {
+            logger.debug(
+                `[SEARCH] Dropped ${queryTerms.length - terms.length} track search terms after the 6-term limit`,
+            );
+        }
+        const termQueries = terms.map((term) => `${term}:*`);
+        const orQuery = termQueries.join(" | ");
+        const termConditions = Prisma.join(
+            termQueries.map(
+                (term) => Prisma.sql`(
+                    t."searchVector" @@ to_tsquery('english', ${term})
+                    OR a."searchVector" @@ to_tsquery('english', ${term})
+                    OR ar."searchVector" @@ to_tsquery('english', ${term})
+                )`,
+            ),
+            " AND ",
+        );
 
         try {
             const sourceSql = trackSourceSql(source);
@@ -560,14 +496,16 @@ export class SearchService {
           ar.name as "artistName",
           CASE WHEN t.origin = ${"FEDERATED"}::"TrackOrigin" THEN 'federated' ELSE 'local' END AS source,
           ${peerSql} AS peer,
-          ts_rank(t."searchVector", to_tsquery('english', ${tsquery})) AS rank
+          ts_rank(t."searchVector", to_tsquery('english', ${orQuery})) * 2
+            + ts_rank(COALESCE(a."searchVector", ''::tsvector), to_tsquery('english', ${orQuery}))
+            + ts_rank(COALESCE(ar."searchVector", ''::tsvector), to_tsquery('english', ${orQuery})) AS rank
         FROM "Track" t
         LEFT JOIN "Album" a ON t."albumId" = a.id
         LEFT JOIN "Artist" ar ON a."artistId" = ar.id
         LEFT JOIN "FederationPeer" fp ON fp.id = t."peerId"
         WHERE t."removedAt" IS NULL
           AND ${sourceSql}
-          AND t."searchVector" @@ to_tsquery('english', ${tsquery})
+          AND ${termConditions}
         ORDER BY rank DESC, t.title ASC
         LIMIT ${limit}
         OFFSET ${offset}
@@ -1050,7 +988,7 @@ export class SearchService {
         }
 
         // Check cache
-        const cacheKey = `search:${type}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}:${source}`;
+        const cacheKey = `search:${type}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}:${source}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {

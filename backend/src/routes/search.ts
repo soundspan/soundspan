@@ -33,6 +33,7 @@ const searchQuerySchema = z.object({
         const parsed = Number.parseInt(String(value ?? "20"), 10);
         return Number.isNaN(parsed) ? 20 : Math.min(Math.max(parsed, 1), 100);
     }, z.number().int()),
+    offset: z.coerce.number().int().min(0).max(10_000).default(0),
     source: z.enum(LIBRARY_ORIGIN_VALUES).default("all"),
 });
 
@@ -265,6 +266,14 @@ router.use(requireAuth);
  *           maximum: 100
  *         description: Maximum number of results per type
  *         default: 20
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 10000
+ *           default: 0
+ *         description: Zero-based result offset for type-scoped searches; ignored when type is all
  *     responses:
  *       200:
  *         description: Search results
@@ -306,7 +315,7 @@ router.get("/", async (req, res) => {
         if (!parsed.success) {
             return res.status(400).json({ error: "Invalid search query" });
         }
-        const { type, genre, source } = parsed.data;
+        const { type, genre, offset, source } = parsed.data;
         const query = parsed.data.q.trim();
         const searchLimit = parsed.data.limit;
         const sourceOption = req.query.source === undefined ? {} : { source };
@@ -339,6 +348,7 @@ router.get("/", async (req, res) => {
             query,
             type: type as string,
             limit: searchLimit,
+            offset,
             genre: genre as string | undefined,
             ...sourceOption,
         });
