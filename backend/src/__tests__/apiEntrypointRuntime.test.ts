@@ -583,7 +583,12 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(deprecatedWarnings).toHaveLength(1);
         expect(String(deprecatedWarnings[0][0])).toContain(
-            "migrate by unsetting DISCOVERY_MODE",
+            "now serves the modern discovery implementation",
+        );
+        expect(mocks.app.use).toHaveBeenCalledWith(
+            "/api/discover",
+            "api-limiter",
+            expect.anything(),
         );
     });
 

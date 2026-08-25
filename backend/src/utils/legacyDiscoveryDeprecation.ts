@@ -2,7 +2,7 @@ import { config } from "../config";
 import { logger } from "./logger";
 
 const LEGACY_DISCOVERY_DEPRECATION_MESSAGE =
-    "Legacy discovery mode is deprecated, no longer receives fixes, and will be removed in a future release; migrate by unsetting DISCOVERY_MODE.";
+    "DISCOVERY_MODE=legacy is deprecated and now serves the modern discovery implementation; unset DISCOVERY_MODE to remove this warning.";
 
 /** Warns once from a process entrypoint when deprecated discovery is enabled. */
 export function warnIfLegacyDiscoveryMode(processType: "API" | "Worker"): void {

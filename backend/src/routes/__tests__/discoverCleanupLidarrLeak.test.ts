@@ -77,20 +77,6 @@ jest.mock("../../services/discovery", () => ({
 
 import router from "../discover";
 
-function getRouteHandler(
-    path: string,
-    method: "get" | "post" | "delete" | "patch",
-) {
-    const layer = (router as any).stack.find(
-        (entry: any) =>
-            entry.route?.path === path && entry.route?.methods?.[method],
-    );
-    if (!layer) {
-        throw new Error(`Route not found: ${method.toUpperCase()} ${path}`);
-    }
-    return layer.route.stack[layer.route.stack.length - 1].handle;
-}
-
 const MAX_ROUTE_HANDLERS = 3;
 
 async function invokeRouteStack(req: any, res: any) {
@@ -131,10 +117,7 @@ function createRes() {
     return res;
 }
 
-const LEAK_MARKER =
-    "connect ECONNREFUSED lidarr.internal:8686 X-Api-Key=SECRET_KEY";
-
-describe("POST /cleanup-lidarr does not disclose caught error text", () => {
+describe("POST /cleanup-lidarr legacy-mode shim", () => {
     beforeEach(() => {
         jest.clearAllMocks();
     });
@@ -168,45 +151,30 @@ describe("POST /cleanup-lidarr does not disclose caught error text", () => {
         expect(prisma.downloadJob.deleteMany).not.toHaveBeenCalled();
     });
 
-    it("returns a static per-artist message, not the raw axios error", async () => {
-        axiosGet.mockResolvedValueOnce({
-            data: [
-                {
-                    id: 42,
-                    foreignArtistId: "mbid-1",
-                    artistName: "Nine Inch Nails",
-                },
-            ],
-        });
-        axiosDelete.mockRejectedValueOnce(new Error(LEAK_MARKER));
+    it("serves the retired modern handler without Lidarr or database effects", async () => {
         const res = createRes();
 
-        await getRouteHandler("/cleanup-lidarr", "post")(
-            { user: { id: "user-1" }, params: {}, query: {}, body: {} },
+        await invokeRouteStack(
+            {
+                user: { id: "admin-1", role: "admin" },
+                params: {},
+                query: {},
+                body: {},
+            },
             res,
         );
 
-        expect(res.body.success).toBe(true);
-        expect(res.body.errors).toEqual(["Failed to process Nine Inch Nails"]);
-        expect(JSON.stringify(res.body)).not.toContain("ECONNREFUSED");
-        expect(JSON.stringify(res.body)).not.toContain("SECRET_KEY");
-    });
-
-    it("survives a non-Error throw without leaking or crashing", async () => {
-        axiosGet.mockResolvedValueOnce({
-            data: [
-                { id: 7, foreignArtistId: "mbid-2", artistName: "Aphex Twin" },
-            ],
+        expect(res.statusCode).toBe(410);
+        expect(res.body).toEqual({
+            error: "Lidarr cleanup is only available in legacy discovery mode",
         });
-        axiosDelete.mockRejectedValueOnce("boom-string-throw");
-        const res = createRes();
-
-        await getRouteHandler("/cleanup-lidarr", "post")(
-            { user: { id: "user-1" }, params: {}, query: {}, body: {} },
-            res,
-        );
-
-        expect(res.body.errors).toEqual(["Failed to process Aphex Twin"]);
-        expect(JSON.stringify(res.body)).not.toContain("boom-string-throw");
+        expect(getSystemSettings).not.toHaveBeenCalled();
+        expect(axiosGet).not.toHaveBeenCalled();
+        expect(axiosDelete).not.toHaveBeenCalled();
+        expect(prisma.ownedAlbum.findFirst).not.toHaveBeenCalled();
+        expect(prisma.discoveryAlbum.findFirst).not.toHaveBeenCalled();
+        expect(prisma.ownedAlbum.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.discoveryAlbum.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.deleteMany).not.toHaveBeenCalled();
     });
 });

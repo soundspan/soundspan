@@ -1,5 +1,4 @@
-import { Router, type RequestHandler } from "express";
-import { config } from "../../config";
+import { Router } from "express";
 import { requireAdmin, requireAuthOrToken } from "../../middleware/auth";
 import { handleModernBatchStatus } from "./batchStatus";
 import { handleGenerateStatus, handleModernGenerate } from "./generation";
@@ -20,25 +19,8 @@ import {
     handleModernCleanupLidarr,
     handleModernFixTagging,
 } from "./maintenance";
-import { handleLegacyBatchStatus } from "./legacy/batchStatus";
-import { handleLegacyGenerate } from "./legacy/generation";
-import { handleLegacyCurrent } from "./legacy/current";
-import { handleLegacyLike, handleLegacyUnlike } from "./legacy/albumActions";
-import { handleLegacyClear } from "./legacy/clear";
-import {
-    handleLegacyCleanupLidarr,
-    handleLegacyFixTagging,
-} from "./legacy/maintenance";
 
 const router = Router();
-const isLegacyDiscoveryMode = config.discover.mode === "legacy";
-
-function modeHandler(
-    modernHandler: RequestHandler,
-    legacyHandler: RequestHandler,
-): RequestHandler {
-    return isLegacyDiscoveryMode ? legacyHandler : modernHandler;
-}
 
 router.use(requireAuthOrToken);
 
@@ -56,10 +38,7 @@ router.use(requireAuthOrToken);
  *       401:
  *         description: Not authenticated
  */
-router.get(
-    "/batch-status",
-    modeHandler(handleModernBatchStatus, handleLegacyBatchStatus),
-);
+router.get("/batch-status", handleModernBatchStatus);
 
 /**
  * @openapi
@@ -76,13 +55,8 @@ router.get(
  *         description: Generation already in progress
  *       401:
  *         description: Not authenticated
- *       403:
- *         description: Legacy-mode generation is restricted to administrators
  */
-router.post(
-    "/generate",
-    modeHandler(handleModernGenerate, handleLegacyGenerate),
-);
+router.post("/generate", handleModernGenerate);
 
 /**
  * @openapi
@@ -123,7 +97,7 @@ router.get("/generate/status/:jobId", handleGenerateStatus);
  *       401:
  *         description: Not authenticated
  */
-router.get("/current", modeHandler(handleModernCurrent, handleLegacyCurrent));
+router.get("/current", handleModernCurrent);
 
 /**
  * @openapi
@@ -155,7 +129,7 @@ router.get("/current", modeHandler(handleModernCurrent, handleLegacyCurrent));
  *       401:
  *         description: Not authenticated
  */
-router.post("/like", modeHandler(handleModernLike, handleLegacyLike));
+router.post("/like", handleModernLike);
 
 /**
  * @openapi
@@ -187,7 +161,7 @@ router.post("/like", modeHandler(handleModernLike, handleLegacyLike));
  *       401:
  *         description: Not authenticated
  */
-router.delete("/unlike", modeHandler(handleModernUnlike, handleLegacyUnlike));
+router.delete("/unlike", handleModernUnlike);
 
 /**
  * @openapi
@@ -286,7 +260,7 @@ router.get("/popular-artists", handlePopularArtists);
  *       401:
  *         description: Not authenticated
  */
-router.delete("/clear", modeHandler(handleModernClear, handleLegacyClear));
+router.delete("/clear", handleModernClear);
 
 /**
  * @openapi
@@ -365,11 +339,7 @@ router.delete("/exclusions/:id", handleRemoveExclusion);
  *       403:
  *         description: Admin access required
  */
-router.post(
-    "/cleanup-lidarr",
-    requireAdmin,
-    modeHandler(handleModernCleanupLidarr, handleLegacyCleanupLidarr),
-);
+router.post("/cleanup-lidarr", requireAdmin, handleModernCleanupLidarr);
 
 /**
  * @openapi
@@ -389,10 +359,6 @@ router.post(
  *       403:
  *         description: Admin access required
  */
-router.post(
-    "/fix-tagging",
-    requireAdmin,
-    modeHandler(handleModernFixTagging, handleLegacyFixTagging),
-);
+router.post("/fix-tagging", requireAdmin, handleModernFixTagging);
 
 export default router;

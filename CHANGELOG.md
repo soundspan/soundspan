@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - App screens now share one catalog of data-cache keys, so library, playlist, download, and notification views refresh reliably after changes instead of occasionally showing stale lists.
+- `DISCOVERY_MODE=legacy` remains accepted but now serves the modern discovery implementation and logs one deprecation warning at process startup (#795).
 - Internal TIDAL and YouTube provider plumbing now uses shared types and routing adapters, and Deezer API calls now use the shared rate limiter.
 - The enrichment worker now idles cheaply when the library is fully enriched.
 - Subsonic apps load artist lists much faster on large libraries, and genre shuffle pages now load consistently fast.

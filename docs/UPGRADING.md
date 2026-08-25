@@ -49,6 +49,19 @@ Anything not listed: drop-in.
 
 ---
 
+## Unreleased: legacy discovery mode now serves the modern implementation
+
+You only need to read this if you ever set the environment variable
+`DISCOVERY_MODE=legacy`. If you never set it (most installs), nothing changes.
+
+The old "legacy" discovery implementation has been removed from the codebase.
+The `DISCOVERY_MODE` variable still works and `legacy` is still a valid value,
+so nothing breaks at startup — but setting it to `legacy` now serves the same
+modern discovery pages everyone else gets, and the server logs a one-line
+reminder when it starts. To stop the reminder, remove the variable (or set it
+to `modern`). Nothing else about discovery, downloads, or your library is
+affected.
+
 ## 2.5.0: sharing defaults, pairing codes, and the TIDAL sidecar rename
 
 **Sharing defaults.** After the upgrade, **Share online presence** controls a

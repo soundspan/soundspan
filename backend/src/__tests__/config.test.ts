@@ -221,6 +221,15 @@ describe("config module", () => {
                 providerName: "SSO",
             },
         });
+        expect(config.discover).toEqual({ mode: "recommendation" });
+    });
+
+    it("keeps explicit modern discovery mode on the modern implementation", async () => {
+        const { config } = await loadConfigModule({
+            DISCOVERY_MODE: "recommendation",
+        });
+
+        expect(config.discover).toEqual({ mode: "recommendation" });
     });
 
     it("keeps the vibe provider disabled when its URL is absent", async () => {

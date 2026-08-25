@@ -155,8 +155,9 @@ new mounts at the deliberate position in `library/index.ts`.
 
 ### Discover Submodules
 
-`backend/src/routes/discover/index.ts` selects modern or legacy handlers while
-preserving one mounted `/api/discover` route stack:
+`backend/src/routes/discover/index.ts` registers one modern
+`/api/discover` route stack. The deprecated `DISCOVERY_MODE=legacy` value is
+accepted by configuration but uses these same handlers.
 
 | Module                                                        | Responsibility                                  |
 | ------------------------------------------------------------- | ----------------------------------------------- |
@@ -170,12 +171,6 @@ preserving one mounted `/api/discover` route stack:
 | `backend/src/routes/discover/maintenance.ts`                  | Modern maintenance handlers                     |
 | `backend/src/routes/discover/popularArtists.ts`               | Popular-artist handler                           |
 | `backend/src/routes/discover/shared.ts`                       | Shared discovery request helpers                 |
-| `backend/src/routes/discover/legacy/albumActions.ts`          | Legacy like and unlike handlers                  |
-| `backend/src/routes/discover/legacy/batchStatus.ts`           | Legacy batch-status handler                      |
-| `backend/src/routes/discover/legacy/clear.ts`                 | Legacy playlist-clear handler                    |
-| `backend/src/routes/discover/legacy/current.ts`               | Legacy current-playlist handler                  |
-| `backend/src/routes/discover/legacy/generation.ts`            | Legacy generation handler                        |
-| `backend/src/routes/discover/legacy/maintenance.ts`           | Legacy maintenance handlers                      |
 
 ### Auth Submodules
 

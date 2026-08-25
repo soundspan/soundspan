@@ -75,7 +75,7 @@ describe("discover mode dispatch", () => {
         jest.clearAllMocks();
     });
 
-    it("dispatches batch status to the frozen legacy handler in legacy mode", async () => {
+    it("dispatches batch status to the modern handler in legacy mode", async () => {
         const { router, getJobs, findFirst } = loadRouter("legacy");
         const response = createResponse();
 
@@ -84,8 +84,12 @@ describe("discover mode dispatch", () => {
             response,
         );
 
-        expect(findFirst).toHaveBeenCalledTimes(1);
-        expect(getJobs).not.toHaveBeenCalled();
+        expect(getJobs).toHaveBeenCalledWith(
+            ["active", "waiting", "delayed"],
+            0,
+            200,
+        );
+        expect(findFirst).not.toHaveBeenCalled();
         expect(response.body).toEqual({
             active: false,
             status: null,

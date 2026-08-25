@@ -63,7 +63,6 @@ const BASELINE = Object.freeze({
 const LEAK_BASELINE = Object.freeze({
     // auth/adminUserInvites.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L479 and ~L897); code-owned schema messages, not raw errors.
     "backend/src/routes/auth/adminUserInvites.ts": 2,
-    "backend/src/routes/discover/legacy/maintenance.ts": 0,
     "backend/src/routes/downloads.ts": 0,
     // library/artists.ts remaining 1: admin-only Lidarr deletion diagnostics (lidarrError = err?.message) returned to the initiating admin, not a general-user 500 leak.
     "backend/src/routes/library/artists.ts": 1,

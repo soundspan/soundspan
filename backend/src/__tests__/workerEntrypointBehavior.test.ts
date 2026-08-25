@@ -270,7 +270,7 @@ describe("worker entrypoint behavior", () => {
         );
         expect(deprecatedWarnings).toHaveLength(1);
         expect(String(deprecatedWarnings[0][0])).toContain(
-            "migrate by unsetting DISCOVERY_MODE",
+            "now serves the modern discovery implementation",
         );
     });
 
