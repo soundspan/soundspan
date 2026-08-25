@@ -22,6 +22,7 @@ const logger = {
     warn: jest.fn(),
     error: jest.fn(),
 };
+(logger as { child?: unknown }).child = jest.fn(() => logger);
 
 jest.mock("../../utils/db", () => ({
     prisma,
