@@ -44,6 +44,17 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../services/searchCacheVersion", () => ({
+    getSearchCacheVersion: jest.fn().mockResolvedValue(1),
+}));
+
+jest.mock("../../utils/redis", () => ({
+    redisClient: {
+        get: jest.fn().mockResolvedValue(null),
+        setEx: jest.fn().mockResolvedValue("OK"),
+    },
+}));
+
 jest.mock("../../workers/queues", () => ({
     scanQueue: {
         getActive: jest.fn(),
@@ -132,9 +143,7 @@ describe("subsonic entity compatibility handlers", () => {
                 id: "artist-1",
                 name: "Artist One",
                 heroUrl: "https://example.test/artist-1.jpg",
-                _count: {
-                    albums: 2,
-                },
+                libraryAlbumCount: 2,
             },
         ]);
 

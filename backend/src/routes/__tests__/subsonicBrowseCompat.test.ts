@@ -19,6 +19,7 @@ jest.mock("../../utils/subsonicResponse", () => ({
 
 jest.mock("../../utils/db", () => ({
     prisma: {
+        $queryRaw: jest.fn(),
         album: {
             findMany: jest.fn(),
             findFirst: jest.fn(),
@@ -43,6 +44,17 @@ jest.mock("../../utils/db", () => ({
             findMany: jest.fn(),
             findFirst: jest.fn(),
         },
+    },
+}));
+
+jest.mock("../../services/searchCacheVersion", () => ({
+    getSearchCacheVersion: jest.fn().mockResolvedValue(1),
+}));
+
+jest.mock("../../utils/redis", () => ({
+    redisClient: {
+        get: jest.fn().mockResolvedValue(null),
+        setEx: jest.fn().mockResolvedValue("OK"),
     },
 }));
 
@@ -113,6 +125,7 @@ describe("subsonic browse compatibility handlers", () => {
     const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
     const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
+    const mockQueryRaw = prisma.$queryRaw as jest.Mock;
     const mockSendSuccess = sendSubsonicSuccess as jest.Mock;
     const mockSendError = sendSubsonicError as jest.Mock;
 
@@ -121,6 +134,7 @@ describe("subsonic browse compatibility handlers", () => {
         mockPlayGroupBy.mockResolvedValue([]);
         mockTrackFindMany.mockResolvedValue([]);
         mockTrackFindFirst.mockResolvedValue(null);
+        mockQueryRaw.mockResolvedValue([]);
     });
 
     it("returns albumList2 results for alphabeticalByName", async () => {
@@ -214,9 +228,7 @@ describe("subsonic browse compatibility handlers", () => {
                 name: "Artist One",
                 heroUrl: "https://example.test/artist.jpg",
                 lastSynced,
-                _count: {
-                    albums: 2,
-                },
+                libraryAlbumCount: 2,
             },
         ]);
 
@@ -417,13 +429,13 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "artist-1",
                 name: "Artist One",
                 heroUrl: "https://example.test/artist.jpg",
-                _count: { albums: 2 },
+                libraryAlbumCount: 2,
             },
             {
                 id: "artist-2",
                 name: "Artist Two",
                 heroUrl: null,
-                _count: { albums: 1 },
+                libraryAlbumCount: 1,
             },
         ]);
 
@@ -435,14 +447,11 @@ describe("subsonic browse compatibility handlers", () => {
         );
 
         const artistQuery = mockArtistFindMany.mock.calls[0][0];
+        expect(artistQuery.where).toEqual({
+            libraryAlbumCount: { gt: 0 },
+        });
         expect(artistQuery.select).toMatchObject({
-            _count: {
-                select: {
-                    albums: {
-                        where: { location: { in: ["LIBRARY", "FEDERATED"] } },
-                    },
-                },
-            },
+            libraryAlbumCount: true,
         });
         expect(artistQuery.select).not.toHaveProperty("albums");
 
@@ -609,6 +618,7 @@ describe("subsonic browse compatibility handlers", () => {
     });
 
     it("returns songs for a requested genre", async () => {
+        mockQueryRaw.mockResolvedValue([{ id: "federated-track-1" }]);
         mockTrackFindMany.mockResolvedValue([
             {
                 id: "federated-track-1",
@@ -644,20 +654,8 @@ describe("subsonic browse compatibility handlers", () => {
             buildRes(),
         );
 
-        // Two-phase selection (GH #46): an id-only fetch of all matching
-        // tracks (day-stable seeded ordering handles pagination), then a
-        // full fetch of the requested page by id.
-        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
-            1,
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    trackGenres: expect.anything(),
-                }),
-                select: { id: true },
-            }),
-        );
-        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
-            2,
+        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+        expect(mockTrackFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
                     removedAt: null,
@@ -1499,9 +1497,7 @@ describe("subsonic browse compatibility handlers", () => {
                 name: "Artist One",
                 heroUrl: "https://example.test/artist.jpg",
                 lastSynced,
-                _count: {
-                    albums: 2,
-                },
+                libraryAlbumCount: 2,
             },
         ]);
 
@@ -1538,9 +1534,7 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "artist-1",
                 name: "Band One",
                 heroUrl: null,
-                _count: {
-                    albums: 1,
-                },
+                libraryAlbumCount: 1,
             },
         ]);
 

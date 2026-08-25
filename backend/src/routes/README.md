@@ -205,6 +205,7 @@ single middleware and endpoint stack composed from these domain modules:
 | `backend/src/routes/subsonic/browsing.ts`                | Music folders, directories, artists, albums, songs, and genres        |
 | `backend/src/routes/subsonic/discovery.ts`               | Similar-song and top-song discovery                                   |
 | `backend/src/routes/subsonic/albumSongLists.ts`          | Album/song lists, random songs, genre songs, and starred collections  |
+| `backend/src/routes/subsonic/genreSongPaging.ts`         | Parameter-bound, day-stable SQL paging for genre-song membership      |
 | `backend/src/routes/subsonic/searching.ts`               | Legacy and current search endpoints                                   |
 | `backend/src/routes/subsonic/playlists.ts`               | Playlist reads and mutations                                          |
 | `backend/src/routes/subsonic/mediaRetrieval.ts`          | Audio, cover art, lyrics, and avatar retrieval                        |

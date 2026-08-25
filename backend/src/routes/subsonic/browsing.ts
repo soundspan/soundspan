@@ -1,6 +1,7 @@
 import { type Request, type Response } from "express";
 import { prisma } from "../../utils/db";
 import { buildArtistIndexes } from "../../utils/subsonicIndexes";
+import { loadSubsonicArtistIndexSnapshot } from "../../services/subsonicArtistIndexCache";
 import {
     parseSubsonicId,
     toSubsonicId,
@@ -75,31 +76,8 @@ export async function handleGetIndexes(
     }
 
     try {
-        const artists = await prisma.artist.findMany({
-            where: {
-                albums: {
-                    some: LIBRARY_ALBUM_WHERE,
-                },
-            },
-            select: {
-                id: true,
-                name: true,
-                heroUrl: true,
-                lastSynced: true,
-                _count: {
-                    select: {
-                        albums: { where: LIBRARY_ALBUM_WHERE },
-                    },
-                },
-            },
-            orderBy: { name: "asc" },
-        });
-
-        const lastModified =
-            artists.reduce((latest, artist) => {
-                const syncedAt = artist.lastSynced?.getTime() ?? 0;
-                return Math.max(latest, syncedAt);
-            }, 0) || Date.now();
+        const { artists, lastModified } =
+            await loadSubsonicArtistIndexSnapshot();
         const ifModifiedSince = parseTimestampParam(req.query.ifModifiedSince);
 
         if (ifModifiedSince !== null && ifModifiedSince >= lastModified) {
@@ -118,7 +96,7 @@ export async function handleGetIndexes(
             artists.map((artist) => ({
                 id: artist.id,
                 name: artist.name,
-                albumCount: artist._count.albums,
+                albumCount: artist.albumCount,
                 coverArtId: artist.heroUrl
                     ? toSubsonicId("artist", artist.id)
                     : undefined,
@@ -170,30 +148,13 @@ export async function handleGetArtists(
     }
 
     try {
-        const artists = await prisma.artist.findMany({
-            where: {
-                albums: {
-                    some: LIBRARY_ALBUM_WHERE,
-                },
-            },
-            select: {
-                id: true,
-                name: true,
-                heroUrl: true,
-                _count: {
-                    select: {
-                        albums: { where: LIBRARY_ALBUM_WHERE },
-                    },
-                },
-            },
-            orderBy: { name: "asc" },
-        });
+        const { artists } = await loadSubsonicArtistIndexSnapshot();
 
         const indexes = buildArtistIndexes(
             artists.map((artist) => ({
                 id: artist.id,
                 name: artist.name,
-                albumCount: artist._count.albums,
+                albumCount: artist.albumCount,
                 coverArtId: artist.heroUrl
                     ? toSubsonicId("artist", artist.id)
                     : undefined,
@@ -878,34 +839,13 @@ export async function handleGetAlbumInfo2(
 async function getRootMusicDirectoryChildren(): Promise<
     Record<string, unknown>[]
 > {
-    const artists = await prisma.artist.findMany({
-        where: {
-            albums: {
-                some: LIBRARY_ALBUM_WHERE,
-            },
-        },
-        select: {
-            id: true,
-            name: true,
-            heroUrl: true,
-            _count: {
-                select: {
-                    albums: {
-                        where: LIBRARY_ALBUM_WHERE,
-                    },
-                },
-            },
-        },
-        orderBy: {
-            name: "asc",
-        },
-    });
+    const { artists } = await loadSubsonicArtistIndexSnapshot();
 
     return artists.map((artist) => ({
         ...formatArtistForSubsonic({
             id: artist.id,
             name: artist.name,
-            albumCount: artist._count.albums,
+            albumCount: artist.albumCount,
             heroUrl: artist.heroUrl,
         }),
         parent: SUBSONIC_MUSIC_FOLDER_ID,

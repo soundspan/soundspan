@@ -1,9 +1,6 @@
 import { type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
-import {
-    allocateTracksWithArtistWeighting,
-    seededShuffle,
-} from "../../services/artistSlotAllocation";
+import { allocateTracksWithArtistWeighting } from "../../services/artistSlotAllocation";
 import { prisma } from "../../utils/db";
 import {
     sendSubsonicError,
@@ -34,6 +31,7 @@ import {
     type AlbumListRecord,
     type SongEnrichment,
 } from "./shared";
+import { loadSongsByGenrePageIds } from "./genreSongPaging";
 
 async function handleGetAlbumListLike(
     req: Request,
@@ -346,39 +344,13 @@ export async function handleGetSongsByGenre(
     }
 
     try {
-        // Every request used to return the same deterministic alphabetical
-        // slice (GH #46). Matching ids are now ordered by a DAY-STABLE
-        // seeded shuffle: offset pagination stays coherent within a day
-        // while composition varies across days.
-        const matchingTracks = await prisma.track.findMany({
-            where: {
-                ...LIBRARY_TRACK_WHERE,
-                album: {
-                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
-                },
-                trackGenres: {
-                    some: {
-                        genre: {
-                            name: {
-                                equals: genre,
-                                mode: "insensitive",
-                            },
-                        },
-                    },
-                },
-            },
-            select: { id: true },
-            // Deterministic base order: the seeded shuffle is only
-            // day-stable (and offset pagination only coherent) when its
-            // input order is stable across requests and query plans.
-            orderBy: { id: "asc" },
-        });
         const dayKey = new Date().toISOString().slice(0, 10);
-        const orderedIds = seededShuffle(
-            matchingTracks.map((t) => t.id),
-            `subsonic-songs-by-genre-${genre.toLowerCase()}-${dayKey}`,
+        const pageIds = await loadSongsByGenrePageIds(
+            genre,
+            dayKey,
+            count,
+            offset,
         );
-        const pageIds = orderedIds.slice(offset, offset + count);
         const trackRows =
             pageIds.length > 0
                 ? await prisma.track.findMany({

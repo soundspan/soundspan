@@ -69,6 +69,17 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../services/searchCacheVersion", () => ({
+    getSearchCacheVersion: jest.fn().mockResolvedValue(1),
+}));
+
+jest.mock("../../utils/redis", () => ({
+    redisClient: {
+        get: jest.fn().mockResolvedValue(null),
+        setEx: jest.fn().mockResolvedValue("OK"),
+    },
+}));
+
 jest.mock("../../workers/queues", () => ({
     scanQueue: {
         getActive: jest.fn(),
@@ -1929,9 +1940,7 @@ describe("subsonic Tier B handlers", () => {
                 name: "Artist One",
                 heroUrl: null,
                 lastSynced: lastModified,
-                _count: {
-                    albums: 1,
-                },
+                libraryAlbumCount: 1,
             },
         ]);
 
@@ -1959,9 +1968,7 @@ describe("subsonic Tier B handlers", () => {
                 id: "artist-1",
                 name: "Artist One",
                 heroUrl: "https://example.com/artist.jpg",
-                _count: {
-                    albums: 2,
-                },
+                libraryAlbumCount: 2,
             },
         ]);
 
@@ -1969,19 +1976,7 @@ describe("subsonic Tier B handlers", () => {
 
         expect(mockArtistFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: {
-                    albums: {
-                        some: {
-                            location: { in: ["LIBRARY", "FEDERATED"] },
-                            tracks: {
-                                some: expect.objectContaining({
-                                    removedAt: null,
-                                    AND: expect.any(Array),
-                                }),
-                            },
-                        },
-                    },
-                },
+                where: { libraryAlbumCount: { gt: 0 } },
                 orderBy: { name: "asc" },
             }),
         );
