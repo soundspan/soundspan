@@ -9,8 +9,18 @@
 import { randomUUID } from "crypto";
 import type { Job } from "bull";
 import type Redis from "ioredis";
-import { scanQueue } from "../workers/queues";
 import { config } from "../config";
+
+/**
+ * Lazily import the scan queue so merely importing this service (routes,
+ * download services, tests) does not instantiate every Bull queue and its
+ * live Redis connections — the pre-existing call sites all imported
+ * workers/queues dynamically for exactly that reason.
+ */
+async function getScanQueue() {
+    const { scanQueue } = await import("../workers/queues");
+    return scanQueue;
+}
 import { createIORedisClient } from "../utils/ioredis";
 import { logger } from "../utils/logger";
 
@@ -88,7 +98,9 @@ async function markFollowUpAndRecheck(
     request: ScanRequest,
 ): Promise<AttemptResult> {
     const stored = await setFollowUp(request.userId, request.triggerSource);
-    const currentJob = await scanQueue.getJob(COALESCED_SCAN_JOB_ID);
+    const currentJob = await (
+        await getScanQueue()
+    ).getJob(COALESCED_SCAN_JOB_ID);
     if (currentJob && LIVE_SCAN_STATES.has(await currentJob.getState())) {
         return "done";
     }
@@ -98,7 +110,9 @@ async function markFollowUpAndRecheck(
 }
 
 async function addCoalescedScan(request: ScanRequest): Promise<void> {
-    await scanQueue.add(
+    await (
+        await getScanQueue()
+    ).add(
         "scan",
         { userId: request.userId, source: "coalesced-library-scan" },
         {
@@ -114,7 +128,9 @@ async function addCoalescedScan(request: ScanRequest): Promise<void> {
 }
 
 async function recheckAddedJob(request: ScanRequest): Promise<AttemptResult> {
-    const currentJob = await scanQueue.getJob(COALESCED_SCAN_JOB_ID);
+    const currentJob = await (
+        await getScanQueue()
+    ).getJob(COALESCED_SCAN_JOB_ID);
     if (!currentJob) return "retry";
     const state = await currentJob.getState();
     if (QUEUED_STATES.has(state)) return "done";
@@ -155,7 +171,9 @@ async function requestWithinAttemptLimit(
     request: ScanRequest,
 ): Promise<boolean> {
     for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
-        const existingJob = await scanQueue.getJob(COALESCED_SCAN_JOB_ID);
+        const existingJob = await (
+            await getScanQueue()
+        ).getJob(COALESCED_SCAN_JOB_ID);
         const result = existingJob
             ? await handleExistingJob(existingJob, request)
             : await addAndRecheck(request);
