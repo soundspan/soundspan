@@ -315,6 +315,7 @@ function composeConfig(
     postgresPassword,
     profiles = ["*"],
     environmentOverrides = {},
+    relativePath = "docker-compose.yml",
 ) {
     const environment = {
         ...process.env,
@@ -329,6 +330,9 @@ function composeConfig(
     } else {
         environment.POSTGRES_PASSWORD = postgresPassword;
     }
+    if (!("SCAN_FILE_CONCURRENCY" in environmentOverrides)) {
+        delete environment.SCAN_FILE_CONCURRENCY;
+    }
 
     const profileArgs = profiles.flatMap((profile) => ["--profile", profile]);
     const args = [
@@ -337,7 +341,7 @@ function composeConfig(
         os.devNull,
         ...profileArgs,
         "-f",
-        path.join(repoRoot, "docker-compose.yml"),
+        path.join(repoRoot, relativePath),
         "config",
         "--format",
         "json",
@@ -588,6 +592,54 @@ test("8a. split-stack compose defaults to the DCLAP vibe provider", () => {
     assert.equal(
         customPortServices.backend.environment.VIBE_PROVIDER_URL,
         "http://vibe-provider-dclap:8192",
+    );
+});
+
+test("8b. compose forwards scan file concurrency defaults and overrides", () => {
+    const splitDefault = composeConfig("test-password");
+    const splitOverride = composeConfig("test-password", ["*"], {
+        SCAN_FILE_CONCURRENCY: "7",
+    });
+    const aioDefault = composeConfig("", [], {}, "docker-compose.aio.yml");
+    const aioOverride = composeConfig(
+        "",
+        [],
+        { SCAN_FILE_CONCURRENCY: "7" },
+        "docker-compose.aio.yml",
+    );
+
+    for (const result of [
+        splitDefault,
+        splitOverride,
+        aioDefault,
+        aioOverride,
+    ]) {
+        assert.equal(result.status, 0, result.stderr);
+    }
+
+    const splitDefaultServices = JSON.parse(splitDefault.stdout).services;
+    const splitOverrideServices = JSON.parse(splitOverride.stdout).services;
+    for (const serviceName of ["backend", "backend-worker"]) {
+        assert.equal(
+            splitDefaultServices[serviceName].environment.SCAN_FILE_CONCURRENCY,
+            "3",
+        );
+        assert.equal(
+            splitOverrideServices[serviceName].environment
+                .SCAN_FILE_CONCURRENCY,
+            "7",
+        );
+    }
+
+    assert.equal(
+        JSON.parse(aioDefault.stdout).services.soundspan.environment
+            .SCAN_FILE_CONCURRENCY,
+        "3",
+    );
+    assert.equal(
+        JSON.parse(aioOverride.stdout).services.soundspan.environment
+            .SCAN_FILE_CONCURRENCY,
+        "7",
     );
 });
 

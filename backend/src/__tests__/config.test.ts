@@ -664,6 +664,22 @@ describe("config module", () => {
         });
     });
 
+    it.each([
+        [undefined, 3],
+        ["1", 1],
+        ["10", 10],
+        ["0", 3],
+        ["11", 3],
+        ["1.5", 3],
+        ["not-a-number", 3],
+    ])("parses bounded SCAN_FILE_CONCURRENCY %s", async (raw, expected) => {
+        const { config } = await loadConfigModule({
+            SCAN_FILE_CONCURRENCY: raw,
+        });
+
+        expect(config.scanFileConcurrency).toBe(expected);
+    });
+
     it("treats only literal true as an enabled feature flag", async () => {
         const { config } = await loadConfigModule({
             LIDARR_ENABLED: "TRUE",

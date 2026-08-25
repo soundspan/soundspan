@@ -3,7 +3,13 @@ const mockStat = jest.fn();
 const mockUnlink = jest.fn();
 const mockExistsSync = jest.fn();
 const mockParseFile = jest.fn();
-const queueInstances: Array<{ add: jest.Mock; onIdle: jest.Mock }> = [];
+const queueInstances: Array<{
+    add: jest.Mock;
+    maxSize: number;
+    onIdle: jest.Mock;
+    onSizeLessThan: jest.Mock;
+    readonly size: number;
+}> = [];
 
 const mockPrisma = {
     track: {
@@ -77,7 +83,9 @@ const mockGetAlbumCover = jest.fn();
 const mockNormalizeArtistName = jest.fn((name: string) =>
     name.trim().toLowerCase(),
 );
-const mockAreArtistNamesSimilar = jest.fn(() => false);
+const mockAreArtistNamesSimilar = jest.fn(
+    (_first: string, _second: string, _threshold: number) => false,
+);
 const mockCanonicalizeVariousArtists = jest.fn((name: string) => name);
 const mockExtractPrimaryArtist = jest.fn((name: string) => name);
 const mockParseArtistFromPath = jest.fn((name: string) => name);
@@ -86,6 +94,7 @@ const mockCreateMapping = jest.fn();
 const mockRecomputeAlbumLoudness = jest.fn();
 const mockConfig = {
     music: { transcodeCachePath: "/cache/transcodes" },
+    scanFileConcurrency: 2,
     workers: { trackRemovalRetentionDays: 90, providerTrackRetentionDays: 30 },
     features: { federation: false },
 };
@@ -112,11 +121,80 @@ jest.mock("p-queue", () => ({
     default: class MockPQueue {
         add: jest.Mock;
         onIdle: jest.Mock;
+        onSizeLessThan: jest.Mock;
+        maxSize = 0;
+        private readonly concurrency: number;
+        private running = 0;
+        private pending: Array<() => void> = [];
+        private idleWaiters: Array<() => void> = [];
+        private sizeWaiters: Array<{ limit: number; resolve: () => void }> = [];
 
-        constructor() {
-            this.add = jest.fn(async (task: () => Promise<unknown>) => task());
-            this.onIdle = jest.fn(async () => undefined);
+        get size(): number {
+            return this.pending.length;
+        }
+
+        constructor(options: { concurrency: number }) {
+            this.concurrency = options.concurrency;
+            this.add = jest.fn(
+                (task: () => Promise<unknown>) =>
+                    new Promise<unknown>((resolve, reject) => {
+                        const start = () => {
+                            this.running++;
+                            Promise.resolve()
+                                .then(task)
+                                .then(resolve, reject)
+                                .finally(() => {
+                                    this.running--;
+                                    this.pending.shift()?.();
+                                    this.resolveSizeWaiters();
+                                    if (
+                                        this.running === 0 &&
+                                        this.pending.length === 0
+                                    ) {
+                                        this.idleWaiters
+                                            .splice(0)
+                                            .forEach((waiter) => waiter());
+                                    }
+                                });
+                        };
+                        if (this.running < this.concurrency) start();
+                        else {
+                            this.pending.push(start);
+                            this.maxSize = Math.max(
+                                this.maxSize,
+                                this.pending.length,
+                            );
+                        }
+                    }),
+            );
+            this.onSizeLessThan = jest.fn(
+                (limit: number) =>
+                    new Promise<void>((resolve) => {
+                        if (this.pending.length < limit) resolve();
+                        else this.sizeWaiters.push({ limit, resolve });
+                    }),
+            );
+            this.onIdle = jest.fn(
+                () =>
+                    new Promise<void>((resolve) => {
+                        if (this.running === 0 && this.pending.length === 0) {
+                            resolve();
+                        } else {
+                            this.idleWaiters.push(resolve);
+                        }
+                    }),
+            );
             queueInstances.push(this);
+        }
+
+        private resolveSizeWaiters(): void {
+            const ready = this.sizeWaiters.filter(
+                ({ limit }) => this.pending.length < limit,
+            );
+            this.sizeWaiters = this.sizeWaiters.filter(
+                ({ limit }) => this.pending.length >= limit,
+            );
+            ready.forEach(({ resolve }) => resolve());
         }
     },
 }));
@@ -230,10 +308,33 @@ function identityTrack(
     };
 }
 
+function deferred<T = void>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (error: Error) => void;
+} {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt++) {
+        if (condition()) return;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error("Timed out waiting for controlled async work");
+}
+
 describe("MusicScannerService.scanLibrary", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         queueInstances.length = 0;
+        mockConfig.scanFileConcurrency = 2;
         mockConfig.workers.trackRemovalRetentionDays = 90;
         mockConfig.features.federation = false;
 
@@ -341,6 +442,742 @@ describe("MusicScannerService.scanLibrary", () => {
     afterEach(() => {
         jest.useRealTimers();
         jest.restoreAllMocks();
+    });
+
+    it("starts multiple per-file tasks before the first one completes", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/Artist/First.flac",
+            "/music/Artist/Second.flac",
+            "/music/Artist/Third.flac",
+        ];
+        const controls = new Map(audioFiles.map((file) => [file, deferred()]));
+        const started: string[] = [];
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        jest.spyOn(scanner as any, "processAudioFile").mockImplementation(
+            async (...args: unknown[]) => {
+                const audioFile = String(args[0]);
+                started.push(audioFile);
+                await controls.get(audioFile)!.promise;
+            },
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(
+            () => queueInstances[0]?.add.mock.calls.length > 0,
+        );
+
+        expect(started).toEqual(audioFiles.slice(0, 2));
+        controls.forEach((control) => control.resolve());
+        await scan;
+    });
+
+    it("never exceeds the configured per-file concurrency", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = Array.from(
+            { length: 5 },
+            (_, index) => `/music/Artist/Track-${index}.flac`,
+        );
+        const releases: Array<() => void> = [];
+        let inFlight = 0;
+        let maxInFlight = 0;
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        jest.spyOn(scanner as any, "processAudioFile").mockImplementation(
+            () =>
+                new Promise<void>((resolve) => {
+                    inFlight++;
+                    maxInFlight = Math.max(maxInFlight, inFlight);
+                    releases.push(() => {
+                        inFlight--;
+                        resolve();
+                    });
+                }),
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(
+            () => queueInstances[0]?.add.mock.calls.length > 0,
+        );
+        expect(inFlight).toBe(2);
+        releases.splice(0).forEach((release) => release());
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        releases.splice(0).forEach((release) => release());
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        releases.splice(0).forEach((release) => release());
+        await scan;
+
+        expect(maxInFlight).toBe(mockConfig.scanFileConcurrency);
+    });
+
+    it("keeps the pending producer backlog within four concurrency batches", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = Array.from(
+            { length: 50 },
+            (_, index) => `/music/Artist/Track-${index}.flac`,
+        );
+        const work = deferred();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        jest.spyOn(scanner as any, "processAudioFile").mockImplementation(
+            () => work.promise,
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(() => queueInstances[0]?.size >= 8);
+
+        const maxPendingSize = queueInstances[0].maxSize;
+        work.resolve();
+        await scan;
+        expect(maxPendingSize).toBeLessThanOrEqual(
+            mockConfig.scanFileConcurrency * 4,
+        );
+    });
+
+    it("serializes artist creation but preserves exact untagged album titles", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/New Artist/New Album/01.flac",
+            "/music/New Artist/New Album/02.flac",
+        ];
+        const artistLookup = deferred<null>();
+        const artistCreate = deferred<any>();
+        let createdArtist: any;
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockParseFile.mockImplementation(async (audioFile: string) => ({
+            common: {
+                title: audioFile.includes("01") ? "Track 1" : "Track 2",
+                track: { no: audioFile.includes("01") ? 1 : 2 },
+                disk: { no: 1 },
+                albumartist: "New Artist",
+                album: audioFile.includes("01")
+                    ? "New Album"
+                    : "  NEW   ALBUM ",
+            },
+            format: { duration: 180, codec: "audio/flac" },
+        }));
+        mockPrisma.artist.findFirst.mockImplementation(() =>
+            createdArtist
+                ? Promise.resolve(createdArtist)
+                : artistLookup.promise,
+        );
+        mockPrisma.artist.findMany.mockResolvedValue([]);
+        mockPrisma.artist.create.mockImplementation(() =>
+            artistCreate.promise.then((artist) => {
+                createdArtist = artist;
+                return artist;
+            }),
+        );
+        mockPrisma.album.findFirst.mockResolvedValue(null);
+        mockPrisma.album.create.mockImplementation(
+            async ({ data }: { data: { title: string } }) => ({
+                id: data.title === "New Album" ? "album-exact" : "album-spaced",
+                title: data.title,
+                coverUrl: null,
+                location: "LIBRARY",
+                rgMbid: `temp-${data.title}`,
+            }),
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(() => mockParseFile.mock.calls.length === 2);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const artistLookupCalls = mockPrisma.artist.findFirst.mock.calls.length;
+
+        artistLookup.resolve(null);
+        await waitForCondition(
+            () => mockPrisma.artist.create.mock.calls.length > 0,
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        artistCreate.resolve({
+            id: "artist-new",
+            name: "New Artist",
+            normalizedName: "new artist",
+        });
+
+        await scan;
+        expect(artistLookupCalls).toBe(2);
+        expect(mockPrisma.artist.findFirst).toHaveBeenCalledTimes(4);
+        expect(mockPrisma.artist.create).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
+            where: { artistId: "artist-new", title: "New Album" },
+        });
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
+            where: { artistId: "artist-new", title: "  NEW   ALBUM " },
+        });
+        expect(mockPrisma.album.create).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(2);
+        expect(
+            mockPrisma.track.upsert.mock.calls.map(
+                ([args]) => args.create.albumId,
+            ),
+        ).toEqual(expect.arrayContaining(["album-exact", "album-spaced"]));
+    });
+
+    it("resolves concurrent raw artist fallbacks independently", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/Artist & Guest A/Shared Album/01.flac",
+            "/music/Artist & Guest B/Shared Album/02.flac",
+        ];
+        const primaryLookup = deferred<null>();
+        const artistsByNormalizedName = new Map([
+            [
+                "artist & guest a",
+                {
+                    id: "artist-guest-a",
+                    name: "Artist & Guest A",
+                    normalizedName: "artist & guest a",
+                },
+            ],
+            [
+                "artist & guest b",
+                {
+                    id: "artist-guest-b",
+                    name: "Artist & Guest B",
+                    normalizedName: "artist & guest b",
+                },
+            ],
+        ]);
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockExtractPrimaryArtist
+            .mockReturnValueOnce("Artist")
+            .mockReturnValueOnce("Artist");
+        mockParseFile.mockImplementation(async (audioFile: string) => ({
+            common: {
+                title: audioFile.includes("01") ? "Track 1" : "Track 2",
+                track: { no: audioFile.includes("01") ? 1 : 2 },
+                disk: { no: 1 },
+                albumartist: audioFile.includes("Guest A")
+                    ? "Artist & Guest A"
+                    : "Artist & Guest B",
+                album: "Shared Album",
+            },
+            format: { duration: 180, codec: "audio/flac" },
+        }));
+        mockPrisma.artist.findFirst.mockImplementation(
+            ({ where }: { where: { normalizedName: string } }) => {
+                if (where.normalizedName === "artist") {
+                    return primaryLookup.promise;
+                }
+                return Promise.resolve(
+                    artistsByNormalizedName.get(where.normalizedName) ?? null,
+                );
+            },
+        );
+        mockPrisma.album.findFirst.mockImplementation(
+            async ({ where }: { where: { artistId: string } }) => ({
+                id: `album-${where.artistId}`,
+                title: "Shared Album",
+                coverUrl: null,
+                location: "LIBRARY",
+                rgMbid: `rg-${where.artistId}`,
+            }),
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(() => mockParseFile.mock.calls.length === 2);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        primaryLookup.resolve(null);
+        await scan;
+
+        expect(mockPrisma.artist.findFirst).toHaveBeenCalledWith({
+            where: { normalizedName: "artist & guest a" },
+        });
+        expect(mockPrisma.artist.findFirst).toHaveBeenCalledWith({
+            where: { normalizedName: "artist & guest b" },
+        });
+        expect(
+            mockPrisma.track.upsert.mock.calls.map(([args]) => [
+                args.create.filePath,
+                args.create.albumId,
+            ]),
+        ).toEqual(
+            expect.arrayContaining([
+                [
+                    "Artist & Guest A/Shared Album/01.flac",
+                    "album-artist-guest-a",
+                ],
+                [
+                    "Artist & Guest B/Shared Album/02.flac",
+                    "album-artist-guest-b",
+                ],
+            ]),
+        );
+    });
+
+    it("serializes concurrent creation by normalized artist name", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/Artist feat. Guest A/Shared Album/01.flac",
+            "/music/Artist feat. Guest B/Shared Album/02.flac",
+        ];
+        let createdArtist:
+            | {
+                  id: string;
+                  name: string;
+                  normalizedName: string;
+              }
+            | undefined;
+        let primaryLookupDelayed = false;
+        const albumsByIdentity = new Map<
+            string,
+            {
+                id: string;
+                title: string;
+                coverUrl: null;
+                location: string;
+                rgMbid: string;
+            }
+        >();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockExtractPrimaryArtist
+            .mockReturnValueOnce("Artist")
+            .mockReturnValueOnce("Artist");
+        mockParseFile.mockImplementation(async (audioFile: string) => ({
+            common: {
+                title: audioFile.includes("01") ? "Track 1" : "Track 2",
+                track: { no: audioFile.includes("01") ? 1 : 2 },
+                disk: { no: 1 },
+                albumartist: audioFile.includes("Guest A")
+                    ? "Artist feat. Guest A"
+                    : "Artist feat. Guest B",
+                album: "Shared Album",
+            },
+            format: { duration: 180, codec: "audio/flac" },
+        }));
+        mockPrisma.artist.findFirst.mockImplementation(
+            async ({ where }: { where: { normalizedName: string } }) => {
+                if (where.normalizedName !== "artist") return null;
+                const artistAtLookup = createdArtist;
+                if (!artistAtLookup && !primaryLookupDelayed) {
+                    primaryLookupDelayed = true;
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                }
+                return artistAtLookup ?? null;
+            },
+        );
+        mockPrisma.artist.create.mockImplementation(
+            async ({ data }: { data: { name: string } }) => {
+                createdArtist = {
+                    id: `artist-${mockPrisma.artist.create.mock.calls.length}`,
+                    name: data.name,
+                    normalizedName: "artist",
+                };
+                return createdArtist;
+            },
+        );
+        mockPrisma.album.findFirst.mockImplementation(
+            async ({ where }: { where: { artistId: string; title: string } }) =>
+                albumsByIdentity.get(`${where.artistId}:${where.title}`) ??
+                null,
+        );
+        mockPrisma.album.create.mockImplementation(
+            async ({ data }: { data: { artistId: string; title: string } }) => {
+                const album = {
+                    id: `album-${data.artistId}`,
+                    title: data.title,
+                    coverUrl: null,
+                    location: "LIBRARY",
+                    rgMbid: `temp-${data.artistId}`,
+                };
+                albumsByIdentity.set(`${data.artistId}:${data.title}`, album);
+                return album;
+            },
+        );
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.artist.create).toHaveBeenCalledTimes(1);
+        expect(createdArtist?.id).toBe("artist-1");
+        expect(mockPrisma.album.create).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.album.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ artistId: "artist-1" }),
+            }),
+        );
+        expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(2);
+        for (const [args] of mockPrisma.track.upsert.mock.calls) {
+            expect(args.create.albumId).toBe("album-artist-1");
+        }
+    });
+
+    it("serializes concurrent creation for fuzzy-equivalent artist names", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/The Weeknd/Shared Album/01.flac",
+            "/music/the weekend/Shared Album/02.flac",
+        ];
+        const initialFuzzyLookups = deferred<never[]>();
+        const artistsByNormalizedName = new Map<
+            string,
+            {
+                id: string;
+                name: string;
+                normalizedName: string;
+            }
+        >();
+        const albumsByIdentity = new Map<
+            string,
+            {
+                id: string;
+                title: string;
+                coverUrl: null;
+                location: string;
+                rgMbid: string;
+            }
+        >();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockParseFile.mockImplementation(async (audioFile: string) => {
+            const first = audioFile.includes("/The Weeknd/");
+            return {
+                common: {
+                    title: first ? "Track 1" : "Track 2",
+                    track: { no: first ? 1 : 2 },
+                    disk: { no: 1 },
+                    albumartist: first ? "The Weeknd" : "the weekend",
+                    album: "Shared Album",
+                },
+                format: { duration: 180, codec: "audio/flac" },
+            };
+        });
+        mockPrisma.artist.findFirst.mockImplementation(
+            async ({ where }: { where: { normalizedName: string } }) =>
+                artistsByNormalizedName.get(where.normalizedName) ?? null,
+        );
+        mockPrisma.artist.findMany.mockImplementation(
+            ({
+                where,
+            }: {
+                where: { normalizedName: { startsWith: string } };
+            }) => {
+                if (mockPrisma.artist.findMany.mock.calls.length <= 2) {
+                    return initialFuzzyLookups.promise;
+                }
+                return Promise.resolve(
+                    [...artistsByNormalizedName.values()].filter((artist) =>
+                        artist.normalizedName.startsWith(
+                            where.normalizedName.startsWith,
+                        ),
+                    ),
+                );
+            },
+        );
+        mockAreArtistNamesSimilar.mockImplementation(
+            (first: string, second: string, threshold: number) =>
+                threshold === 95 &&
+                new Set([first.toLowerCase(), second.toLowerCase()]).size === 2,
+        );
+        mockPrisma.artist.create.mockImplementation(
+            async ({
+                data,
+            }: {
+                data: { name: string; normalizedName: string };
+            }) => {
+                const artist = {
+                    id: `artist-${mockPrisma.artist.create.mock.calls.length}`,
+                    name: data.name,
+                    normalizedName: data.normalizedName,
+                };
+                artistsByNormalizedName.set(data.normalizedName, artist);
+                return artist;
+            },
+        );
+        mockPrisma.album.findFirst.mockImplementation(
+            async ({ where }: { where: { artistId: string; title: string } }) =>
+                albumsByIdentity.get(`${where.artistId}:${where.title}`) ??
+                null,
+        );
+        mockPrisma.album.create.mockImplementation(
+            async ({ data }: { data: { artistId: string; title: string } }) => {
+                const album = {
+                    id: `album-${data.artistId}`,
+                    title: data.title,
+                    coverUrl: null,
+                    location: "LIBRARY",
+                    rgMbid: `temp-${data.artistId}`,
+                };
+                albumsByIdentity.set(`${data.artistId}:${data.title}`, album);
+                return album;
+            },
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(
+            () => mockPrisma.artist.findMany.mock.calls.length === 2,
+        );
+        initialFuzzyLookups.resolve([]);
+        await scan;
+
+        expect(mockPrisma.artist.create).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(2);
+        expect(
+            mockPrisma.track.upsert.mock.calls.map(
+                ([args]) => args.create.albumId,
+            ),
+        ).toEqual(["album-artist-1", "album-artist-1"]);
+    });
+
+    it("singleflights concurrent tagged creation of the same new album", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/Tagged Artist/Tagged Album/01.flac",
+            "/music/Tagged Artist/Tagged Album/02.flac",
+        ];
+        const albumLookup = deferred<null>();
+        const albumCreate = deferred<any>();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockParseFile.mockImplementation(async (audioFile: string) => ({
+            common: {
+                title: audioFile.includes("01") ? "Track 1" : "Track 2",
+                track: { no: audioFile.includes("01") ? 1 : 2 },
+                disk: { no: 1 },
+                albumartist: "Test Artist",
+                album: "Tagged Album",
+                musicbrainz_releasegroupid: "rg-tagged",
+            },
+            format: { duration: 180, codec: "audio/flac" },
+        }));
+        mockPrisma.album.findFirst.mockReturnValue(albumLookup.promise);
+        mockPrisma.album.create.mockReturnValue(albumCreate.promise);
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(
+            () => mockPrisma.album.findFirst.mock.calls.length > 0,
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const albumLookupCalls = mockPrisma.album.findFirst.mock.calls.length;
+        albumLookup.resolve(null);
+        await waitForCondition(
+            () => mockPrisma.album.create.mock.calls.length > 0,
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const albumCreateCalls = mockPrisma.album.create.mock.calls.length;
+        albumCreate.resolve({
+            id: "album-tagged",
+            title: "Tagged Album",
+            coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: "rg-tagged",
+        });
+
+        await scan;
+        expect(albumLookupCalls).toBe(1);
+        expect(albumCreateCalls).toBe(1);
+        expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(2);
+        for (const [args] of mockPrisma.track.upsert.mock.calls) {
+            expect(args.create.albumId).toBe("album-tagged");
+        }
+    });
+
+    it("creates same-titled tagged albums with different release-group MBIDs concurrently", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/Tagged Artist/Self Titled/01.flac",
+            "/music/Tagged Artist/Self Titled/02.flac",
+        ];
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockParseFile.mockImplementation(async (audioFile: string) => {
+            const first = audioFile.includes("01");
+            return {
+                common: {
+                    title: first ? "Track 1" : "Track 2",
+                    track: { no: first ? 1 : 2 },
+                    disk: { no: 1 },
+                    albumartist: "Test Artist",
+                    album: "Self Titled",
+                    musicbrainz_releasegroupid: first ? "rg-one" : "rg-two",
+                },
+                format: { duration: 180, codec: "audio/flac" },
+            };
+        });
+        mockPrisma.album.findFirst.mockResolvedValue(null);
+        mockPrisma.album.findUnique.mockResolvedValue(null);
+        mockPrisma.album.create.mockImplementation(
+            async ({ data }: { data: { rgMbid: string; title: string } }) => ({
+                id: `album-${data.rgMbid}`,
+                title: data.title,
+                coverUrl: null,
+                location: "LIBRARY",
+                rgMbid: data.rgMbid,
+            }),
+        );
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.album.create).toHaveBeenCalledTimes(2);
+        expect(
+            mockPrisma.track.upsert.mock.calls.map(
+                ([args]) => args.create.albumId,
+            ),
+        ).toEqual(expect.arrayContaining(["album-rg-one", "album-rg-two"]));
+    });
+
+    it("loads selected discovery download identities once per scan and resets between scans", async () => {
+        const scanner = new MusicScannerService();
+        const findAudioFiles = jest
+            .spyOn(scanner as any, "findAudioFiles")
+            .mockResolvedValueOnce([
+                "/music/Artist/First.flac",
+                "/music/Artist/Second.flac",
+            ])
+            .mockResolvedValueOnce(["/music/Artist/Third.flac"]);
+
+        await scanner.scanLibrary("/music");
+        expect(mockPrisma.downloadJob.findMany).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: {
+                discoveryBatchId: { not: null },
+                status: { in: ["pending", "processing", "completed"] },
+            },
+            select: { id: true, metadata: true },
+        });
+
+        await scanner.scanLibrary("/music");
+        expect(findAudioFiles).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.downloadJob.findMany).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries discovery identity loading after a per-file database failure", async () => {
+        mockConfig.scanFileConcurrency = 1;
+        const scanner = new MusicScannerService();
+        const firstFile = "/music/Artist/First.flac";
+        const secondFile = "/music/Artist/Second.flac";
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            firstFile,
+            secondFile,
+        ]);
+        mockPrisma.downloadJob.findMany
+            .mockRejectedValueOnce(new Error("transient discovery query"))
+            .mockResolvedValueOnce([]);
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 1,
+                errors: [
+                    { file: firstFile, error: "transient discovery query" },
+                ],
+            }),
+        );
+        expect(mockPrisma.downloadJob.findMany).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for every per-file task before producing the scan result", async () => {
+        const scanner = new MusicScannerService();
+        const lateFile = "/music/Artist/Late.flac";
+        const late = deferred();
+        let scanSettled = false;
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            "/music/Artist/Early.flac",
+            lateFile,
+        ]);
+        jest.spyOn(scanner as any, "processAudioFile").mockImplementation(
+            (...args: unknown[]) =>
+                String(args[0]) === lateFile ? late.promise : Promise.resolve(),
+        );
+
+        const scan = scanner.scanLibrary("/music").then((result) => {
+            scanSettled = true;
+            return result;
+        });
+        await waitForCondition(
+            () => (scanner as any).processAudioFile.mock.calls.length === 2,
+        );
+
+        expect(scanSettled).toBe(false);
+        late.resolve();
+        await expect(scan).resolves.toEqual(
+            expect.objectContaining({ tracksAdded: 2, errors: [] }),
+        );
+    });
+
+    it("retains successful file results when a concurrent file records an error", async () => {
+        const scanner = new MusicScannerService();
+        const badFile = "/music/Artist/Bad.flac";
+        const audioFiles = [
+            "/music/Artist/First.flac",
+            badFile,
+            "/music/Artist/Last.flac",
+        ];
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        jest.spyOn(scanner as any, "processAudioFile").mockImplementation(
+            (...args: unknown[]) =>
+                String(args[0]) === badFile
+                    ? Promise.reject(new Error("metadata read failed"))
+                    : Promise.resolve(),
+        );
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 2,
+                errors: [{ file: badFile, error: "metadata read failed" }],
+            }),
+        );
+        expect((scanner as any).processAudioFile).toHaveBeenCalledTimes(3);
+    });
+
+    it("counts a null task rejection as one file error and completes", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Null.flac";
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            audioFile,
+        ]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            identityTrack("track-null", "Artist/Null.flac"),
+        ]);
+        mockParseFile.mockRejectedValueOnce(null);
+
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 0,
+                errors: [{ file: audioFile, error: "null" }],
+            }),
+        );
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("accounts for a queue admission rejection exactly once", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Rejected.flac";
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            audioFile,
+        ]);
+        queueInstances[0].add.mockRejectedValueOnce(
+            new Error("queue admission failed"),
+        );
+
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                errors: [{ file: audioFile, error: "queue admission failed" }],
+            }),
+        );
     });
 
     it("hides a federated duplicate when a matching local rip arrives", async () => {
@@ -1364,6 +2201,72 @@ describe("MusicScannerService.scanLibrary", () => {
                 }),
             }),
         );
+    });
+
+    it("serializes full-file duration fallbacks while header parses remain concurrent", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = [
+            "/music/Artist/First.opus",
+            "/music/Artist/Second.opus",
+        ];
+        const firstFallback = deferred<any>();
+        const secondFallback = deferred<any>();
+        const fallbackStarts: string[] = [];
+        const headerStarts: string[] = [];
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        mockParseFile.mockImplementation(
+            async (audioFile: string, options?: { duration?: boolean }) => {
+                const common = {
+                    title: audioFile.includes("First") ? "First" : "Second",
+                    track: { no: 1 },
+                    disk: { no: 1 },
+                    albumartist: "Test Artist",
+                    album: "Test Album",
+                };
+                if (!options?.duration) {
+                    headerStarts.push(audioFile);
+                    return { common, format: { codec: "opus" } };
+                }
+                fallbackStarts.push(audioFile);
+                return audioFile.includes("First")
+                    ? firstFallback.promise
+                    : secondFallback.promise;
+            },
+        );
+
+        const scan = scanner.scanLibrary("/music");
+        await waitForCondition(() => headerStarts.length === 2);
+        await waitForCondition(() => fallbackStarts.length > 0);
+
+        expect(headerStarts).toHaveLength(2);
+        const fallbacksBeforeFirstCompletion = [...fallbackStarts];
+        firstFallback.resolve({
+            common: {
+                title: "First",
+                track: { no: 1 },
+                disk: { no: 1 },
+                albumartist: "Test Artist",
+                album: "Test Album",
+            },
+            format: { duration: 180, codec: "opus" },
+        });
+        await waitForCondition(() => fallbackStarts.length === 2);
+        secondFallback.resolve({
+            common: {
+                title: "Second",
+                track: { no: 2 },
+                disk: { no: 1 },
+                albumartist: "Test Artist",
+                album: "Test Album",
+            },
+            format: { duration: 181, codec: "opus" },
+        });
+
+        await scan;
+        expect(fallbacksBeforeFirstCompletion).toEqual([audioFiles[0]]);
+        expect(fallbackStarts).toEqual(audioFiles);
     });
 
     it("resolves albums by release-group MBID so same-titled albums never merge", async () => {
@@ -2445,7 +3348,7 @@ describe("MusicScannerService.scanLibrary", () => {
         });
     });
 
-    it("continues scan with deterministic progress and mixed file outcomes", async () => {
+    it("continues scan with completion-ordered progress and mixed file outcomes", async () => {
         const progress: Array<{
             filesScanned: number;
             filesTotal: number;
@@ -2502,7 +3405,7 @@ describe("MusicScannerService.scanLibrary", () => {
             expect.objectContaining({
                 filesScanned: 2,
                 filesTotal: 2,
-                currentFile: "Broken/Bad.flac",
+                currentFile: "Good/Track.flac",
                 errors: [{ file: badFile, error: "metadata read failed" }],
             }),
         );
@@ -2510,23 +3413,29 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(queueInstances[0].onIdle).toHaveBeenCalledTimes(1);
     });
 
-    it("propagates queue scheduling failures", async () => {
+    it("records a task-wrapper failure exactly once without rejecting the queue", async () => {
         const scanner = new MusicScannerService();
-        const audioFile = "/music/Queued/Fail.flac";
+        const audioFile = "/music/Callback/Fail.flac";
 
         jest.spyOn(
             MusicScannerService.prototype as any,
             "findAudioFiles",
         ).mockResolvedValue([audioFile]);
+        const progressFailure = jest.fn(() => {
+            throw new Error("progress callback failed");
+        });
+        (scanner as any).progressCallback = progressFailure;
 
-        queueInstances[0].add = jest
-            .fn()
-            .mockRejectedValue(new Error("queue unavailable"));
-
-        await expect(scanner.scanLibrary("/music")).rejects.toThrow(
-            "queue unavailable",
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                errors: [
+                    { file: audioFile, error: "progress callback failed" },
+                ],
+            }),
         );
         expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
+        expect(progressFailure).toHaveBeenCalledTimes(2);
     });
 
     it("does not fail the scan when scoped artist count refresh fails", async () => {
@@ -2602,16 +3511,6 @@ describe("MusicScannerService helper methods", () => {
             scanner.isDiscoveryDownload("Artist Name", "Album Name"),
         ).resolves.toBe(true);
 
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-partial",
-                metadata: {
-                    artistName: "Artist Name",
-                    albumTitle: "Album Name",
-                },
-            },
-        ]);
-
         await expect(
             scanner.isDiscoveryDownload("Artist Name", "Album Name (Deluxe)"),
         ).resolves.toBe(true);
@@ -2686,6 +3585,7 @@ describe("MusicScannerService helper methods", () => {
             scanner.isDiscoveryDownload("Featured Guest", "Shared Album"),
         ).resolves.toBe(true);
 
+        scanner.discoveryDownloadIdentities = undefined;
         mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
         mockPrisma.discoveryAlbum.findFirst.mockResolvedValueOnce({
             id: "discovery-by-title",
@@ -2694,6 +3594,7 @@ describe("MusicScannerService helper methods", () => {
             scanner.isDiscoveryDownload("Any Artist", "Unique Album"),
         ).resolves.toBe(true);
 
+        scanner.discoveryDownloadIdentities = undefined;
         mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
         mockPrisma.discoveryAlbum.findFirst
             .mockResolvedValueOnce(null)
@@ -2703,6 +3604,7 @@ describe("MusicScannerService helper methods", () => {
             scanner.isDiscoveryDownload("Discovery Artist", "Other Album"),
         ).resolves.toBe(true);
 
+        scanner.discoveryDownloadIdentities = undefined;
         mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
         mockPrisma.discoveryAlbum.findFirst
             .mockResolvedValueOnce(null)
@@ -2716,16 +3618,23 @@ describe("MusicScannerService helper methods", () => {
         ).resolves.toBe(false);
     });
 
-    it("returns false when discovery matching throws", async () => {
+    it("propagates discovery matching failures and retries after cache rejection", async () => {
         const scanner = new MusicScannerService() as any;
-        mockPrisma.downloadJob.findMany.mockRejectedValueOnce(
-            new Error("db down"),
-        );
+        mockPrisma.downloadJob.findMany
+            .mockRejectedValueOnce(new Error("db down"))
+            .mockResolvedValueOnce([]);
+        mockPrisma.discoveryAlbum.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+        mockPrisma.album.findFirst.mockResolvedValueOnce(null);
 
         await expect(
             scanner.isDiscoveryDownload("Artist Name", "Album Name"),
+        ).rejects.toThrow("db down");
+        await expect(
+            scanner.isDiscoveryDownload("Artist Name", "Album Name"),
         ).resolves.toBe(false);
-        expect(mockLogger.error).toHaveBeenCalled();
+        expect(mockPrisma.downloadJob.findMany).toHaveBeenCalledTimes(2);
     });
 
     it("returns false when discovery download cannot be matched", async () => {
@@ -3150,9 +4059,10 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         const conflict = new Error("duplicate");
         (conflict as Error & { code: string }).code = "P2002";
 
-        mockPrisma.artist.findFirst.mockResolvedValueOnce(null);
-        mockPrisma.artist.findMany.mockResolvedValueOnce([]);
+        mockPrisma.artist.findFirst.mockResolvedValue(null);
+        mockPrisma.artist.findMany.mockResolvedValue([]);
         mockPrisma.artist.findUnique
+            .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({
                 id: "artist-existing",
@@ -3203,7 +4113,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1700000000000);
         const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.12345);
 
-        mockPrisma.artist.findFirst.mockResolvedValueOnce(null);
+        mockPrisma.artist.findFirst.mockResolvedValue(null);
         mockPrisma.artist.findMany.mockResolvedValue([]);
         mockPrisma.artist.findUnique.mockResolvedValue(null);
         mockPrisma.artist.create.mockResolvedValue({
@@ -3308,7 +4218,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         expect(mockPrisma.artist.create).not.toHaveBeenCalled();
     });
 
-    it("updates artist capitalization when existing name is lowercase", async () => {
+    it("updates artist capitalization after an exact normalized-name match", async () => {
         const scanner = new MusicScannerService() as any;
 
         mockParseFile.mockResolvedValue({
@@ -3354,7 +4264,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         });
     });
 
-    it("applies fuzzy artist matching before creating a new artist", async () => {
+    it("does not rename an artist resolved by a fuzzy-name match", async () => {
         const scanner = new MusicScannerService() as any;
 
         mockParseFile.mockResolvedValue({
@@ -3376,8 +4286,8 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         mockPrisma.artist.findMany.mockResolvedValueOnce([
             {
                 id: "artist-fuzzy",
-                name: "The Weeknd",
-                normalizedName: "the weeknd",
+                name: "the weekend",
+                normalizedName: "the weekend",
                 mbid: "mbid-weeknd",
             },
         ]);
@@ -3391,9 +4301,10 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
 
         expect(mockPrisma.artist.findMany).toHaveBeenCalledTimes(1);
         expect(mockPrisma.artist.create).not.toHaveBeenCalled();
+        expect(mockPrisma.artist.update).not.toHaveBeenCalled();
         expect(mockAreArtistNamesSimilar).toHaveBeenCalledWith(
             "The Weeknd",
-            "The Weeknd",
+            "the weekend",
             95,
         );
     });

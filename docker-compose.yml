@@ -68,6 +68,7 @@ services:
             MUSIC_PATH: /music
             TRANSCODE_CACHE_PATH: /app/cache/transcodes
             TRANSCODE_CACHE_MAX_GB: ${TRANSCODE_CACHE_MAX_GB:-10}
+            SCAN_FILE_CONCURRENCY: ${SCAN_FILE_CONCURRENCY:-3}
             BROWSE_IMAGE_CACHE_MAX_BYTES: ${BROWSE_IMAGE_CACHE_MAX_BYTES:-268435456}
             BROWSE_IMAGE_CACHE_MAX_ENTRIES: ${BROWSE_IMAGE_CACHE_MAX_ENTRIES:-2048}
 
@@ -227,6 +228,7 @@ services:
             SETTINGS_ENCRYPTION_KEY: "${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required - generate one with: openssl rand -base64 32}"
             LOG_LEVEL: ${LOG_LEVEL:-warn}
             MUSIC_PATH: /music
+            SCAN_FILE_CONCURRENCY: ${SCAN_FILE_CONCURRENCY:-3}
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
             METRICS_TOKEN: "${METRICS_TOKEN:-}"
             METRICS_PUBLIC: ${METRICS_PUBLIC:-false}

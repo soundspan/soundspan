@@ -593,6 +593,11 @@ const transcodeConcurrency = boundedPositiveIntEnvOr(
     3,
     32,
 );
+const scanFileConcurrency = boundedPositiveIntEnvOr(
+    process.env.SCAN_FILE_CONCURRENCY,
+    3,
+    10,
+);
 const transcodeTimeoutMs = boundedPositiveIntEnvOr(
     process.env.TRANSCODE_TIMEOUT_MS,
     5 * 60 * 1000,
@@ -798,6 +803,7 @@ export const config = {
 
     // Music library configuration (self-contained native music system)
     // Access via config.music - will be updated after initialization
+    scanFileConcurrency,
     transcodeConcurrency,
     transcodeTimeoutMs,
     get music() {

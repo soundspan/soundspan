@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Album downloads now use queued, serialized processing, one album at a time across the deployment, with renewable claims, restart recovery, and queue-owned lifecycle reconciliation.
 - The DCLAP vibe provider now answers malformed requests with the same 422 response the other sidecars use (previously 400).
+- Library scans now process several files at once within a configurable bound, making large-library scans significantly faster.
 
 ### Fixed
 

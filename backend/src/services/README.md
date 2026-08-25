@@ -136,6 +136,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |
 | `backend/src/services/musicScanner.ts` | Core |
+| `backend/src/services/musicScannerIdentity.ts` | Scanner artist and album identity resolution |
 | `backend/src/services/musicRequestService.ts` | Album request deduplication, quota, review, and notification lifecycle |
 | `backend/src/services/nativeCoverHealing.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
