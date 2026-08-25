@@ -170,6 +170,47 @@ def test_allocator_skips_planned_and_suffixed_paths_owned_by_other_tracks(
     assert suffixed.read_bytes() == b"track-two"
 
 
+def test_allocator_reuses_matching_identity_after_an_earlier_free_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Match YouTube Music by scanning past a free candidate before allocation."""
+    import tidal_downloads
+
+    planned = tmp_path / "Track.m4a"
+    matching = tmp_path / "Track [tidal-8].m4a"
+    matching.write_bytes(b"current-track")
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: 8 if path == matching else None,
+    )
+
+    resolved = tidal_downloads._resolve_final_download_path(planned, tmp_path.resolve(), 8)
+
+    assert resolved == matching
+
+
+def test_allocator_skips_directory_at_planned_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Match YouTube Music by never treating a directory as legacy audio."""
+    import tidal_downloads
+
+    planned = tmp_path / "Track.m4a"
+    planned.mkdir()
+    reader_calls: list[Path] = []
+    monkeypatch.setattr(
+        tidal_downloads,
+        "_read_embedded_tidal_id",
+        lambda path: reader_calls.append(path),
+    )
+
+    resolved = tidal_downloads._resolve_final_download_path(planned, tmp_path.resolve(), 8)
+
+    assert resolved == tmp_path / "Track [tidal-8].m4a"
+    assert reader_calls == []
+
+
 def test_allocator_raises_when_every_bounded_candidate_is_occupied(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -190,7 +231,7 @@ def test_allocator_raises_when_every_bounded_candidate_is_occupied(
         lambda path: embedded_ids.get(path),
     )
 
-    with pytest.raises(RuntimeError, match=r"track 8.*6 candidates"):
+    with pytest.raises(RuntimeError, match=r"identity 8.*6 candidates"):
         tidal_downloads._resolve_final_download_path(planned, tmp_path.resolve(), 8)
 
 
@@ -209,7 +250,7 @@ def test_download_allocator_exhaustion_removes_uuid_temp(
     _configure_download(monkeypatch, tidal_downloads, lambda _track_id: b"new-audio")
     monkeypatch.setattr(tidal_downloads, "_read_embedded_tidal_id", lambda _path: 999)
 
-    with pytest.raises(RuntimeError, match=r"track 8.*6 candidates"):
+    with pytest.raises(RuntimeError, match=r"identity 8.*6 candidates"):
         tidal_downloads._download_track_sync(
             _FakeDownloadApi({8: "Track"}), 8, "HIGH", "ignored", destination
         )

@@ -1,12 +1,13 @@
-"""Sequential persistence flow for loudness-only analyzer queue jobs."""
+"""Concurrent measurement and ordered persistence for loudness-only queue jobs."""
 
 from __future__ import annotations
 
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from hashlib import sha256
-from typing import Any, Literal, Protocol, TypedDict
+from typing import Any, Literal, NamedTuple, Protocol, TypedDict
 
 from loudness import (
     ALBUM_LOUDNESS_LOCK_SQL,
@@ -181,6 +182,15 @@ PathExists = Callable[[str], bool]
 PathSize = Callable[[str], int]
 
 
+class _ScheduledJob(NamedTuple):
+    """Keep one input-ordered job beside its immediate or future result."""
+
+    job: AnalysisQueueJob
+    track: tuple[str, str]
+    immediate_result: JobResult | None
+    measurement_future: Future[LoudnessMeasurementResult] | None
+
+
 def partition_analysis_jobs(
     jobs: Sequence[AnalysisQueueJob],
 ) -> tuple[list[tuple[str, str]], list[AnalysisQueueJob]]:
@@ -256,32 +266,12 @@ def _persist_measurement(
         cursor.close()
 
 
-def _process_job(
-    job: AnalysisQueueJob,
+def _complete_measurement(
+    measurement_result: LoudnessMeasurementResult,
     database: Database,
-    resolve_path: ResolvePath,
-    max_file_size_mb: int,
-    timeout_seconds: int,
-    measure: MeasureLoudness,
-    path_exists: PathExists,
-    path_size: PathSize,
+    track_id: str,
 ) -> JobResult:
-    """Measure and persist one eligible loudness-only queue job."""
-    track_id = job["trackId"]
-    file_path = job.get("filePath", "")
-    if _already_measured(database, track_id):
-        return "already_measured"
-    resolved_path, path_failure = _resolve_eligible_path(
-        file_path,
-        resolve_path,
-        max_file_size_mb,
-        path_exists,
-        path_size,
-    )
-    if resolved_path is None:
-        logger.warning("Skipping ineligible loudness backfill file for track %s", track_id)
-        return path_failure or "transient_failure"
-    measurement_result = measure(resolved_path, timeout_seconds)
+    """Convert one completed measurement into a coordinator-owned database result."""
     measurement = measurement_result["measurement"]
     if measurement is None:
         logger.warning("Loudness backfill measurement failed for track %s", track_id)
@@ -289,6 +279,40 @@ def _process_job(
         return "permanent_failure" if failure == "permanent" else "transient_failure"
     persisted = _persist_measurement(database, track_id, measurement)
     return "measured" if persisted else "already_measured"
+
+
+def _schedule_job(
+    job: AnalysisQueueJob,
+    *,
+    database: Database,
+    resolve_path: ResolvePath,
+    max_file_size_mb: int,
+    timeout_seconds: int,
+    measure: MeasureLoudness,
+    path_exists: PathExists,
+    path_size: PathSize,
+    executor: ThreadPoolExecutor,
+) -> _ScheduledJob:
+    """Validate one job on the coordinator and schedule only its measurement."""
+    track = (job["trackId"], job.get("filePath", ""))
+    try:
+        if _already_measured(database, track[0]):
+            return _ScheduledJob(job, track, "already_measured", None)
+        resolved_path, path_failure = _resolve_eligible_path(
+            track[1], resolve_path, max_file_size_mb, path_exists, path_size
+        )
+        if resolved_path is None:
+            logger.warning("Skipping ineligible loudness backfill file for track %s", track[0])
+            return _ScheduledJob(job, track, path_failure or "transient_failure", None)
+        future = executor.submit(measure, resolved_path, timeout_seconds)
+        return _ScheduledJob(job, track, None, future)
+    except Exception as error:
+        logger.warning(
+            "Loudness backfill failed for track %s: %s",
+            track[0],
+            type(error).__name__,
+        )
+        return _ScheduledJob(job, track, "transient_failure", None)
 
 
 def _legacy_attempt_key(track_id: str) -> str:
@@ -345,6 +369,39 @@ def _record_job_result(
     bookkeeping.increment_outcome("transient_failure")
 
 
+def _settle_scheduled_job(
+    scheduled: _ScheduledJob,
+    database: Database,
+    bookkeeping: LoudnessBackfillBookkeeping,
+    release_reservations: ReleaseReservations,
+) -> None:
+    """Settle one scheduled job on the coordinator and release its reservation."""
+    result = scheduled.immediate_result
+    try:
+        if scheduled.measurement_future is not None:
+            measurement_result = scheduled.measurement_future.result()
+            result = _complete_measurement(measurement_result, database, scheduled.track[0])
+        if result is None:
+            raise RuntimeError("Loudness job completed without a result")
+    except Exception as error:
+        logger.warning(
+            "Loudness backfill failed for track %s: %s",
+            scheduled.track[0],
+            type(error).__name__,
+        )
+        result = "transient_failure"
+    try:
+        _record_job_result(scheduled.job, result, bookkeeping)
+    except Exception as error:
+        logger.warning(
+            "Failed to persist loudness backfill bookkeeping for track %s: %s",
+            scheduled.track[0],
+            type(error).__name__,
+        )
+    finally:
+        release_reservations([scheduled.track])
+
+
 def process_loudness_backfill_jobs(
     jobs: Sequence[AnalysisQueueJob],
     *,
@@ -358,41 +415,31 @@ def process_loudness_backfill_jobs(
     path_exists: PathExists = os.path.exists,
     path_size: PathSize = os.path.getsize,
 ) -> None:
-    """Process loudness-only jobs sequentially and always release reservations."""
-    legacy_fallback_jobs = 0
-    for job in jobs:
-        if "loudnessAttemptKey" not in job:
-            legacy_fallback_jobs += 1
-        track = (job["trackId"], job.get("filePath", ""))
-        result: JobResult
-        try:
-            result = _process_job(
+    """Measure jobs in a bounded pool and coordinate persistence in input order."""
+    legacy_fallback_jobs = sum("loudnessAttemptKey" not in job for job in jobs)
+    if not jobs:
+        return
+    worker_count = min(4, len(jobs))
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="loudness-backfill",
+    ) as executor:
+        scheduled_jobs = [
+            _schedule_job(
                 job,
-                database,
-                resolve_path,
-                max_file_size_mb,
-                timeout_seconds,
-                measure,
-                path_exists,
-                path_size,
+                database=database,
+                resolve_path=resolve_path,
+                max_file_size_mb=max_file_size_mb,
+                timeout_seconds=timeout_seconds,
+                measure=measure,
+                path_exists=path_exists,
+                path_size=path_size,
+                executor=executor,
             )
-        except Exception as error:
-            logger.warning(
-                "Loudness backfill failed for track %s: %s",
-                track[0],
-                type(error).__name__,
-            )
-            result = "transient_failure"
-        try:
-            _record_job_result(job, result, bookkeeping)
-        except Exception as error:
-            logger.warning(
-                "Failed to persist loudness backfill bookkeeping for track %s: %s",
-                track[0],
-                type(error).__name__,
-            )
-        finally:
-            release_reservations([track])
+            for job in jobs
+        ]
+        for scheduled in scheduled_jobs:
+            _settle_scheduled_job(scheduled, database, bookkeeping, release_reservations)
     if legacy_fallback_jobs > 0:
         logger.info(
             "Using legacy fallback attempt keys for %d loudness jobs without a producer key",

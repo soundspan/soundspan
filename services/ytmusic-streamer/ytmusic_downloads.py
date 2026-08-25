@@ -2,11 +2,9 @@
 
 import asyncio
 import os
-import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 
+from common.job_registry import JobRegistry
 from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException
 from yt_download import (
@@ -25,7 +23,6 @@ from ytmusic_stream import YTDLP_SOCKET_TIMEOUT, _extract_pacer
 YT_DOWNLOAD_DIR = os.getenv("YT_DOWNLOAD_DIR", "/music/YouTube Downloads")
 
 # Download job store (in-memory). Jobs are lost on restart.
-_yt_download_jobs: dict[str, JsonObject] = {}
 _yt_download_tasks: set[asyncio.Task[None]] = set()
 YT_DOWNLOAD_JOB_TTL = 6 * 60 * 60
 YT_DOWNLOAD_CONCURRENCY = max(1, env_int("YT_DOWNLOAD_CONCURRENCY", "2"))
@@ -34,20 +31,18 @@ _yt_download_executor = ThreadPoolExecutor(
     thread_name_prefix="yt-download",
 )
 TERMINAL_DOWNLOAD_STATUSES = ("completed", "failed", "cancelled")
+_yt_download_registry = JobRegistry(
+    ttl_seconds=YT_DOWNLOAD_JOB_TTL,
+    terminal_statuses=TERMINAL_DOWNLOAD_STATUSES,
+)
+_yt_download_jobs = _yt_download_registry.jobs
 
 
 def _prune_yt_download_jobs() -> None:
     """Drop terminal jobs older than the TTL to bound memory."""
-    cutoff = time.time() - YT_DOWNLOAD_JOB_TTL
-    stale = [
-        job_id
-        for job_id, job in _yt_download_jobs.items()
-        if job.get("status") in TERMINAL_DOWNLOAD_STATUSES and job.get("created_at", 0) <= cutoff
-    ]
-    for job_id in stale:
-        del _yt_download_jobs[job_id]
-    if stale:
-        log.debug(f"Pruned {len(stale)} stale YT download job(s)")
+    pruned = _yt_download_registry.prune()
+    if pruned:
+        log.debug(f"Pruned {pruned} stale YT download job(s)")
 
 
 def _new_yt_download_job(
@@ -57,39 +52,37 @@ def _new_yt_download_job(
     source_kind: str | None = None,
 ) -> JsonObject:
     """Create and register a download job record."""
-    _prune_yt_download_jobs()
-    job: dict[str, Any] = {
-        "job_id": uuid.uuid4().hex,
-        "video_id": video_id,
-        "status": status,
-        "progress_pct": 0.0,
-        "file_path": None,
-        "title": "",
-        "error": None,
-        "already_existed": False,
-        "source": source,
-        "source_kind": source_kind,
-        "cancel_requested": False,
-        "created_at": time.time(),
-    }
-    _yt_download_jobs[job["job_id"]] = job
-    return job
+    return _yt_download_registry.create(
+        {
+            "video_id": video_id,
+            "status": status,
+            "progress_pct": 0.0,
+            "file_path": None,
+            "title": "",
+            "error": None,
+            "already_existed": False,
+            "source": source,
+            "source_kind": source_kind,
+            "cancel_requested": False,
+        }
+    )
 
 
 def _yt_download_job_payload(job: JsonObject) -> JsonObject:
     """Public job-status shape returned to the backend."""
-    return {
-        "job_id": job["job_id"],
-        "video_id": job["video_id"],
-        "status": job["status"],
-        "progress_pct": job["progress_pct"],
-        "file_path": job["file_path"],
-        "title": job["title"],
-        "error": job["error"],
-        "already_existed": job["already_existed"],
-        "source": job.get("source"),
-        "created_at": job.get("created_at"),
-    }
+    keys = (
+        "job_id",
+        "video_id",
+        "status",
+        "progress_pct",
+        "file_path",
+        "title",
+        "error",
+        "already_existed",
+        "source",
+        "created_at",
+    )
+    return _yt_download_registry.payload(job, keys)
 
 
 def _update_yt_download_progress(

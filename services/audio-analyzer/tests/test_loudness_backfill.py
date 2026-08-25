@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
 from hashlib import sha256
 from types import ModuleType
@@ -247,6 +248,61 @@ def test_loudness_job_orchestrates_save_lock_and_rollup() -> None:
     assert database.rollback_calls == 0
     assert bookkeeping.outcomes == ["measured_success"]
     assert releases == [[("track-1", "Artist/track-1.flac")]]
+
+
+def test_loudness_measurements_run_concurrently_and_settle_in_input_order() -> None:
+    """Run blocking measurement calls together but coordinate state in batch order."""
+    database = FakeDatabaseConnection(
+        [
+            [{"loudnessLufs": None}],
+            [{"loudnessLufs": None}],
+            [{"id": "track-1"}],
+            [{"id": "track-2"}],
+        ]
+    )
+    bookkeeping = _Bookkeeping()
+    releases, release = _release_recorder()
+    lock = threading.Lock()
+    both_started = threading.Event()
+    active = 0
+    maximum_active = 0
+
+    def measure(path: str, _timeout: int) -> dict[str, Any]:
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+            if active == 2:
+                both_started.set()
+        try:
+            assert both_started.wait(timeout=1)
+            return {
+                "measurement": {"loudnessLufs": -18.0, "truePeakDb": -1.0},
+                "failure": None,
+            }
+        finally:
+            with lock:
+                active -= 1
+
+    loudness_backfill.process_loudness_backfill_jobs(
+        [_job("track-1"), _job("track-2")],
+        database=database,
+        release_reservations=release,
+        resolve_path=lambda path: f"/music/{path}",
+        max_file_size_mb=500,
+        timeout_seconds=120,
+        bookkeeping=bookkeeping,
+        measure=measure,
+        path_exists=lambda _path: True,
+        path_size=lambda _path: 1024,
+    )
+
+    assert maximum_active == 2
+    assert bookkeeping.outcomes == ["measured_success", "measured_success"]
+    assert releases == [
+        [("track-1", "Artist/track-1.flac")],
+        [("track-2", "Artist/track-2.flac")],
+    ]
 
 
 def test_loudness_job_releases_reservation_after_measurement_failure() -> None:

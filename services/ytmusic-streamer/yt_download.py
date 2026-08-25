@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
+from common.download_identity import build_bounded_filename as _build_bounded_filename
+from common.download_identity import build_identity_candidates
 from common.download_paths import (
     require_contained_download_path as _require_contained_download_path,
 )
@@ -35,9 +37,6 @@ AUDIO_EXTENSIONS = {".mp3", ".opus", ".flac", ".m4a", ".ogg", ".webm"}
 
 # Download-job states that mean a download is still in flight.
 ACTIVE_DOWNLOAD_STATUSES = {"queued", "downloading", "processing"}
-
-_MAX_FILENAME_BYTES = 255
-_MAX_COLLISION_COUNTER = 5
 
 
 def find_active_download_job(
@@ -117,30 +116,9 @@ class _Mp4Reader(Protocol):
     tags: _TagReader | None
 
 
-def _build_bounded_filename(stem: str, suffix: str, extension: str) -> str:
-    """Build one UTF-8 filename component within the common 255-byte limit."""
-    reserved_bytes = len(f"{suffix}{extension}".encode())
-    stem_budget = _MAX_FILENAME_BYTES - reserved_bytes
-    if stem_budget < 1:
-        raise ValueError("Download filename suffix exceeds the 255-byte component limit")
-    bounded_stem = stem.encode()[:stem_budget].decode(errors="ignore")
-    if not bounded_stem:
-        raise ValueError("Download filename has no stem within the 255-byte component limit")
-    return f"{bounded_stem}{suffix}{extension}"
-
-
 def _build_album_track_candidates(planned_path: Path, video_id: str) -> tuple[Path, ...]:
     """Build the planned album path and five byte-bounded identity alternatives."""
-    candidates = [planned_path]
-    for counter in range(1, _MAX_COLLISION_COUNTER + 1):
-        identity_suffix = f" [{video_id}]" if counter == 1 else f" [{video_id}-{counter}]"
-        candidate_name = _build_bounded_filename(
-            planned_path.stem,
-            identity_suffix,
-            planned_path.suffix,
-        )
-        candidates.append(planned_path.with_name(candidate_name))
-    return tuple(candidates)
+    return build_identity_candidates(planned_path, video_id)
 
 
 def _build_album_track_tmp_path(final_path: Path, destination_root: Path) -> Path:

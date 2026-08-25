@@ -13,6 +13,8 @@ from uuid import uuid4
 from xml.etree.ElementTree import Element
 from xml.etree.ElementTree import fromstring as xml_fromstring
 
+from common.download_identity import build_bounded_filename as _build_bounded_filename
+from common.download_identity import build_identity_candidates, resolve_identity_path
 from common.download_paths import (
     require_contained_download_path as _require_contained_download_path,
 )
@@ -45,8 +47,6 @@ __all__ = (
 JsonObject = dict[str, Any]
 log = logging.getLogger("tidal-streamer")
 
-_MAX_FILENAME_BYTES = 255
-_MAX_COLLISION_COUNTER = 5
 # Backend queue claims serialize downloads across replicas; this lock closes in-process races.
 _DOWNLOAD_INSTALL_LOCK = threading.Lock()
 
@@ -116,18 +116,6 @@ def _build_download_file_path(
     return relative_file, file_path, tmp_path
 
 
-def _build_bounded_filename(stem: str, suffix: str, extension: str) -> str:
-    """Build one UTF-8 filename component within the common 255-byte limit."""
-    reserved_bytes = len(f"{suffix}{extension}".encode())
-    stem_budget = _MAX_FILENAME_BYTES - reserved_bytes
-    if stem_budget < 1:
-        raise ValueError("Download filename suffix exceeds the 255-byte component limit")
-    bounded_stem = stem.encode()[:stem_budget].decode(errors="ignore")
-    if not bounded_stem:
-        raise ValueError("Download filename has no stem within the 255-byte component limit")
-    return f"{bounded_stem}{suffix}{extension}"
-
-
 def _parse_tidal_comment(tag_values: object) -> int | None:
     """Parse the single identity value written by tiddl's comment metadata."""
     if not isinstance(tag_values, list) or not tag_values:
@@ -159,56 +147,32 @@ def _resolve_final_download_path(
     track_id: int,
 ) -> Path:
     """Reuse planned legacy files but require identity for occupied suffixes."""
-    candidates = _build_download_candidates(planned_path, track_id)
-    for candidate_index, candidate in enumerate(candidates):
-        contained_candidate = _require_contained_download_path(candidate, destination_root)
-        if not contained_candidate.exists():
-            if contained_candidate != planned_path:
-                log.info(
-                    "Download path collision at %s; saving track %s to %s",
-                    planned_path,
-                    track_id,
-                    contained_candidate,
-                )
-            return contained_candidate
-        embedded_id = _read_embedded_tidal_id(contained_candidate)
-        if embedded_id == track_id:
-            if contained_candidate != planned_path:
-                log.info(
-                    "Download path collision at %s; saving track %s to %s",
-                    planned_path,
-                    track_id,
-                    contained_candidate,
-                )
-            return contained_candidate
-        if candidate_index == 0 and embedded_id is None:
-            log.debug(
-                "Refreshing unidentified legacy file at planned path %s for track %s",
-                contained_candidate,
-                track_id,
-            )
-            return contained_candidate
-
-    raise RuntimeError(
-        f"No safe download path for TIDAL track {track_id}; all {len(candidates)} candidates "
-        "are occupied by other or unidentified files"
+    resolved = resolve_identity_path(
+        planned_path,
+        destination_root,
+        f"tidal-{track_id}",
+        track_id,
+        _read_embedded_tidal_id,
     )
+    if resolved != planned_path:
+        log.info(
+            "Download path collision at %s; saving track %s to %s",
+            planned_path,
+            track_id,
+            resolved,
+        )
+    elif resolved.is_file() and _read_embedded_tidal_id(resolved) is None:
+        log.debug(
+            "Refreshing unidentified legacy file at planned path %s for track %s",
+            resolved,
+            track_id,
+        )
+    return resolved
 
 
 def _build_download_candidates(planned_path: Path, track_id: int) -> tuple[Path, ...]:
     """Build the planned path and five byte-bounded identity alternatives."""
-    candidates = [planned_path]
-    for counter in range(1, _MAX_COLLISION_COUNTER + 1):
-        identity_suffix = (
-            f" [tidal-{track_id}]" if counter == 1 else f" [tidal-{track_id}-{counter}]"
-        )
-        candidate_name = _build_bounded_filename(
-            planned_path.stem,
-            identity_suffix,
-            planned_path.suffix,
-        )
-        candidates.append(planned_path.with_name(candidate_name))
-    return tuple(candidates)
+    return build_identity_candidates(planned_path, f"tidal-{track_id}")
 
 
 def _finalize_flac_download(

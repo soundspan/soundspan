@@ -4,21 +4,17 @@ import asyncio
 import glob
 import os
 import threading
-import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from itertools import islice
 from pathlib import Path
 from typing import Any
 
-from common.download_paths import (
-    require_contained_download_path as _require_contained_download_path,
-)
+from common.download_identity import resolve_identity_path
+from common.job_registry import JobRegistry
 from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException, Query
 from yt_download import (
-    _build_album_track_candidates,
     _build_album_track_tmp_path,
     _read_embedded_video_id,
     _stamp_audio_tags,
@@ -39,7 +35,11 @@ _yt_album_download_executor = ThreadPoolExecutor(
     max_workers=YT_ALBUM_DOWNLOAD_CONCURRENCY,
     thread_name_prefix="yt-album-download",
 )
-_yt_album_download_jobs: dict[str, JsonObject] = {}
+_yt_album_download_registry = JobRegistry(
+    ttl_seconds=YT_ALBUM_DOWNLOAD_JOB_TTL,
+    terminal_statuses=TERMINAL_DOWNLOAD_STATUSES,
+)
+_yt_album_download_jobs = _yt_album_download_registry.jobs
 _yt_album_download_tasks: set[asyncio.Task[None]] = set()
 _album_track_install_lock = threading.Lock()
 _MAX_OWNED_TEMP_ARTIFACTS = 64
@@ -100,36 +100,26 @@ async def yt_album_search(
 
 def _prune_yt_album_download_jobs() -> None:
     """Drop terminal album jobs older than the bounded retention period."""
-    cutoff = time.time() - YT_ALBUM_DOWNLOAD_JOB_TTL
-    stale = [
-        job_id
-        for job_id, job in _yt_album_download_jobs.items()
-        if job.get("status") in TERMINAL_DOWNLOAD_STATUSES and job.get("created_at", 0) <= cutoff
-    ]
-    for job_id in stale:
-        del _yt_album_download_jobs[job_id]
+    _yt_album_download_registry.prune()
 
 
 def _new_yt_album_download_job(browse_id: str) -> JsonObject:
     """Create and register an isolated album download job."""
-    _prune_yt_album_download_jobs()
-    job: JsonObject = {
-        "job_id": uuid.uuid4().hex,
-        "browse_id": browse_id,
-        "status": "queued",
-        "progress_pct": 0.0,
-        "album_title": "",
-        "album_artist": "",
-        "total_tracks": 0,
-        "downloaded": 0,
-        "failed": 0,
-        "errors": [],
-        "error": None,
-        "cancel_requested": False,
-        "created_at": time.time(),
-    }
-    _yt_album_download_jobs[str(job["job_id"])] = job
-    return job
+    return _yt_album_download_registry.create(
+        {
+            "browse_id": browse_id,
+            "status": "queued",
+            "progress_pct": 0.0,
+            "album_title": "",
+            "album_artist": "",
+            "total_tracks": 0,
+            "downloaded": 0,
+            "failed": 0,
+            "errors": [],
+            "error": None,
+            "cancel_requested": False,
+        }
+    )
 
 
 def _yt_album_download_job_payload(job: JsonObject) -> JsonObject:
@@ -148,7 +138,7 @@ def _yt_album_download_job_payload(job: JsonObject) -> JsonObject:
         "error",
         "created_at",
     )
-    return {key: job.get(key) for key in keys}
+    return _yt_album_download_registry.payload(job, keys)
 
 
 def _track_details(track: JsonObject, index: int) -> tuple[str, str, int, list[str]]:
@@ -192,31 +182,23 @@ def _resolve_album_track_path(
     video_id: str,
 ) -> Path:
     """Resolve one bounded identity-checked album path without overwriting files."""
-    candidates = _build_album_track_candidates(planned_path, video_id)
-    first_free: Path | None = None
-    for index, candidate in enumerate(candidates):
-        contained = _require_contained_download_path(candidate, destination_root)
-        if not contained.exists():
-            if first_free is None:
-                first_free = contained
-            continue
-        if not contained.is_file():
-            continue
-        embedded_id = _read_embedded_video_id(contained)
-        if embedded_id == video_id:
-            return contained
-        if embedded_id is None and index == 0:
-            log.debug(
-                "Keeping legacy YouTube Music album track without embedded identity at %s",
-                contained,
-            )
-            return contained
-    if first_free is not None:
-        return first_free
-    raise RuntimeError(
-        f"No safe download path for YouTube Music video {video_id}; all {len(candidates)} "
-        "candidates are occupied by other or unidentified files"
+    resolved = resolve_identity_path(
+        planned_path,
+        destination_root,
+        video_id,
+        video_id,
+        _read_embedded_video_id,
     )
+    if (
+        resolved == planned_path
+        and resolved.is_file()
+        and _read_embedded_video_id(resolved) is None
+    ):
+        log.debug(
+            "Keeping legacy YouTube Music album track without embedded identity at %s",
+            resolved,
+        )
+    return resolved
 
 
 def _install_album_track(
