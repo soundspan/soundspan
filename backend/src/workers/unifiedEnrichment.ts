@@ -963,8 +963,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     entityType: "artist", // Generic type for system errors
                     entityId: "system",
                     entityName: "Enrichment System",
-                    errorMessage:
-                        error instanceof Error ? error.message : String(error),
+                    errorMessage: toErrorMessage(error),
                     errorCode: "SYSTEM_ERROR",
                 })
                 .catch((err) => log.error("Failed to record failure:", err));
@@ -1054,10 +1053,7 @@ async function enrichArtistsBatch(): Promise<number> {
                     // Collect failure for batch reporting
                     currentBatchFailures.artists.push({
                         name: artist.name,
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
+                        error: toErrorMessage(error),
                     });
 
                     // Record failure
@@ -1065,10 +1061,7 @@ async function enrichArtistsBatch(): Promise<number> {
                         entityType: "artist",
                         entityId: artist.id,
                         entityName: artist.name,
-                        errorMessage:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
+                        errorMessage: toErrorMessage(error),
                         errorCode:
                             error instanceof Error &&
                             error.message.includes("Timeout")
@@ -1908,3 +1901,4 @@ export const __unifiedEnrichmentTestables = {
         sessionFailureCount,
     }),
 };
+import { toErrorMessage } from "../utils/errors";

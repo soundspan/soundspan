@@ -20,7 +20,7 @@ async function reconcileDownloadJobsWithScan(): Promise<number> {
 
     // Get all pending/processing download jobs
     const activeJobs = await prisma.downloadJob.findMany({
-        where: { status: { in: ["pending", "processing"] } },
+        where: { status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES } },
     });
 
     if (activeJobs.length === 0) {
@@ -244,7 +244,7 @@ export async function processScan(
                     where: {
                         targetMbid: artistMbid,
                         type: "artist",
-                        status: { in: ["pending", "processing"] },
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
                     data: {
                         status: "completed",
@@ -284,7 +284,7 @@ export async function processScan(
                     where: {
                         targetMbid: albumMbid,
                         type: "album",
-                        status: { in: ["pending", "processing"] },
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
                     data: {
                         status: "completed",
@@ -312,7 +312,9 @@ export async function processScan(
                             await prisma.downloadJob.updateMany({
                                 where: {
                                     type: "album",
-                                    status: { in: ["pending", "processing"] },
+                                    status: {
+                                        in: ACTIVE_DOWNLOAD_JOB_STATUSES,
+                                    },
                                     metadata: {
                                         path: ["albumTitle"],
                                         equals: album.title,
@@ -368,7 +370,7 @@ export async function processScan(
                 const updated = await prisma.downloadJob.updateMany({
                     where: {
                         lidarrRef: downloadId,
-                        status: { in: ["pending", "processing"] },
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
                     data: {
                         status: "completed",
@@ -602,3 +604,4 @@ export async function processScan(
         throw error;
     }
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";

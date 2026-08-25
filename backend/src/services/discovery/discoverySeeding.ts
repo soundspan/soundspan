@@ -270,7 +270,7 @@ export class DiscoverySeeding {
         const pendingDownload = await prisma.downloadJob.findFirst({
             where: {
                 targetMbid: albumMbid,
-                status: { in: ["pending", "processing"] },
+                status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
             },
         });
         if (pendingDownload) return true;
@@ -290,3 +290,4 @@ export class DiscoverySeeding {
 }
 
 export const discoverySeeding = new DiscoverySeeding();
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../downloadJobStatus";

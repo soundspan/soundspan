@@ -101,10 +101,11 @@ async function testPlaylistImport() {
             );
         }
     } catch (error: unknown) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = toErrorMessage(error);
         console.error("\nError:", errorMsg);
         process.exit(1);
     }
 }
 
 testPlaylistImport().catch(console.error);
+import { toErrorMessage } from "../utils/errors";

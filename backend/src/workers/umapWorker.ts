@@ -30,8 +30,9 @@ function postMessage(message: UmapWorkerMessage): void {
 if (!isMainThread) {
     const data = validateWorkerData(workerData);
     runUmapMaterialization(data, postMessage).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = toErrorMessage(error);
         postMessage({ type: "error", error: message.slice(0, 500) });
         process.exitCode = 1;
     });
 }
+import { toErrorMessage } from "../utils/errors";

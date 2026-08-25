@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -13,7 +13,7 @@ import {
     METADATA_GAP_KINDS,
 } from "../services/libraryHealthDashboard";
 import { logger } from "../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import { sendRouteFailure, sendValidationError } from "./routeErrorResponse";
 
 const router = Router();
 const log = logger.child("LibraryHealthDashboard");
@@ -57,15 +57,6 @@ const qualityQuerySchema = z.strictObject({
 const gapParamsSchema = z.strictObject({
     kind: z.enum(METADATA_GAP_KINDS),
 });
-
-function invalidRequest(res: Response): Response {
-    return sendRouteError(res, 400, "Invalid library health request");
-}
-
-function internalFailure(res: Response, operation: string, error: unknown) {
-    log.error(`${operation} failed`, { error });
-    return sendInternalRouteError(res, `Failed to ${operation}`);
-}
 
 router.use(requireAuth, requireAdmin);
 
@@ -132,12 +123,22 @@ router.use(requireAuth, requireAdmin);
 router.get(
     "/summary",
     asyncHandler(async (req, res) => {
-        if (!emptySchema.safeParse(req.query).success)
-            return invalidRequest(res);
+        const query = emptySchema.safeParse(req.query);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid library health request",
+            );
         try {
             return res.json(await getLibraryHealthDashboardSummary());
         } catch (error) {
-            return internalFailure(res, "load library health summary", error);
+            return sendRouteFailure(
+                res,
+                log,
+                "load library health summary",
+                error,
+            );
         }
     }),
 );
@@ -203,7 +204,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = gapParamsSchema.safeParse(req.params);
         const query = paginationSchema.safeParse(req.query);
-        if (!params.success || !query.success) return invalidRequest(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid library health request",
+            );
         try {
             return res.json(
                 await getLibraryHealthMetadataGaps(
@@ -212,8 +218,9 @@ router.get(
                 ),
             );
         } catch (error) {
-            return internalFailure(
+            return sendRouteFailure(
                 res,
+                log,
                 "load library health metadata gaps",
                 error,
             );
@@ -271,11 +278,21 @@ router.get(
     "/analysis",
     asyncHandler(async (req, res) => {
         const query = paginationSchema.safeParse(req.query);
-        if (!query.success) return invalidRequest(res);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid library health request",
+            );
         try {
             return res.json(await getLibraryHealthAnalysis(query.data));
         } catch (error) {
-            return internalFailure(res, "load library health analysis", error);
+            return sendRouteFailure(
+                res,
+                log,
+                "load library health analysis",
+                error,
+            );
         }
     }),
 );
@@ -328,12 +345,22 @@ router.get(
 router.get(
     "/storage",
     asyncHandler(async (req, res) => {
-        if (!emptySchema.safeParse(req.query).success)
-            return invalidRequest(res);
+        const query = emptySchema.safeParse(req.query);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid library health request",
+            );
         try {
             return res.json(await getLibraryHealthStorage());
         } catch (error) {
-            return internalFailure(res, "load library health storage", error);
+            return sendRouteFailure(
+                res,
+                log,
+                "load library health storage",
+                error,
+            );
         }
     }),
 );
@@ -385,14 +412,24 @@ router.get(
     "/quality",
     asyncHandler(async (req, res) => {
         const query = qualityQuerySchema.safeParse(req.query);
-        if (!query.success) return invalidRequest(res);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid library health request",
+            );
         const { floor, limit, offset } = query.data;
         try {
             return res.json(
                 await getLibraryHealthQuality(floor, { limit, offset }),
             );
         } catch (error) {
-            return internalFailure(res, "load library health quality", error);
+            return sendRouteFailure(
+                res,
+                log,
+                "load library health quality",
+                error,
+            );
         }
     }),
 );
@@ -454,12 +491,18 @@ router.get(
     "/duplicates",
     asyncHandler(async (req, res) => {
         const query = duplicatePaginationSchema.safeParse(req.query);
-        if (!query.success) return invalidRequest(res);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid library health request",
+            );
         try {
             return res.json(await getLibraryHealthDuplicates(query.data));
         } catch (error) {
-            return internalFailure(
+            return sendRouteFailure(
                 res,
+                log,
                 "load library health duplicates",
                 error,
             );
@@ -496,18 +539,22 @@ router.get(
 router.post(
     "/refresh",
     asyncHandler(async (req, res) => {
-        if (
-            !emptySchema.safeParse(req.query).success ||
-            !emptySchema.safeParse(req.body ?? {}).success
-        ) {
-            return invalidRequest(res);
+        const query = emptySchema.safeParse(req.query);
+        const body = emptySchema.safeParse(req.body ?? {});
+        if (!query.success || !body.success) {
+            return sendValidationError(
+                res,
+                query.success ? body : query,
+                "Invalid library health request",
+            );
         }
         try {
             await invalidateLibraryHealthDashboardCache();
             return res.json(await getLibraryHealthDashboardSummary());
         } catch (error) {
-            return internalFailure(
+            return sendRouteFailure(
                 res,
+                log,
                 "refresh library health dashboard",
                 error,
             );

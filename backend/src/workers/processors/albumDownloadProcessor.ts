@@ -153,7 +153,7 @@ export async function finalizeAlbumDownloadQueueFailure(
         await prisma.downloadJob.updateMany({
             where: {
                 id: parsed.data.jobId,
-                status: { in: ["pending", "processing"] },
+                status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
             },
             data: {
                 status: "failed",
@@ -168,3 +168,4 @@ export async function finalizeAlbumDownloadQueueFailure(
         });
     }
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";

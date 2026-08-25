@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import { isPlainObject } from "../utils/plainObject";
 
 /**
  * Makes form-encoded OpenSubsonic POST parameters available to query-based
@@ -15,7 +16,7 @@ export function mergeSubsonicBodyParamsIntoQuery(
     _res: Response,
     next: NextFunction,
 ): void {
-    if (req.method !== "POST" || !isRecord(req.body)) {
+    if (req.method !== "POST" || !isPlainObject(req.body)) {
         next();
         return;
     }
@@ -39,7 +40,4 @@ export function mergeSubsonicBodyParamsIntoQuery(
     }
     Object.defineProperty(req, "query", { configurable: true, value: query });
     next();
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

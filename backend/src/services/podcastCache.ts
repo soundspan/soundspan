@@ -7,12 +7,9 @@ import path from "path";
 import { config } from "../config";
 import { buildCachePath } from "./cacheHelpers";
 import { fetchExternalImage, MAX_EXTERNAL_IMAGE_BYTES } from "./imageProxy";
+import { toErrorMessage } from "../utils/errors";
 
 const podcastCacheLogger = logger.child("PodcastCache");
-
-function describeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
 
 function isImageMediaType(contentType: string | null): boolean {
     return contentType?.trim().toLowerCase().startsWith("image/") ?? false;
@@ -144,7 +141,7 @@ export class PodcastCacheService {
                     }
                 } catch (error: unknown) {
                     result.failed++;
-                    const errorMsg = `Failed to sync cover for ${podcast.title}: ${describeError(error)}`;
+                    const errorMsg = `Failed to sync cover for ${podcast.title}: ${toErrorMessage(error)}`;
                     result.errors.push(errorMsg);
                     podcastCacheLogger.error(` ${errorMsg}`);
                 }
@@ -226,7 +223,7 @@ export class PodcastCacheService {
                     }
                 } catch (error: unknown) {
                     result.failed++;
-                    const errorMsg = `Failed to sync cover for episode ${episode.title}: ${describeError(error)}`;
+                    const errorMsg = `Failed to sync cover for episode ${episode.title}: ${toErrorMessage(error)}`;
                     result.errors.push(errorMsg);
                     podcastCacheLogger.error(` ${errorMsg}`);
                 }
@@ -301,7 +298,7 @@ export class PodcastCacheService {
         } catch (error: unknown) {
             podcastCacheLogger.error(
                 `Failed to download cover for ${type} ${id}:`,
-                describeError(error),
+                toErrorMessage(error),
             );
             return null;
         }

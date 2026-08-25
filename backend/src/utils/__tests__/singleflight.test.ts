@@ -1,4 +1,4 @@
-import { coalesceInFlightByKey } from "../singleflight";
+import { cachedSingleflight, coalesceInFlightByKey } from "../singleflight";
 
 interface Deferred<T> {
     promise: Promise<T>;
@@ -131,5 +131,62 @@ describe("coalesceInFlightByKey", () => {
         ).resolves.toEqual(["first", "second"]);
         expect(firstFactory).toHaveBeenCalledTimes(1);
         expect(secondFactory).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("cachedSingleflight", () => {
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    it("coalesces concurrent fills and caches the settled value until expiry", async () => {
+        jest.useFakeTimers().setSystemTime(new Date("2026-08-24T12:00:00Z"));
+        const deferred = createDeferred<string>();
+        const factory = jest.fn(() => deferred.promise);
+        const load = cachedSingleflight(factory, 1_000);
+
+        const first = load();
+        const second = load();
+        expect(second).toBe(first);
+        expect(factory).toHaveBeenCalledTimes(1);
+
+        deferred.resolve("available");
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            "available",
+            "available",
+        ]);
+        await expect(load()).resolves.toBe("available");
+        expect(factory).toHaveBeenCalledTimes(1);
+
+        jest.advanceTimersByTime(1_001);
+        await expect(load()).resolves.toBe("available");
+        expect(factory).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not cache a rejected fill", async () => {
+        const error = new Error("probe failed");
+        const factory = jest
+            .fn<Promise<boolean>, []>()
+            .mockRejectedValueOnce(error)
+            .mockResolvedValueOnce(true);
+        const load = cachedSingleflight(factory, 1_000);
+
+        await expect(load()).rejects.toBe(error);
+        await expect(load()).resolves.toBe(true);
+        expect(factory).toHaveBeenCalledTimes(2);
+    });
+
+    it("can clear a settled cached value", async () => {
+        const factory = jest
+            .fn<Promise<string>, []>()
+            .mockResolvedValueOnce("first")
+            .mockResolvedValueOnce("second");
+        const load = cachedSingleflight(factory, 1_000);
+
+        await expect(load()).resolves.toBe("first");
+        load.clear();
+        await expect(load()).resolves.toBe("second");
+
+        expect(factory).toHaveBeenCalledTimes(2);
     });
 });

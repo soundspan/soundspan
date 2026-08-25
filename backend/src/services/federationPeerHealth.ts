@@ -127,10 +127,7 @@ export function deriveFederationHealthState(
 
 /** Produces a bounded credential-safe federation error for persistence. */
 export function safeFederationErrorMessage(cause: unknown): string {
-    const raw = (cause instanceof Error ? cause.message : String(cause)).slice(
-        0,
-        MAX_ERROR_LENGTH * 4,
-    );
+    const raw = toErrorMessage(cause).slice(0, MAX_ERROR_LENGTH * 4);
     const redacted = raw
         .replace(/https?:\/\/\S+/gi, "[url redacted]")
         .replace(
@@ -395,3 +392,4 @@ export async function collectFederationLeaseMetricSnapshot(): Promise<
     warnIfPeerQueryCapped(peers.length, "lease_metrics");
     return loadLeaseCounts(peers.map(({ id }) => id));
 }
+import { toErrorMessage } from "../utils/errors";

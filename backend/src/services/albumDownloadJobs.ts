@@ -3,9 +3,9 @@ import { lastFmService } from "./lastfm";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "./albumDownloadQueueOwnership";
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "./downloadJobStatus";
 
 const log = logger.child?.("AlbumDownloadJobs") ?? logger;
-const ACTIVE_DOWNLOAD_STATUSES = ["pending", "processing"] as const;
 
 type AlbumDownloadDatabase = Pick<
     Prisma.TransactionClient,
@@ -62,7 +62,7 @@ async function findActiveJob(
     return database.downloadJob.findFirst({
         where: {
             targetMbid: mbid,
-            status: { in: [...ACTIVE_DOWNLOAD_STATUSES] },
+            status: { in: [...ACTIVE_DOWNLOAD_JOB_STATUSES] },
         },
         orderBy: { createdAt: "asc" },
     });

@@ -10,6 +10,11 @@ import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { yieldToEventLoop } from "../utils/async";
 import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
+import {
+    parseArtistAlbumSubject,
+    stripAlbumYearSuffix,
+} from "../utils/downloadSubject";
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../services/downloadJobStatus";
 
 class QueueCleanerService {
     private isRunning = false;
@@ -216,14 +221,10 @@ class QueueCleanerService {
                 for (const title of cleanResult.items) {
                     // Try to extract artist and album from the title
                     // Typical format: "Artist - Album" or "Artist - Album (Year)"
-                    const parts = title.split(" - ");
-                    if (parts.length >= 2) {
-                        const artistName = parts[0].trim();
-                        const albumPart = parts.slice(1).join(" - ").trim();
-                        // Remove year in parentheses if present
-                        const albumTitle = albumPart
-                            .replace(/\s*\(\d{4}\)\s*$/, "")
-                            .trim();
+                    const parsed = parseArtistAlbumSubject(title);
+                    if (parsed.artist !== title) {
+                        const artistName = parsed.artist;
+                        const albumTitle = stripAlbumYearSuffix(parsed.album);
 
                         // Find matching processing jobs
                         const matchingJobs = await this.withPrismaRetry(
@@ -393,7 +394,7 @@ class QueueCleanerService {
                 () =>
                     prisma.downloadJob.count({
                         where: {
-                            status: { in: ["pending", "processing"] },
+                            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                         },
                     }),
             );
@@ -454,7 +455,9 @@ class QueueCleanerService {
             "reconcileWithLocalLibrary.downloadJob.findMany.processing",
             () =>
                 prisma.downloadJob.findMany({
-                    where: { status: { in: ["pending", "processing"] } },
+                    where: {
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
+                    },
                 }),
         );
 

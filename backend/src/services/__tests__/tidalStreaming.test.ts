@@ -110,10 +110,8 @@ type RankedCandidate = {
 };
 
 type TidalStreamingPrivate = {
-    availabilityCache: { value: boolean; expiresAt: number } | null;
-    enabledCache: { value: boolean; expiresAt: number } | null;
-    availabilityInFlight: Promise<boolean> | null;
-    enabledInFlight: Promise<boolean> | null;
+    loadAvailability: { clear(): void };
+    loadEnabled: { clear(): void };
     qualityCache: Map<string, { quality: string; expiresAt: number }>;
     isAvailable(): Promise<boolean>;
     isEnabled(): Promise<boolean>;
@@ -135,10 +133,8 @@ const privateService =
     tidalStreamingService as unknown as TidalStreamingPrivate;
 
 function resetServiceState(service: TidalStreamingPrivate): void {
-    service.availabilityCache = null;
-    service.enabledCache = null;
-    service.availabilityInFlight = null;
-    service.enabledInFlight = null;
+    service.loadAvailability.clear();
+    service.loadEnabled.clear();
     service.qualityCache?.clear?.();
 }
 
@@ -266,7 +262,7 @@ describe("tidal streaming service", () => {
                 select: { tidalEnabled: true },
             });
 
-            privateService.enabledCache = null;
+            privateService.loadEnabled.clear();
             mockPrisma.systemSettings.findUnique.mockRejectedValueOnce(
                 new Error("db unavailable"),
             );

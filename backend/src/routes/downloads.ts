@@ -6,9 +6,6 @@ import { parseBoundedInt } from "../utils/queryParams";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
-import { soulseekService } from "../services/soulseek";
-import { tidalService } from "../services/tidal";
-import { youtubeDownloadService } from "../services/youtubeDownload";
 import { musicBrainzService } from "../services/musicbrainz";
 import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
@@ -16,8 +13,17 @@ import { mapInteractiveRelease } from "../services/releaseContracts";
 import { createAlbumDownloadJob } from "../services/albumDownloadJobs";
 import { enqueueAlbumDownloadInBackground } from "../services/albumDownloadQueueService";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendRouteFailure,
+    sendInternalRouteError,
+    sendRouteError,
+} from "./routeErrorResponse";
 import crypto from "crypto";
+import { probeDownloadSourceAvailability } from "../services/downloadSourcePolicy";
+import {
+    ACTIVE_DOWNLOAD_JOB_STATUSES,
+    failDownloadJob,
+} from "../services/downloadJobStatus";
 
 const router = Router();
 
@@ -44,28 +50,18 @@ router.use(requireAuthOrToken);
  */
 router.get("/availability", async (req, res) => {
     try {
-        const [
-            lidarrEnabled,
-            soulseekAvailable,
-            tidalAvailable,
-            youtubeAvailable,
-        ] = await Promise.all([
-            lidarrService.isEnabled(),
-            soulseekService.isAvailable(),
-            tidalService.isAvailable(),
-            youtubeDownloadService.isAvailable(),
-        ]);
+        const availability = await probeDownloadSourceAvailability();
 
         res.json({
             enabled:
-                lidarrEnabled ||
-                soulseekAvailable ||
-                tidalAvailable ||
-                youtubeAvailable,
-            lidarr: lidarrEnabled,
-            soulseek: soulseekAvailable,
-            tidal: tidalAvailable,
-            youtube: youtubeAvailable,
+                availability.lidarr ||
+                availability.soulseek ||
+                availability.tidal ||
+                availability.youtube,
+            lidarr: availability.lidarr,
+            soulseek: availability.soulseek,
+            tidal: availability.tidal,
+            youtube: availability.youtube,
         });
     } catch (error: any) {
         logger.error("Download availability check error:", error.message);
@@ -150,23 +146,13 @@ router.post("/", requireAdmin, async (req, res) => {
 
         // Check if at least one download service is available
         const settings = await getSystemSettings();
-        const [
-            lidarrEnabled,
-            soulseekAvailable,
-            tidalAvailable,
-            youtubeAvailable,
-        ] = await Promise.all([
-            lidarrService.isEnabled(),
-            soulseekService.isAvailable(),
-            tidalService.isAvailable(),
-            youtubeDownloadService.isAvailable(),
-        ]);
+        const availability = await probeDownloadSourceAvailability();
 
         if (
-            !lidarrEnabled &&
-            !soulseekAvailable &&
-            !tidalAvailable &&
-            !youtubeAvailable
+            !availability.lidarr &&
+            !availability.soulseek &&
+            !availability.tidal &&
+            !availability.youtube
         ) {
             return res.status(400).json({
                 error: "No download service configured. Please set up Lidarr, Soulseek, TIDAL, or YouTube Music.",
@@ -778,10 +764,12 @@ router.get("/releases/:albumMbid", requireAdmin, async (req, res) => {
             total: formattedReleases.length,
         });
     } catch (error: any) {
-        logger.error("Get interactive releases error:", error);
-        res.status(500).json({
-            error: "Failed to fetch releases",
-        });
+        return sendRouteFailure(
+            res,
+            logger,
+            ["Get interactive releases error:", "Failed to fetch releases"],
+            error,
+        );
     }
 });
 
@@ -860,7 +848,7 @@ router.post("/grab", requireAdmin, async (req, res) => {
 
         const duplicateWhere: any = {
             userId,
-            status: { in: ["pending", "processing"] },
+            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
             OR: [{ lidarrAlbumId: parsedLidarrAlbumId }],
         };
 
@@ -913,14 +901,10 @@ router.post("/grab", requireAdmin, async (req, res) => {
         });
 
         if (!success) {
-            await prisma.downloadJob.update({
-                where: { id: job.id },
-                data: {
-                    status: "failed",
-                    error: "Failed to grab release from indexer",
-                    completedAt: new Date(),
-                },
-            });
+            await failDownloadJob(
+                job.id,
+                "Failed to grab release from indexer",
+            );
             return sendInternalRouteError(res, "Failed to grab release");
         }
 
@@ -930,10 +914,12 @@ router.post("/grab", requireAdmin, async (req, res) => {
             message: `Downloading "${albumTitle}" - release grabbed from indexer`,
         });
     } catch (error: any) {
-        logger.error("Grab interactive release error:", error);
-        res.status(500).json({
-            error: "Failed to grab release",
-        });
+        return sendRouteFailure(
+            res,
+            logger,
+            ["Grab interactive release error:", "Failed to grab release"],
+            error,
+        );
     }
 });
 

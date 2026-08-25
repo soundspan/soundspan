@@ -103,10 +103,6 @@ async function openSafePodcastDownloadStream(
     throw new PodcastDownloadBlockedError(current);
 }
 
-function describePodcastDownloadError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
 function isRetryablePodcastDownloadPrismaError(error: unknown): boolean {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
         return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
@@ -372,7 +368,7 @@ async function performAutoCacheDownload(
     } catch (error) {
         podcastDownloadLogger.error(
             `Background download failed for ${episodeId}`,
-            describePodcastDownloadError(error),
+            toErrorMessage(error),
         );
     } finally {
         downloadingEpisodes.delete(episodeId);
@@ -396,7 +392,7 @@ function enqueueAutoCacheDownload(
             downloadingEpisodes.delete(episodeId);
             podcastDownloadLogger.error(
                 `Auto-cache queue failed for ${episodeId}`,
-                describePodcastDownloadError(error),
+                toErrorMessage(error),
             );
         },
     );
@@ -553,7 +549,7 @@ async function determineExpectedDownloadBytes(
         }
     } catch (error) {
         podcastDownloadLogger.warn(
-            `Failed to persist Content-Length: ${describePodcastDownloadError(error)}`,
+            `Failed to persist Content-Length: ${toErrorMessage(error)}`,
         );
     }
     return expectedBytes;
@@ -807,7 +803,7 @@ async function performDownload(
                 throw error;
             }
             podcastDownloadLogger.debug(
-                `Download failed (attempt ${attempt}), retrying in 5s: ${describePodcastDownloadError(error)}`,
+                `Download failed (attempt ${attempt}), retrying in 5s: ${toErrorMessage(error)}`,
             );
             await new Promise((resolve) => setTimeout(resolve, 5000));
         }
@@ -846,7 +842,7 @@ async function deleteExpiredPodcastDownload(
     } catch (error) {
         podcastDownloadLogger.error(
             `Failed to delete ${download.localPath}`,
-            describePodcastDownloadError(error),
+            toErrorMessage(error),
         );
         return null;
     }
@@ -926,3 +922,4 @@ export async function getCacheStats(): Promise<{
 export function isDownloading(episodeId: string): boolean {
     return downloadingEpisodes.has(episodeId);
 }
+import { toErrorMessage } from "../utils/errors";

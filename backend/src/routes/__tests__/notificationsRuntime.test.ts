@@ -1084,6 +1084,43 @@ describe("notifications route runtime", () => {
         expect(noMbidRes.body.error).toBe("Cannot retry: missing album MBID");
     });
 
+    it("preserves a dashed album title when retrying a generic album download", async () => {
+        prisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "job-generic-dashed-album",
+            userId: "u1",
+            subject: "Artist - Album - Deluxe Edition",
+            type: "album",
+            targetMbid: "mbid-dashed-album",
+            artistMbid: "artist-mbid",
+            metadata: {},
+        });
+        prisma.downloadJob.create.mockResolvedValueOnce({
+            id: "job-new-dashed-album",
+            metadata: {},
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { id: "job-generic-dashed-album" },
+        } as any;
+        const res = createRes();
+
+        await retryDownload(req, res);
+
+        expect(res.body).toEqual({
+            success: true,
+            newJobId: "job-new-dashed-album",
+            error: null,
+        });
+        expect(enqueueAlbumDownload).toHaveBeenCalledWith({
+            jobId: "job-new-dashed-album",
+            type: "album",
+            mbid: "mbid-dashed-album",
+            subject: "Artist - Album - Deluxe Edition",
+            artistName: "Artist",
+            albumTitle: "Album - Deluxe Edition",
+        });
+    });
+
     it("handles spotify_import retry async success/fallback/catch branches", async () => {
         prisma.downloadJob.findFirst.mockResolvedValueOnce({
             id: "job-spotify-success",

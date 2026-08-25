@@ -10,6 +10,7 @@ import {
     watchYouTubeDownloadJobUntilTerminal,
     youtubeDownloadService,
 } from "./youtubeDownload";
+import { asPlainObject } from "../utils/plainObject";
 
 type DownloadMetadata = Record<string, unknown>;
 
@@ -25,9 +26,7 @@ export interface YoutubeLibraryDownloadOptions {
 }
 
 function asMetadata(value: unknown): DownloadMetadata {
-    return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as DownloadMetadata)
-        : {};
+    return asPlainObject(value);
 }
 
 function withoutFailedAt(metadata: DownloadMetadata): DownloadMetadata {

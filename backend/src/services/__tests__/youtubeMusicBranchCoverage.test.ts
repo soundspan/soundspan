@@ -34,8 +34,7 @@ import { logger } from "../../utils/logger";
 import { ytMusicService } from "../youtubeMusic";
 
 type MutableServiceState = {
-    availabilityCache: unknown;
-    availabilityInFlight: unknown;
+    loadAvailability: { clear(): void };
 };
 
 describe("youtubeMusic service branch coverage", () => {
@@ -43,8 +42,7 @@ describe("youtubeMusic service branch coverage", () => {
         jest.clearAllMocks();
         jest.useRealTimers();
         const mutableService = ytMusicService as unknown as MutableServiceState;
-        mutableService.availabilityCache = null;
-        mutableService.availabilityInFlight = null;
+        mutableService.loadAvailability.clear();
     });
 
     it("reuses in-flight availability request and then cached value", async () => {

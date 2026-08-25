@@ -128,7 +128,7 @@ export class DiscoveryAlbumLifecycle {
                         : true
                 ) {
                     logger.warn(
-                        `[DiscoveryLifecycle] Lidarr delete failed for discoveryAlbum=${album.id}, rgMbid=${album.rgMbid}, lidarrAlbumId=${album.lidarrAlbumId}: ${error instanceof Error ? error.message : String(error)}`,
+                        `[DiscoveryLifecycle] Lidarr delete failed for discoveryAlbum=${album.id}, rgMbid=${album.rgMbid}, lidarrAlbumId=${album.lidarrAlbumId}: ${toErrorMessage(error)}`,
                     );
                 }
             }
@@ -238,3 +238,4 @@ export class DiscoveryAlbumLifecycle {
 }
 
 export const discoveryAlbumLifecycle = new DiscoveryAlbumLifecycle();
+import { toErrorMessage } from "../../utils/errors";

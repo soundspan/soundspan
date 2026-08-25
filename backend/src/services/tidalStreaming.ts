@@ -16,6 +16,7 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { encrypt } from "../utils/encryption";
+import { cachedSingleflight } from "../utils/singleflight";
 
 const SIDECAR_AGENT_OPTIONS = {
     keepAlive: true,
@@ -131,11 +132,25 @@ export interface TidalPlaylistDetail {
 class TidalStreamingService {
     private client: AxiosInstance;
     private readonly sidecarUrl: string;
-    private availabilityCache: { value: boolean; expiresAt: number } | null =
-        null;
-    private enabledCache: { value: boolean; expiresAt: number } | null = null;
-    private availabilityInFlight: Promise<boolean> | null = null;
-    private enabledInFlight: Promise<boolean> | null = null;
+    private readonly loadAvailability = cachedSingleflight(async () => {
+        try {
+            const res = await this.client.get("/health", { timeout: 5000 });
+            return res.data?.status === "ok";
+        } catch {
+            return false;
+        }
+    }, AVAILABILITY_CACHE_TTL_MS);
+    private readonly loadEnabled = cachedSingleflight(async () => {
+        try {
+            const settings = await prisma.systemSettings.findUnique({
+                where: { id: "default" },
+                select: { tidalEnabled: true },
+            });
+            return !!settings?.tidalEnabled;
+        } catch {
+            return false;
+        }
+    }, ENABLED_CACHE_TTL_MS);
     private static readonly UNDESIRED_MISMATCH_TERMS = [
         "karaoke",
         "tribute",
@@ -179,33 +194,7 @@ class TidalStreamingService {
      * Check whether the TIDAL sidecar is reachable.
      */
     async isAvailable(): Promise<boolean> {
-        const now = Date.now();
-        if (this.availabilityCache && this.availabilityCache.expiresAt > now) {
-            return this.availabilityCache.value;
-        }
-        if (this.availabilityInFlight) {
-            return this.availabilityInFlight;
-        }
-
-        this.availabilityInFlight = (async () => {
-            let available = false;
-            try {
-                const res = await this.client.get("/health", { timeout: 5000 });
-                available = res.data?.status === "ok";
-            } catch {
-                available = false;
-            }
-
-            this.availabilityCache = {
-                value: available,
-                expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
-            };
-            return available;
-        })().finally(() => {
-            this.availabilityInFlight = null;
-        });
-
-        return this.availabilityInFlight;
+        return this.loadAvailability();
     }
 
     /**
@@ -214,36 +203,7 @@ class TidalStreamingService {
      * has `tidalEnabled` set in SystemSettings.
      */
     async isEnabled(): Promise<boolean> {
-        const now = Date.now();
-        if (this.enabledCache && this.enabledCache.expiresAt > now) {
-            return this.enabledCache.value;
-        }
-        if (this.enabledInFlight) {
-            return this.enabledInFlight;
-        }
-
-        this.enabledInFlight = (async () => {
-            let enabled = false;
-            try {
-                const settings = await prisma.systemSettings.findUnique({
-                    where: { id: "default" },
-                    select: { tidalEnabled: true },
-                });
-                enabled = !!settings?.tidalEnabled;
-            } catch {
-                enabled = false;
-            }
-
-            this.enabledCache = {
-                value: enabled,
-                expiresAt: Date.now() + ENABLED_CACHE_TTL_MS,
-            };
-            return enabled;
-        })().finally(() => {
-            this.enabledInFlight = null;
-        });
-
-        return this.enabledInFlight;
+        return this.loadEnabled();
     }
 
     // ── Per-user auth ──────────────────────────────────────────────

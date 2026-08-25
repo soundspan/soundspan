@@ -38,8 +38,7 @@ export class SpotifyImportPreviewService extends SpotifyImportMatchingService {
             try {
                 await this.enrichUnknownAlbumsViaMusicBrainz(tracks, logPrefix);
             } catch (error: unknown) {
-                const errorMsg =
-                    error instanceof Error ? error.message : String(error);
+                const errorMsg = toErrorMessage(error);
                 logger?.error(
                     `${logPrefix} MusicBrainz enrichment failed: ${errorMsg}`,
                 );
@@ -354,3 +353,4 @@ export class SpotifyImportPreviewService extends SpotifyImportMatchingService {
         );
     }
 }
+import { toErrorMessage } from "../../utils/errors";

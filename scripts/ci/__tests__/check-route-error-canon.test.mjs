@@ -245,6 +245,31 @@ test("countLeakPattern flags result.error forwarded in a response body", () => {
     );
 });
 
+test("countLeakPattern flags raw errors passed to failDownloadJob", () => {
+    assert.equal(countLeakPattern("failDownloadJob(id, result.error)"), 1);
+    assert.equal(countLeakPattern("failDownloadJob(id, err)"), 1);
+    assert.equal(
+        countLeakPattern(
+            'failDownloadJob(id, result.error ?? "Download failed")',
+        ),
+        1,
+    );
+    assert.equal(
+        countLeakPattern(
+            'failDownloadJob(id, result.error || "Download failed")',
+        ),
+        1,
+    );
+});
+
+test("countLeakPattern ignores curated errors passed to failDownloadJob", () => {
+    assert.equal(
+        countLeakPattern("failDownloadJob(id, toErrorMessage(error))"),
+        0,
+    );
+    assert.equal(countLeakPattern('failDownloadJob(id, "static message")'), 0);
+});
+
 test("countLeakPattern flags result.error interpolated into a session log push", () => {
     const source =
         'sessionLog("PENDING-RETRY", `Download failed: ${result.error || "unknown error"}`, "WARN");';

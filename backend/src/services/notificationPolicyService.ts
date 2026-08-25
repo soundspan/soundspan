@@ -331,7 +331,7 @@ class NotificationPolicyService {
             where: {
                 id: { not: job.id },
                 userId: job.userId,
-                status: { in: ["completed", "failed", "exhausted"] },
+                status: { in: TERMINAL_DOWNLOAD_JOB_STATUSES },
             },
         });
 
@@ -419,3 +419,4 @@ class NotificationPolicyService {
 
 // Singleton instance
 export const notificationPolicyService = new NotificationPolicyService();
+import { TERMINAL_DOWNLOAD_JOB_STATUSES } from "./downloadJobStatus";

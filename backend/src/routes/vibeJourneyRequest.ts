@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { VALID_MOODS, MoodType } from "../services/moodBucketService";
+import { isPlainObject } from "../utils/plainObject";
 
 /**
  * vibeJourneyRequest — pure request validation for `POST /api/vibe/journey`.
@@ -30,10 +31,7 @@ export type JourneyRequestResult =
     | { ok: true; value: JourneyRequest }
     | { ok: false; status: number; error: string };
 
-const requestBodySchema = z.custom<Record<string, unknown>>(
-    (value) =>
-        typeof value === "object" && value !== null && !Array.isArray(value),
-);
+const requestBodySchema = z.custom<Record<string, unknown>>(isPlainObject);
 const nonEmptyStringSchema = z.string().min(1);
 const moodSchema = z.enum(VALID_MOODS);
 const excludeArraySchema = z.array(z.unknown()).default([]);

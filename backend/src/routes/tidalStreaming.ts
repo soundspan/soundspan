@@ -527,7 +527,7 @@ router.post(
         } catch (err: unknown) {
             logger.error(
                 "[TIDAL-STREAM] Poll auth failed:",
-                err instanceof Error ? err.message : String(err),
+                toErrorMessage(err),
             );
             res.status(500).json({
                 status: "error",
@@ -1124,3 +1124,4 @@ router.get(
 );
 
 export default router;
+import { toErrorMessage } from "../utils/errors";

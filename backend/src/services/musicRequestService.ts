@@ -149,7 +149,7 @@ async function rejectIfDownloading(rgMbid: string): Promise<void> {
     const active = await prisma.downloadJob.findFirst({
         where: {
             targetMbid: rgMbid,
-            status: { in: ["pending", "processing"] },
+            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
         },
         select: { id: true },
     });
@@ -574,7 +574,7 @@ export async function approveRequest(
         const job = await prisma.downloadJob.findFirst({
             where: {
                 targetMbid: request.rgMbid,
-                status: { in: ["pending", "processing"] },
+                status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
             },
             orderBy: { createdAt: "asc" },
         });
@@ -633,3 +633,4 @@ export async function denyRequest(
     await bestEffortDenialNotification(request, deniedReason);
     return { kind: "updated", request };
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "./downloadJobStatus";

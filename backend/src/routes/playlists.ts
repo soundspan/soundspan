@@ -2022,14 +2022,7 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
         const settings = await getSystemSettings();
         if (!settings?.musicPath) {
             sessionLog("PENDING-RETRY", `Music path not configured`, "WARN");
-            await prisma.downloadJob.update({
-                where: { id: downloadJob.id },
-                data: {
-                    status: "failed",
-                    error: "Music path not configured",
-                    completedAt: new Date(),
-                },
-            });
+            await failDownloadJob(downloadJob.id, "Music path not configured");
             return res.status(400).json({ error: "Music path not configured" });
         }
 
@@ -2039,14 +2032,10 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
                 `Soulseek credentials not configured`,
                 "WARN",
             );
-            await prisma.downloadJob.update({
-                where: { id: downloadJob.id },
-                data: {
-                    status: "failed",
-                    error: "Soulseek credentials not configured",
-                    completedAt: new Date(),
-                },
-            });
+            await failDownloadJob(
+                downloadJob.id,
+                "Soulseek credentials not configured",
+            );
             return res
                 .status(400)
                 .json({ error: "Soulseek credentials not configured" });
@@ -2077,14 +2066,7 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
             logger.debug(`[Retry] No results found on Soulseek`);
             sessionLog("PENDING-RETRY", `No results found on Soulseek`, "INFO");
 
-            await prisma.downloadJob.update({
-                where: { id: downloadJob.id },
-                data: {
-                    status: "failed",
-                    error: "No matching files found",
-                    completedAt: new Date(),
-                },
-            });
+            await failDownloadJob(downloadJob.id, "No matching files found");
 
             return res.status(200).json({
                 success: false,
@@ -2174,14 +2156,10 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
                         "WARN",
                     );
 
-                    await prisma.downloadJob.update({
-                        where: { id: downloadJob.id },
-                        data: {
-                            status: "failed",
-                            error: result.error || "Download failed",
-                            completedAt: new Date(),
-                        },
-                    });
+                    await failDownloadJob(
+                        downloadJob.id,
+                        result.error || "Download failed",
+                    );
                 }
             })
             .catch((error) => {
@@ -2193,17 +2171,10 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
                     "ERROR",
                 );
 
-                prisma.downloadJob
-                    .update({
-                        where: { id: downloadJob.id },
-                        data: {
-                            status: "failed",
-                            // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
-                            error: "Download exception",
-                            completedAt: new Date(),
-                        },
-                    })
-                    .catch(() => undefined);
+                // downloadJob rows (including error) are returned to the owning user via GET /api/downloads.
+                failDownloadJob(downloadJob.id, "Download exception").catch(
+                    () => undefined,
+                );
             });
     } catch (error: any) {
         logger.error("Retry pending track error:", error);
@@ -2289,3 +2260,4 @@ router.post("/:id/pending/reconcile", async (req, res) => {
 });
 
 export default router;
+import { failDownloadJob } from "../services/downloadJobStatus";

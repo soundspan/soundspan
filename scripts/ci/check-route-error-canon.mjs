@@ -23,7 +23,7 @@ const BASELINE = Object.freeze({
     "backend/src/routes/deviceLink.ts": 6,
     "backend/src/routes/discover/exclusions.ts": 1,
     "backend/src/routes/discover/shared.ts": 4,
-    "backend/src/routes/downloads.ts": 3,
+    "backend/src/routes/downloads.ts": 1,
     "backend/src/routes/enrichment.ts": 30,
     "backend/src/routes/homepage.ts": 2,
     "backend/src/routes/library/albums.ts": 1,
@@ -63,19 +63,17 @@ const BASELINE = Object.freeze({
 const LEAK_BASELINE = Object.freeze({
     // auth/adminUserInvites.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L479 and ~L897); code-owned schema messages, not raw errors.
     "backend/src/routes/auth/adminUserInvites.ts": 2,
-    // discover/legacy/maintenance.ts +1: cleanup-loop detail const used only by logger.error; server-side only; frozen with deprecated legacy discovery.
-    // discover/legacy/maintenance.ts +1: the same logger-only cleanup detail's ternary-consequent error.message; frozen with deprecated legacy discovery.
-    "backend/src/routes/discover/legacy/maintenance.ts": 2,
+    "backend/src/routes/discover/legacy/maintenance.ts": 0,
     "backend/src/routes/downloads.ts": 0,
     // library/artists.ts remaining 1: admin-only Lidarr deletion diagnostics (lidarrError = err?.message) returned to the initiating admin, not a general-user 500 leak.
     "backend/src/routes/library/artists.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
-    // notifications.ts remaining 1: stored downloadJob.error from the soulseek retry result (~L702), returned to the owning user via GET /api/downloads — client-reachable and flagged for follow-up sanitization under the slice-J scope guard.
+    // notifications.ts remaining 1: stored downloadJob.error from the soulseek retry result (~L676), returned to the owning user via GET /api/downloads — client-reachable and flagged for follow-up sanitization under the slice-J scope guard.
     "backend/src/routes/notifications.ts": 1,
     "backend/src/routes/playbackState.ts": 0,
     // playlistImport.ts remaining 2: substring-guarded 400 echoes of playlistImportService's own thrown validation messages (~L434 preview, ~L516 "Invalid track reference" execute); code-owned text, not raw transport errors.
     "backend/src/routes/playlistImport.ts": 2,
-    // playlists.ts remaining 2: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); plus stored downloadJob.error from the soulseek retry result (~L1725), stored-then-returned to the owning user via GET /api/downloads — flagged for follow-up sanitization under the slice-J scope guard (the sessionLog WARN leak was sanitized).
+    // playlists.ts remaining 2: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); plus stored downloadJob.error from the soulseek retry result (~L2161), stored-then-returned to the owning user via GET /api/downloads — flagged for follow-up sanitization under the slice-J scope guard (the sessionLog WARN leak was sanitized).
     "backend/src/routes/playlists.ts": 2,
     // podcasts.ts remaining 2: Prisma-retry classification helper (~L83) and logger-only describeAxiosError (~L133); neither reaches a response body.
     // podcasts.ts +1: retry classification's ternary-consequent error.message (~L108); frozen under the ratchet-widening (slice-X1) scope guard.
@@ -112,9 +110,7 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/imageProxy.ts": 1,
     // importJobStore.ts remaining 1: persisted input.error passthrough (~L192); job-state plumbing, frozen under the slice-J scope guard.
     "backend/src/services/importJobStore.ts": 1,
-    // lastfm.ts +1: album-info error detail const consumed only by logger.error (~L303); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
-    // lastfm.ts +1: the same logger-only detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/lastfm.ts": 2,
+    "backend/src/services/lastfm.ts": 0,
     // listenTogetherSocket.ts +4: GroupError ternary-consequent messages forwarded through socket acknowledgements; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/listenTogetherSocket.ts": 0,
     // lidarr.ts remaining 3: { success, message } Lidarr client results (~L1651, ~L1732, ~L2152) consumed by admin Lidarr management flows; frozen under the slice-E scope guard.
@@ -126,12 +122,9 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/vibeProvider.ts": 1,
     // musicScanner.ts remaining 1: per-file scan-error detail stored in scan progress/health records (~L211); server-side scan state, admin-only surface.
     "backend/src/services/musicScanner.ts": 1,
-    // podcastCache.ts remaining 2: cover-sync failure strings recorded server-side (~L90, ~L172); frozen under the slice-E scope guard.
-    "backend/src/services/podcastCache.ts": 2,
-    // podcastDownload.ts remaining 1: error-classification const (~L92), never a response body; frozen under the slice-E scope guard.
-    // podcastDownload.ts +1: describePodcastDownloadError fallback (~L77) is consumed only by logger.warn calls; server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
-    // podcastDownload.ts +2: logger-detail and Redis-classifier ternary-consequent error.message uses (~L80 and ~L103); frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/podcastDownload.ts": 4,
+    "backend/src/services/podcastCache.ts": 0,
+    // podcastDownload.ts remaining 2: internal error classification and logger detail; neither reaches a response body.
+    "backend/src/services/podcastDownload.ts": 2,
     // remoteTrackBackfillService.ts +2: numeric phase error counters (~L164 and ~L168); no error text; frozen under the ratchet-widening (slice-B2) scope guard.
     "backend/src/services/remoteTrackBackfillService.ts": 2,
     // rssParser.ts +1: feed-failure result's ternary-consequent error.message (~L252); frozen under the ratchet-widening (slice-X1) scope guard.
@@ -140,14 +133,12 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/simpleDownloadManager.ts": 4,
     // soulseek.ts remaining 9: download-result error objects and downstream aggregations/passthroughs in Soulseek orchestration; the session log is client-visible and its raw error/path entries are sanitized rather than frozen.
     "backend/src/services/soulseek.ts": 9,
-    // spotify.ts +1: track-scraper error detail const consumed only by logger.debug (~L663); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
-    // spotify.ts +1: the same logger-only detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/spotify.ts": 2,
-    // spotifyImport split: the prior spotifyImport.ts baseline of 14 is relocated verbatim across focused modules with the same total.
+    "backend/src/services/spotify.ts": 0,
+    // spotifyImport modules retain only server-side job-state and retry-classification values.
     "backend/src/services/spotifyImport/jobManagement.ts": 1,
     "backend/src/services/spotifyImport/lifecycle.ts": 3,
-    "backend/src/services/spotifyImport/matching.ts": 2,
-    "backend/src/services/spotifyImport/preview.ts": 2,
+    "backend/src/services/spotifyImport/matching.ts": 0,
+    "backend/src/services/spotifyImport/preview.ts": 0,
     "backend/src/services/spotifyImport/state.ts": 6,
     // youtubeDownload.ts remaining 4: sidecar job-state plumbing — data.error in the per-video mapper (~L433), and data.errors / entry.error / data.error in the album-job mapper (~L443-459). The sidecar sanitizes these to code-owned generic strings ("Track download failed", "Album download failed") before they enter any payload; frozen under the slice-J scope guard.
     "backend/src/services/youtubeDownload.ts": 4,
@@ -157,8 +148,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/middleware/errorHandler.ts": 5,
     // dataIntegrity.ts remaining 2: Prisma/retry error classification used only by internal worker retry decisions.
     "backend/src/workers/dataIntegrity.ts": 2,
-    // index.ts remaining 4: one scheduler retry classifier, one numeric error counter, and two worker-result details used only in scoped server logs.
-    "backend/src/workers/index.ts": 4,
+    // index.ts remaining 3: one scheduler retry classifier, one numeric error counter, and one worker-result detail used only in scoped server logs.
+    "backend/src/workers/index.ts": 3,
     // moodBucketWorker.ts remaining 2: internal retry classification and a scoped server-log diagnostic.
     "backend/src/workers/moodBucketWorker.ts": 2,
     // organizeSingles.ts is explicitly frozen at zero after sanitizing its client-visible session-log errors and absolute paths.
@@ -167,10 +158,9 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/workers/processors/discoverProcessor.ts": 1,
     // imageProcessor.ts remaining 1: an existing internal queue-result error field returned to its Bull processor.
     "backend/src/workers/processors/imageProcessor.ts": 1,
-    // umapWorker.ts remaining 2: error normalization and an internal parent-worker message.
-    "backend/src/workers/umapWorker.ts": 2,
-    // unifiedEnrichment.ts remaining 13: retry classifiers, scoped worker diagnostics, and internal failure/batch-state records.
-    "backend/src/workers/unifiedEnrichment.ts": 13,
+    "backend/src/workers/umapWorker.ts": 0,
+    // unifiedEnrichment.ts remaining 7: retry classifiers, scoped worker diagnostics, and internal failure/batch-state records.
+    "backend/src/workers/unifiedEnrichment.ts": 7,
 });
 
 export function countPattern(source) {
@@ -229,7 +219,8 @@ export function countLeakPattern(source) {
         identifierPropertyCount +
         countErrorPropertyLeaks(stripped) +
         countErrorConversions(stripped) +
-        countAxiosResponseDataLeaks(stripped)
+        countAxiosResponseDataLeaks(stripped) +
+        countDownloadJobErrorLeaks(stripped)
     );
 }
 
@@ -281,6 +272,15 @@ function countErrorConversions(strippedSource) {
 function countAxiosResponseDataLeaks(strippedSource) {
     const pattern = new RegExp(
         String.raw`${VALUE_PREFIX}${CHAIN}\s*\??\s*\.\s*response\s*\??\s*\.\s*data\b(?!\s*(?:\??\.|\(|\[))`,
+        "g",
+    );
+    return countMatches(strippedSource, pattern);
+}
+
+function countDownloadJobErrorLeaks(strippedSource) {
+    const rawErrorProperty = String.raw`${CHAIN}\s*\??\s*\.\s*error\b(?!\s*(?:\??\.|\(|\[))`;
+    const pattern = new RegExp(
+        String.raw`failDownloadJob\s*\(\s*${CHAIN}\s*,\s*(?:${rawErrorProperty}|${ERROR_ID})(?=\s*(?:\|\||\?\?|,|\)))`,
         "g",
     );
     return countMatches(strippedSource, pattern);

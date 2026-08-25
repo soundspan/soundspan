@@ -6,6 +6,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { simpleDownloadManager } from "./simpleDownloadManager";
 import { tidalService, type TidalAlbumDownloadResult } from "./tidal";
 import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
+import { asPlainObject } from "../utils/plainObject";
 
 type DownloadMetadata = Record<string, unknown>;
 type TidalAlbumMatch = NonNullable<
@@ -18,9 +19,7 @@ export interface TidalLibraryDownloadOptions {
 }
 
 function asMetadata(value: unknown): DownloadMetadata {
-    return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as DownloadMetadata)
-        : {};
+    return asPlainObject(value);
 }
 
 function withoutFailedAt(metadata: DownloadMetadata): DownloadMetadata {

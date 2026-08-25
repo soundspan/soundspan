@@ -83,7 +83,7 @@ async function probePostgres(timeoutMs: number): Promise<DependencyStatus> {
     } catch (error) {
         return {
             ok: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: toErrorMessage(error),
             latencyMs: null,
         };
     }
@@ -115,7 +115,7 @@ async function probeRedis(timeoutMs: number): Promise<DependencyStatus> {
     } catch (error) {
         return {
             ok: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: toErrorMessage(error),
             latencyMs: null,
         };
     }
@@ -211,3 +211,4 @@ export function createDependencyReadinessTracker(
 ): DependencyReadinessTracker {
     return new DependencyReadinessTracker(label);
 }
+import { toErrorMessage } from "./errors";

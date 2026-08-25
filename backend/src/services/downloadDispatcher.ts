@@ -4,15 +4,13 @@ import { getSystemSettings } from "../utils/systemSettings";
 import {
     type DownloadSource,
     type DownloadSourceAvailability,
+    probeDownloadSourceAvailability,
     resolveDownloadSource,
 } from "./downloadSourcePolicy";
-import { lidarrService } from "./lidarr";
 import { simpleDownloadManager } from "./simpleDownloadManager";
-import { soulseekService } from "./soulseek";
-import { tidalService } from "./tidal";
 import { processTidalDownload } from "./tidalLibraryDownload";
-import { youtubeDownloadService } from "./youtubeDownload";
 import { processYoutubeDownload } from "./youtubeLibraryDownload";
+import { parseArtistAlbumSubject } from "../utils/downloadSubject";
 
 const logger = rootLogger.child("DownloadDispatcher");
 
@@ -42,24 +40,7 @@ function parseAlbumNames({
     if (artistName && albumTitle) {
         return { artist: artistName, album: albumTitle };
     }
-    const parts = subject.split(" - ");
-    if (parts.length >= 2) {
-        return {
-            artist: parts[0].trim(),
-            album: parts.slice(1).join(" - ").trim(),
-        };
-    }
-    return { artist: subject, album: subject };
-}
-
-async function getDownloadSourceAvailability(): Promise<DownloadSourceAvailability> {
-    const [tidal, lidarr, soulseek, youtube] = await Promise.all([
-        tidalService.isAvailable(),
-        lidarrService.isEnabled(),
-        soulseekService.isAvailable(),
-        youtubeDownloadService.isAvailable(),
-    ]);
-    return { tidal, lidarr, soulseek, youtube };
+    return parseArtistAlbumSubject(subject);
 }
 
 async function failJobWithoutDispatch(
@@ -160,7 +141,7 @@ export async function dispatchAlbumDownload(
     const settings = await getSystemSettings();
     const configuredSource = (settings?.downloadSource ||
         "soulseek") as DownloadSource;
-    const availability = await getDownloadSourceAvailability();
+    const availability = await probeDownloadSourceAvailability();
     const resolution = resolveDownloadSource({
         configuredSource,
         fallback: settings?.primaryFailureFallback,

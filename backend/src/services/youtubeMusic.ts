@@ -16,6 +16,7 @@ import https from "node:https";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import type { CanonicalMediaSearchResult } from "@soundspan/media-metadata-contract";
+import { cachedSingleflight } from "../utils/singleflight";
 
 // ── Sidecar URL ────────────────────────────────────────────────────
 const YTMUSIC_STREAMER_URL = config.ytmusicStreamer.url;
@@ -302,9 +303,14 @@ async function retryWithBackoff<T>(
 
 class YouTubeMusicService {
     private client: AxiosInstance;
-    private availabilityCache: { value: boolean; expiresAt: number } | null =
-        null;
-    private availabilityInFlight: Promise<boolean> | null = null;
+    private readonly loadAvailability = cachedSingleflight(async () => {
+        try {
+            const res = await this.client.get("/health", { timeout: 5_000 });
+            return res.status === 200;
+        } catch {
+            return false;
+        }
+    }, AVAILABILITY_CACHE_TTL_MS);
     private static readonly UNDESIRED_MISMATCH_TERMS = [
         "karaoke",
         "tribute",
@@ -346,35 +352,7 @@ class YouTubeMusicService {
      * Check whether the sidecar is reachable.
      */
     async isAvailable(): Promise<boolean> {
-        const now = Date.now();
-        if (this.availabilityCache && this.availabilityCache.expiresAt > now) {
-            return this.availabilityCache.value;
-        }
-        if (this.availabilityInFlight) {
-            return this.availabilityInFlight;
-        }
-
-        this.availabilityInFlight = (async () => {
-            let available = false;
-            try {
-                const res = await this.client.get("/health", {
-                    timeout: 5_000,
-                });
-                available = res.status === 200;
-            } catch {
-                available = false;
-            }
-
-            this.availabilityCache = {
-                value: available,
-                expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
-            };
-            return available;
-        })().finally(() => {
-            this.availabilityInFlight = null;
-        });
-
-        return this.availabilityInFlight;
+        return this.loadAvailability();
     }
 
     /**

@@ -3,6 +3,7 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { organizeSingles } from "../workers/organizeSingles";
 import { scanQueue } from "../workers/queues";
+import { isPlainObject } from "../utils/plainObject";
 
 /** Stable queue job identifier for global library maintenance. */
 export const LIBRARY_MAINTENANCE_JOB_ID = "library-global-maintenance";
@@ -177,8 +178,8 @@ const toNonNegativeInteger = (value: unknown): number =>
 /** Normalizes queue progress into an integer percentage from zero to 100. */
 export const sanitizeScanProgress = (value: unknown): number => {
     let percent = value;
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        const fields = value as Record<string, unknown>;
+    if (isPlainObject(value)) {
+        const fields = value;
         if (typeof fields.percent === "number") {
             percent = fields.percent;
         } else if (
@@ -197,11 +198,11 @@ export const sanitizeScanProgress = (value: unknown): number => {
 export const sanitizeScanResult = (
     value: unknown,
 ): SanitizedScanResult | null => {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    if (!isPlainObject(value)) {
         return null;
     }
 
-    const fields = value as Record<string, unknown>;
+    const fields = value;
     return {
         tracksAdded: toNonNegativeInteger(fields.tracksAdded),
         tracksUpdated: toNonNegativeInteger(fields.tracksUpdated),

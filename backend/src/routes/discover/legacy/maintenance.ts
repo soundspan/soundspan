@@ -113,8 +113,7 @@ export async function handleLegacyCleanupLidarr(
                 artistsRemoved.push(artistName);
                 logger.debug(`[CLEANUP] Removed: ${artistName}`);
             } catch (error: unknown) {
-                const detail =
-                    error instanceof Error ? error.message : String(error);
+                const detail = toErrorMessage(error);
                 errors.push(`Failed to process ${artistName}`);
                 logger.error(
                     `[CLEANUP] Failed to process ${artistName}: ${detail}`,
@@ -260,3 +259,4 @@ export async function handleLegacyFixTagging(
         sendFixTaggingFailure(res, error);
     }
 }
+import { toErrorMessage } from "../../../utils/errors";

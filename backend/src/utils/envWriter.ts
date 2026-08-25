@@ -7,6 +7,7 @@ import {
     DB_ONLY_SECRET_ENV_KEYS,
     isSecretsDbOnlyEnabled,
 } from "../config/secretsPolicy";
+import { isPlainObject } from "./plainObject";
 
 const log = logger.child("EnvWriter");
 const ENV_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -81,7 +82,7 @@ function assertSafeEnvVariables(
     variables: Record<string, string | null | undefined>,
 ): void {
     assert.ok(
-        variables && typeof variables === "object" && !Array.isArray(variables),
+        isPlainObject(variables),
         "variables must be an environment variable record",
     );
     Object.entries(variables).forEach(([key, value]) => {

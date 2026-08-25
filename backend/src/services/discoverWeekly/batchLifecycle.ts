@@ -57,7 +57,7 @@ export class BatchLifecycleService extends PlaylistPersistenceService {
                 await discoverWeeklyPrisma.downloadJob.updateMany({
                     where: {
                         discoveryBatchId: batch.id,
-                        status: { in: ["pending", "processing"] },
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
                     data: {
                         status: "failed",
@@ -90,7 +90,7 @@ export class BatchLifecycleService extends PlaylistPersistenceService {
                 await discoverWeeklyPrisma.downloadJob.updateMany({
                     where: {
                         discoveryBatchId: batch.id,
-                        status: { in: ["pending", "processing"] },
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
                     data: {
                         status: "failed",
@@ -264,3 +264,4 @@ export class BatchLifecycleService extends PlaylistPersistenceService {
         );
     }
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../downloadJobStatus";

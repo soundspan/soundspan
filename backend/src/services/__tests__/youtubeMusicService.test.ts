@@ -38,6 +38,7 @@ describe("youtubeMusic service", () => {
         jest.clearAllMocks();
         jest.useRealTimers();
         mockConfig.internalApiSecret = undefined;
+        (ytMusicService as any).loadAvailability.clear();
     });
 
     describe("internal-secret header (F31)", () => {
@@ -73,8 +74,7 @@ describe("youtubeMusic service", () => {
         });
 
         // Reset availability memoization so the next check exercises the failure path.
-        (ytMusicService as any).availabilityCache = null;
-        (ytMusicService as any).availabilityInFlight = null;
+        (ytMusicService as any).loadAvailability.clear();
         mockClient.get.mockRejectedValueOnce(new Error("down"));
         await expect(ytMusicService.isAvailable()).resolves.toBe(false);
 

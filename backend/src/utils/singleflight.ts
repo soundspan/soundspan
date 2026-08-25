@@ -4,6 +4,12 @@ export interface SingleflightOptions {
     onCoalescedWait?: () => void;
 }
 
+/** Callable cached singleflight with explicit settled-value invalidation. */
+export interface CachedSingleflight<T> {
+    (): Promise<T>;
+    clear(): void;
+}
+
 /**
  * Coalesce concurrent asynchronous work by key within the provided map.
  * The settled flight clears only its own map slot, preserving any replacement.
@@ -29,4 +35,38 @@ export function coalesceInFlightByKey<T>(
         });
     inFlightMap.set(key, inFlightPromise);
     return inFlightPromise;
+}
+
+/**
+ * Cache one asynchronous value for a TTL and coalesce concurrent cache fills.
+ * Rejected fills are not cached.
+ */
+export function cachedSingleflight<T>(
+    factory: () => Promise<T>,
+    ttlMs: number,
+): CachedSingleflight<T> {
+    let cached: { value: T; expiresAt: number } | null = null;
+    let inFlight: Promise<T> | null = null;
+
+    const load = (): Promise<T> => {
+        if (cached && cached.expiresAt > Date.now()) {
+            return Promise.resolve(cached.value);
+        }
+        if (inFlight) return inFlight;
+
+        const fill = (async () => factory())()
+            .then((value) => {
+                cached = { value, expiresAt: Date.now() + ttlMs };
+                return value;
+            })
+            .finally(() => {
+                if (inFlight === fill) inFlight = null;
+            });
+        inFlight = fill;
+        return fill;
+    };
+    load.clear = (): void => {
+        cached = null;
+    };
+    return load;
 }

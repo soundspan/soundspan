@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { isPlainObject } from "./plainObject";
 
 export const SUBSONIC_API_VERSION = "1.16.1";
 export const SUBSONIC_SERVER_TYPE = "soundspan";
@@ -162,7 +163,7 @@ function objectToXml(value: unknown, rootName?: string): string {
         return value.map((entry) => objectToXml(entry, rootName)).join("");
     }
 
-    if (!isObject(value)) {
+    if (!isPlainObject(value)) {
         return escapeXml(toStringValue(value));
     }
 
@@ -181,7 +182,7 @@ function objectToXml(value: unknown, rootName?: string): string {
             continue;
         }
 
-        if (isObject(entry)) {
+        if (isPlainObject(entry)) {
             children.push(objectToXml(entry, key));
             continue;
         }
@@ -199,10 +200,6 @@ function objectToXml(value: unknown, rootName?: string): string {
     }
 
     return `<${rootName}${attrs}>${children.join("")}</${rootName}>`;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toStringValue(value: unknown): string {

@@ -1,4 +1,25 @@
-import { resolveDownloadSource } from "../downloadSourcePolicy";
+const isLidarrEnabled = jest.fn();
+const isSoulseekAvailable = jest.fn();
+const isTidalAvailable = jest.fn();
+const isYoutubeAvailable = jest.fn();
+
+jest.mock("../lidarr", () => ({
+    lidarrService: { isEnabled: isLidarrEnabled },
+}));
+jest.mock("../soulseek", () => ({
+    soulseekService: { isAvailable: isSoulseekAvailable },
+}));
+jest.mock("../tidal", () => ({
+    tidalService: { isAvailable: isTidalAvailable },
+}));
+jest.mock("../youtubeDownload", () => ({
+    youtubeDownloadService: { isAvailable: isYoutubeAvailable },
+}));
+
+import {
+    probeDownloadSourceAvailability,
+    resolveDownloadSource,
+} from "../downloadSourcePolicy";
 
 const availability = {
     tidal: true,
@@ -6,6 +27,26 @@ const availability = {
     soulseek: true,
     youtube: true,
 };
+
+describe("probeDownloadSourceAvailability", () => {
+    it("fans out all source probes and returns the named availability snapshot", async () => {
+        isLidarrEnabled.mockResolvedValueOnce(true);
+        isSoulseekAvailable.mockResolvedValueOnce(false);
+        isTidalAvailable.mockResolvedValueOnce(true);
+        isYoutubeAvailable.mockResolvedValueOnce(false);
+
+        await expect(probeDownloadSourceAvailability()).resolves.toEqual({
+            tidal: true,
+            lidarr: true,
+            soulseek: false,
+            youtube: false,
+        });
+        expect(isLidarrEnabled).toHaveBeenCalledTimes(1);
+        expect(isSoulseekAvailable).toHaveBeenCalledTimes(1);
+        expect(isTidalAvailable).toHaveBeenCalledTimes(1);
+        expect(isYoutubeAvailable).toHaveBeenCalledTimes(1);
+    });
+});
 
 describe("resolveDownloadSource", () => {
     it.each(["tidal", "lidarr", "soulseek", "youtube"] as const)(

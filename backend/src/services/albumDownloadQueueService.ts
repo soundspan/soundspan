@@ -26,14 +26,7 @@ function readMetadataString(
 
 async function persistQueueAdmissionFailure(jobId: string): Promise<void> {
     try {
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                status: "failed",
-                error: "Download queue unavailable",
-                completedAt: new Date(),
-            },
-        });
+        await failDownloadJob(jobId, "Download queue unavailable");
     } catch (error) {
         log.error("Failed to persist album download queue admission failure", {
             jobId,
@@ -90,7 +83,7 @@ async function finalizeRecoveredQueueFailure(jobId: string): Promise<void> {
     await prisma.downloadJob.updateMany({
         where: {
             id: jobId,
-            status: { in: ["pending", "processing"] },
+            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
         },
         data: {
             status: "failed",
@@ -187,3 +180,7 @@ export function enqueueAlbumDownloadInBackground(
         });
     });
 }
+import {
+    ACTIVE_DOWNLOAD_JOB_STATUSES,
+    failDownloadJob,
+} from "./downloadJobStatus";

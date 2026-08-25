@@ -434,6 +434,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         () =>
             prisma.downloadJob.deleteMany({
                 where: {
+                    // Exhausted jobs are deliberately retained by this cleanup.
                     status: { in: ["completed", "failed"] },
                     completedAt: { lt: thirtyDaysAgo },
                 },

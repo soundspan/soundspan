@@ -165,7 +165,7 @@ export class SpotifyImportJobManagementService extends SpotifyImportLifecycleSer
                     path: ["spotifyImportJobId"],
                     equals: jobId,
                 },
-                status: { in: ["pending", "processing"] },
+                status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
             },
             data: {
                 status: "failed",
@@ -187,3 +187,4 @@ export class SpotifyImportJobManagementService extends SpotifyImportLifecycleSer
         };
     }
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../downloadJobStatus";

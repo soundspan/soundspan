@@ -237,14 +237,10 @@ async function cleanupLegacySlskdJobs(): Promise<void> {
             );
 
             for (const job of legacyJobs) {
-                await prisma.downloadJob.update({
-                    where: { id: job.id },
-                    data: {
-                        status: "failed",
-                        error: "SLSKD integration replaced with direct Soulseek connection",
-                        completedAt: new Date(),
-                    },
-                });
+                await failDownloadJob(
+                    job.id,
+                    "SLSKD integration replaced with direct Soulseek connection",
+                );
                 sessionLog(
                     "ORGANIZE",
                     `Marked legacy job ${job.id} (${job.subject}) as failed`,
@@ -316,3 +312,4 @@ export async function queueOrganizeSingles(): Promise<void> {
         log.error("Organization failed", err);
     }
 }
+import { failDownloadJob } from "../services/downloadJobStatus";

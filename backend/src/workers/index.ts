@@ -93,6 +93,7 @@ import {
     COALESCED_SCAN_JOB_ID,
     consumeCoalescedScanFollowUp,
 } from "../services/coalescedLibraryScan";
+import { registerQueueProcessorEvents } from "./queueEvents";
 
 const log = logger.child("WorkerScheduler");
 const queueProcessorLog = log.child("QueueProcessor");
@@ -807,139 +808,134 @@ if (config.features.audioAnalysis) {
 
 startTrackMappingStalenessWorker();
 
-// Event handlers for scan queue
-scanQueue.on("completed", (job, result) => {
-    recordQueueProcessorEvent("library-scan", "completed", job);
-    consumeCoalescedFollowUpAfterSettlement(job);
-    log.debug(
-        `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} (workerId=${WORKER_PROCESSOR_ID})`,
-    );
-});
-
-scanQueue.on("failed", (job, err) => {
-    recordQueueProcessorEvent("library-scan", "failed", job);
-    consumeCoalescedFollowUpAfterSettlement(job);
-    log.error(
-        `Scan job ${job.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-        err.message,
-    );
-});
-
-scanQueue.on("active", (job) => {
-    recordQueueProcessorEvent("library-scan", "active", job);
-    log.debug(` Scan job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`);
-});
-
-// Event handlers for discover queue
-discoverQueue.on("completed", (job, result) => {
-    recordQueueProcessorEvent("discover-weekly", "completed", job);
-    if (result.success) {
+registerQueueProcessorEvents(scanQueue, "library-scan", {
+    record: recordQueueProcessorEvent,
+    recordFailedWithoutJob: true,
+    active: (job) => {
         log.debug(
-            `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs) (workerId=${WORKER_PROCESSOR_ID})`,
+            ` Scan job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
         );
-    } else {
+    },
+    completed: (job, result) => {
+        consumeCoalescedFollowUpAfterSettlement(job);
+        log.debug(
+            `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} (workerId=${WORKER_PROCESSOR_ID})`,
+        );
+    },
+    failed: (job, error) => {
+        consumeCoalescedFollowUpAfterSettlement(job!);
+        log.error(
+            `Scan job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+            error.message,
+        );
+    },
+});
+
+registerQueueProcessorEvents(discoverQueue, "discover-weekly", {
+    record: recordQueueProcessorEvent,
+    recordFailedWithoutJob: true,
+    active: (job) => {
+        log.debug(
+            ` Discover job ${job.id} started for user ${job.data.userId} (workerId=${WORKER_PROCESSOR_ID})`,
+        );
+    },
+    completed: (job, result) => {
+        if (result.success) {
+            log.debug(
+                `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs) (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+            return;
+        }
         log.debug(
             `Discover job ${job.id} failed: ${result.error} (workerId=${WORKER_PROCESSOR_ID})`,
         );
-    }
+    },
+    failed: (job, error) => {
+        log.error(
+            `Discover job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+            error.message,
+        );
+    },
 });
 
-discoverQueue.on("failed", (job, err) => {
-    recordQueueProcessorEvent("discover-weekly", "failed", job);
-    log.error(
-        `Discover job ${job.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-        err.message,
-    );
+registerQueueProcessorEvents(imageQueue, "image-optimization", {
+    record: recordQueueProcessorEvent,
+    recordFailedWithoutJob: true,
+    completed: (job, result) => {
+        log.debug(
+            `Image job ${job.id} completed: ${
+                result.success ? "success" : result.error
+            } (workerId=${WORKER_PROCESSOR_ID})`,
+        );
+    },
+    failed: (job, error) => {
+        log.error(
+            `Image job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+            error.message,
+        );
+    },
 });
 
-discoverQueue.on("active", (job) => {
-    recordQueueProcessorEvent("discover-weekly", "active", job);
-    log.debug(
-        ` Discover job ${job.id} started for user ${job.data.userId} (workerId=${WORKER_PROCESSOR_ID})`,
-    );
+registerQueueProcessorEvents(validationQueue, "file-validation", {
+    record: recordQueueProcessorEvent,
+    recordFailedWithoutJob: true,
+    active: (job) => {
+        log.debug(
+            ` Validation job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
+        );
+    },
+    completed: (job, result) => {
+        log.debug(
+            `Validation job ${job.id} completed: ${result.tracksChecked} checked, ${result.tracksRemoved} removed (workerId=${WORKER_PROCESSOR_ID})`,
+        );
+    },
+    failed: (job, error) => {
+        log.error(
+            ` Validation job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+            error.message,
+        );
+    },
 });
 
-// Event handlers for image queue
-imageQueue.on("completed", (job, result) => {
-    recordQueueProcessorEvent("image-optimization", "completed", job);
-    log.debug(
-        `Image job ${job.id} completed: ${
-            result.success ? "success" : result.error
-        } (workerId=${WORKER_PROCESSOR_ID})`,
-    );
+registerQueueProcessorEvents(genericImportQueue, "generic-import", {
+    record: recordQueueProcessorEvent,
+    failed: (job, error) => {
+        if (!job) {
+            queueProcessorLog.error("Generic import queue failure had no job", {
+                error,
+            });
+            return;
+        }
+        void finalizeGenericImportQueueFailure(job, error).catch(
+            (finalizationError) => {
+                queueProcessorLog.error(
+                    "Failed to finalize exhausted generic import job",
+                    { jobId: job.id, error: finalizationError },
+                );
+            },
+        );
+    },
 });
 
-imageQueue.on("failed", (job, err) => {
-    recordQueueProcessorEvent("image-optimization", "failed", job);
-    log.error(
-        `Image job ${job.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-        err.message,
-    );
-});
-
-imageQueue.on("active", (job) => {
-    recordQueueProcessorEvent("image-optimization", "active", job);
-});
-
-// Event handlers for validation queue
-validationQueue.on("completed", (job, result) => {
-    recordQueueProcessorEvent("file-validation", "completed", job);
-    log.debug(
-        `Validation job ${job.id} completed: ${result.tracksChecked} checked, ${result.tracksRemoved} removed (workerId=${WORKER_PROCESSOR_ID})`,
-    );
-});
-
-validationQueue.on("failed", (job, err) => {
-    recordQueueProcessorEvent("file-validation", "failed", job);
-    log.error(
-        ` Validation job ${job.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-        err.message,
-    );
-});
-
-validationQueue.on("active", (job) => {
-    recordQueueProcessorEvent("file-validation", "active", job);
-    log.debug(
-        ` Validation job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
-    );
-});
-
-genericImportQueue.on("active", (job) => {
-    recordQueueProcessorEvent("generic-import", "active", job);
-});
-
-genericImportQueue.on("completed", (job) => {
-    recordQueueProcessorEvent("generic-import", "completed", job);
-});
-
-genericImportQueue.on("failed", (job, error) => {
-    if (!job) {
-        queueProcessorLog.error("Generic import queue failure had no job", {
-            error,
-        });
-        return;
-    }
-    recordQueueProcessorEvent("generic-import", "failed", job);
-    void finalizeGenericImportQueueFailure(job, error).catch(
-        (finalizationError) => {
-            queueProcessorLog.error(
-                "Failed to finalize exhausted generic import job",
-                {
-                    jobId: job.id,
-                    error: finalizationError,
-                },
-            );
-        },
-    );
-});
-
-albumDownloadQueue.on("active", (job) => {
-    recordQueueProcessorEvent("album-download", "active", job);
-});
-
-albumDownloadQueue.on("completed", (job) => {
-    recordQueueProcessorEvent("album-download", "completed", job);
-    recordAlbumDownloadOutcome("completed");
+registerQueueProcessorEvents(albumDownloadQueue, "album-download", {
+    record: recordQueueProcessorEvent,
+    completed: () => recordAlbumDownloadOutcome("completed"),
+    failed: (job, error) => {
+        if (!job) {
+            queueProcessorLog.error("Album download queue failure had no job", {
+                error,
+            });
+            return;
+        }
+        void handleAlbumDownloadQueueFailure(job, error).catch(
+            (finalizationError) => {
+                queueProcessorLog.error(
+                    "Failed to classify or finalize album download queue failure",
+                    { jobId: job.id, error: finalizationError },
+                );
+            },
+        );
+    },
 });
 
 albumDownloadQueue.on("stalled", () => {
@@ -959,47 +955,26 @@ async function handleAlbumDownloadQueueFailure(
     await finalizeAlbumDownloadQueueFailure(job, error, state);
 }
 
-albumDownloadQueue.on("failed", (job, error) => {
-    if (!job) {
-        queueProcessorLog.error("Album download queue failure had no job", {
-            error,
-        });
-        return;
-    }
-    recordQueueProcessorEvent("album-download", "failed", job);
-    void handleAlbumDownloadQueueFailure(job, error).catch(
-        (finalizationError) => {
-            queueProcessorLog.error(
-                "Failed to classify or finalize album download queue failure",
-                { jobId: job.id, error: finalizationError },
-            );
-        },
-    );
-});
-
 // The scheduler queue runs the heavy maintenance cycles (metadata refresh,
 // reconciliation, artist-count backfills) — the primary stall suspects — so
 // it MUST feed the event-loop watchdog's attribution registry.
-schedulerQueue.on("active", (job) => {
-    recordQueueProcessorEvent("worker-scheduler", "active", job);
+registerQueueProcessorEvents(schedulerQueue, "worker-scheduler", {
+    record: recordQueueProcessorEvent,
+    completed: (job) => {
+        log.debug(
+            `Scheduler job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
+        );
+    },
+    failed: (job, error) => {
+        log.error(
+            `Scheduler job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
+            error.message,
+        );
+    },
 });
 
-schedulerQueue.on("completed", (job) => {
-    recordQueueProcessorEvent("worker-scheduler", "completed", job);
-    log.debug(
-        `Scheduler job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
-    );
-});
-
-schedulerQueue.on("failed", (job, err) => {
-    if (job) {
-        recordQueueProcessorEvent("worker-scheduler", "failed", job);
-    }
-    log.error(
-        `Scheduler job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
-        err.message,
-    );
-});
+// analysisQueue has no processor in this module, so processor-event wiring remains owner-local.
+// federationQueue processing is owned by federationJobs; no generic wiring is added here.
 
 log.debug("Worker processors registered and event handlers attached");
 

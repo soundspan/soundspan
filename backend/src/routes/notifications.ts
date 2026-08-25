@@ -8,6 +8,12 @@ import { enqueueAlbumDownload } from "../services/albumDownloadQueueService";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
 import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
+import { parseArtistAlbumSubject } from "../utils/downloadSubject";
+import {
+    ACTIVE_DOWNLOAD_JOB_STATUSES,
+    failDownloadJob,
+    TERMINAL_DOWNLOAD_JOB_STATUSES,
+} from "../services/downloadJobStatus";
 
 const router = Router();
 
@@ -282,7 +288,7 @@ router.get(
             const downloads = await prisma.downloadJob.findMany({
                 where: {
                     userId: req.user!.id,
-                    status: { in: ["completed", "failed", "exhausted"] },
+                    status: { in: TERMINAL_DOWNLOAD_JOB_STATUSES },
                     cleared: false,
                 },
                 orderBy: { updatedAt: "desc" },
@@ -337,7 +343,7 @@ router.get(
             const downloads = await prisma.downloadJob.findMany({
                 where: {
                     userId: req.user!.id,
-                    status: { in: ["pending", "processing"] },
+                    status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                 },
                 orderBy: { createdAt: "desc" },
             });
@@ -428,7 +434,7 @@ router.post(
             await prisma.downloadJob.updateMany({
                 where: {
                     userId: req.user!.id,
-                    status: { in: ["completed", "failed", "exhausted"] },
+                    status: { in: TERMINAL_DOWNLOAD_JOB_STATUSES },
                     cleared: false,
                 },
                 data: { cleared: true },
@@ -582,14 +588,10 @@ router.post(
 
                 const settings = await getSystemSettings();
                 if (!settings?.musicPath) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "Music path not configured",
-                            completedAt: new Date(),
-                        },
-                    });
+                    await failDownloadJob(
+                        newJobRecord.id,
+                        "Music path not configured",
+                    );
                     return res.json({
                         success: false,
                         newJobId: newJobRecord.id,
@@ -601,14 +603,10 @@ router.post(
                     !settings?.soulseekUsername ||
                     !settings?.soulseekPassword
                 ) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "Soulseek credentials not configured",
-                            completedAt: new Date(),
-                        },
-                    });
+                    await failDownloadJob(
+                        newJobRecord.id,
+                        "Soulseek credentials not configured",
+                    );
                     return res.json({
                         success: false,
                         newJobId: newJobRecord.id,
@@ -630,14 +628,10 @@ router.post(
                     !searchResult.found ||
                     searchResult.allMatches.length === 0
                 ) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "No matching files found",
-                            completedAt: new Date(),
-                        },
-                    });
+                    await failDownloadJob(
+                        newJobRecord.id,
+                        "No matching files found",
+                    );
                     return res.json({
                         success: false,
                         newJobId: newJobRecord.id,
@@ -677,27 +671,19 @@ router.post(
                                 // Best-effort; job status already reflects download
                             }
                         } else {
-                            await prisma.downloadJob.update({
-                                where: { id: newJobRecord.id },
-                                data: {
-                                    status: "failed",
-                                    error: result.error || "Download failed",
-                                    completedAt: new Date(),
-                                },
-                            });
+                            await failDownloadJob(
+                                newJobRecord.id,
+                                result.error || "Download failed",
+                            );
                         }
                     })
                     .catch(async (error) => {
                         logger.error(`[Retry] Download error:`, error);
-                        await prisma.downloadJob.update({
-                            where: { id: newJobRecord.id },
-                            data: {
-                                status: "failed",
-                                // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
-                                error: "Download exception",
-                                completedAt: new Date(),
-                            },
-                        });
+                        // downloadJob rows (including error) are returned to the owning user via GET /api/downloads.
+                        await failDownloadJob(
+                            newJobRecord.id,
+                            "Download exception",
+                        );
                     })
                     .catch((persistenceError) => {
                         logger.error(
@@ -757,14 +743,10 @@ router.post(
                 const musicPath = settings?.musicPath;
 
                 if (!musicPath) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "Music path not configured",
-                            completedAt: new Date(),
-                        },
-                    });
+                    await failDownloadJob(
+                        newJobRecord.id,
+                        "Music path not configured",
+                    );
                     return res.json({
                         success: false,
                         newJobId: newJobRecord.id,
@@ -856,28 +838,20 @@ router.post(
                                     );
                                 });
                             } else {
-                                await prisma.downloadJob.update({
-                                    where: { id: newJobRecord.id },
-                                    data: {
-                                        status: "failed",
-                                        error: "No tracks found on Soulseek, no MBID for Lidarr fallback",
-                                        completedAt: new Date(),
-                                    },
-                                });
+                                await failDownloadJob(
+                                    newJobRecord.id,
+                                    "No tracks found on Soulseek, no MBID for Lidarr fallback",
+                                );
                             }
                         }
                     })
                     .catch(async (error) => {
                         logger.error(`[Retry] Soulseek error:`, error);
-                        await prisma.downloadJob.update({
-                            where: { id: newJobRecord.id },
-                            data: {
-                                status: "failed",
-                                // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
-                                error: "Soulseek error",
-                                completedAt: new Date(),
-                            },
-                        });
+                        // downloadJob rows (including error) are returned to the owning user via GET /api/downloads.
+                        await failDownloadJob(
+                            newJobRecord.id,
+                            "Soulseek error",
+                        );
                     })
                     .catch((persistenceError) => {
                         logger.error(
@@ -906,11 +880,13 @@ router.post(
 
             // Extract parameters from the failed job
             // Subject is typically "Artist - Album" format
-            const subjectParts = failedJob.subject.split(" - ");
-            const artistName = subjectParts[0] || failedJob.subject;
+            const parsedSubject = parseArtistAlbumSubject(failedJob.subject, {
+                trim: false,
+            });
+            const artistName = parsedSubject.artist || failedJob.subject;
             const albumTitle =
                 (metadata?.albumTitle as string) ||
-                subjectParts[1] ||
+                parsedSubject.album ||
                 failedJob.subject;
 
             // Create a NEW download job record for the retry

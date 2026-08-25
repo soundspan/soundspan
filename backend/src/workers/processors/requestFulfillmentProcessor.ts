@@ -6,12 +6,12 @@ import {
 } from "../../services/notificationService";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { TERMINAL_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";
 
 const log = logger.child("RequestFulfillmentProcessor");
 
 /** Maximum approved requests reconciled during one five-minute tick. */
 export const MAX_REQUEST_FULFILLMENTS_PER_TICK = 200;
-const TERMINAL_DOWNLOAD_STATUSES = ["completed", "failed", "exhausted"];
 
 type RequestCandidate = Pick<
     MusicRequest,
@@ -109,7 +109,7 @@ async function loadCandidates(): Promise<{
         prisma.downloadJob.findMany({
             where: {
                 id: { in: jobIds },
-                status: { in: TERMINAL_DOWNLOAD_STATUSES },
+                status: { in: TERMINAL_DOWNLOAD_JOB_STATUSES },
             },
             select: { id: true, status: true },
             take: MAX_REQUEST_FULFILLMENTS_PER_TICK,

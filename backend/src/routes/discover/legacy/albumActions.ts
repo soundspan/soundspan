@@ -128,7 +128,7 @@ async function removeLegacyDiscoveryTag(
         }
     } catch (error: unknown) {
         logger.debug(
-            `Failed to remove discovery tag for ${discoveryAlbum.artistName}: ${error instanceof Error ? error.message : String(error)}`,
+            `Failed to remove discovery tag for ${discoveryAlbum.artistName}: ${toErrorMessage(error)}`,
         );
     }
 }
@@ -249,3 +249,4 @@ export async function handleLegacyUnlike(
         sendInternalRouteError(res, "Failed to unlike album");
     }
 }
+import { toErrorMessage } from "../../../utils/errors";

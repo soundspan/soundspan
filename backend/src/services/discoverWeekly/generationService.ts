@@ -219,7 +219,9 @@ export class DiscoverWeeklyService extends BatchLifecycleService {
                         const existingJob = await tx.downloadJob.findFirst({
                             where: {
                                 targetMbid: album.albumMbid,
-                                status: { in: ["pending", "processing"] },
+                                status: {
+                                    in: ACTIVE_DOWNLOAD_JOB_STATUSES,
+                                },
                             },
                         });
 
@@ -478,3 +480,4 @@ export class DiscoverWeeklyService extends BatchLifecycleService {
         return cache;
     }
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../downloadJobStatus";

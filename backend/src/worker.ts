@@ -178,7 +178,7 @@ async function checkPostgresConnection() {
         log.debug("✓ PostgreSQL connection verified");
     } catch (error) {
         log.error("✗ PostgreSQL connection failed:", {
-            error: error instanceof Error ? error.message : String(error),
+            error: toErrorMessage(error),
             databaseUrl: config.databaseUrl?.replace(/:[^:@]+@/, ":***@"),
         });
         log.error("Unable to connect to PostgreSQL. Please ensure:");
@@ -208,8 +208,7 @@ async function checkRedisConnection() {
             log.debug("✓ Redis connection verified");
             return;
         } catch (error) {
-            const errorMsg =
-                error instanceof Error ? error.message : String(error);
+            const errorMsg = toErrorMessage(error);
 
             if (attempt < MAX_RETRIES) {
                 const delay = Math.min(
@@ -324,7 +323,7 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 process.on("unhandledRejection", (reason) => {
     log.error("Unhandled Promise Rejection:", {
-        reason: reason instanceof Error ? reason.message : String(reason),
+        reason: toErrorMessage(reason),
         stack: reason instanceof Error ? reason.stack : undefined,
     });
 });
@@ -365,7 +364,7 @@ healthCheckInterval = setInterval(async () => {
         }
     } catch (error) {
         log.error("Worker health check failed - connections may be stale:", {
-            error: error instanceof Error ? error.message : String(error),
+            error: toErrorMessage(error),
         });
     }
 }, HEALTH_CHECK_INTERVAL);
@@ -379,3 +378,4 @@ startWorkerRuntime().catch(async (error) => {
     await stopHealthServer();
     process.exit(1);
 });
+import { toErrorMessage } from "./utils/errors";

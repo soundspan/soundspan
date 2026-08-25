@@ -4,8 +4,26 @@ import {
     ErrorCode,
     isRecoverable,
     isTransient,
+    toErrorMessage,
     wrapNodeError,
 } from "../errors";
+
+describe("toErrorMessage", () => {
+    it("returns the message from Error instances", () => {
+        expect(toErrorMessage(new Error("download failed"))).toBe(
+            "download failed",
+        );
+    });
+
+    it.each([
+        ["plain failure", "plain failure"],
+        [42, "42"],
+        [null, "null"],
+        [undefined, "undefined"],
+    ])("stringifies non-Error values", (value, expected) => {
+        expect(toErrorMessage(value)).toBe(expected);
+    });
+});
 
 describe("AppError", () => {
     it("serializes all expected fields in toJSON", () => {

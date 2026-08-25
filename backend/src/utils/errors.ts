@@ -42,6 +42,11 @@ export enum ErrorCode {
     INTERNAL = "INTERNAL",
 }
 
+/** Return an Error message or the standard string conversion of a caught value. */
+export function toErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Custom application error class
  */

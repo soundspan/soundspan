@@ -30,7 +30,7 @@ import { federationCapabilitiesSchema } from "../services/federationCapabilities
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { handleGetCoverArt } from "./library/coverArt";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError, sendValidationError } from "./routeErrorResponse";
 import { handleAudiobookCover } from "./audiobooks";
 import { withFederationStreamControls } from "../services/federationStreamControls";
 import { getFederationPresenceExport } from "../services/federationPresence";
@@ -79,10 +79,6 @@ const playlistPageQuerySchema = z.strictObject({
 const playlistParamsSchema = z.strictObject({
     id: z.string().trim().min(1).max(256),
 });
-
-function validationError(res: Response): Response {
-    return sendRouteError(res, 400, "Invalid federation request");
-}
 
 function includesEmbeddingScope(req: Request): boolean {
     return req.federationPeer?.scopes.includes("embeddings:read") ?? false;
@@ -142,7 +138,12 @@ router.get(
     federationPeerLimiter,
     asyncHandler(async (req, res) => {
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!query.success) return validationError(res);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid federation request",
+            );
         return res.json(
             await getFederationManifest(
                 includesEmbeddingScope(req),
@@ -195,7 +196,12 @@ router.get(
     federationPeerLimiter,
     asyncHandler(async (req, res) => {
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!query.success) return validationError(res);
+        if (!query.success)
+            return sendValidationError(
+                res,
+                query,
+                "Invalid federation request",
+            );
         const payload = await getFederationPresenceExport();
         recordFederationPresenceUsersExported(
             req.federationPeer?.id ?? "unknown",
@@ -229,7 +235,12 @@ router.get(
     federationPeerLimiter,
     asyncHandler(async (req, res) => {
         const parsed = playlistPageQuerySchema.safeParse(req.query);
-        if (!parsed.success) return validationError(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation request",
+            );
         return res.json(await getFederationPlaylistPage(parsed.data));
     }),
 );
@@ -258,7 +269,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = playlistParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return validationError(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation request",
+            );
         const detail = await getFederationPlaylistDetail(params.data.id);
         if (!detail) return sendRouteError(res, 404, "Playlist not found");
         return res.json(detail);
@@ -293,7 +309,12 @@ router.get(
     federationPeerLimiter,
     asyncHandler(async (req, res) => {
         const parsed = catalogItemsSchema.safeParse(req.query);
-        if (!parsed.success) return validationError(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation request",
+            );
         const response = await getFederationCatalogItems({
             mediaType: parsed.data.type,
             cursor: parsed.data.cursor,
@@ -333,7 +354,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = catalogItemParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return validationError(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation request",
+            );
         const response = await getFederationCatalogItem({
             mediaType: params.data.type,
             id: params.data.id,
@@ -373,14 +399,23 @@ router.get(
     federationPeerLimiter,
     asyncHandler(async (req, res) => {
         const parsed = deltaQuerySchema.safeParse(req.query);
-        if (!parsed.success) return validationError(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation request",
+            );
         let cursor;
         try {
             cursor = parsed.data.cursor
                 ? decodeFederationDeltaCursor(parsed.data.cursor)
                 : undefined;
         } catch (_error: unknown) {
-            return validationError(res);
+            return sendValidationError(
+                res,
+                { success: false },
+                "Invalid federation request",
+            );
         }
         const response = await getFederationCatalogDelta({
             since: parsed.data.since,
@@ -435,7 +470,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = albumParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return validationError(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation request",
+            );
         if (!(await findExportedFederationAlbum(params.data.albumId))) {
             return sendRouteError(res, 404, "Album cover not found");
         }
@@ -462,7 +502,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = audiobookParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return validationError(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation request",
+            );
         const exported = await findExportedFederationAudiobook(
             params.data.audiobookId,
         );
@@ -542,7 +587,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = trackParamsSchema.safeParse(req.params);
         const query = streamQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return validationError(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation request",
+            );
         return withFederationStreamControls(
             req,
             res,
@@ -600,7 +650,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = audiobookParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return validationError(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation request",
+            );
         return withFederationStreamControls(
             req,
             res,

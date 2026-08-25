@@ -23,7 +23,7 @@ import {
 } from "../services/federationDedupArbitration";
 import { listFederationPeerHealth } from "../services/federationPeerHealth";
 import { enqueueFederationSyncNow } from "../workers/federationJobs";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError, sendValidationError } from "./routeErrorResponse";
 
 const router = Router();
 const scopeSchema = z.enum(FEDERATION_SCOPE_VALUES);
@@ -82,10 +82,6 @@ const dedupActionSchema = z.discriminatedUnion("action", [
     z.strictObject({ action: z.literal("unlink") }),
     z.strictObject({ action: z.literal("reset") }),
 ]);
-
-function invalidRequest(res: Response): Response {
-    return sendRouteError(res, 400, "Invalid federation peer request");
-}
 
 const outboundRouteErrors = {
     unreachable: [
@@ -179,7 +175,12 @@ router.patch(
     asyncHandler(async (req, res) => {
         const params = peerParamsSchema.safeParse(req.params);
         const body = peerSettingsSchema.safeParse(req.body);
-        if (!params.success || !body.success) return invalidRequest(res);
+        if (!params.success || !body.success)
+            return sendValidationError(
+                res,
+                params.success ? body : params,
+                "Invalid federation peer request",
+            );
         const peer = await updateFederationPeerSettings(
             params.data.id,
             body.data,
@@ -210,7 +211,12 @@ router.get(
     asyncHandler(async (req, res) => {
         const params = peerParamsSchema.safeParse(req.params);
         const query = dedupListQuerySchema.safeParse(req.query);
-        if (!params.success || !query.success) return invalidRequest(res);
+        if (!params.success || !query.success)
+            return sendValidationError(
+                res,
+                params.success ? query : params,
+                "Invalid federation peer request",
+            );
         const page = await listFederationPeerDedup({
             peerId: params.data.id,
             cursor: query.data.cursor,
@@ -247,7 +253,12 @@ router.post(
     asyncHandler(async (req, res) => {
         const params = peerParamsSchema.safeParse(req.params);
         const body = dedupActionSchema.safeParse(req.body);
-        if (!params.success || !body.success) return invalidRequest(res);
+        if (!params.success || !body.success)
+            return sendValidationError(
+                res,
+                params.success ? body : params,
+                "Invalid federation peer request",
+            );
         const result = await arbitrateFederationTrackDedup(
             params.data.id,
             body.data,
@@ -293,7 +304,11 @@ router.post(
     asyncHandler(async (req, res) => {
         const parsed = createPeerSchema.safeParse(req.body);
         if (!parsed.success || !req.user) {
-            return invalidRequest(res);
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation peer request",
+            );
         }
         const result = await createHostFederationPeer({
             name: parsed.data.name,
@@ -334,7 +349,11 @@ router.post(
     asyncHandler(async (req, res) => {
         const parsed = consumerLinkSchema.safeParse(req.body);
         if (!parsed.success || !req.user) {
-            return invalidRequest(res);
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation peer request",
+            );
         }
         try {
             const peer = await linkConsumerFederationPeer({
@@ -371,7 +390,12 @@ router.post(
     "/peers/:id/rotate",
     asyncHandler(async (req, res) => {
         const parsed = peerParamsSchema.safeParse(req.params);
-        if (!parsed.success) return invalidRequest(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation peer request",
+            );
         const result = await rotateFederationPeerCredential(parsed.data.id);
         if (!result)
             return sendRouteError(res, 404, "Federation peer not found");
@@ -394,7 +418,12 @@ router.post(
     "/peers/:id/revoke",
     asyncHandler(async (req, res) => {
         const parsed = peerParamsSchema.safeParse(req.params);
-        if (!parsed.success) return invalidRequest(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation peer request",
+            );
         if (!(await revokeFederationPeer(parsed.data.id))) {
             return sendRouteError(res, 404, "Federation peer not found");
         }
@@ -417,7 +446,12 @@ router.post(
     "/peers/:id/sync",
     asyncHandler(async (req, res) => {
         const parsed = peerParamsSchema.safeParse(req.params);
-        if (!parsed.success) return invalidRequest(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation peer request",
+            );
         await enqueueFederationSyncNow(parsed.data.id);
         return res.status(202).json({ queued: true });
     }),
@@ -438,7 +472,12 @@ router.delete(
     "/peers/:id",
     asyncHandler(async (req, res) => {
         const parsed = peerParamsSchema.safeParse(req.params);
-        if (!parsed.success) return invalidRequest(res);
+        if (!parsed.success)
+            return sendValidationError(
+                res,
+                parsed,
+                "Invalid federation peer request",
+            );
         if (!(await deleteFederationPeer(parsed.data.id))) {
             return sendRouteError(res, 404, "Federation peer not found");
         }

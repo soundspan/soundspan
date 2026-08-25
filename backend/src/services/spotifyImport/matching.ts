@@ -623,8 +623,7 @@ export class SpotifyImportMatchingService {
             } catch (error: unknown) {
                 resolutionCache.set(cacheKey, null);
                 failed++;
-                const errorMsg =
-                    error instanceof Error ? error.message : String(error);
+                const errorMsg = toErrorMessage(error);
                 logger?.error(
                     `${logPrefix} Error resolving "${track.title}": ${errorMsg}`,
                 );
@@ -638,3 +637,4 @@ export class SpotifyImportMatchingService {
         return { resolved, failed, cached: resultsCache };
     }
 }
+import { toErrorMessage } from "../../utils/errors";

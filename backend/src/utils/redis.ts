@@ -114,7 +114,7 @@ function destroyBlockingConnection(
     } catch (error) {
         logger.debug(
             "Failed to destroy dedicated Redis connection:",
-            error instanceof Error ? error.message : String(error),
+            toErrorMessage(error),
         );
     }
 }
@@ -187,3 +187,4 @@ export async function closeBlockingBlPop(key: string): Promise<void> {
 }
 
 export { redisClient };
+import { toErrorMessage } from "./errors";

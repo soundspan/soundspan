@@ -535,7 +535,7 @@ export class SpotifyImportLifecycleService extends SpotifyImportPlaylistBuilderS
                         path: ["spotifyImportJobId"],
                         equals: importJobId,
                     },
-                    status: { in: ["pending", "processing"] },
+                    status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                 },
                 data: {
                     status: "failed",
@@ -587,3 +587,4 @@ export class SpotifyImportLifecycleService extends SpotifyImportPlaylistBuilderS
         await this.buildPlaylist(job);
     }
 }
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../downloadJobStatus";

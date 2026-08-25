@@ -6,6 +6,7 @@ import { config } from "../config";
 import { withListenTogetherDeadline } from "./listenTogetherDeadline";
 import type { FencedStateWriteResult } from "./listenTogetherLeaseFencing";
 import { GroupError } from "./listenTogetherGroupError";
+import { isPlainObject } from "../utils/plainObject";
 import {
     LISTEN_TOGETHER_CLAIM_FENCE_SCRIPT,
     LISTEN_TOGETHER_DELETE_SNAPSHOT_SCRIPT,
@@ -83,10 +84,6 @@ function restoreRolloutSnapshot(snapshot: GroupSnapshot): GroupSnapshot {
     };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function isFiniteNumber(value: unknown): value is number {
     return typeof value === "number" && Number.isFinite(value);
 }
@@ -115,7 +112,7 @@ function isMediaSource(value: unknown): boolean {
 
 function isProvider(value: unknown): boolean {
     if (value === undefined) return true;
-    if (!isRecord(value) || !isMediaSource(value.source)) return false;
+    if (!isPlainObject(value) || !isMediaSource(value.source)) return false;
     return (
         isOptionalString(value.providerTrackId) &&
         (value.tidalTrackId === undefined ||
@@ -128,7 +125,11 @@ function isProvider(value: unknown): boolean {
 }
 
 function isQueueItem(value: unknown): boolean {
-    if (!isRecord(value) || !isRecord(value.artist) || !isRecord(value.album)) {
+    if (
+        !isPlainObject(value) ||
+        !isPlainObject(value.artist) ||
+        !isPlainObject(value.album)
+    ) {
         return false;
     }
     const validSources =
@@ -174,7 +175,7 @@ function isQueueItem(value: unknown): boolean {
 }
 
 function isSnapshotPlayback(value: unknown): boolean {
-    if (!isRecord(value) || !Array.isArray(value.queue)) return false;
+    if (!isPlainObject(value) || !Array.isArray(value.queue)) return false;
     if (
         value.queue.length > MAX_SNAPSHOT_QUEUE_ITEMS ||
         !value.queue.every(isQueueItem)
@@ -199,7 +200,7 @@ function isSnapshotPlayback(value: unknown): boolean {
 }
 
 function isSnapshotMember(value: unknown): boolean {
-    if (!isRecord(value)) return false;
+    if (!isPlainObject(value)) return false;
     return (
         typeof value.userId === "string" &&
         typeof value.username === "string" &&
@@ -256,7 +257,7 @@ function hasSnapshotMetadata(snapshot: Record<string, unknown>): boolean {
 
 function isLikelyGroupSnapshot(value: unknown): value is GroupSnapshot {
     return (
-        isRecord(value) &&
+        isPlainObject(value) &&
         hasSnapshotMetadata(value) &&
         hasSnapshotCollections(value) &&
         isSnapshotPlayback(value.playback)

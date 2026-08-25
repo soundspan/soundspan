@@ -26,6 +26,11 @@ import { config } from "../config";
 import axios from "axios";
 import * as crypto from "crypto";
 import { isAlbumDownloadQueueOwned } from "./albumDownloadQueueOwnership";
+import { parseArtistAlbumSubject } from "../utils/downloadSubject";
+import {
+    ACTIVE_DOWNLOAD_JOB_STATUSES,
+    failDownloadJob,
+} from "./downloadJobStatus";
 
 // Type for transactional prisma client
 type TransactionClient = Omit<
@@ -485,7 +490,7 @@ class SimpleDownloadManager {
                 // ═══════════════════════════════════════════════════════════════
                 const activeJobs = await tx.downloadJob.findMany({
                     where: {
-                        status: { in: ["pending", "processing"] },
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                         lidarrRef: null, // Not yet assigned to a download
                     },
                 });
@@ -749,7 +754,9 @@ class SimpleDownloadManager {
                 // STEP 2: Find Active Job
                 // ═══════════════════════════════════════════════════════════════
                 const activeJobs = await tx.downloadJob.findMany({
-                    where: { status: { in: ["pending", "processing"] } },
+                    where: {
+                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
+                    },
                 });
 
                 const normalizedArtist = artistName?.toLowerCase().trim() || "";
@@ -1308,14 +1315,10 @@ class SimpleDownloadManager {
             }
         }
 
-        await prisma.downloadJob.update({
-            where: { id: job.id },
-            data: {
-                status: "failed",
-                error: `All releases and albums exhausted: ${reason}`,
-                completedAt: new Date(),
-            },
-        });
+        await failDownloadJob(
+            job.id,
+            `All releases and albums exhausted: ${reason}`,
+        );
 
         // Check batch completion for discovery jobs
         if (job.discoveryBatchId) {
@@ -1382,7 +1385,7 @@ class SimpleDownloadManager {
 
         // Find all pending and processing jobs
         const activeJobs = await prisma.downloadJob.findMany({
-            where: { status: { in: ["pending", "processing"] } },
+            where: { status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES } },
         });
 
         // Log to session for debugging Spotify imports
@@ -1680,14 +1683,7 @@ class SimpleDownloadManager {
             // NOTE: No notification here - stale cleanup is a background safety net
             // Notifications are only sent from markJobExhausted when truly exhausted
             if (!replacementStarted) {
-                await prisma.downloadJob.update({
-                    where: { id: job.id },
-                    data: {
-                        status: "failed",
-                        error: errorMessage,
-                        completedAt: new Date(),
-                    },
-                });
+                await failDownloadJob(job.id, errorMessage);
             }
 
             if (job.discoveryBatchId) {
@@ -2053,15 +2049,13 @@ class SimpleDownloadManager {
 
             // Strategy 3: Parse subject if no metadata (format: "Artist - Album")
             if (!isAvailable && !artistName && job.subject) {
-                const parts = job.subject.split(" - ");
-                if (parts.length >= 2) {
-                    const parsedArtist = parts[0].trim();
-                    const parsedAlbum = parts.slice(1).join(" - ").trim();
+                const parsed = parseArtistAlbumSubject(job.subject);
+                if (parsed.artist !== job.subject) {
                     isAvailable = lidarrService.isAlbumAvailableInSnapshot(
                         snapshot,
                         undefined,
-                        parsedArtist,
-                        parsedAlbum,
+                        parsed.artist,
+                        parsed.album,
                     );
                 }
             }

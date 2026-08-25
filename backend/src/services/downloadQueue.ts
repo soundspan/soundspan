@@ -691,7 +691,7 @@ class DownloadQueueManager {
             const result = await prisma.downloadJob.updateMany({
                 where: {
                     targetMbid: albumMbid,
-                    status: { in: ["pending", "processing"] },
+                    status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     OR: [{ lidarrRef: null }, { lidarrRef: "" }],
                 },
                 data: {
@@ -725,3 +725,4 @@ class DownloadQueueManager {
 
 // Singleton instance
 export const downloadQueueManager = new DownloadQueueManager();
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "./downloadJobStatus";

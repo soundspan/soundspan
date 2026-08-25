@@ -667,8 +667,7 @@ class SpotifyService {
                 // Rate limit - wait 300ms between requests
                 await new Promise((resolve) => setTimeout(resolve, 300));
             } catch (error: unknown) {
-                const errorMsg =
-                    error instanceof Error ? error.message : String(error);
+                const errorMsg = toErrorMessage(error);
                 logger.debug(
                     `[Spotify Track Scraper] Failed for track ${track.spotifyId}: ${errorMsg}`,
                 );
@@ -1622,3 +1621,4 @@ class SpotifyService {
 }
 
 export const spotifyService = new SpotifyService();
+import { toErrorMessage } from "../utils/errors";

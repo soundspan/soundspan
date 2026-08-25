@@ -307,8 +307,7 @@ class LastFmService {
                     }
                 }
             } else {
-                const errorMsg =
-                    error instanceof Error ? error.message : String(error);
+                const errorMsg = toErrorMessage(error);
                 logger.error(
                     `Last.fm album info error for ${albumName}: ${errorMsg}`,
                 );
@@ -1149,3 +1148,4 @@ class LastFmService {
 }
 
 export const lastFmService = new LastFmService();
+import { toErrorMessage } from "../utils/errors";
