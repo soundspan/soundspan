@@ -40,7 +40,10 @@ class _ThrottlePoolFullWarning(logging.Filter):
 
     def __init__(self) -> None:
         super().__init__()
-        self._last_emit_at = 0.0
+        # None = never emitted. A 0.0 sentinel would wrongly suppress the
+        # FIRST warning on hosts whose monotonic clock is younger than the
+        # suppression window (fresh VMs boot with time.monotonic() < 300s).
+        self._last_emit_at: float | None = None
 
     def filter(self, record: logging.LogRecord) -> bool:
         """Rewrite the first pool-full warning and suppress repeats for five minutes."""
@@ -49,7 +52,10 @@ class _ThrottlePoolFullWarning(logging.Filter):
             return True
 
         now = time.monotonic()
-        if (now - self._last_emit_at) < _POOL_WARNING_SUPPRESSION_SECONDS:
+        if (
+            self._last_emit_at is not None
+            and (now - self._last_emit_at) < _POOL_WARNING_SUPPRESSION_SECONDS
+        ):
             return False
 
         self._last_emit_at = now
