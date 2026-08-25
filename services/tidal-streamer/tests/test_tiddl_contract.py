@@ -11,12 +11,17 @@ import pytest
 TIDDL_CONTRACT_PROBE = """
 import inspect
 import json
+import re
 from importlib import import_module
+
+
+def public_module_name(module_name):
+    return re.sub(r"(?:[.]_[^.]+)+$", "", module_name)
 
 
 def annotation_name(annotation):
     if isinstance(annotation, type):
-        return f"{annotation.__module__}.{annotation.__qualname__}"
+        return f"{public_module_name(annotation.__module__)}.{annotation.__qualname__}"
     return str(annotation)
 
 
