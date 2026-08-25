@@ -1,4 +1,3 @@
-import axios from "axios";
 import {
     AcquisitionError,
     AcquisitionErrorType,
@@ -14,8 +13,22 @@ import { musicBrainzService } from "../musicbrainz";
 import { stripAlbumEdition } from "../../utils/artistNormalization";
 import { config as mockedConfig } from "../../config";
 import { logger } from "../../utils/logger";
+import { LidarrHttpClient, LidarrHttpError } from "../lidarr/lidarrHttpClient";
 
-jest.mock("axios");
+const mockLidarrClient = {
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn(),
+};
+
+jest.mock("../lidarr/lidarrHttpClient", () => {
+    const actual = jest.requireActual("../lidarr/lidarrHttpClient");
+    return {
+        ...actual,
+        LidarrHttpClient: jest.fn(() => mockLidarrClient),
+    };
+});
 
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -50,10 +63,9 @@ jest.mock("../musicbrainz", () => ({
     },
 }));
 
-const mockAxiosCreate = axios.create as jest.Mock;
-const mockAxiosGet = axios.get as jest.Mock;
-const mockAxiosPost = axios.post as jest.Mock;
-const mockAxiosDelete = axios.delete as jest.Mock;
+const mockLidarrHttpClient = LidarrHttpClient as jest.MockedClass<
+    typeof LidarrHttpClient
+>;
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
 const mockMusicBrainzSearchArtist =
     musicBrainzService.searchArtist as jest.Mock;
@@ -78,7 +90,6 @@ function primeServiceWithClient(client: ReturnType<typeof createClientMock>) {
 }
 
 export {
-    axios,
     AcquisitionError,
     AcquisitionErrorType,
     cleanStuckDownloads,
@@ -92,13 +103,12 @@ export {
     stripAlbumEdition,
     mockedConfig,
     logger,
-    mockAxiosCreate,
-    mockAxiosGet,
-    mockAxiosPost,
-    mockAxiosDelete,
+    mockLidarrClient,
+    mockLidarrHttpClient,
     mockGetSystemSettings,
     mockMusicBrainzSearchArtist,
     mockStripAlbumEdition,
+    LidarrHttpError,
     createClientMock,
     primeServiceWithClient,
 };

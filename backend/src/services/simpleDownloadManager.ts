@@ -23,7 +23,6 @@ import { notificationService } from "./notificationService";
 import { notificationPolicyService } from "./notificationPolicyService";
 import { sessionLog } from "../utils/playlistLogger";
 import { config } from "../config";
-import axios from "axios";
 import * as crypto from "crypto";
 import { isAlbumDownloadQueueOwned } from "./albumDownloadQueueOwnership";
 import { parseArtistAlbumSubject } from "../utils/downloadSubject";
@@ -34,6 +33,7 @@ import {
     patchDownloadJobMetadataFrom,
 } from "./downloadJobStatus";
 import { asPlainObject } from "../utils/plainObject";
+import { toErrorMessage } from "../utils/errors";
 
 // Type for transactional prisma client
 type TransactionClient = Omit<
@@ -1597,7 +1597,7 @@ class SimpleDownloadManager {
             // only disabled type checking on the field that drives dedup/retry.
             const lidarrAlbumId = job.lidarrAlbumId;
             if (lidarrAlbumId && job.lidarrRef) {
-                await this.blocklistAndRetry(job.lidarrRef, lidarrAlbumId);
+                await this.blocklistAndRetry(job.lidarrRef);
             }
 
             // Use same-artist fallback ONLY for non-discovery jobs
@@ -1665,48 +1665,11 @@ class SimpleDownloadManager {
      * Blocklist a failed release and let Lidarr search for alternatives
      * skipRedownload=false tells Lidarr to automatically search for another release
      */
-    private async blocklistAndRetry(
-        downloadId: string,
-        _lidarrAlbumId: number,
-    ) {
+    private async blocklistAndRetry(downloadId: string): Promise<void> {
         try {
-            const settings = await getSystemSettings();
-            if (!settings?.lidarrUrl || !settings?.lidarrApiKey) return;
-
-            // Get queue to find the specific release
-            try {
-                const queueResponse = await axios.get(
-                    `${settings.lidarrUrl}/api/v1/queue`,
-                    {
-                        headers: { "X-Api-Key": settings.lidarrApiKey },
-                        timeout: 10000,
-                    },
-                );
-
-                const queueItem = queueResponse.data.records?.find(
-                    (item: any) => item.downloadId === downloadId,
-                );
-
-                if (queueItem) {
-                    // Remove from queue with blocklist=true and skipRedownload=false
-                    // Lidarr will automatically search for another release
-                    await axios.delete(
-                        `${settings.lidarrUrl}/api/v1/queue/${queueItem.id}?removeFromClient=true&blocklist=true&skipRedownload=false`,
-                        {
-                            headers: { "X-Api-Key": settings.lidarrApiKey },
-                            timeout: 10000,
-                        },
-                    );
-                    logger.debug(
-                        `   Blocklisted release, Lidarr searching for alternative`,
-                    );
-                }
-            } catch (queueError: any) {
-                // Queue item may have already been removed
-                logger.debug(`   Queue cleanup: ${queueError.message}`);
-            }
-        } catch (error: any) {
-            logger.error(`   Blocklist/retry failed:`, error.message);
+            await lidarrService.blocklistAndRemove(downloadId, false);
+        } catch (error: unknown) {
+            logger.error(`   Blocklist/retry failed:`, toErrorMessage(error));
         }
     }
 
@@ -1716,188 +1679,23 @@ class SimpleDownloadManager {
      */
     private async removeFromLidarrQueue(downloadId: string) {
         try {
-            const settings = await getSystemSettings();
-            if (!settings?.lidarrUrl || !settings?.lidarrApiKey) return;
-
-            const queueResponse = await axios.get(
-                `${settings.lidarrUrl}/api/v1/queue`,
-                {
-                    headers: { "X-Api-Key": settings.lidarrApiKey },
-                    timeout: 10000,
-                },
-            );
-
-            const queueItem = queueResponse.data.records?.find(
-                (item: any) => item.downloadId === downloadId,
-            );
-
-            if (queueItem) {
-                // Remove from queue with blocklist=true and skipRedownload=false
-                // skipRedownload=false tells Lidarr to search for another release
-                await axios.delete(
-                    `${settings.lidarrUrl}/api/v1/queue/${queueItem.id}?removeFromClient=true&blocklist=true&skipRedownload=false`,
-                    {
-                        headers: { "X-Api-Key": settings.lidarrApiKey },
-                        timeout: 10000,
-                    },
-                );
-                logger.debug(
-                    `   Removed from Lidarr queue, blocklisted, triggering new search`,
-                );
-            } else {
-                logger.debug(
-                    `   Item not found in Lidarr queue (may already be removed)`,
-                );
-            }
-        } catch (error: any) {
+            await lidarrService.blocklistAndRemove(downloadId, false);
+        } catch (error: unknown) {
             logger.error(
                 `   Failed to remove from Lidarr queue:`,
-                error.message,
+                toErrorMessage(error),
             );
         }
     }
 
     /**
-     * Clear all failed/stuck items from Lidarr's download queue
-     * and trigger new searches for the albums.
-     *
-     * Uses parallel batches for DELETE requests to improve performance.
+     * Clear failed/stuck Lidarr queue items and trigger new album searches.
+     * The shared Lidarr client bounds DELETE concurrency.
      */
-    async clearLidarrQueue(): Promise<{ removed: number; errors: string[] }> {
-        const errors: string[] = [];
-        let removed = 0;
-        const albumIdsToSearch: number[] = [];
-        const CONCURRENCY = 3; // Process 3 deletes in parallel
-
-        try {
-            const settings = await getSystemSettings();
-            if (!settings?.lidarrUrl || !settings?.lidarrApiKey) {
-                return { removed: 0, errors: ["Lidarr not configured"] };
-            }
-
-            logger.debug(`\nClearing Lidarr download queue...`);
-
-            const queueResponse = await axios.get(
-                `${settings.lidarrUrl}/api/v1/queue`,
-                {
-                    headers: { "X-Api-Key": settings.lidarrApiKey },
-                    timeout: 10000,
-                },
-            );
-
-            const records = queueResponse.data.records || [];
-
-            if (records.length === 0) {
-                return { removed: 0, errors: [] };
-            }
-
-            logger.debug(`   Found ${records.length} items in queue`);
-
-            // Filter for failed/warning status items
-            const failedItems = records.filter(
-                (item: any) =>
-                    item.status === "warning" ||
-                    item.status === "failed" ||
-                    item.trackedDownloadStatus === "warning" ||
-                    item.trackedDownloadStatus === "error" ||
-                    item.trackedDownloadState === "importPending" ||
-                    item.trackedDownloadState === "importFailed" ||
-                    (item.statusMessages && item.statusMessages.length > 0),
-            );
-
-            if (failedItems.length === 0) {
-                return { removed: 0, errors: [] };
-            }
-
-            logger.debug(`   ${failedItems.length} items have errors/warnings`);
-
-            // Collect album IDs for re-search
-            for (const item of failedItems) {
-                if (item.albumId) {
-                    albumIdsToSearch.push(item.albumId);
-                }
-            }
-
-            // Process DELETE requests in parallel batches
-            const { chunkArray } = await import("../utils/async");
-            const chunks = chunkArray(failedItems, CONCURRENCY);
-
-            for (const chunk of chunks) {
-                const results = await Promise.allSettled(
-                    chunk.map((item: any) =>
-                        axios
-                            .delete(
-                                `${settings.lidarrUrl}/api/v1/queue/${item.id}?removeFromClient=true&blocklist=true&skipRedownload=false`,
-                                {
-                                    headers: {
-                                        "X-Api-Key": settings.lidarrApiKey,
-                                    },
-                                    timeout: 10000,
-                                },
-                            )
-                            .then(() => {
-                                logger.debug(
-                                    `    Removed: ${item.title || item.album?.title || "Unknown"}`,
-                                );
-                                return true;
-                            }),
-                    ),
-                );
-
-                // Count successes and collect errors
-                for (let i = 0; i < results.length; i++) {
-                    const result = results[i];
-                    if (result.status === "fulfilled") {
-                        removed++;
-                    } else {
-                        const reason = (result as PromiseRejectedResult).reason;
-                        const errorMsg =
-                            reason instanceof Error
-                                ? reason.message
-                                : "Unknown error";
-                        const msg = `Failed to remove ${(chunk[i] as any).id}: ${errorMsg}`;
-                        logger.debug(` ${msg}`);
-                        errors.push(msg);
-                    }
-                }
-
-                // Yield to event loop between batches
-                await yieldToEventLoop();
-            }
-
-            // Explicitly trigger album searches for removed items (batch API call)
-            if (albumIdsToSearch.length > 0) {
-                try {
-                    logger.debug(
-                        `    Triggering search for ${albumIdsToSearch.length} album(s)...`,
-                    );
-                    await axios.post(
-                        `${settings.lidarrUrl}/api/v1/command`,
-                        {
-                            name: "AlbumSearch",
-                            albumIds: albumIdsToSearch,
-                        },
-                        {
-                            headers: { "X-Api-Key": settings.lidarrApiKey },
-                            timeout: 10000,
-                        },
-                    );
-                    logger.debug(
-                        `    Search triggered for alternative releases`,
-                    );
-                } catch (searchError: any) {
-                    logger.debug(
-                        ` Failed to trigger search: ${searchError.message}`,
-                    );
-                }
-            }
-
-            logger.debug(`   Removed ${removed} items from queue`);
-            return { removed, errors };
-        } catch (error: any) {
-            logger.error(`   Queue cleanup failed:`, error.message);
-            return { removed, errors: [error.message] };
-        }
+    async clearLidarrQueue(
+        signal?: AbortSignal,
+    ): Promise<{ removed: number; errors: string[] }> {
+        return lidarrService.clearFailedQueue(signal);
     }
 
     /**

@@ -157,7 +157,9 @@ describe("workers runtime behavior", () => {
             markStaleJobsAsFailed: jest.fn(async () => 0),
             reconcileWithLidarr: jest.fn(async () => ({ reconciled: 0 })),
             syncWithLidarrQueue: jest.fn(async () => ({ cancelled: 0 })),
-            clearLidarrQueue: jest.fn(async () => ({ removed: 0 })),
+            clearLidarrQueue: jest.fn(async (_signal?: AbortSignal) => ({
+                removed: 0,
+            })),
         };
 
         const queueCleaner = {
@@ -2385,6 +2387,9 @@ describe("workers runtime behavior", () => {
         expect(
             mocks.simpleDownloadManager.clearLidarrQueue,
         ).toHaveBeenCalledTimes(3);
+        expect(
+            mocks.simpleDownloadManager.clearLidarrQueue,
+        ).toHaveBeenNthCalledWith(1, expect.any(AbortSignal));
         expect(mocks.dataCacheService.warmupCache).toHaveBeenCalledTimes(1);
         expect(mocks.logger.debug).toHaveBeenCalledWith(
             "Running initial Lidarr queue cleanup...",
@@ -2635,6 +2640,10 @@ describe("workers runtime behavior", () => {
         });
         await flushPromises();
         timeoutCallback();
+        const cleanupSignal = mocks.simpleDownloadManager.clearLidarrQueue.mock
+            .calls[0]?.[0] as AbortSignal;
+        expect(cleanupSignal).toBeInstanceOf(AbortSignal);
+        expect(cleanupSignal.aborted).toBe(true);
         rejectWork(new Error("cancelled work settled"));
         await handled;
         setTimeoutSpy.mockRestore();

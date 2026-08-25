@@ -1,5 +1,4 @@
 import {
-    axios,
     AcquisitionError,
     AcquisitionErrorType,
     cleanStuckDownloads,
@@ -13,13 +12,12 @@ import {
     stripAlbumEdition,
     mockedConfig,
     logger,
-    mockAxiosCreate,
-    mockAxiosGet,
-    mockAxiosPost,
-    mockAxiosDelete,
+    mockLidarrClient,
+    mockLidarrHttpClient,
     mockGetSystemSettings,
     mockMusicBrainzSearchArtist,
     mockStripAlbumEdition,
+    LidarrHttpError,
     createClientMock,
     primeServiceWithClient,
 } from "./lidarrService.helpers";
@@ -941,7 +939,6 @@ describe("lidarr service behavior", () => {
 
         expect(client.delete).toHaveBeenCalledWith("/api/v1/artist/99", {
             params: { deleteFiles: false, addImportListExclusion: false },
-            timeout: 30000,
         });
     });
 
@@ -1201,6 +1198,74 @@ describe("lidarr service behavior", () => {
         });
     });
 
+    it("does not log raw Lidarr response bodies from acquisition catches", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        const sentinel = "response-body-api-key-sentinel";
+        const failure = (method: string, path: string) =>
+            new LidarrHttpError({
+                status: 500,
+                method,
+                path,
+                attempts: 1,
+                isTransient: true,
+                data: [{ errorMessage: sentinel }],
+            });
+        const searchArtistSpy = jest
+            .spyOn(lidarrService, "searchArtist")
+            .mockRejectedValueOnce(failure("GET", "/api/v1/artist/lookup"));
+        client.get
+            .mockResolvedValueOnce({ data: [{ path: "/music" }] })
+            .mockRejectedValueOnce(failure("GET", "/api/v1/album/lookup"))
+            .mockRejectedValueOnce(failure("GET", "/api/v1/artist"));
+        client.post.mockRejectedValueOnce(failure("POST", "/api/v1/release"));
+
+        await expect(
+            lidarrService.addArtist("artist-mbid", "Artist"),
+        ).resolves.toBeNull();
+        await expect(
+            lidarrService.searchAlbum("Artist", "Album"),
+        ).resolves.toEqual([]);
+        await expect(
+            lidarrService.addAlbum(
+                "album-mbid",
+                "Artist",
+                "Album",
+                "/music",
+                "artist-mbid",
+            ),
+        ).resolves.toBeNull();
+        await expect(
+            lidarrService.grabRelease({
+                guid: "release-guid",
+                indexerId: 1,
+                title: "Release",
+                protocol: "torrent",
+                approved: true,
+                rejected: false,
+            }),
+        ).resolves.toBe(false);
+
+        const errorLogs = (logger.error as jest.Mock).mock.calls;
+        expect(JSON.stringify(errorLogs)).not.toContain(sentinel);
+        for (const path of [
+            "/api/v1/artist/lookup",
+            "/api/v1/album/lookup",
+            "/api/v1/artist",
+            "/api/v1/release",
+        ]) {
+            expect(errorLogs).toContainEqual([
+                expect.any(String),
+                expect.objectContaining({
+                    message: `Lidarr ${path === "/api/v1/release" ? "POST" : "GET"} ${path} failed after 1 attempt(s)`,
+                    status: 500,
+                    path,
+                }),
+            ]);
+        }
+        searchArtistSpy.mockRestore();
+    });
+
     it("addAlbum refreshes metadata when an existing artist has no albums", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -1376,7 +1441,7 @@ describe("lidarr service behavior", () => {
     });
 
     it("cleanStuckDownloads removes terminal import-failed items", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -1389,7 +1454,7 @@ describe("lidarr service behavior", () => {
                 ],
             },
         });
-        mockAxiosDelete.mockResolvedValue({});
+        mockLidarrClient.delete.mockResolvedValue({});
 
         const result = await cleanStuckDownloads(
             "http://lidarr:8686",
@@ -1399,7 +1464,7 @@ describe("lidarr service behavior", () => {
             removed: 1,
             items: ["Terminal Import Failed"],
         });
-        expect(mockAxiosDelete).toHaveBeenCalledTimes(1);
+        expect(mockLidarrClient.delete).toHaveBeenCalledTimes(1);
     });
 
     it("initializes a Lidarr client from environment config during construction", () => {
@@ -1409,18 +1474,20 @@ describe("lidarr service behavior", () => {
             url: "http://constructor-lidarr:8686",
             apiKey: "constructor-key",
         };
-        mockAxiosCreate.mockReturnValue(constructedClient);
+        mockLidarrHttpClient.mockImplementationOnce(
+            () => constructedClient as any,
+        );
 
         const ServiceClass = (lidarrService as any).constructor;
         const freshService = new ServiceClass();
 
-        expect(mockAxiosCreate).toHaveBeenCalledWith({
-            baseURL: "http://constructor-lidarr:8686",
-            timeout: 30000,
-            headers: {
-                "X-Api-Key": "constructor-key",
+        expect(mockLidarrHttpClient).toHaveBeenCalledWith(
+            {
+                baseUrl: "http://constructor-lidarr:8686",
+                apiKey: "constructor-key",
             },
-        });
+            { timeoutMs: 30_000 },
+        );
         expect(freshService.client).toBe(constructedClient);
         expect(freshService.enabled).toBe(true);
     });
@@ -1748,18 +1815,237 @@ describe("lidarr service behavior", () => {
                 ],
             },
         });
-        client.delete.mockRejectedValueOnce({
-            response: { status: 500 },
-            message: "delete failed",
-        });
+        client.delete.mockRejectedValueOnce(
+            new LidarrHttpError({
+                status: 500,
+                method: "DELETE",
+                path: "/api/v1/queue/100",
+                attempts: 3,
+                isTransient: true,
+                message: "delete failed",
+            }),
+        );
 
         await expect(
-            lidarrService.blocklistAndRemove("remove-fail"),
+            lidarrService.blocklistAndRemove("remove-fail", true),
         ).resolves.toBe(false);
         expect(logger.error).toHaveBeenCalledWith(
             "[LIDARR] Failed to blocklist:",
             "delete failed",
         );
+    });
+
+    it("blocklistAndRemove treats a queue-list 404 as a failure", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockRejectedValueOnce(
+            new LidarrHttpError({
+                status: 404,
+                method: "GET",
+                path: "/api/v1/queue",
+                attempts: 1,
+                isTransient: false,
+                message: "queue endpoint not found",
+            }),
+        );
+
+        await expect(
+            lidarrService.blocklistAndRemove("missing", false),
+        ).resolves.toBe(false);
+        expect(client.delete).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalledWith(
+            "[LIDARR] Failed to blocklist:",
+            "queue endpoint not found",
+        );
+    });
+
+    it("clearFailedQueue removes failed items and searches their albums", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockResolvedValueOnce({
+            data: {
+                records: [
+                    { id: 10, albumId: 20, status: "failed", title: "Failed" },
+                    {
+                        id: 11,
+                        status: "downloading",
+                        title: "Healthy",
+                        statusMessages: [],
+                    },
+                ],
+            },
+        });
+        client.delete.mockResolvedValueOnce({ data: undefined });
+        client.post.mockResolvedValueOnce({ data: { id: 30 } });
+
+        const signal = new AbortController().signal;
+        await expect(lidarrService.clearFailedQueue(signal)).resolves.toEqual({
+            removed: 1,
+            errors: [],
+        });
+        expect(client.get).toHaveBeenCalledWith("/api/v1/queue", {
+            timeoutMs: 10_000,
+            maxRetries: 0,
+            signal,
+        });
+        expect(client.delete).toHaveBeenCalledWith("/api/v1/queue/10", {
+            params: {
+                removeFromClient: true,
+                blocklist: true,
+                skipRedownload: false,
+            },
+            timeoutMs: 10_000,
+            maxRetries: 0,
+            signal,
+        });
+        expect(client.post).toHaveBeenCalledWith(
+            "/api/v1/command",
+            {
+                name: "AlbumSearch",
+                albumIds: [20],
+            },
+            { timeoutMs: 10_000, maxRetries: 0, signal },
+        );
+    });
+
+    it("clearFailedQueue collects delete errors and tolerates search failures", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockResolvedValueOnce({
+            data: {
+                records: [
+                    { id: 301, albumId: 91, status: "failed" },
+                    { id: 302, albumId: 92, status: "warning" },
+                ],
+            },
+        });
+        client.delete
+            .mockRejectedValueOnce(new Error("delete failed"))
+            .mockResolvedValueOnce({});
+        client.post.mockRejectedValueOnce(new Error("search trigger failed"));
+
+        await expect(lidarrService.clearFailedQueue()).resolves.toEqual({
+            removed: 1,
+            errors: ["Failed to remove 301: delete failed"],
+        });
+        expect(client.post).toHaveBeenCalledTimes(1);
+    });
+
+    it("clearFailedQueue returns the queue-fetch failure", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockRejectedValueOnce(new Error("queue unavailable"));
+
+        await expect(lidarrService.clearFailedQueue()).resolves.toEqual({
+            removed: 0,
+            errors: ["queue unavailable"],
+        });
+        expect(client.delete).not.toHaveBeenCalled();
+    });
+
+    it("clearFailedQueue normalizes non-Error delete rejections", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockResolvedValueOnce({
+            data: {
+                records: [
+                    { id: 901, status: "failed" },
+                    { id: 902, status: "warning" },
+                ],
+            },
+        });
+        client.delete
+            .mockRejectedValueOnce("network")
+            .mockResolvedValueOnce({});
+
+        await expect(lidarrService.clearFailedQueue()).resolves.toEqual({
+            removed: 1,
+            errors: ["Failed to remove 901: network"],
+        });
+    });
+
+    it("clearFailedQueue starts at most two deletions at a time", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockResolvedValueOnce({
+            data: {
+                records: Array.from({ length: 5 }, (_, index) => ({
+                    id: index + 1,
+                    status: "failed",
+                    title: `Failed ${index + 1}`,
+                })),
+            },
+        });
+        const releases: Array<() => void> = [];
+        client.delete.mockImplementation(
+            () => new Promise((resolve) => releases.push(() => resolve({}))),
+        );
+
+        const cleanup = lidarrService.clearFailedQueue();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(client.delete).toHaveBeenCalledTimes(2);
+        releases.splice(0, 2).forEach((release) => release());
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(client.delete).toHaveBeenCalledTimes(4);
+        releases.splice(0, 2).forEach((release) => release());
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(client.delete).toHaveBeenCalledTimes(5);
+        releases.splice(0).forEach((release) => release());
+        await expect(cleanup).resolves.toEqual({ removed: 5, errors: [] });
+    });
+
+    it("clearFailedQueue counts a retried queue DELETE 404 as removed", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockResolvedValueOnce({
+            data: { records: [{ id: 10, status: "failed", title: "Gone" }] },
+        });
+        client.delete.mockRejectedValueOnce(
+            new LidarrHttpError({
+                status: 404,
+                method: "DELETE",
+                path: "/api/v1/queue/10",
+                attempts: 2,
+                isTransient: false,
+                data: { message: "Not Found" },
+                message: "Request failed with status code 404",
+            }),
+        );
+
+        await expect(lidarrService.clearFailedQueue()).resolves.toEqual({
+            removed: 1,
+            errors: [],
+        });
+    });
+
+    it("blocklistAndRemove accepts a retried queue DELETE 404", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get.mockResolvedValueOnce({
+            data: {
+                records: [
+                    { id: 12, downloadId: "already-gone", title: "Gone" },
+                ],
+            },
+        });
+        client.delete.mockRejectedValueOnce(
+            new LidarrHttpError({
+                status: 404,
+                method: "DELETE",
+                path: "/api/v1/queue/12",
+                attempts: 2,
+                isTransient: false,
+                data: { message: "Not Found" },
+                message: "Request failed with status code 404",
+            }),
+        );
+
+        await expect(
+            lidarrService.blocklistAndRemove("already-gone", false),
+        ).resolves.toBe(true);
     });
 
     it("rescanLibrary throws when Lidarr is disabled", async () => {
@@ -1811,20 +2097,41 @@ describe("lidarr service behavior", () => {
                     { id: 3, title: "Seeded B", approved: false, seeders: 9 },
                 ],
             })
-            .mockRejectedValueOnce(new Error("release lookup failed"));
+            .mockRejectedValueOnce(
+                new LidarrHttpError({
+                    status: 500,
+                    method: "GET",
+                    path: "/api/v1/release",
+                    attempts: 1,
+                    isTransient: true,
+                    data: [{ errorMessage: "release-body-secret-sentinel" }],
+                }),
+            );
 
         await expect(lidarrService.getAlbumReleases(12)).resolves.toEqual([
             expect.objectContaining({ id: 2 }),
             expect.objectContaining({ id: 3 }),
             expect.objectContaining({ id: 1 }),
         ]);
+        expect(client.get).toHaveBeenCalledWith("/api/v1/release", {
+            params: { albumId: 12 },
+            timeoutMs: 60_000,
+            maxRetries: 0,
+        });
 
         const emptyReleases = await lidarrService.getAlbumReleases(13);
         expect(emptyReleases).toEqual([]);
         expect(logger.error).toHaveBeenCalledWith(
             "[LIDARR] Failed to fetch releases:",
-            "release lookup failed",
+            expect.objectContaining({
+                status: 500,
+                path: "/api/v1/release",
+            }),
         );
+        const releaseLogCalls = JSON.stringify(
+            (logger.error as jest.Mock).mock.calls,
+        );
+        expect(releaseLogCalls).not.toContain("release-body-secret-sentinel");
     });
 
     it("returns null for findQueueItemByDownloadId when client is unavailable", async () => {
@@ -2012,7 +2319,7 @@ describe("lidarr exported queue/history helpers", () => {
     });
 
     it("cleans stuck queue downloads by status and message patterns", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -2046,7 +2353,7 @@ describe("lidarr exported queue/history helpers", () => {
                 ],
             },
         });
-        mockAxiosDelete.mockResolvedValue({});
+        mockLidarrClient.delete.mockResolvedValue({});
 
         const result = await cleanStuckDownloads(
             "http://lidarr:8686",
@@ -2054,12 +2361,12 @@ describe("lidarr exported queue/history helpers", () => {
         );
         expect(result.removed).toBe(3);
         expect(result.items).toEqual(["Album One", "Album Two", "Album Three"]);
-        expect(mockAxiosDelete).toHaveBeenCalledTimes(3);
+        expect(mockLidarrClient.delete).toHaveBeenCalledTimes(3);
     });
 
     it("filters recent completed downloads from history", async () => {
         const now = Date.now();
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     { id: 1, date: new Date(now - 60_000).toISOString() },
@@ -2078,21 +2385,21 @@ describe("lidarr exported queue/history helpers", () => {
     });
 
     it("returns queue count with safe fallback on errors", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: { totalRecords: 17 },
         });
         await expect(
             getQueueCount("http://lidarr:8686", "api-key"),
         ).resolves.toBe(17);
 
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue down"));
+        mockLidarrClient.get.mockRejectedValueOnce(new Error("queue down"));
         await expect(
             getQueueCount("http://lidarr:8686", "api-key"),
         ).resolves.toBe(0);
     });
 
     it("returns queue and active download status from settings", async () => {
-        mockAxiosGet
+        mockLidarrClient.get
             .mockResolvedValueOnce({
                 data: {
                     records: [
@@ -2135,7 +2442,7 @@ describe("lidarr exported queue/history helpers", () => {
     });
 
     it("marks warning-tracked downloads as inactive even when still downloading", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -2158,8 +2465,8 @@ describe("lidarr exported queue/history helpers", () => {
         });
     });
 
-    it("continues cleanup when queue removal returns 404 and does not count it as removed", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+    it("counts an already-removed queue item as successfully cleaned", async () => {
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -2172,19 +2479,26 @@ describe("lidarr exported queue/history helpers", () => {
                 ],
             },
         });
-        mockAxiosDelete.mockRejectedValueOnce({
-            response: { status: 404 },
-            message: "not found",
-        });
+        mockLidarrClient.delete.mockRejectedValueOnce(
+            new LidarrHttpError({
+                status: 404,
+                method: "DELETE",
+                path: "/api/v1/queue/9",
+                attempts: 2,
+                isTransient: false,
+                data: { message: "Not Found" },
+                message: "Request failed with status code 404",
+            }),
+        );
 
         await expect(
             cleanStuckDownloads("http://lidarr:8686", "api-key"),
-        ).resolves.toEqual({ removed: 0, items: [] });
-        expect(mockAxiosDelete).toHaveBeenCalledTimes(1);
+        ).resolves.toEqual({ removed: 1, items: ["Already Gone"] });
+        expect(mockLidarrClient.delete).toHaveBeenCalledTimes(1);
     });
 
     it("logs non-404 cleanup failures and continues without counting removed items", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -2204,7 +2518,7 @@ describe("lidarr exported queue/history helpers", () => {
                 ],
             },
         });
-        mockAxiosDelete.mockRejectedValueOnce({
+        mockLidarrClient.delete.mockRejectedValueOnce({
             response: { status: 500 },
             message: "delete failed",
         });
@@ -2212,11 +2526,13 @@ describe("lidarr exported queue/history helpers", () => {
         await expect(
             cleanStuckDownloads("http://lidarr:8686", "api-key"),
         ).resolves.toEqual({ removed: 0, items: [] });
-        expect(mockAxiosDelete).toHaveBeenCalledTimes(1);
+        expect(mockLidarrClient.delete).toHaveBeenCalledTimes(1);
     });
 
     it("bubbles queue cleanup fetch failures", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue unavailable"));
+        mockLidarrClient.get.mockRejectedValueOnce(
+            new Error("queue unavailable"),
+        );
 
         await expect(
             cleanStuckDownloads("http://lidarr:8686", "api-key"),
@@ -2240,7 +2556,7 @@ describe("lidarr exported queue/history helpers", () => {
     });
 
     it("cleanStuckDownloads leaves non-stuck items untouched", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -2261,23 +2577,23 @@ describe("lidarr exported queue/history helpers", () => {
             "api-key",
         );
         expect(result).toEqual({ removed: 0, items: [] });
-        expect(mockAxiosDelete).not.toHaveBeenCalled();
+        expect(mockLidarrClient.delete).not.toHaveBeenCalled();
     });
 
     it("returns empty queue when queue fetch fails", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue down"));
+        mockLidarrClient.get.mockRejectedValueOnce(new Error("queue down"));
         await expect(getQueue()).resolves.toEqual([]);
     });
 
     it("returns inactive status when active-check fetch fails", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue down"));
+        mockLidarrClient.get.mockRejectedValueOnce(new Error("queue down"));
         await expect(isDownloadActive("dl-11")).resolves.toEqual({
             active: false,
         });
     });
 
     it("propagates recent-completed-download failures from Lidarr history", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("history down"));
+        mockLidarrClient.get.mockRejectedValueOnce(new Error("history down"));
 
         await expect(
             getRecentCompletedDownloads("http://lidarr:8686", "api-key", 5),
@@ -2285,7 +2601,7 @@ describe("lidarr exported queue/history helpers", () => {
     });
 });
 
-describe("lidarr exported queue/history helpers bound HTTP calls", () => {
+describe("lidarr exported queue/history helpers use the shared client seam", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockGetSystemSettings.mockResolvedValue({
@@ -2295,8 +2611,8 @@ describe("lidarr exported queue/history helpers bound HTTP calls", () => {
         });
     });
 
-    it("cleanStuckDownloads sends an explicit timeout on queue fetch and delete", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
+    it("cleanStuckDownloads sends relative paths and operation parameters", async () => {
+        mockLidarrClient.get.mockResolvedValueOnce({
             data: {
                 records: [
                     {
@@ -2309,61 +2625,97 @@ describe("lidarr exported queue/history helpers bound HTTP calls", () => {
                 ],
             },
         });
-        mockAxiosDelete.mockResolvedValue({});
+        mockLidarrClient.delete.mockResolvedValue({});
 
-        await cleanStuckDownloads("http://lidarr:8686", "api-key");
+        const signal = new AbortController().signal;
+        await cleanStuckDownloads("http://lidarr:8686", "api-key", signal);
 
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ timeout: 30000 }),
+        expect(mockLidarrHttpClient).toHaveBeenLastCalledWith(
+            { baseUrl: "http://lidarr:8686", apiKey: "api-key" },
+            { timeoutMs: 30_000 },
         );
-        expect(mockAxiosDelete).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ timeout: 30000 }),
+        expect(mockLidarrClient.get).toHaveBeenCalledWith(
+            "/api/v1/queue",
+            expect.objectContaining({
+                params: expect.any(Object),
+                timeoutMs: 10_000,
+                maxRetries: 0,
+                signal,
+            }),
+        );
+        expect(mockLidarrClient.delete).toHaveBeenCalledWith(
+            "/api/v1/queue/5",
+            {
+                params: {
+                    removeFromClient: true,
+                    blocklist: true,
+                    skipRedownload: false,
+                },
+                timeoutMs: 10_000,
+                maxRetries: 0,
+                signal,
+            },
         );
     });
 
-    it("getRecentCompletedDownloads sends an explicit timeout", async () => {
-        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
+    it("getRecentCompletedDownloads uses the shared client", async () => {
+        mockLidarrClient.get.mockResolvedValueOnce({ data: { records: [] } });
 
         await getRecentCompletedDownloads("http://lidarr:8686", "api-key", 5);
 
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ timeout: 30000 }),
+        expect(mockLidarrHttpClient).toHaveBeenLastCalledWith(
+            { baseUrl: "http://lidarr:8686", apiKey: "api-key" },
+            { timeoutMs: 30_000 },
+        );
+        expect(mockLidarrClient.get).toHaveBeenCalledWith(
+            "/api/v1/history",
+            expect.objectContaining({ params: expect.any(Object) }),
         );
     });
 
-    it("getQueueCount sends an explicit timeout", async () => {
-        mockAxiosGet.mockResolvedValueOnce({ data: { totalRecords: 0 } });
+    it("getQueueCount uses the shared client", async () => {
+        mockLidarrClient.get.mockResolvedValueOnce({
+            data: { totalRecords: 0 },
+        });
 
         await getQueueCount("http://lidarr:8686", "api-key");
 
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ timeout: 30000 }),
+        expect(mockLidarrHttpClient).toHaveBeenLastCalledWith(
+            { baseUrl: "http://lidarr:8686", apiKey: "api-key" },
+            { timeoutMs: 30_000 },
         );
+        expect(mockLidarrClient.get).toHaveBeenCalledWith("/api/v1/queue", {
+            params: { page: 1, pageSize: 1 },
+        });
     });
 
-    it("getQueue sends an explicit timeout", async () => {
-        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
+    it("getQueue uses the shared client", async () => {
+        mockLidarrClient.get.mockResolvedValueOnce({ data: { records: [] } });
 
         await getQueue();
 
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ timeout: 30000 }),
+        expect(mockLidarrHttpClient).toHaveBeenLastCalledWith(
+            { baseUrl: "http://lidarr:8686", apiKey: "api-key" },
+            { timeoutMs: 30_000 },
+        );
+        expect(mockLidarrClient.get).toHaveBeenCalledWith(
+            "/api/v1/queue",
+            expect.objectContaining({ params: expect.any(Object) }),
         );
     });
 
-    it("isDownloadActive sends an explicit timeout", async () => {
-        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
+    it("isDownloadActive uses the shared client", async () => {
+        mockLidarrClient.get.mockResolvedValueOnce({ data: { records: [] } });
 
         await isDownloadActive("dl-1");
 
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({ timeout: 30000 }),
+        expect(mockLidarrHttpClient).toHaveBeenLastCalledWith(
+            { baseUrl: "http://lidarr:8686", apiKey: "api-key" },
+            { timeoutMs: 30_000 },
+        );
+        expect(mockLidarrClient.get).toHaveBeenCalledWith(
+            "/api/v1/queue",
+            expect.objectContaining({ params: expect.any(Object) }),
         );
     });
 });

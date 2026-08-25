@@ -1,7 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 import type { Readable } from "node:stream";
-import type { AxiosInstance } from "axios";
 import { normalizeForExactKey } from "../../utils/artistNormalization";
+import type { LidarrCallConfig, LidarrHttpResponse } from "./lidarrHttpClient";
 
 export const LIDARR_ALBUM_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
 const LIDARR_ALBUM_MAX_ITEMS = 250_000;
@@ -19,6 +19,13 @@ interface AlbumSnapshotInfo {
 interface ReconciliationAlbumMaps {
     albumsByMbid: Map<string, AlbumSnapshotInfo>;
     albumsByTitle: Map<string, AlbumSnapshotInfo>;
+}
+
+interface ReconciliationAlbumClient {
+    get(
+        path: string,
+        config: LidarrCallConfig,
+    ): Promise<LidarrHttpResponse<unknown>>;
 }
 
 interface JsonArrayParserState {
@@ -207,7 +214,7 @@ function isReadable(value: unknown): value is Readable {
 
 /** Streams the unpaged Lidarr album array into the two derived snapshot maps. */
 export async function fetchReconciliationAlbumMaps(
-    client: AxiosInstance,
+    client: ReconciliationAlbumClient,
     target: ReconciliationAlbumMaps,
     signal: AbortSignal,
 ): Promise<void> {

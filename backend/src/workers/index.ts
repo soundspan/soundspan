@@ -456,7 +456,7 @@ async function processLidarrCleanupJob(
             const result = await runSchedulerTimedOperation(
                 "clearLidarrQueue",
                 180_000,
-                () => simpleDownloadManager.clearLidarrQueue(),
+                (signal) => simpleDownloadManager.clearLidarrQueue(signal),
             );
 
             if (!result) {

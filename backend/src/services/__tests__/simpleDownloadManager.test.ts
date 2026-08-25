@@ -1,4 +1,3 @@
-import axios from "axios";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { prisma } from "../../utils/db";
 import {
@@ -12,8 +11,6 @@ import { notificationService } from "../notificationService";
 import { notificationPolicyService } from "../notificationPolicyService";
 import { discoverWeeklyService } from "../discoverWeekly";
 import { spotifyImportService } from "../spotifyImport";
-
-jest.mock("axios");
 
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -74,6 +71,8 @@ jest.mock("../lidarr", () => {
             getReconciliationSnapshot: jest.fn(),
             isAlbumAvailableInSnapshot: jest.fn(),
             isDownloadActiveInSnapshot: jest.fn(),
+            blocklistAndRemove: jest.fn(),
+            clearFailedQueue: jest.fn(),
         },
     };
 });
@@ -127,10 +126,6 @@ jest.mock("../spotifyImport", () => ({
         checkImportCompletion: jest.fn(),
     },
 }));
-
-const mockAxiosGet = axios.get as jest.Mock;
-const mockAxiosPost = axios.post as jest.Mock;
-const mockAxiosDelete = axios.delete as jest.Mock;
 
 const mockPrisma = prisma as any;
 const mockLidarrService = lidarrService as jest.Mocked<typeof lidarrService>;
@@ -196,6 +191,11 @@ describe("simpleDownloadManager", () => {
             foreignAlbumId: "album-mbid-1",
         } as any);
         mockLidarrService.getArtistAlbums.mockResolvedValue([]);
+        mockLidarrService.blocklistAndRemove.mockResolvedValue(true);
+        mockLidarrService.clearFailedQueue.mockResolvedValue({
+            removed: 0,
+            errors: [],
+        });
 
         mockMusicBrainzService.getReleaseGroup.mockResolvedValue({
             "artist-credit": [{ artist: { id: "artist-mbid-1" } }],
@@ -223,10 +223,6 @@ describe("simpleDownloadManager", () => {
         mockSpotifyImportService.checkImportCompletion.mockResolvedValue(
             undefined as any,
         );
-
-        mockAxiosGet.mockResolvedValue({ data: { records: [] } });
-        mockAxiosPost.mockResolvedValue({});
-        mockAxiosDelete.mockResolvedValue({});
     });
 
     it("starts a download successfully and preserves existing metadata", async () => {
@@ -960,13 +956,6 @@ describe("simpleDownloadManager", () => {
                 return operation(tx);
             },
         );
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [{ id: 9, downloadId: "dl-fail-1" }],
-            },
-        });
-        mockAxiosDelete.mockResolvedValueOnce({});
-
         const result = await simpleDownloadManager.onImportFailed(
             "dl-fail-1",
             "Import failed",
@@ -977,11 +966,9 @@ describe("simpleDownloadManager", () => {
             failed: false,
             jobId: "job-fail-1",
         });
-        expect(mockAxiosDelete).toHaveBeenCalledWith(
-            expect.stringContaining(
-                "/api/v1/queue/9?removeFromClient=true&blocklist=true&skipRedownload=false",
-            ),
-            expect.any(Object),
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledWith(
+            "dl-fail-1",
+            false,
         );
     });
 
@@ -1028,50 +1015,17 @@ describe("simpleDownloadManager", () => {
     });
 
     it("clears failed Lidarr queue items and triggers album search", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [
-                    {
-                        id: 1,
-                        albumId: 11,
-                        status: "warning",
-                        trackedDownloadStatus: "warning",
-                        trackedDownloadState: "importPending",
-                        statusMessages: [
-                            { title: "err", messages: ["failed"] },
-                        ],
-                        title: "Album 11",
-                    },
-                    {
-                        id: 2,
-                        albumId: 22,
-                        status: "failed",
-                        trackedDownloadStatus: "error",
-                        trackedDownloadState: "importFailed",
-                        statusMessages: [
-                            { title: "err", messages: ["failed"] },
-                        ],
-                        title: "Album 22",
-                    },
-                ],
-            },
+        mockLidarrService.clearFailedQueue.mockResolvedValueOnce({
+            removed: 2,
+            errors: [],
         });
-        mockAxiosDelete.mockResolvedValue({});
-        mockAxiosPost.mockResolvedValue({});
 
-        const result = await simpleDownloadManager.clearLidarrQueue();
+        const signal = new AbortController().signal;
+        const result = await simpleDownloadManager.clearLidarrQueue(signal);
 
         expect(result.removed).toBe(2);
         expect(result.errors).toEqual([]);
-        expect(mockAxiosDelete).toHaveBeenCalledTimes(2);
-        expect(mockAxiosPost).toHaveBeenCalledWith(
-            "http://lidarr:8686/api/v1/command",
-            {
-                name: "AlbumSearch",
-                albumIds: [11, 22],
-            },
-            expect.any(Object),
-        );
+        expect(mockLidarrService.clearFailedQueue).toHaveBeenCalledWith(signal);
     });
 
     it("returns aggregate download stats by status", async () => {
@@ -1739,47 +1693,34 @@ describe("simpleDownloadManager", () => {
     });
 
     it("blocklistAndRetry and removeFromLidarrQueue clean up matching queue entries", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [{ id: 81, downloadId: "dl-cleanup-1" }],
-            },
-        });
         await (simpleDownloadManager as any).blocklistAndRetry(
             "dl-cleanup-1",
             777,
         );
-        expect(mockAxiosDelete).toHaveBeenCalledWith(
-            "http://lidarr:8686/api/v1/queue/81?removeFromClient=true&blocklist=true&skipRedownload=false",
-            expect.any(Object),
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledWith(
+            "dl-cleanup-1",
+            false,
         );
 
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [{ id: 82, downloadId: "dl-cleanup-2" }],
-            },
-        });
         await (simpleDownloadManager as any).removeFromLidarrQueue(
             "dl-cleanup-2",
         );
-        expect(mockAxiosDelete).toHaveBeenCalledWith(
-            "http://lidarr:8686/api/v1/queue/82?removeFromClient=true&blocklist=true&skipRedownload=false",
-            expect.any(Object),
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledWith(
+            "dl-cleanup-2",
+            false,
         );
     });
 
-    it("blocklistAndRetry skips queue delete when no matching download exists", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [{ id: 91, downloadId: "dl-not-match" }],
-            },
-        });
-
+    it("blocklistAndRetry delegates missing-item handling to LidarrService", async () => {
         await (simpleDownloadManager as any).blocklistAndRetry(
             "dl-missing",
             999,
         );
 
-        expect(mockAxiosDelete).not.toHaveBeenCalled();
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledWith(
+            "dl-missing",
+            false,
+        );
     });
 
     it("onDownloadGrabbed matches by lidarr MBID metadata when target MBID misses", async () => {
@@ -2201,20 +2142,15 @@ describe("simpleDownloadManager", () => {
         mockPrisma.$transaction.mockImplementationOnce(
             async (operation: (tx: any) => Promise<any>) => operation(tx),
         );
-        mockAxiosGet.mockResolvedValueOnce({
-            data: { records: [{ id: 90, downloadId: "dl-no-job" }] },
-        });
-        mockAxiosDelete.mockResolvedValueOnce({});
-
         const result = await simpleDownloadManager.onImportFailed(
             "dl-no-job",
             "Import failed",
         );
 
         expect(result).toEqual({ retried: false, failed: false });
-        expect(mockAxiosDelete).toHaveBeenCalledWith(
-            "http://lidarr:8686/api/v1/queue/90?removeFromClient=true&blocklist=true&skipRedownload=false",
-            expect.any(Object),
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledWith(
+            "dl-no-job",
+            false,
         );
     });
 
@@ -2244,7 +2180,7 @@ describe("simpleDownloadManager", () => {
             jobId: "job-repeat-failure",
         });
         expect(tx.downloadJob.update).not.toHaveBeenCalled();
-        expect(mockAxiosDelete).not.toHaveBeenCalled();
+        expect(mockLidarrService.blocklistAndRemove).not.toHaveBeenCalled();
     });
 
     it("tryNextAlbumFromArtist skips fallback for discovery jobs", async () => {
@@ -2683,8 +2619,9 @@ describe("simpleDownloadManager", () => {
     });
 
     it("clearLidarrQueue returns configuration error when Lidarr settings are missing", async () => {
-        mockGetSystemSettings.mockResolvedValueOnce({
-            musicPath: "/music-only",
+        mockLidarrService.clearFailedQueue.mockResolvedValueOnce({
+            removed: 0,
+            errors: ["Lidarr not configured"],
         });
 
         const result = await simpleDownloadManager.clearLidarrQueue();
@@ -2692,58 +2629,6 @@ describe("simpleDownloadManager", () => {
         expect(result).toEqual({
             removed: 0,
             errors: ["Lidarr not configured"],
-        });
-    });
-
-    it("clearLidarrQueue collects delete errors and tolerates search trigger failures", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [
-                    {
-                        id: 301,
-                        albumId: 91,
-                        status: "failed",
-                        trackedDownloadStatus: "error",
-                        trackedDownloadState: "importFailed",
-                        statusMessages: [
-                            { title: "failed", messages: ["oops"] },
-                        ],
-                        title: "Album 91",
-                    },
-                    {
-                        id: 302,
-                        albumId: 92,
-                        status: "warning",
-                        trackedDownloadStatus: "warning",
-                        trackedDownloadState: "importPending",
-                        statusMessages: [
-                            { title: "warn", messages: ["retry"] },
-                        ],
-                        title: "Album 92",
-                    },
-                ],
-            },
-        });
-        mockAxiosDelete
-            .mockRejectedValueOnce(new Error("delete failed"))
-            .mockResolvedValueOnce({});
-        mockAxiosPost.mockRejectedValueOnce(new Error("search trigger failed"));
-
-        const result = await simpleDownloadManager.clearLidarrQueue();
-
-        expect(result.removed).toBe(1);
-        expect(result.errors.length).toBe(1);
-        expect(result.errors[0]).toContain("Failed to remove 301");
-    });
-
-    it("clearLidarrQueue returns outer error when queue fetch fails", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue unavailable"));
-
-        const result = await simpleDownloadManager.clearLidarrQueue();
-
-        expect(result).toEqual({
-            removed: 0,
-            errors: ["queue unavailable"],
         });
     });
 

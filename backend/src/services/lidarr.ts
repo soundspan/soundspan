@@ -1,4 +1,3 @@
-import axios, { AxiosInstance } from "axios";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { BRAND_SLUG } from "../config/brand";
@@ -9,6 +8,16 @@ import {
     stripAlbumEdition,
 } from "../utils/artistNormalization";
 import { fetchReconciliationAlbumMaps } from "./lidarr/reconciliationAlbumStream";
+import {
+    getLidarrErrorMessage,
+    LidarrHttpClient,
+    LidarrHttpError,
+} from "./lidarr/lidarrHttpClient";
+import { toErrorMessage } from "../utils/errors";
+import {
+    blocklistQueueDownload,
+    clearFailedQueue as clearFailedLidarrQueue,
+} from "./lidarr/lidarrQueue";
 
 /**
  * Error types for music acquisition failures
@@ -98,12 +107,20 @@ interface LidarrAlbum {
     };
 }
 
+function lidarrErrorLogFields(error: unknown) {
+    return {
+        message: error instanceof Error ? toErrorMessage(error) : undefined,
+        status: error instanceof LidarrHttpError ? error.status : undefined,
+        path: error instanceof LidarrHttpError ? error.path : undefined,
+    };
+}
+
 function normalizeAlbumTitleForMatch(title: string): string {
     return normalizeForFuzzyMatch(stripAlbumEdition(title));
 }
 
 class LidarrService {
-    private client: AxiosInstance | null = null;
+    private client: LidarrHttpClient | null = null;
     private enabled: boolean;
     private initialized: boolean = false;
 
@@ -114,13 +131,10 @@ class LidarrService {
         // Under SECRETS_DB_ONLY the env-sourced apiKey is blanked at the
         // config boundary, so no env-based client is constructed.
         if (this.enabled && config.lidarr && !config.secretsDbOnly) {
-            this.client = axios.create({
-                baseURL: config.lidarr.url,
-                timeout: 30000,
-                headers: {
-                    "X-Api-Key": config.lidarr.apiKey,
-                },
-            });
+            this.client = new LidarrHttpClient(
+                { baseUrl: config.lidarr.url, apiKey: config.lidarr.apiKey },
+                { timeoutMs: 30_000 },
+            );
         }
     }
 
@@ -137,13 +151,10 @@ class LidarrService {
 
                 if (url && apiKey) {
                     logger.debug("Lidarr configured from database");
-                    this.client = axios.create({
-                        baseURL: url,
-                        timeout: 30000,
-                        headers: {
-                            "X-Api-Key": apiKey,
-                        },
-                    });
+                    this.client = new LidarrHttpClient(
+                        { baseUrl: url, apiKey },
+                        { timeoutMs: 30_000 },
+                    );
                     this.enabled = true;
                 } else {
                     logger.warn(
@@ -660,12 +671,8 @@ class LidarrService {
                     "/api/v1/artist",
                     artistPayload,
                 );
-            } catch (postError: any) {
-                // Handle race condition where artist was added between our check and post
-                const errorMsg =
-                    postError.response?.data?.[0]?.errorMessage ||
-                    postError.message ||
-                    "";
+            } catch (postError: unknown) {
+                const errorMsg = getLidarrErrorMessage(postError);
                 if (
                     errorMsg.includes("already exists") ||
                     errorMsg.includes("UNIQUE constraint failed")
@@ -710,10 +717,10 @@ class LidarrService {
             }
 
             return response.data;
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error(
                 "Lidarr add artist error:",
-                error.response?.data || error.message,
+                lidarrErrorLogFields(error),
             );
             return null;
         }
@@ -779,11 +786,11 @@ class LidarrService {
 
             logger.debug(`   Found 0 album result(s)`);
             return response.data;
-        } catch (error: any) {
-            logger.error(`Lidarr album search error: ${error.message}`);
-            if (error.response?.data) {
-                logger.error(`   Response:`, error.response.data);
-            }
+        } catch (error: unknown) {
+            logger.error(
+                "Lidarr album search error:",
+                lidarrErrorLogFields(error),
+            );
             return [];
         }
     }
@@ -1546,14 +1553,17 @@ class LidarrService {
                 }
                 throw error;
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Re-throw our own errors (like "No releases available")
-            if (error.message?.includes("No releases available")) {
+            if (
+                error instanceof Error &&
+                error.message.includes("No releases available")
+            ) {
                 throw error;
             }
             logger.error(
                 "Lidarr add album error:",
-                error.response?.data || error.message,
+                lidarrErrorLogFields(error),
             );
             return null;
         }
@@ -1643,7 +1653,6 @@ class LidarrService {
                     deleteFiles: deleteFiles,
                     addImportListExclusion: false,
                 },
-                timeout: 30000, // 30 second timeout
             });
 
             logger.debug(
@@ -2153,7 +2162,6 @@ class LidarrService {
                     deleteFiles,
                     addImportListExclusion: false,
                 },
-                timeout: 30000,
             });
 
             return { success: true, message: "Artist deleted" };
@@ -2166,58 +2174,45 @@ class LidarrService {
         }
     }
 
-    /**
-     * Get all available releases for an album from all indexers
-     * This is what Lidarr's "Interactive Search" uses
-     */
+    /** Returns Lidarr's interactive-search releases for an album. */
     async getAlbumReleases(lidarrAlbumId: number): Promise<LidarrRelease[]> {
         await this.ensureInitialized();
-
         if (!this.enabled || !this.client) {
             throw new Error("Lidarr not enabled");
         }
-
         try {
             logger.debug(
                 `[LIDARR] Fetching releases for album ID: ${lidarrAlbumId}`,
             );
             const response = await this.client.get("/api/v1/release", {
                 params: { albumId: lidarrAlbumId },
-                timeout: 60000, // 60s timeout for indexer searches
+                timeoutMs: 60_000,
+                maxRetries: 0,
             });
-
             const releases: LidarrRelease[] = response.data || [];
             logger.debug(
                 `[LIDARR] Found ${releases.length} releases from indexers`,
             );
 
-            // Sort by preferred criteria (Lidarr already sorts by quality/preferred words)
-            // but we can add seeders as a secondary sort for torrents
             releases.sort((a, b) => {
-                // Approved releases first
                 if (a.approved && !b.approved) return -1;
                 if (!a.approved && b.approved) return 1;
-
-                // Higher seeders for torrents
                 if (a.seeders !== undefined && b.seeders !== undefined) {
                     return b.seeders - a.seeders;
                 }
-
-                // Keep original order (Lidarr's quality sorting)
                 return 0;
             });
-
             return releases;
-        } catch (error: any) {
-            logger.error(`[LIDARR] Failed to fetch releases:`, error.message);
+        } catch (error: unknown) {
+            logger.error(
+                `[LIDARR] Failed to fetch releases:`,
+                lidarrErrorLogFields(error),
+            );
             return [];
         }
     }
 
-    /**
-     * Grab (download) a specific release by GUID
-     * This tells Lidarr to download the specified release
-     */
+    /** Tells Lidarr to download a release by GUID. */
     async grabRelease(release: LidarrRelease): Promise<boolean> {
         await this.ensureInitialized();
 
@@ -2240,66 +2235,38 @@ class LidarrService {
 
             logger.debug(`[LIDARR] Release grabbed successfully`);
             return true;
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error(
                 `[LIDARR] Failed to grab release:`,
-                error.response?.data || error.message,
+                lidarrErrorLogFields(error),
             );
             return false;
         }
     }
 
-    /**
-     * Remove a download from queue and blocklist the release
-     * Use skipRedownload=true since we'll manually grab the next release
-     */
-    async blocklistAndRemove(downloadId: string): Promise<boolean> {
+    /** Removes a release; skipRedownload selects replacement ownership. */
+    async blocklistAndRemove(
+        downloadId: string,
+        skipRedownload: boolean,
+    ): Promise<boolean> {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
             throw new Error("Lidarr not enabled");
         }
 
-        try {
-            // Find the queue item by downloadId
-            const queueResponse = await this.client.get("/api/v1/queue", {
-                params: { page: 1, pageSize: 100 },
-            });
+        return blocklistQueueDownload(this.client, downloadId, skipRedownload);
+    }
 
-            const queueItem = queueResponse.data.records.find(
-                (item: any) => item.downloadId === downloadId,
-            );
-
-            if (!queueItem) {
-                logger.debug(
-                    `[LIDARR] Download ${downloadId} not found in queue (may already be removed)`,
-                );
-                return true; // Consider it success if not in queue
-            }
-
-            logger.debug(
-                `[LIDARR] Blocklisting and removing: ${queueItem.title}`,
-            );
-
-            await this.client.delete(`/api/v1/queue/${queueItem.id}`, {
-                params: {
-                    removeFromClient: true,
-                    blocklist: true,
-                    skipRedownload: true, // We'll grab the next release manually
-                },
-            });
-
-            logger.debug(
-                `[LIDARR] Successfully blocklisted: ${queueItem.title}`,
-            );
-            return true;
-        } catch (error: any) {
-            logger.error(
-                `[LIDARR] Failed to blocklist:`,
-                error.response?.data || error.message,
-            );
-            return false;
+    /** Clears failed queue entries and asks Lidarr to search their albums again. */
+    async clearFailedQueue(
+        signal?: AbortSignal,
+    ): Promise<{ removed: number; errors: string[] }> {
+        await this.ensureInitialized();
+        if (!this.enabled || !this.client) {
+            return { removed: 0, errors: ["Lidarr not configured"] };
         }
+        return clearFailedLidarrQueue(this.client, signal);
     }
 
     /**
@@ -2611,341 +2578,10 @@ export interface LidarrRelease {
 
 export const lidarrService = new LidarrService();
 
-// Types for queue monitoring
-interface QueueItem {
-    id: number;
-    title: string;
-    status: string;
-    downloadId: string;
-    trackedDownloadStatus: string;
-    trackedDownloadState: string;
-    statusMessages: { title: string; messages: string[] }[];
-    sizeleft?: number;
-    size?: number;
-}
-
-interface QueueResponse {
-    page: number;
-    pageSize: number;
-    totalRecords: number;
-    records: QueueItem[];
-}
-
-interface HistoryRecord {
-    id: number;
-    albumId: number;
-    downloadId: string;
-    eventType: string;
-    date: string;
-    data: {
-        droppedPath?: string;
-        importedPath?: string;
-    };
-    album: {
-        id: number;
-        title: string;
-        foreignAlbumId: string; // MBID
-    };
-    artist: {
-        name: string;
-    };
-}
-
-interface HistoryResponse {
-    page: number;
-    pageSize: number;
-    totalRecords: number;
-    records: HistoryRecord[];
-}
-
-// Patterns that indicate a stuck download (case-insensitive matching)
-const FAILED_IMPORT_PATTERNS = [
-    // Import issues
-    "No files found are eligible for import",
-    "Not an upgrade for existing",
-    "Not a Custom Format upgrade",
-    "missing tracks",
-    "Album match is not close enough", // Lidarr matching threshold failure
-    "Artist name mismatch", // Manual import required - artist doesn't match
-    "automatic import is not possible", // Generic auto-import failure
-    // Unpack/extraction failures
-    "Unable to extract",
-    "Failed to extract",
-    "Unpacking failed",
-    "unpack error",
-    "Error extracting",
-    "extraction failed",
-    "corrupt archive",
-    "invalid archive",
-    "CRC failed",
-    "bad archive",
-    // Download/transfer issues
-    "Download failed",
-    "import failed",
-    "Sample",
-];
-
-/**
- * Clean stuck downloads from Lidarr queue
- * Returns items that were removed and will trigger automatic search for alternatives
- */
-export async function cleanStuckDownloads(
-    lidarrUrl: string,
-    apiKey: string,
-): Promise<{ removed: number; items: string[] }> {
-    const removed: string[] = [];
-
-    try {
-        // Fetch current queue
-        const response = await axios.get<QueueResponse>(
-            `${lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 100,
-                    includeUnknownArtistItems: true,
-                },
-                timeout: 30000,
-                headers: { "X-Api-Key": apiKey },
-            },
-        );
-
-        logger.debug(
-            ` Queue cleaner: checking ${response.data.records.length} items`,
-        );
-
-        for (const item of response.data.records) {
-            // Check if this item has a failed import message
-            const allMessages =
-                item.statusMessages?.flatMap((sm) => sm.messages) || [];
-
-            // Log ALL items to understand what states we're seeing
-            logger.debug(`   - ${item.title}`);
-            logger.debug(
-                `      Status: ${item.status}, TrackedStatus: ${item.trackedDownloadStatus}, State: ${item.trackedDownloadState}`,
-            );
-            if (allMessages.length > 0) {
-                logger.debug(`      Messages: ${allMessages.join("; ")}`);
-            }
-
-            // Check for pattern matches in messages
-            const hasFailedPattern = allMessages.some((msg) =>
-                FAILED_IMPORT_PATTERNS.some((pattern) =>
-                    msg.toLowerCase().includes(pattern.toLowerCase()),
-                ),
-            );
-
-            // Also check if trackedDownloadStatus is "warning" with importPending state
-            // These are items that have finished downloading but can't be imported
-            const isStuckWarning =
-                item.trackedDownloadStatus === "warning" &&
-                item.trackedDownloadState === "importPending";
-
-            // CRITICAL: importFailed state is TERMINAL - will never recover
-            // Don't wait for timeout, clean up immediately
-            const isImportFailed = item.trackedDownloadState === "importFailed";
-
-            const shouldRemove =
-                hasFailedPattern || isStuckWarning || isImportFailed;
-
-            if (shouldRemove) {
-                const reason = isImportFailed
-                    ? "importFailed state (terminal)"
-                    : hasFailedPattern
-                      ? "failed pattern match"
-                      : "stuck warning state";
-                logger.debug(`   [REMOVE] Removing ${item.title} (${reason})`);
-
-                try {
-                    // Remove from queue, blocklist the release, trigger new search
-                    await axios.delete(`${lidarrUrl}/api/v1/queue/${item.id}`, {
-                        params: {
-                            removeFromClient: true, // Remove from NZBGet too
-                            blocklist: true, // Don't try this release again
-                            skipRedownload: false, // DO trigger new search
-                        },
-                        timeout: 30000,
-                        headers: { "X-Api-Key": apiKey },
-                    });
-
-                    removed.push(item.title);
-                    logger.debug(`   Removed and blocklisted: ${item.title}`);
-                } catch (deleteError: any) {
-                    // Item might already be gone - that's fine
-                    if (deleteError.response?.status !== 404) {
-                        logger.error(
-                            `    Failed to remove ${item.title}:`,
-                            deleteError.message,
-                        );
-                    }
-                }
-            }
-        }
-
-        if (removed.length > 0) {
-            logger.debug(
-                ` Queue cleaner: removed ${removed.length} stuck item(s)`,
-            );
-        }
-
-        return { removed: removed.length, items: removed };
-    } catch (error: any) {
-        logger.error("Queue clean failed:", error.message);
-        throw error;
-    }
-}
-
-/**
- * Get recently completed downloads from Lidarr history
- * Used to find orphaned completions (webhooks that never arrived)
- */
-export async function getRecentCompletedDownloads(
-    lidarrUrl: string,
-    apiKey: string,
-    sinceMinutes: number = 5,
-): Promise<HistoryRecord[]> {
-    try {
-        const response = await axios.get<HistoryResponse>(
-            `${lidarrUrl}/api/v1/history`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 100,
-                    sortKey: "date",
-                    sortDirection: "descending",
-                    eventType: 3, // 3 = downloadFolderImported (successful import)
-                },
-                timeout: 30000,
-                headers: { "X-Api-Key": apiKey },
-            },
-        );
-
-        // Filter to only recent imports (within last X minutes)
-        const cutoff = new Date(Date.now() - sinceMinutes * 60 * 1000);
-        return response.data.records.filter((record) => {
-            return new Date(record.date) >= cutoff;
-        });
-    } catch (error: any) {
-        logger.error("Failed to fetch Lidarr history:", error.message);
-        throw error;
-    }
-}
-
-/**
- * Get the current queue count from Lidarr
- */
-export async function getQueueCount(
-    lidarrUrl: string,
-    apiKey: string,
-): Promise<number> {
-    try {
-        const response = await axios.get<QueueResponse>(
-            `${lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 1,
-                },
-                timeout: 30000,
-                headers: { "X-Api-Key": apiKey },
-            },
-        );
-        return response.data.totalRecords;
-    } catch (error: any) {
-        logger.error("Failed to get queue count:", error.message);
-        return 0;
-    }
-}
-
-/**
- * Get the full Lidarr queue
- * Returns all items currently in the download queue
- */
-export async function getQueue(): Promise<QueueItem[]> {
-    const settings = await getSystemSettings();
-    if (
-        !settings?.lidarrEnabled ||
-        !settings.lidarrUrl ||
-        !settings.lidarrApiKey
-    ) {
-        return [];
-    }
-
-    try {
-        const response = await axios.get<QueueResponse>(
-            `${settings.lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 100,
-                    includeUnknownArtistItems: true,
-                },
-                timeout: 30000,
-                headers: { "X-Api-Key": settings.lidarrApiKey },
-            },
-        );
-
-        return response.data.records || [];
-    } catch (error: any) {
-        logger.error("Failed to get Lidarr queue:", error.message);
-        return [];
-    }
-}
-
-/**
- * Check if a specific download is still actively downloading in Lidarr's queue
- * Returns true if actively downloading, false if not found or stuck
- */
-export async function isDownloadActive(
-    downloadId: string,
-): Promise<{ active: boolean; status?: string; progress?: number }> {
-    const settings = await getSystemSettings();
-    if (
-        !settings?.lidarrEnabled ||
-        !settings.lidarrUrl ||
-        !settings.lidarrApiKey
-    ) {
-        return { active: false };
-    }
-
-    try {
-        const response = await axios.get<QueueResponse>(
-            `${settings.lidarrUrl}/api/v1/queue`,
-            {
-                params: {
-                    page: 1,
-                    pageSize: 100,
-                    includeUnknownArtistItems: true,
-                },
-                timeout: 30000,
-                headers: { "X-Api-Key": settings.lidarrApiKey },
-            },
-        );
-
-        const item = response.data.records.find(
-            (r) => r.downloadId === downloadId,
-        );
-
-        if (!item) {
-            return { active: false, status: "not_found" };
-        }
-
-        // Check if it's actively downloading (not stuck in warning/failed state)
-        const isActivelyDownloading =
-            item.status === "downloading" ||
-            (item.trackedDownloadState === "downloading" &&
-                item.trackedDownloadStatus !== "warning");
-
-        return {
-            active: isActivelyDownloading,
-            status: item.trackedDownloadState || item.status,
-            progress:
-                item.sizeleft && item.size
-                    ? Math.round((1 - item.sizeleft / item.size) * 100)
-                    : undefined,
-        };
-    } catch (error: any) {
-        logger.error("Failed to check download status:", error.message);
-        return { active: false };
-    }
-}
+export {
+    cleanStuckDownloads,
+    getQueue,
+    getQueueCount,
+    getRecentCompletedDownloads,
+    isDownloadActive,
+} from "./lidarr/lidarrQueue";

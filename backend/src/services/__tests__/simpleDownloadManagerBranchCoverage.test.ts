@@ -1,4 +1,3 @@
-import axios from "axios";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { prisma } from "../../utils/db";
 import { lidarrService } from "../lidarr";
@@ -6,8 +5,6 @@ import { musicBrainzService } from "../musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { notificationPolicyService } from "../notificationPolicyService";
 import { sessionLog } from "../../utils/playlistLogger";
-
-jest.mock("axios");
 
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -68,6 +65,8 @@ jest.mock("../lidarr", () => {
             getReconciliationSnapshot: jest.fn(),
             isAlbumAvailableInSnapshot: jest.fn(),
             isDownloadActiveInSnapshot: jest.fn(),
+            blocklistAndRemove: jest.fn(),
+            clearFailedQueue: jest.fn(),
         },
     };
 });
@@ -122,8 +121,6 @@ jest.mock("../spotifyImport", () => ({
     },
 }));
 
-const mockAxiosGet = axios.get as jest.Mock;
-const mockAxiosDelete = axios.delete as jest.Mock;
 const mockPrisma = prisma as any;
 const mockLidarrService = lidarrService as jest.Mocked<typeof lidarrService>;
 const mockMusicBrainzService = musicBrainzService as jest.Mocked<
@@ -184,6 +181,11 @@ describe("simpleDownloadManager branch coverage", () => {
             active: false,
             progress: 0,
         } as any);
+        mockLidarrService.blocklistAndRemove.mockResolvedValue(true);
+        mockLidarrService.clearFailedQueue.mockResolvedValue({
+            removed: 0,
+            errors: [],
+        });
 
         mockMusicBrainzService.getReleaseGroup.mockResolvedValue({
             "artist-credit": [{ artist: { id: "artist-mbid-1" } }],
@@ -199,9 +201,6 @@ describe("simpleDownloadManager branch coverage", () => {
             shouldNotify: true,
             reason: "policy allows",
         } as any);
-
-        mockAxiosGet.mockResolvedValue({ data: { records: [] } });
-        mockAxiosDelete.mockResolvedValue({});
     });
 
     it("uses default max attempts when user config returns 0", async () => {
@@ -502,7 +501,7 @@ describe("simpleDownloadManager branch coverage", () => {
             queue: new Map(),
         } as any);
 
-        expect(blocklistSpy).toHaveBeenCalledWith("dl-stale-lidarr-ref", 501);
+        expect(blocklistSpy).toHaveBeenCalledWith("dl-stale-lidarr-ref");
         blocklistSpy.mockRestore();
         fallbackSpy.mockRestore();
     });
@@ -552,7 +551,9 @@ describe("simpleDownloadManager branch coverage", () => {
     });
 
     it("blocklistAndRetry handles queue lookup errors", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue endpoint down"));
+        mockLidarrService.blocklistAndRemove.mockRejectedValueOnce(
+            new Error("queue endpoint down"),
+        );
 
         await expect(
             (simpleDownloadManager as any).blocklistAndRetry(
@@ -563,7 +564,7 @@ describe("simpleDownloadManager branch coverage", () => {
     });
 
     it("blocklistAndRetry handles settings failures", async () => {
-        mockGetSystemSettings.mockRejectedValueOnce(
+        mockLidarrService.blocklistAndRemove.mockRejectedValueOnce(
             new Error("settings unavailable"),
         );
 
@@ -575,20 +576,21 @@ describe("simpleDownloadManager branch coverage", () => {
         ).resolves.toBeUndefined();
     });
 
-    it("removeFromLidarrQueue logs when queue item is not present", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: { records: [{ id: 1, downloadId: "not-this-one" }] },
-        });
-
+    it("removeFromLidarrQueue delegates missing-item handling", async () => {
         await (simpleDownloadManager as any).removeFromLidarrQueue(
             "missing-dl-id",
         );
 
-        expect(mockAxiosDelete).not.toHaveBeenCalled();
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledWith(
+            "missing-dl-id",
+            false,
+        );
     });
 
     it("removeFromLidarrQueue swallows queue fetch errors", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("queue fetch failed"));
+        mockLidarrService.blocklistAndRemove.mockRejectedValueOnce(
+            new Error("queue fetch failed"),
+        );
 
         await expect(
             (simpleDownloadManager as any).removeFromLidarrQueue(
@@ -598,33 +600,16 @@ describe("simpleDownloadManager branch coverage", () => {
     });
 
     it("clearLidarrQueue returns early when queue has zero records", async () => {
-        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
-
         const result = await simpleDownloadManager.clearLidarrQueue();
 
         expect(result).toEqual({ removed: 0, errors: [] });
     });
 
     it("clearLidarrQueue returns early when no records meet failed-item filters", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [
-                    {
-                        id: 800,
-                        title: "Healthy item",
-                        status: "downloading",
-                        trackedDownloadStatus: "ok",
-                        trackedDownloadState: "downloading",
-                        statusMessages: [],
-                    },
-                ],
-            },
-        });
-
         const result = await simpleDownloadManager.clearLidarrQueue();
 
         expect(result).toEqual({ removed: 0, errors: [] });
-        expect(mockAxiosDelete).not.toHaveBeenCalled();
+        expect(mockLidarrService.clearFailedQueue).toHaveBeenCalledTimes(1);
     });
 
     it("onDownloadGrabbed uses incoming MBID when matched job targetMbid is empty", async () => {
@@ -774,52 +759,19 @@ describe("simpleDownloadManager branch coverage", () => {
         expect(result.jobId).toBe("job-subject-match");
     });
 
-    it("blocklistAndRetry and removeFromLidarrQueue exit when Lidarr config is incomplete", async () => {
-        mockGetSystemSettings.mockResolvedValueOnce({ musicPath: "/music" });
+    it("blocklistAndRetry and removeFromLidarrQueue handle disabled Lidarr", async () => {
+        mockLidarrService.blocklistAndRemove.mockRejectedValue(
+            new Error("Lidarr not enabled"),
+        );
         await (simpleDownloadManager as any).blocklistAndRetry(
             "dl-no-config",
             10,
         );
 
-        mockGetSystemSettings.mockResolvedValueOnce({ musicPath: "/music" });
         await (simpleDownloadManager as any).removeFromLidarrQueue(
             "dl-no-config-2",
         );
 
-        expect(mockAxiosGet).not.toHaveBeenCalled();
-        expect(mockAxiosDelete).not.toHaveBeenCalled();
-    });
-
-    it("clearLidarrQueue handles mixed albumIds and non-Error rejection reasons", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                records: [
-                    {
-                        id: 901,
-                        status: "failed",
-                        trackedDownloadStatus: "error",
-                        trackedDownloadState: "importFailed",
-                        statusMessages: [{ title: "x", messages: ["y"] }],
-                    },
-                    {
-                        id: 902,
-                        albumId: 999,
-                        status: "warning",
-                        trackedDownloadStatus: "warning",
-                        trackedDownloadState: "importPending",
-                        statusMessages: [{ title: "x", messages: ["y"] }],
-                        album: { title: "Album Title" },
-                    },
-                ],
-            },
-        });
-        mockAxiosDelete
-            .mockRejectedValueOnce("network")
-            .mockResolvedValueOnce({});
-
-        const result = await simpleDownloadManager.clearLidarrQueue();
-
-        expect(result.removed).toBe(1);
-        expect(result.errors[0]).toContain("Unknown error");
+        expect(mockLidarrService.blocklistAndRemove).toHaveBeenCalledTimes(2);
     });
 });

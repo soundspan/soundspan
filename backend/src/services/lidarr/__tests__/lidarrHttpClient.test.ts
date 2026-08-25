@@ -61,6 +61,28 @@ function allLogOutput(): string {
     ]);
 }
 
+function enumerableGraph(value: unknown): string {
+    const pending: unknown[] = [value];
+    const seen = new WeakSet<object>();
+    const entries: unknown[] = [];
+    for (let index = 0; index < 100 && pending.length > 0; index += 1) {
+        const current = pending.shift();
+        if (
+            typeof current !== "object" ||
+            current === null ||
+            seen.has(current)
+        ) {
+            entries.push(current);
+            continue;
+        }
+        seen.add(current);
+        const currentEntries = Object.entries(current);
+        entries.push(...currentEntries);
+        pending.push(...currentEntries.map(([, entry]) => entry));
+    }
+    return JSON.stringify(entries);
+}
+
 async function flushPromises(): Promise<void> {
     for (let turn = 0; turn < 10; turn += 1) {
         await Promise.resolve();
@@ -84,7 +106,7 @@ describe("LidarrHttpClient", () => {
 
         await expect(
             client.get<{ records: number[] }>("/api/v1/queue"),
-        ).resolves.toEqual({ records: [1] });
+        ).resolves.toEqual({ data: { records: [1] }, status: 200 });
 
         expect(mockAxiosCreate).toHaveBeenCalledTimes(1);
         expect(mockAxiosCreate).toHaveBeenCalledWith({
@@ -98,9 +120,41 @@ describe("LidarrHttpClient", () => {
             params: undefined,
             data: undefined,
             signal: undefined,
+            responseType: undefined,
+            maxContentLength: undefined,
+            maxBodyLength: undefined,
         });
         expect(allLogOutput()).not.toContain(API_KEY);
         expect(allLogOutput()).not.toContain("lidarr.internal.example");
+    });
+
+    it("keeps raw DELETE parameters compatible with discovery lifecycle callers", async () => {
+        mockRequest.mockResolvedValueOnce({ data: undefined, status: 200 });
+
+        await expect(
+            createClient().delete("/api/v1/album/42", { deleteFiles: true }),
+        ).resolves.toEqual({ data: undefined, status: 200 });
+        expect(mockRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                method: "DELETE",
+                url: "/api/v1/album/42",
+                params: { deleteFiles: true },
+            }),
+        );
+    });
+
+    it("threads per-request timeout overrides through every HTTP method", async () => {
+        mockRequest.mockResolvedValue({ data: undefined, status: 200 });
+        const client = createClient();
+
+        await client.get("/api/v1/get", { timeoutMs: 60_000 });
+        await client.post("/api/v1/post", {}, { timeoutMs: 50_000 });
+        await client.put("/api/v1/put", {}, { timeoutMs: 40_000 });
+        await client.delete("/api/v1/delete", { timeoutMs: 10_000 });
+
+        expect(
+            mockRequest.mock.calls.map(([request]) => request.timeout),
+        ).toEqual([60_000, 50_000, 40_000, 10_000]);
     });
 
     it("threads caller cancellation through Axios without retrying aborts", async () => {
@@ -116,6 +170,87 @@ describe("LidarrHttpClient", () => {
         expect(mockSleep).not.toHaveBeenCalled();
     });
 
+    it("aborts during retry backoff without starting another attempt", async () => {
+        const controller = new AbortController();
+        let releaseBackoff!: () => void;
+        const sleep = jest.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    releaseBackoff = resolve;
+                }),
+        );
+        mockRequest.mockRejectedValueOnce(httpError(503));
+        const request = createClient({ sleep }).get("/api/v1/queue", {
+            signal: controller.signal,
+        });
+        let settled = false;
+        void request.catch(() => {
+            settled = true;
+        });
+
+        await flushPromises();
+        expect(sleep).toHaveBeenCalledTimes(1);
+        controller.abort(new Error("cleanup deadline exceeded"));
+        await flushPromises();
+
+        expect(settled).toBe(true);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        releaseBackoff();
+        await expect(request).rejects.toEqual(
+            expect.objectContaining({
+                message:
+                    "Lidarr GET /api/v1/queue canceled during retry backoff after 1 attempt(s)",
+                attempts: 1,
+                isTransient: false,
+            }),
+        );
+        await request.catch((error: unknown) => {
+            expect(error).toBeInstanceOf(LidarrHttpError);
+        });
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(logger.error).toHaveBeenCalledWith(
+            "Lidarr HTTP request canceled during retry backoff",
+            {
+                method: "GET",
+                path: "/api/v1/queue",
+                attempt: 1,
+                isTransient: false,
+            },
+        );
+    });
+
+    it("clears the default retry timer when backoff is aborted", async () => {
+        jest.useFakeTimers();
+        try {
+            const controller = new AbortController();
+            mockRequest.mockRejectedValueOnce(httpError(503));
+            const request = createClient({ sleep: undefined }).get(
+                "/api/v1/queue",
+                { signal: controller.signal },
+            );
+
+            await flushPromises();
+            expect(jest.getTimerCount()).toBe(1);
+            controller.abort();
+            await expect(request).rejects.toBeInstanceOf(LidarrHttpError);
+
+            expect(jest.getTimerCount()).toBe(0);
+            expect(mockRequest).toHaveBeenCalledTimes(1);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("honors a per-call zero-retry override", async () => {
+        mockRequest.mockRejectedValue(httpError(503));
+
+        await expect(
+            createClient().get("/api/v1/release", { maxRetries: 0 }),
+        ).rejects.toMatchObject({ attempts: 1, status: 503 });
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(mockSleep).not.toHaveBeenCalled();
+    });
+
     it("retries a transient GET failure and returns the second result", async () => {
         mockRequest
             .mockRejectedValueOnce(httpError(503))
@@ -123,7 +258,7 @@ describe("LidarrHttpClient", () => {
 
         await expect(
             createClient().get<{ ok: boolean }>("/api/v1/system/status"),
-        ).resolves.toEqual({ ok: true });
+        ).resolves.toEqual({ data: { ok: true }, status: 200 });
         expect(mockRequest).toHaveBeenCalledTimes(2);
         expect(mockSleep).toHaveBeenCalledTimes(1);
         expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -155,6 +290,39 @@ describe("LidarrHttpClient", () => {
         expect(logger.error).toHaveBeenCalledTimes(1);
     });
 
+    it("preserves the Axios message and parsed Lidarr error body", async () => {
+        const responseData = [{ errorMessage: "artist already exists" }];
+        mockRequest.mockRejectedValueOnce(
+            Object.assign(new Error("Request failed with status code 400"), {
+                response: { status: 400, data: responseData },
+            }),
+        );
+
+        await expect(
+            createClient().post("/api/v1/artist", {}),
+        ).rejects.toMatchObject({
+            message: "Request failed with status code 400",
+            response: { status: 400, data: responseData },
+        });
+    });
+
+    it("does not retain API keys from enumerable Axios failure state", async () => {
+        const axiosError = Object.assign(new Error("request failed"), {
+            code: "ERR_BAD_RESPONSE",
+            response: { status: 500, data: [{ errorMessage: "unavailable" }] },
+            config: { headers: { "X-Api-Key": API_KEY } },
+        });
+        mockRequest.mockRejectedValue(axiosError);
+
+        const error = await createClient({ maxRetries: 0 })
+            .get("/api/v1/queue")
+            .catch((failure: unknown) => failure);
+
+        expect(error).toBeInstanceOf(LidarrHttpError);
+        expect(JSON.stringify(error)).not.toContain(API_KEY);
+        expect(enumerableGraph(error)).not.toContain(API_KEY);
+    });
+
     it("does not retry a non-transient status", async () => {
         mockRequest.mockRejectedValue(httpError(404));
 
@@ -167,6 +335,17 @@ describe("LidarrHttpClient", () => {
         });
         expect(mockRequest).toHaveBeenCalledTimes(1);
         expect(mockSleep).not.toHaveBeenCalled();
+    });
+
+    it("reports 404 after a lost-response DELETE retry as two attempts", async () => {
+        mockRequest
+            .mockRejectedValueOnce({ code: "ECONNRESET" })
+            .mockRejectedValueOnce(httpError(404));
+
+        await expect(
+            createClient({ maxRetries: 1 }).delete("/api/v1/queue/12"),
+        ).rejects.toMatchObject({ status: 404, attempts: 2 });
+        expect(mockRequest).toHaveBeenCalledTimes(2);
     });
 
     it("does not retry POST unless explicitly overridden", async () => {
@@ -210,7 +389,7 @@ describe("LidarrHttpClient", () => {
 
         await expect(
             createClient({ maxBackoffMs: 25 }).get("/api/v1/queue"),
-        ).resolves.toBe("ok");
+        ).resolves.toEqual({ data: "ok", status: 200 });
         expect(mockSleep).toHaveBeenCalledWith(25);
     });
 
@@ -245,9 +424,43 @@ describe("LidarrHttpClient", () => {
         releases.splice(0).forEach((release) => release());
 
         await expect(Promise.all(requests)).resolves.toEqual(
-            Array(5).fill("done"),
+            Array(5).fill({ data: "done", status: 200 }),
         );
         expect(maximumInFlight).toBe(2);
+    });
+
+    it("releases its concurrency slot while a retry waits for backoff", async () => {
+        let releaseBackoff: (() => void) | undefined;
+        const sleep = jest.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    releaseBackoff = resolve;
+                }),
+        );
+        mockRequest.mockImplementation(({ url }: { url: string }) => {
+            const retryAttempts = mockRequest.mock.calls.filter(
+                ([request]) => request.url === "/api/v1/retry",
+            ).length;
+            if (url === "/api/v1/retry" && retryAttempts === 1) {
+                return Promise.reject(httpError(503));
+            }
+            return Promise.resolve({ data: url, status: 200 });
+        });
+        const client = createClient({ concurrency: 1, maxRetries: 1, sleep });
+
+        const retrying = client.get("/api/v1/retry");
+        await flushPromises();
+        expect(sleep).toHaveBeenCalledTimes(1);
+        const unrelated = client.get("/api/v1/unrelated");
+        await flushPromises();
+
+        expect(mockRequest).toHaveBeenCalledWith(
+            expect.objectContaining({ url: "/api/v1/unrelated" }),
+        );
+        releaseBackoff?.();
+        await expect(Promise.all([retrying, unrelated])).resolves.toHaveLength(
+            2,
+        );
     });
 
     it("rejects invalid connection, options, and paths", async () => {

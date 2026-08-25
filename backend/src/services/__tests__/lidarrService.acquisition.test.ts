@@ -1,5 +1,4 @@
 import {
-    axios,
     AcquisitionError,
     AcquisitionErrorType,
     cleanStuckDownloads,
@@ -13,13 +12,11 @@ import {
     stripAlbumEdition,
     mockedConfig,
     logger,
-    mockAxiosCreate,
-    mockAxiosGet,
-    mockAxiosPost,
-    mockAxiosDelete,
+    mockLidarrHttpClient,
     mockGetSystemSettings,
     mockMusicBrainzSearchArtist,
     mockStripAlbumEdition,
+    LidarrHttpError,
     createClientMock,
     primeServiceWithClient,
 } from "./lidarrService.helpers";
@@ -50,7 +47,7 @@ describe("lidarr service behavior", () => {
 
     it("initializes from config when DB settings are disabled", async () => {
         const client = createClientMock();
-        mockAxiosCreate.mockReturnValue(client);
+        mockLidarrHttpClient.mockImplementationOnce(() => client as any);
         mockedConfig.lidarr = {
             enabled: true,
             url: "http://lidarr-config:8686",
@@ -68,7 +65,7 @@ describe("lidarr service behavior", () => {
 
     it("initializes from system settings when enabled", async () => {
         const client = createClientMock();
-        mockAxiosCreate.mockReturnValue(client);
+        mockLidarrHttpClient.mockImplementationOnce(() => client as any);
         mockGetSystemSettings.mockResolvedValue({
             lidarrEnabled: true,
             lidarrUrl: "http://lidarr:8686",
@@ -81,7 +78,7 @@ describe("lidarr service behavior", () => {
         svc.client = null;
 
         await expect(lidarrService.isEnabled()).resolves.toBe(true);
-        expect(mockAxiosCreate).toHaveBeenCalled();
+        expect(mockLidarrHttpClient).toHaveBeenCalled();
     });
 
     it("returns disabled when settings are incomplete", async () => {
@@ -791,12 +788,17 @@ describe("lidarr service behavior", () => {
                     },
                 ],
             });
-        client.post.mockRejectedValueOnce({
-            response: {
+        client.post.mockRejectedValueOnce(
+            new LidarrHttpError({
+                status: 400,
+                method: "POST",
+                path: "/api/v1/artist",
+                attempts: 1,
+                isTransient: false,
                 data: [{ errorMessage: "artist already exists" }],
-            },
-            message: "artist already exists",
-        });
+                message: "Request failed with status code 400",
+            }),
+        );
 
         await expect(
             lidarrService.addArtist(
@@ -1296,15 +1298,16 @@ describe("lidarr service behavior", () => {
         await expect(
             lidarrService.grabRelease(releases[0] as any),
         ).resolves.toBe(true);
-        await expect(lidarrService.blocklistAndRemove("dl-1")).resolves.toBe(
-            true,
-        );
+        await expect(
+            lidarrService.blocklistAndRemove("dl-1", true),
+        ).resolves.toBe(true);
         expect(client.delete).toHaveBeenCalledWith("/api/v1/queue/44", {
             params: {
                 removeFromClient: true,
                 blocklist: true,
                 skipRedownload: true,
             },
+            timeoutMs: 10_000,
         });
     });
 
@@ -2094,7 +2097,7 @@ describe("lidarr service behavior", () => {
         client.get.mockResolvedValueOnce({ data: { records: [] } });
 
         await expect(
-            lidarrService.blocklistAndRemove("missing-download"),
+            lidarrService.blocklistAndRemove("missing-download", true),
         ).resolves.toBe(true);
         expect(client.delete).not.toHaveBeenCalled();
     });
@@ -2552,10 +2555,11 @@ describe("lidarr service behavior", () => {
                 "artist-fail",
             ),
         ).resolves.toBeNull();
-        expect(logger.error).toHaveBeenCalledWith(
-            "Lidarr add album error:",
-            "command transport failed",
-        );
+        expect(logger.error).toHaveBeenCalledWith("Lidarr add album error:", {
+            message: "command transport failed",
+            path: undefined,
+            status: undefined,
+        });
 
         waitSpy.mockRestore();
     });
@@ -2567,7 +2571,7 @@ describe("lidarr service behavior", () => {
         svc.client = null;
 
         await expect(
-            lidarrService.blocklistAndRemove("missing-download"),
+            lidarrService.blocklistAndRemove("missing-download", true),
         ).rejects.toThrow("Lidarr not enabled");
     });
 
@@ -2612,15 +2616,16 @@ describe("lidarr service behavior", () => {
         });
         client.delete.mockRejectedValueOnce(new Error("delete failed"));
 
-        await expect(lidarrService.blocklistAndRemove("dl-fail")).resolves.toBe(
-            false,
-        );
+        await expect(
+            lidarrService.blocklistAndRemove("dl-fail", true),
+        ).resolves.toBe(false);
         expect(client.delete).toHaveBeenCalledWith("/api/v1/queue/123", {
             params: {
                 removeFromClient: true,
                 blocklist: true,
                 skipRedownload: true,
             },
+            timeoutMs: 10_000,
         });
     });
 
