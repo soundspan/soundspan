@@ -6,6 +6,7 @@ import {
 } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
+import { normalizeForFuzzyMatch } from "../utils/artistNormalization";
 import { BRAND_USER_AGENT } from "../config/brand";
 
 const LRCLIB_BASE_URL = "https://lrclib.net/api";
@@ -151,28 +152,18 @@ function buildLrclibDurationCandidates(duration?: number): number[] {
     );
 }
 
-function normalizeLrclibMatchValue(value: string): string {
-    return value
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
 function scoreLrclibCandidate(
     candidate: LrclibResponse,
     artistName: string,
     trackName: string,
     albumName?: string,
 ): number {
-    const candidateArtist = normalizeLrclibMatchValue(
-        candidate.artistName || "",
-    );
-    const candidateTrack = normalizeLrclibMatchValue(candidate.trackName || "");
-    const candidateAlbum = normalizeLrclibMatchValue(candidate.albumName || "");
-    const targetArtist = normalizeLrclibMatchValue(artistName);
-    const targetTrack = normalizeLrclibMatchValue(trackName);
-    const targetAlbum = normalizeLrclibMatchValue(albumName || "");
+    const candidateArtist = normalizeForFuzzyMatch(candidate.artistName || "");
+    const candidateTrack = normalizeForFuzzyMatch(candidate.trackName || "");
+    const candidateAlbum = normalizeForFuzzyMatch(candidate.albumName || "");
+    const targetArtist = normalizeForFuzzyMatch(artistName);
+    const targetTrack = normalizeForFuzzyMatch(trackName);
+    const targetAlbum = normalizeForFuzzyMatch(albumName || "");
 
     let score = 0;
 

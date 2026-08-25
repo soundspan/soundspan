@@ -31,6 +31,7 @@ jest.mock("../../utils/systemSettings", () => ({
 }));
 
 jest.mock("../../utils/artistNormalization", () => ({
+    ...jest.requireActual("../../utils/artistNormalization"),
     stripAlbumEdition: jest.fn((title: string) => title),
 }));
 

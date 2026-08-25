@@ -481,6 +481,42 @@ describe("lyrics service", () => {
         expect(searchCalls).toHaveLength(1);
     });
 
+    it("ranks accent and punctuation variants as the same LRCLIB identity", async () => {
+        mockPrisma.track.findUnique.mockResolvedValue({
+            id: "track-canonical-match",
+            filePath: null,
+            displayTitle: "R.E.M.",
+            title: "R.E.M.",
+            duration: null,
+            album: {
+                title: "Renaissance",
+                artist: { name: "Beyoncé" },
+            },
+        });
+        mockAxiosGet.mockResolvedValueOnce({
+            data: [
+                {
+                    trackName: "Wrong Song",
+                    artistName: "Beyoncé",
+                    albumName: "Renaissance",
+                    plainLyrics: "wrong",
+                    syncedLyrics: null,
+                },
+                {
+                    trackName: "REM",
+                    artistName: "Beyonce",
+                    albumName: "Renaissance",
+                    plainLyrics: "canonical",
+                    syncedLyrics: null,
+                },
+            ],
+        } as any);
+
+        await expect(getLyrics("track-canonical-match")).resolves.toEqual(
+            expect.objectContaining({ plainLyrics: "canonical" }),
+        );
+    });
+
     it("sets LRCLIB backoff on 429 and skips further LRCLIB requests", async () => {
         mockPrisma.track.findUnique.mockResolvedValue({
             id: "track-backoff-429",

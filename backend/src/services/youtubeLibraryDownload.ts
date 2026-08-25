@@ -5,6 +5,7 @@ import {
     runLibraryAlbumDownload,
 } from "./libraryDownloadProcessor";
 import { patchDownloadJobMetadata } from "./downloadJobStatus";
+import { normalizeForExactKey } from "../utils/artistNormalization";
 import {
     type YtAlbumDownloadJobStatus,
     watchYouTubeDownloadJobUntilTerminal,
@@ -39,26 +40,23 @@ function asAlbumSearchCandidate(value: unknown): AlbumSearchCandidate | null {
     };
 }
 
-function normalizeMatchText(value: string): string {
-    return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 function selectAlbumBrowseId(
     candidates: AlbumSearchCandidate[],
     artistName: string,
     albumTitle: string,
 ): string | null {
-    const normalizedTitle = normalizeMatchText(albumTitle);
-    const normalizedArtist = normalizeMatchText(artistName);
+    const normalizedTitle = normalizeForExactKey(albumTitle);
+    const normalizedArtist = normalizeForExactKey(artistName);
     const exactMatch = candidates.find(
         (candidate) =>
-            normalizeMatchText(candidate.title) === normalizedTitle &&
+            normalizeForExactKey(candidate.title) === normalizedTitle &&
             candidate.artists.some(
-                (artist) => normalizeMatchText(artist) === normalizedArtist,
+                (artist) => normalizeForExactKey(artist) === normalizedArtist,
             ),
     );
     const titleMatch = candidates.find(
-        (candidate) => normalizeMatchText(candidate.title) === normalizedTitle,
+        (candidate) =>
+            normalizeForExactKey(candidate.title) === normalizedTitle,
     );
     return (
         exactMatch?.browseId ??

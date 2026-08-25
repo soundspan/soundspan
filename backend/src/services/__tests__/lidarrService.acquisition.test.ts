@@ -1593,6 +1593,68 @@ describe("lidarr service behavior", () => {
         ).resolves.toBeNull();
     });
 
+    it("addAlbum matches accent, punctuation, and edition variants", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        mockStripAlbumEdition.mockImplementation((title: string) =>
+            title.replace(/\s*\(Deluxe Edition\)\s*$/i, ""),
+        );
+        const album = {
+            id: 903,
+            title: "Beyonce - Renaissance",
+            foreignAlbumId: "catalog-mbid",
+            artistId: 57,
+        };
+        client.get
+            .mockResolvedValueOnce({
+                data: [
+                    {
+                        id: 57,
+                        artistName: "Beyoncé",
+                        foreignArtistId: "artist-mbid",
+                        monitored: true,
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({ data: [album] })
+            .mockResolvedValueOnce({
+                data: {
+                    ...album,
+                    monitored: false,
+                    anyReleaseOk: false,
+                    releases: [{ id: 1 }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    ...album,
+                    monitored: true,
+                    anyReleaseOk: false,
+                    releases: [{ id: 1 }],
+                },
+            });
+        client.put.mockResolvedValue({ data: { ...album, monitored: true } });
+        client.post.mockResolvedValue({ data: { id: 9102 } });
+        const waitSpy = jest
+            .spyOn(lidarrService as any, "waitForCommand")
+            .mockResolvedValue({
+                status: "completed",
+                message: "Search completed with 1 report",
+            });
+
+        await expect(
+            lidarrService.addAlbum(
+                "requested-mbid",
+                "Beyoncé",
+                "Beyoncé – Renaissance (Deluxe Edition)",
+                "/music",
+                "artist-mbid",
+            ),
+        ).resolves.toEqual(expect.objectContaining({ id: 903 }));
+
+        waitSpy.mockRestore();
+    });
+
     it("adds existing unmonitored artist and enables monitoring before album search", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);

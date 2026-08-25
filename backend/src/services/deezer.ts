@@ -1,6 +1,10 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
+import {
+    normalizeForExactKey,
+    normalizeForFuzzyMatch,
+} from "../utils/artistNormalization";
 import { rateLimiter } from "./rateLimiter";
 
 /**
@@ -76,24 +80,6 @@ class DeezerService {
         return rateLimiter.execute("deezer", () => axios.get(url, config));
     }
 
-    private normalizeArtistIdentity(name: string): string {
-        return name
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-z0-9]/g, "");
-    }
-
-    private normalizeAlbumIdentity(name: string): string {
-        return name
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/['’`]/g, "")
-            .replace(/[^a-z0-9]+/g, " ")
-            .trim();
-    }
-
     private buildAlbumTitleVariants(albumName: string): string[] {
         const variants = new Set<string>();
         const addVariant = (value: string) => {
@@ -147,10 +133,10 @@ class DeezerService {
         normalizedArtistName: string,
         normalizedAlbumVariants: Set<string>,
     ): number {
-        const normalizedCandidateArtist = this.normalizeArtistIdentity(
+        const normalizedCandidateArtist = normalizeForExactKey(
             String(album?.artist?.name || ""),
         );
-        const normalizedCandidateTitle = this.normalizeAlbumIdentity(
+        const normalizedCandidateTitle = normalizeForFuzzyMatch(
             String(album?.title || ""),
         );
 
@@ -250,9 +236,7 @@ class DeezerService {
      * Prevents cross-matching similarly named artists.
      */
     async getArtistImageStrict(artistName: string): Promise<string | null> {
-        const normalizedTarget = this.normalizeArtistIdentity(
-            artistName.trim(),
-        );
+        const normalizedTarget = normalizeForExactKey(artistName);
         if (!normalizedTarget) {
             return null;
         }
@@ -270,7 +254,7 @@ class DeezerService {
             const artists = response.data?.data || [];
             const exactMatch = artists.find(
                 (artist: any) =>
-                    this.normalizeArtistIdentity(artist?.name || "") ===
+                    normalizeForExactKey(artist?.name || "") ===
                     normalizedTarget,
             );
 
@@ -303,11 +287,10 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const normalizedArtistName =
-                this.normalizeArtistIdentity(artistName);
+            const normalizedArtistName = normalizeForExactKey(artistName);
             const normalizedAlbumVariants = new Set(
                 this.buildAlbumTitleVariants(albumName)
-                    .map((variant) => this.normalizeAlbumIdentity(variant))
+                    .map(normalizeForFuzzyMatch)
                     .filter((variant) => variant.length > 0),
             );
 

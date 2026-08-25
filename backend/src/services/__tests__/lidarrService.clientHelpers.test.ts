@@ -641,6 +641,65 @@ describe("lidarr service behavior", () => {
         ).resolves.toBe(true);
     });
 
+    it("matches available albums across accents, punctuation, and conjunctions", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        client.get
+            .mockResolvedValueOnce({
+                data: [
+                    {
+                        id: 55,
+                        artistName: "Beyonce and Jay-Z",
+                        sortName: "Beyonce and Jay-Z",
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                data: [
+                    {
+                        title: "Renaissance – Deluxe",
+                        statistics: { percentOfTracks: 100 },
+                    },
+                ],
+            });
+
+        await expect(
+            lidarrService.isAlbumAvailableByTitle(
+                "Beyoncé & Jay Z",
+                "Renaissance - Deluxe",
+            ),
+        ).resolves.toBe(true);
+    });
+
+    it("matches reconciliation snapshot keys across canonical variants", () => {
+        const snapshot = {
+            queue: new Map(),
+            albumsByMbid: new Map(),
+            albumsByTitle: new Map([
+                [
+                    "beyonceandjayz|renaissancedeluxe",
+                    {
+                        id: 1,
+                        title: "Renaissance – Deluxe",
+                        foreignAlbumId: "album-mbid",
+                        artistName: "Beyonce and Jay-Z",
+                        hasFiles: true,
+                    },
+                ],
+            ]),
+            fetchedAt: new Date(),
+        } as any;
+
+        expect(
+            (lidarrService as any).isAlbumAvailableInSnapshot(
+                snapshot,
+                undefined,
+                "Beyoncé & Jay Z",
+                "Renaissance - Deluxe",
+            ),
+        ).toBe(true);
+    });
+
     it("returns false on Lidarr availability lookup failures and checks snapshot helpers", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -686,7 +745,7 @@ describe("lidarr service behavior", () => {
             ]),
             albumsByTitle: new Map([
                 [
-                    "artist|album deluxe",
+                    "artist|albumdeluxe",
                     {
                         id: 1,
                         title: "Album Deluxe",
@@ -1424,6 +1483,9 @@ describe("lidarr service behavior", () => {
     });
 
     it("addAlbum matches album title using exact normalized comparison", async () => {
+        mockStripAlbumEdition.mockImplementation((title: string) =>
+            title.replace("((Deluxe Edition) ", "").replace(/\)$/, ""),
+        );
         const client = createClientMock();
         primeServiceWithClient(client);
 

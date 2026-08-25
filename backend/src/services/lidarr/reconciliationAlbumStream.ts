@@ -1,6 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 import type { Readable } from "node:stream";
 import type { AxiosInstance } from "axios";
+import { normalizeForExactKey } from "../../utils/artistNormalization";
 
 export const LIDARR_ALBUM_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
 const LIDARR_ALBUM_MAX_ITEMS = 250_000;
@@ -65,7 +66,7 @@ function indexAlbum(target: ReconciliationAlbumMaps, value: unknown): void {
         target.albumsByMbid.set(album.foreignAlbumId, album);
     }
     if (!album.artistName || !album.title) return;
-    const key = `${album.artistName.toLowerCase().trim()}|${album.title.toLowerCase().trim()}`;
+    const key = `${normalizeForExactKey(album.artistName)}|${normalizeForExactKey(album.title)}`;
     target.albumsByTitle.set(key, album);
 }
 

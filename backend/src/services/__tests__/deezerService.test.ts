@@ -171,6 +171,23 @@ describe("deezerService", () => {
         );
     });
 
+    it("strictly matches canonical accent, punctuation, and conjunction variants", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            data: {
+                data: [
+                    {
+                        name: "Beyonce and Jay-Z",
+                        picture_xl: "https://img/canonical.jpg",
+                    },
+                ],
+            },
+        });
+
+        await expect(
+            deezerService.getArtistImageStrict("Beyoncé & Jay Z"),
+        ).resolves.toBe("https://img/canonical.jpg");
+    });
+
     it("returns album cover and preview URL with best match logic and error fallback", async () => {
         mockAxiosGet.mockResolvedValueOnce({
             data: {

@@ -119,6 +119,25 @@ describe("album enrichment fields", () => {
         });
     });
 
+    it("matches release-group titles across accents and conjunction punctuation", async () => {
+        musicBrainzService.getReleaseGroups.mockResolvedValueOnce([
+            {
+                id: RELEASE_GROUP_MBID,
+                title: "Beyonce and Jay-Z",
+                "primary-type": "Album",
+            },
+        ]);
+
+        const result = await resolveAlbumEnrichmentFields({
+            id: "album-canonical",
+            title: "Beyoncé & Jay Z",
+            rgMbid: null,
+            artist: { name: "Artist", mbid: ARTIST_MBID },
+        });
+
+        expect(result.rgMbid).toBe(RELEASE_GROUP_MBID);
+    });
+
     it("extracts the first release date and label for an existing MusicBrainz release group", async () => {
         musicBrainzService.getReleaseGroup.mockResolvedValueOnce({
             "first-release-date": "1994-09-19",

@@ -3,8 +3,11 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { BRAND_SLUG } from "../config/brand";
 import { getSystemSettings } from "../utils/systemSettings";
-import { stripAlbumEdition } from "../utils/artistNormalization";
-import { stripDelimitedSegments } from "../utils/stripDelimitedSegments";
+import {
+    normalizeForExactKey,
+    normalizeForFuzzyMatch,
+    stripAlbumEdition,
+} from "../utils/artistNormalization";
 import { fetchReconciliationAlbumMaps } from "./lidarr/reconciliationAlbumStream";
 
 /**
@@ -93,6 +96,10 @@ interface LidarrAlbum {
         foreignArtistId: string; // MusicBrainz artist ID
         artistName: string;
     };
+}
+
+function normalizeAlbumTitleForMatch(title: string): string {
+    return normalizeForFuzzyMatch(stripAlbumEdition(title));
 }
 
 class LidarrService {
@@ -1030,27 +1037,13 @@ class LidarrService {
                     `   Album MBID not found, trying STRICT name match for: ${albumTitle}`,
                 );
 
-                // Normalize title for matching - remove parenthetical suffixes, edition markers, etc.
-                const normalizeTitle = (title: string) =>
-                    stripDelimitedSegments(
-                        stripDelimitedSegments(title.toLowerCase(), "(", ")"),
-                        "[",
-                        "]",
-                    )
-                        .replace(
-                            /[-–—]\s*(deluxe|remaster|bonus|special|anniversary|expanded|limited|collector).*$/i,
-                            "",
-                        ) // Remove edition suffixes
-                        .replace(/[^\w\s]/g, "") // Remove remaining punctuation
-                        .replace(/\s+/g, " ") // Normalize whitespace
-                        .trim();
-
-                const targetTitle = normalizeTitle(albumTitle);
+                const targetTitle = normalizeAlbumTitleForMatch(albumTitle);
                 logger.debug(`   Normalized target: "${targetTitle}"`);
 
                 // Try exact normalized match first
                 albumData = artistAlbums.find(
-                    (a: LidarrAlbum) => normalizeTitle(a.title) === targetTitle,
+                    (a: LidarrAlbum) =>
+                        normalizeAlbumTitleForMatch(a.title) === targetTitle,
                 );
                 if (albumData) {
                     logger.debug(
@@ -1062,7 +1055,7 @@ class LidarrService {
                 // This handles "Album Name" matching "Album Name (Deluxe Edition)"
                 if (!albumData) {
                     albumData = artistAlbums.find((a: LidarrAlbum) => {
-                        const normalized = normalizeTitle(a.title);
+                        const normalized = normalizeAlbumTitleForMatch(a.title);
                         // Only match if one is a substring of the other AND they share significant content
                         // The shorter one must be at least 60% of the longer one's length
                         const shorter =
@@ -1405,18 +1398,13 @@ class LidarrService {
                                     `   Trying base album title fallback: "${albumTitle}" → "${baseAlbumTitle}"`,
                                 );
 
-                                const normalizeForMatch = (s: string) =>
-                                    s
-                                        .toLowerCase()
-                                        .replace(/[^\w\s]/g, "")
-                                        .trim();
                                 const normalizedBase =
-                                    normalizeForMatch(baseAlbumTitle);
+                                    normalizeForFuzzyMatch(baseAlbumTitle);
 
                                 const baseMatch = artistAlbums.find(
                                     (a: LidarrAlbum) => {
                                         const normalizedAlbumTitle =
-                                            normalizeForMatch(a.title);
+                                            normalizeForFuzzyMatch(a.title);
 
                                         if (
                                             normalizedAlbumTitle ===
@@ -1816,8 +1804,8 @@ class LidarrService {
             return false;
         }
 
-        const normalizedArtist = artistName.toLowerCase().trim();
-        const normalizedAlbum = albumTitle.toLowerCase().trim();
+        const normalizedArtist = normalizeForExactKey(artistName);
+        const normalizedAlbum = normalizeForExactKey(albumTitle);
 
         try {
             // Get all artists from Lidarr
@@ -1827,8 +1815,9 @@ class LidarrService {
             // Find matching artist by name
             const matchingArtist = artists.find(
                 (a: any) =>
-                    a.artistName?.toLowerCase().trim() === normalizedArtist ||
-                    a.sortName?.toLowerCase().trim() === normalizedArtist,
+                    normalizeForExactKey(a.artistName || "") ===
+                        normalizedArtist ||
+                    normalizeForExactKey(a.sortName || "") === normalizedArtist,
             );
 
             if (!matchingArtist) {
@@ -1843,7 +1832,7 @@ class LidarrService {
 
             // Check if any album matches the title and has files
             for (const album of albums) {
-                const albumTitleNorm = album.title?.toLowerCase().trim() || "";
+                const albumTitleNorm = normalizeForExactKey(album.title || "");
                 if (
                     albumTitleNorm === normalizedAlbum ||
                     albumTitleNorm.includes(normalizedAlbum)
@@ -2521,15 +2510,15 @@ class LidarrService {
 
         // Strategy 2: Check by normalized artist|title
         if (artistName && albumTitle) {
-            const key = `${artistName.toLowerCase().trim()}|${albumTitle.toLowerCase().trim()}`;
+            const normalizedArtist = normalizeForExactKey(artistName);
+            const normalizedAlbum = normalizeForExactKey(albumTitle);
+            const key = `${normalizedArtist}|${normalizedAlbum}`;
             if (snapshot.albumsByTitle.has(key)) {
                 return true;
             }
 
             // Strategy 3: Partial title match (handles edition differences)
-            const normalizedArtist = artistName.toLowerCase().trim();
-            const normalizedAlbum = albumTitle.toLowerCase().trim();
-            for (const [titleKey, info] of snapshot.albumsByTitle) {
+            for (const titleKey of snapshot.albumsByTitle.keys()) {
                 const [keyArtist, keyAlbum] = titleKey.split("|");
                 if (
                     keyArtist === normalizedArtist &&

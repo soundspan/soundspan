@@ -57,6 +57,10 @@ function stripDiacritics(str: string): string {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+function removePunctuation(str: string): string {
+    return str.replace(/\p{P}+/gu, "");
+}
+
 /**
  * Check if a string contains any diacritics/accents
  * Used to prefer the accented version when merging duplicates
@@ -113,6 +117,29 @@ export function normalizeArtistName(name: string): string {
 export function normalizeAlbumTitle(title: string): string {
     if (title == null) return "";
     return title.trim().toLowerCase();
+}
+
+/**
+ * Normalize text for fuzzy match comparisons.
+ * Lowercases, strips diacritics and punctuation, expands ampersands to "and",
+ * and collapses Unicode whitespace while preserving word boundaries.
+ */
+export function normalizeForFuzzyMatch(value: string): string {
+    const withCanonicalConjunctions = stripDiacritics(
+        value.toLowerCase(),
+    ).replace(/\s*&\s*/g, " and ");
+    return removePunctuation(withCanonicalConjunctions)
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/**
+ * Normalize text as an exact comparison key.
+ * Applies fuzzy-match normalization, then deletes every remaining whitespace
+ * separator so differences in spacing and punctuation cannot split the key.
+ */
+export function normalizeForExactKey(value: string): string {
+    return normalizeForFuzzyMatch(value).replace(/\s+/g, "");
 }
 
 /**

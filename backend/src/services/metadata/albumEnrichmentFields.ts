@@ -1,5 +1,6 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { normalizeForExactKey } from "../../utils/artistNormalization";
 import { isRealArtistMbid, rgMbidKind } from "../../utils/musicIds";
 import { downloadAndStoreImage, isNativePath } from "../imageStorage";
 import { lastFmService } from "../lastfm";
@@ -70,17 +71,13 @@ function nonEmptyString(value: unknown): string | undefined {
     return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function normalizedTitle(value: string): string {
-    return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 function matchingReleaseGroup(results: unknown, title: string): unknown {
     if (!Array.isArray(results)) return undefined;
-    const target = normalizedTitle(title);
+    const target = normalizeForExactKey(title);
     return results.slice(0, MAX_RELEASE_GROUPS).find((candidate) => {
         const candidateTitle = nonEmptyString(asRecord(candidate)?.title);
         return candidateTitle
-            ? normalizedTitle(candidateTitle) === target
+            ? normalizeForExactKey(candidateTitle) === target
             : false;
     });
 }

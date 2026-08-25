@@ -220,6 +220,7 @@ jest.mock("../metadata/albumCoverResolver", () => ({
 }));
 
 jest.mock("../../utils/artistNormalization", () => ({
+    ...jest.requireActual("../../utils/artistNormalization"),
     normalizeArtistName: mockNormalizeArtistName,
     areArtistNamesSimilar: mockAreArtistNamesSimilar,
     canonicalizeVariousArtists: mockCanonicalizeVariousArtists,

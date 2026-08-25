@@ -7,6 +7,8 @@ import {
     getPreferredArtistName,
     normalizeArtistName,
     normalizeAlbumTitle,
+    normalizeForExactKey,
+    normalizeForFuzzyMatch,
     stripAlbumEdition,
     areArtistNamesSimilar,
     findBestArtistMatch,
@@ -55,6 +57,55 @@ describe("artistNormalization utilities", () => {
             "a love supreme",
         );
         expect(normalizeAlbumTitle(null as any)).toBe("");
+    });
+
+    describe("canonical match normalization", () => {
+        it.each([
+            ["Beyoncé", "beyonce"],
+            ["Motörhead", "motorhead"],
+            ["Sigur Rós", "sigur ros"],
+            ["AC/DC", "acdc"],
+            ["Panic! at the Disco", "panic at the disco"],
+            ["R.E.M.", "rem"],
+            ["Of Mice & Men", "of mice and men"],
+            ["Of Mice and Men", "of mice and men"],
+            ["Beyoncé – Renaissance", "beyonce renaissance"],
+            ["Beyoncé — Renaissance", "beyonce renaissance"],
+            ["Beyoncé - Renaissance", "beyonce renaissance"],
+            ["\u2002Sigur\u00a0\u2009Rós\n", "sigur ros"],
+            ["", ""],
+            ["  — !?  ", ""],
+        ])("normalizes %p for fuzzy matching", (input, expected) => {
+            expect(normalizeForFuzzyMatch(input)).toBe(expected);
+        });
+
+        it.each([
+            ["Beyoncé", "beyonce"],
+            ["Motörhead", "motorhead"],
+            ["Sigur Rós", "sigurros"],
+            ["AC/DC", "acdc"],
+            ["Panic! at the Disco", "panicatthedisco"],
+            ["R.E.M.", "rem"],
+            ["Of Mice & Men", "ofmiceandmen"],
+            ["Of Mice and Men", "ofmiceandmen"],
+            ["Beyoncé – Renaissance", "beyoncerenaissance"],
+            ["Beyoncé-Renaissance", "beyoncerenaissance"],
+            ["\u2002Sigur\u00a0\u2009Rós\n", "sigurros"],
+            ["", ""],
+            ["  — !?  ", ""],
+        ])("normalizes %p as an exact key", (input, expected) => {
+            expect(normalizeForExactKey(input)).toBe(expected);
+        });
+
+        it("composes edition stripping with either match normalizer", () => {
+            const title = "Beyoncé – Renaissance (Deluxe Edition)";
+            const baseTitle = stripAlbumEdition(title);
+
+            expect(normalizeForFuzzyMatch(baseTitle)).toBe(
+                "beyonce renaissance",
+            );
+            expect(normalizeForExactKey(baseTitle)).toBe("beyoncerenaissance");
+        });
     });
 
     it("strips album edition markers and guards oversized input", () => {

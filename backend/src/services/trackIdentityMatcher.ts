@@ -1,3 +1,5 @@
+import { normalizeForExactKey } from "../utils/artistNormalization";
+
 /** Identity fields used to match a disappeared track to a newly scanned row. */
 export interface TrackIdentity {
     id: string;
@@ -52,15 +54,6 @@ interface TierDefinition {
 const ALBUM_DURATION_TOLERANCE_SECONDS = 10;
 const FILE_DURATION_TOLERANCE_SECONDS = 2;
 
-function normalizeTitle(title: string): string {
-    return title
-        .trim()
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ");
-}
-
 function nonEmptyKey(value: string | null): string | null {
     return value !== null && value.length > 0 ? value : null;
 }
@@ -108,16 +101,23 @@ function validInteger(value: number): boolean {
     return Number.isSafeInteger(value) && value >= 0;
 }
 
+/** Rows can surface null/empty titles at runtime; those never form a key. */
+function normalizedTitleKey(title: string | null | undefined): string | null {
+    if (typeof title !== "string" || title.length === 0) return null;
+    const normalized = normalizeForExactKey(title);
+    return normalized.length > 0 ? normalized : null;
+}
+
 function albumPositionTitleKey(track: TrackIdentity): string | null {
     const rgMbid = nonEmptyKey(track.album.rgMbid);
-    const title = normalizeTitle(track.title);
+    const title = normalizedTitleKey(track.title);
     if (!rgMbid || !title || !validInteger(track.discNo)) return null;
     if (!validInteger(track.trackNo)) return null;
     return JSON.stringify([rgMbid, track.discNo, track.trackNo, title]);
 }
 
 function fileSizeTitleKey(track: TrackIdentity): string | null {
-    const title = normalizeTitle(track.title);
+    const title = normalizedTitleKey(track.title);
     if (!title || !validInteger(track.fileSize)) return null;
     return JSON.stringify([track.fileSize, title]);
 }

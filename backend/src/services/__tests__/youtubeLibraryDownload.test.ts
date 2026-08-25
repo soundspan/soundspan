@@ -125,6 +125,28 @@ describe("youtubeLibraryDownload", () => {
         expect(mockSearch).toHaveBeenCalledWith("Artist Album");
     });
 
+    it("matches accent, punctuation, conjunction, and edition variants", async () => {
+        mockSearch.mockResolvedValueOnce([
+            {
+                browseId: "WRONG-ARTIST",
+                title: "Renaissance (Deluxe Edition)",
+                artists: ["Different Artist"],
+            },
+            {
+                browseId: "CANONICAL",
+                title: "Renaissance (Deluxe Edition)",
+                artists: ["Beyonce and Jay-Z"],
+            },
+        ]);
+
+        await expect(
+            findAlbumBrowseId(
+                "Beyoncé & Jay Z",
+                "Renaissance (Deluxe Edition)",
+            ),
+        ).resolves.toBe("CANONICAL");
+    });
+
     it("falls back to an exact normalized title match", async () => {
         mockSearch.mockResolvedValueOnce([
             {

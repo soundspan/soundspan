@@ -116,6 +116,23 @@ describe("matchTrackIdentities", () => {
         expect(matches).toHaveLength(4);
     });
 
+    it("matches title identity across accents and punctuation", () => {
+        const missing = track("missing-canonical", {
+            fileSize: 4_200,
+            title: "Beyoncé – R.E.M.",
+            duration: 200,
+        });
+        const candidate = track("candidate-canonical", {
+            fileSize: 4_200,
+            title: "Beyonce REM",
+            duration: 201,
+        });
+
+        expect(matchTrackIdentities([missing], [candidate])).toEqual([
+            { missing, candidate, tier: "fileSizeTitleDuration" },
+        ]);
+    });
+
     it("lets a lower tier disambiguate identical audio hashes", () => {
         const missingOne = track("missing-1", {
             audioHash: "sha256:duplicate",

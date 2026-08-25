@@ -46,7 +46,32 @@ describe("Lidarr reconciliation album stream", () => {
                 ],
             ]),
         );
-        expect(albumsByTitle.has("artist|album one")).toBe(true);
+        expect(albumsByTitle.has("artist|albumone")).toBe(true);
+    });
+
+    it("indexes accent, punctuation, and conjunction variants by canonical key", async () => {
+        const get = jest.fn(async () => ({
+            data: [
+                {
+                    id: 4,
+                    title: "Renaissance – Deluxe",
+                    foreignAlbumId: "rg-4",
+                    artist: { artistName: "Beyoncé & Jay Z" },
+                    statistics: { percentOfTracks: 100 },
+                },
+            ],
+        }));
+        const albumsByTitle = new Map();
+
+        await fetchReconciliationAlbumMaps(
+            { get } as unknown as AxiosInstance,
+            { albumsByMbid: new Map(), albumsByTitle },
+            new AbortController().signal,
+        );
+
+        expect(albumsByTitle.has("beyonceandjayz|renaissancedeluxe")).toBe(
+            true,
+        );
     });
 
     it("supports buffered arrays returned by existing Axios test doubles", async () => {
