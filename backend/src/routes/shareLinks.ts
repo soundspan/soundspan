@@ -12,7 +12,10 @@ import { fetchExternalImage } from "../services/imageProxy";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 import {
     LOCAL_TRACK_WHERE,

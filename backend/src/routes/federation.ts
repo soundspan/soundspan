@@ -30,7 +30,10 @@ import { federationCapabilitiesSchema } from "../services/federationCapabilities
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { handleGetCoverArt } from "./library/coverArt";
-import { sendRouteError, sendValidationError } from "./routeErrorResponse";
+import {
+    sendRouteError,
+    sendValidationError,
+} from "../utils/routeErrorResponse";
 import { handleAudiobookCover } from "./audiobooks";
 import { withFederationStreamControls } from "../services/federationStreamControls";
 import { getFederationPresenceExport } from "../services/federationPresence";

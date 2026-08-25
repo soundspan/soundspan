@@ -1,4 +1,4 @@
-import type { GroupState } from "./listenTogetherManager";
+import type { GroupState } from "./listenTogetherTypes";
 
 /** Clear one ready-gate timer and its published deadline. */
 export function clearReadyGateTimer(group: GroupState): void {

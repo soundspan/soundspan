@@ -30,12 +30,14 @@ import {
     groupManager,
     GroupError,
     MAX_QUEUE_SIZE,
-    type ManagerCallbacks,
-    type GroupSnapshot,
-    type PlaybackDelta,
-    type QueueDelta,
-    type StatePublicationOptions,
 } from "./listenTogetherManager";
+import type {
+    GroupSnapshot,
+    ManagerCallbacks,
+    PlaybackDelta,
+    QueueDelta,
+    StatePublicationOptions,
+} from "./listenTogetherTypes";
 import {
     joinGroupByIdAdmitted,
     leaveGroup,

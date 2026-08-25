@@ -23,7 +23,7 @@ import {
     type UserDeletionResult,
 } from "../../services/userDeletion";
 import { acquireRoleGuardLock } from "../../utils/advisoryLocks";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 import { hasErrorCode, sendLoginSuccess } from "./shared";
 
 const inviteCodeSchema = z.object({

@@ -14,7 +14,7 @@ import {
 } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 const router = Router();
 const searchLog = logger.child("SoulseekUiSearch");

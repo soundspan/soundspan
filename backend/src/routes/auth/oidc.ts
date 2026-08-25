@@ -33,7 +33,7 @@ import {
 import { putOnce, takeOnce } from "../../utils/redisKv";
 import { timingSafeCompare } from "../../utils/timingSafe";
 import { runDummyBcrypt } from "../../utils/dummyCredential";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 import {
     hasErrorCode,
     oidcLog,

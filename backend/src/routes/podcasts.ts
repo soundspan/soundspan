@@ -17,7 +17,7 @@ import {
 import axios from "axios";
 import fs from "fs";
 import pLimit from "p-limit";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 import { config } from "../config";
 import { asyncHandler } from "../middleware/asyncHandler";

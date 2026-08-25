@@ -9,7 +9,7 @@ import {
     RadioPlaylistServiceError,
     regenerateRadioPlaylist,
 } from "../../services/radioPlaylistService";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 
 const valueSchema = z.string().trim().min(1).max(200);
 const filterSchema = z.discriminatedUnion("type", [

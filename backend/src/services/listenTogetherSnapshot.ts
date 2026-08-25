@@ -2,19 +2,12 @@ import type {
     GroupMember,
     GroupSnapshot,
     GroupState,
-} from "./listenTogetherManager";
+    PersistedGroupMember,
+} from "./listenTogetherTypes";
 import {
     computePosition,
     currentTrackId,
 } from "./listenTogetherPlaybackPosition";
-
-/** Authoritative active membership loaded from the database. */
-export interface PersistedGroupMember {
-    userId: string;
-    username: string;
-    isHost: boolean;
-    joinedAt: Date;
-}
 
 /** Bounds snapshot-age compensation so clock skew cannot add more than 2 seconds. */
 const SNAPSHOT_POSITION_COMPENSATION_MAX_MS = 2_000;

@@ -1,8 +1,8 @@
-import {
-    groupManager as runtimeGroupManager,
-    type ManagerCallbacks as RuntimeManagerCallbacks,
-    type SyncQueueItem as RuntimeSyncQueueItem,
-} from "../listenTogetherManager";
+import { groupManager as runtimeGroupManager } from "../listenTogetherManager";
+import type {
+    ManagerCallbacks as RuntimeManagerCallbacks,
+    SyncQueueItem as RuntimeSyncQueueItem,
+} from "../listenTogetherTypes";
 
 describe("listenTogether service", () => {
     const originalEnv = process.env;

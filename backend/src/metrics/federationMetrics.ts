@@ -3,7 +3,7 @@ import type {
     FederationCatalogCounts,
     FederationLeaseMetricSnapshot,
     FederationWorkerMetricSnapshot,
-} from "../services/federationPeerHealth";
+} from "../services/federationMetricsTypes";
 import { logger } from "../utils/logger";
 
 const DEFAULT_MAX_PEER_LABELS = 100;

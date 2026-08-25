@@ -9,11 +9,20 @@
  */
 
 import type {} from "@soundspan/media-metadata-contract";
-import type { SyncQueueItem } from "./listenTogetherQueueItem";
 import type {
+    GroupMember,
+    GroupPlayback,
+    GroupSnapshot,
+    GroupState,
     ManagerCallbacks,
+    PersistedGroupMember,
+    PlaybackDelta,
+    QueueAction,
+    QueueDelta,
+    ShutdownPauseResult,
     StatePublicationOptions,
-} from "./listenTogetherCallbacks";
+    SyncQueueItem,
+} from "./listenTogetherTypes";
 import { logger } from "../utils/logger";
 import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
 import { GroupError } from "./listenTogetherGroupError";
@@ -44,83 +53,11 @@ import {
     createGroupSnapshot,
     reconcileHostFlags,
     selectHostSuccessor,
-    type PersistedGroupMember,
 } from "./listenTogetherSnapshot";
 
 const log = logger.child("ListenTogetherManager");
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type { SyncQueueItem } from "./listenTogetherQueueItem";
-export type {
-    ManagerCallbacks,
-    StatePublicationOptions,
-} from "./listenTogetherCallbacks";
 export { GroupError } from "./listenTogetherGroupError";
-
-export interface GroupMember {
-    userId: string;
-    username: string;
-    isHost: boolean;
-    joinedAt: Date;
-    socketIds: Set<string>;
-    isReady: boolean;
-    unavailableIndices?: Set<number>;
-    lastSeen: number; // Date.now()
-}
-
-export type { PersistedGroupMember } from "./listenTogetherSnapshot";
-
-export interface GroupPlayback {
-    queue: SyncQueueItem[];
-    currentIndex: number;
-    isPlaying: boolean;
-    /** Track position (ms) at the moment captured by `lastPositionUpdate`. */
-    positionMs: number;
-    /** Date.now() when `positionMs` was last written. */
-    lastPositionUpdate: number;
-    /** Producer clock from the most recently applied or published snapshot. */
-    lastAppliedSnapshotServerTime: number;
-    stateVersion: number;
-}
-
-export type GroupSyncState = "idle" | "waiting" | "playing" | "paused";
-
-export interface GroupState {
-    id: string;
-    name: string;
-    joinCode: string;
-    groupType: "host-follower" | "collaborative";
-    visibility: "public" | "private";
-    hostUserId: string;
-    /** Highest membership authority applied to this in-memory group. */
-    membershipVersion: number;
-    syncState: GroupSyncState;
-    playback: GroupPlayback;
-    members: Map<string, GroupMember>;
-    /** User-IDs that have reported "ready" during a waiting gate. */
-    readyUserIds: Set<string>;
-    /** Timer handle for the ready-gate timeout. */
-    readyTimeout: ReturnType<typeof setTimeout> | null;
-    /** Absolute ready-gate deadline (`Date.now()` ms), if waiting. */
-    readyDeadlineMs: number | null;
-    /** Timer handle for the current track's boundary watchdog. */
-    boundaryTimeout: ReturnType<typeof setTimeout> | null;
-    lastActivity: number; // Date.now()
-    createdAt: Date;
-    /** True when in-memory state has diverged from DB and needs persisting. */
-    dirty: boolean;
-    /** True when playback came from a live or shared authoritative snapshot. */
-    playbackAuthoritative: boolean;
-    /** False after fencing invalidates this object for periodic persistence. */
-    persistenceValid: boolean;
-    /** DB hydration converted a persisted playing row into a safe local pause. */
-    normalizedFromPlaying: boolean;
-    /** Highest state version whose complete publication pipeline succeeded. */
-    lastPublishedStateVersion: number;
-}
 
 interface HydratedGroupOptions {
     name: string;
@@ -151,70 +88,6 @@ interface CreatedGroupOptions {
     isPlaying?: boolean;
     createdAt: Date;
 }
-
-/** Serialisable snapshot broadcast to clients. */
-export interface GroupSnapshot {
-    id: string;
-    name: string;
-    joinCode: string;
-    groupType: "host-follower" | "collaborative";
-    visibility: "public" | "private";
-    isActive: boolean;
-    hostUserId: string;
-    /** Optional for snapshots produced before membership fencing was deployed. */
-    membershipVersion?: number;
-    syncState: GroupSyncState;
-    readyDeadlineMs?: number | null;
-    /** Ready votes are optional when reading snapshots written by older versions. */
-    readyUserIds?: string[];
-    playback: {
-        queue: SyncQueueItem[];
-        currentIndex: number;
-        isPlaying: boolean;
-        positionMs: number;
-        serverTime: number;
-        stateVersion: number;
-        trackId: string | null;
-    };
-    members: Array<{
-        userId: string;
-        username: string;
-        isHost: boolean;
-        joinedAt: string;
-        isConnected: boolean;
-    }>;
-}
-
-/** Lightweight delta for play/pause/seek (avoids re-sending full queue). */
-export interface PlaybackDelta {
-    isPlaying: boolean;
-    positionMs: number;
-    serverTime: number;
-    stateVersion: number;
-    currentIndex: number;
-    trackId: string | null;
-}
-
-export interface QueueDelta {
-    queue: SyncQueueItem[];
-    currentIndex: number;
-    trackId: string | null;
-    stateVersion: number;
-}
-
-/** Captured result of applying the normal pause transition for shutdown. */
-export interface ShutdownPauseResult {
-    group: GroupState;
-    snapshot: GroupSnapshot;
-    paused: boolean;
-}
-
-export type QueueAction =
-    | { action: "add"; items: SyncQueueItem[] }
-    | { action: "insert-next"; items: SyncQueueItem[] }
-    | { action: "remove"; index: number }
-    | { action: "reorder"; fromIndex: number; toIndex: number }
-    | { action: "clear" };
 
 // ---------------------------------------------------------------------------
 // Helpers

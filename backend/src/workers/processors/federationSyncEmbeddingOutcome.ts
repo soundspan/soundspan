@@ -1,9 +1,9 @@
 import type { ActiveEmbeddingSpace } from "../../services/embeddingSpaces";
 import {
     decideScopedEmbeddingPage,
-    type FederationEmbeddingPageOutcome,
     type ParsedFederationEmbeddingSpaceIdentity,
 } from "../../services/federationEmbeddingSpace";
+import type { FederationEmbeddingPageOutcome } from "../../services/federationMetricsTypes";
 
 /** Per-peer embedding result persisted after one completed sync. */
 export type FederationEmbeddingOutcome = "active" | "skipped_mismatch" | null;

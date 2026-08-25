@@ -2,10 +2,12 @@ import {
     GroupError,
     groupManager,
     MAX_QUEUE_SIZE,
-    type GroupSnapshot,
-    type ManagerCallbacks,
-    type SyncQueueItem,
 } from "../listenTogetherManager";
+import type {
+    GroupSnapshot,
+    ManagerCallbacks,
+    SyncQueueItem,
+} from "../listenTogetherTypes";
 
 describe("listenTogetherManager runtime behavior", () => {
     const track = (id: string, duration: number = 180): SyncQueueItem => ({

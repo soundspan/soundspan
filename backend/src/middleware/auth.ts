@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { findApiKeyRecord, isApiKeyExpired } from "../utils/apiKeyHash";
 import jwt from "jsonwebtoken";
-import { sendRouteError } from "../routes/routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 // JWT_SECRET is required - SESSION_SECRET (a required, stable deploy secret;
 // docker-entrypoint.sh fails fast when it is missing) is the fallback.

@@ -1,5 +1,5 @@
 import type { Response } from "express";
-import type { Logger } from "../utils/logger";
+import type { Logger } from "./logger";
 
 export type RouteErrorExtras = Record<string, unknown>;
 

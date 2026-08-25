@@ -1,4 +1,4 @@
-import type { GroupSnapshot, SyncQueueItem } from "./listenTogetherManager";
+import type { GroupSnapshot, SyncQueueItem } from "./listenTogetherTypes";
 
 const MAX_QUEUE_IDENTITY_ITEMS = 500;
 

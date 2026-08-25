@@ -29,7 +29,7 @@ import {
     invalidateUserProviderProfileCache,
     resolveTrackForUser,
 } from "../listenTogetherResolution";
-import type { SyncQueueItem } from "../listenTogetherManager";
+import type { SyncQueueItem } from "../listenTogetherTypes";
 
 function queueItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueItem {
     return {

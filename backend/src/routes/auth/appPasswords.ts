@@ -13,7 +13,7 @@ import {
     acquireUserScopedLock,
     USER_LOCK_NAMESPACES,
 } from "../../utils/advisoryLocks";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 import { credentialLog, resourceIdParamsSchema } from "./shared";
 
 const appPasswordSchema = z

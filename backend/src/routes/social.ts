@@ -14,7 +14,7 @@ import { readFederationPeerPresenceSnapshots } from "../services/federationPrese
 import type { FederationPeerPresenceSnapshot } from "../utils/federationPresenceSchemas";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/asyncHandler";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 import { config } from "../config";
 import {
     browseFederationPeerPlaylists,

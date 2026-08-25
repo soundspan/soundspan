@@ -1,6 +1,6 @@
 import { logger } from "../utils/logger";
 import { createIORedisClient } from "../utils/ioredis";
-import type { GroupSnapshot } from "./listenTogetherManager";
+import type { GroupSnapshot } from "./listenTogetherTypes";
 import type { SyncQueueItem } from "./listenTogetherQueueItem";
 import { config } from "../config";
 import { withListenTogetherDeadline } from "./listenTogetherDeadline";

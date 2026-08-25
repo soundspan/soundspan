@@ -1,8 +1,8 @@
-import {
-    groupManager,
-    type ManagerCallbacks,
-    type SyncQueueItem,
-} from "../services/listenTogetherManager";
+import { groupManager } from "../services/listenTogetherManager";
+import type {
+    ManagerCallbacks,
+    SyncQueueItem,
+} from "../services/listenTogetherTypes";
 
 const track: SyncQueueItem = {
     id: "track-1",

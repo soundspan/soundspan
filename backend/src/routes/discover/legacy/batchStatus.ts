@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { prisma } from "../../../utils/db";
 import { logger } from "../../../utils/logger";
-import { sendInternalRouteError } from "../../routeErrorResponse";
+import { sendInternalRouteError } from "../../../utils/routeErrorResponse";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 

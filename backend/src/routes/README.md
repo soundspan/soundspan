@@ -28,7 +28,7 @@ How to write a handler:
    rejected promise is forwarded to the shared `errorHandler`
    (`../middleware/errorHandler`) instead of hanging the request.
 2. **Deliberate client errors** (400/401/403/404/409/…) — call
-   `sendRouteError(res, status, message)` from `./routeErrorResponse`.
+   `sendRouteError(res, status, message)` from `../utils/routeErrorResponse`.
 3. **Unexpected/internal failures** — either let the error propagate to the
    shared `errorHandler` (which logs once and returns a generic 500 in
    production, hiding stack/SQL/secret detail), or, when a safe static label is
@@ -68,14 +68,18 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | Route File                                 | Mounted Prefixes                                                                                      |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | `backend/src/routes/admin.ts`              | `/api/admin`                                                                                          |
+| `backend/src/routes/adminLibraryHealthPurge.ts` | Library-health purge handler; not a router                                                       |
 | `backend/src/routes/analysis.ts`           | `/api/analysis`                                                                                       |
 | `backend/src/routes/apiKeys.ts`            | `/api/api-keys`                                                                                       |
+| `backend/src/routes/artistRouteName.ts`    | Shared artist route-name helper; not a router                                                         |
 | `backend/src/routes/artists.ts`            | `/api/artists`                                                                                        |
 | `backend/src/routes/audiobooks.ts`         | `/api/audiobooks`                                                                                     |
 | `backend/src/routes/auth.ts`               | `/api/auth` (compatibility re-export of `auth/index.ts`)                                              |
 | `backend/src/routes/browse.ts`             | `/api/browse`                                                                                         |
+| `backend/src/routes/browseYtMusicErrors.ts` | Shared YouTube Music browse error mapping; not a router                                              |
 | `backend/src/routes/deviceLink.ts`         | `/api/device-link`                                                                                    |
 | `backend/src/routes/discover/index.ts`     | `/api/discover`                                                                                       |
+| `backend/src/routes/discoverTrackPayload.ts` | Shared discovery track response mapping; not a router                                               |
 | `backend/src/routes/downloads.ts`          | `/api/downloads`                                                                                      |
 | `backend/src/routes/enrichment.ts`         | `/api/enrichment`                                                                                     |
 | `backend/src/routes/federation.ts`         | `/api/federation/v1`                                                                                  |
@@ -101,7 +105,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/releases.ts`           | `/api/releases`                                                                                       |
 | `backend/src/routes/requests.ts`           | `/api/requests` (feature-gated album request queue and administrator review)                          |
 | `backend/src/routes/audiobookRouteResponses.ts` | Audiobook response serializers; not a router                                                          |
-| `backend/src/routes/routeErrorResponse.ts` | Shared response helper; not a router                                                                  |
+| `backend/src/routes/routeParamName.ts`     | Shared route-parameter name helper; not a router                                                      |
 | `backend/src/routes/search.ts`             | `/api/search`                                                                                         |
 | `backend/src/routes/settings.ts`           | `/api/settings`                                                                                       |
 | `backend/src/routes/shareLinks.ts`         | `/api/share-links`                                                                                    |
@@ -111,6 +115,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/subsonic.ts`           | `/rest` (compatibility re-export of `subsonic/index.ts`)                                              |
 | `backend/src/routes/system.ts`             | `/api/system`                                                                                         |
 | `backend/src/routes/systemSettings.ts`     | `/api/system-settings`                                                                                |
+| `backend/src/routes/systemSettingsFederationSchema.ts` | Federation settings schema helper; not a router                                        |
 | `backend/src/routes/tidalStreaming.ts`     | `/api/tidal-streaming`                                                                                |
 | `backend/src/routes/trackMappings.ts`      | `/api/track-mappings`                                                                                 |
 | `backend/src/routes/vibe.ts`               | `/api/vibe`                                                                                           |
@@ -123,21 +128,54 @@ route file is intentionally incremental (per touched file), not a big-bang.
 
 `backend/src/routes/library.ts` is a compatibility re-export of
 `backend/src/routes/library/index.ts`. The mounted `/api/library` router is
-composed from these eleven domain modules:
+composed from these order-dependent domain and helper modules:
 
-| Module                        | Responsibility                                                |
-| ----------------------------- | ------------------------------------------------------------- |
-| `library/albums.ts`           | Album browse, preference, and deletion routes                 |
-| `library/artistCounts.ts`     | Artist-count status and backfill routes                       |
-| `library/artists.ts`          | Artist list, detail, and deletion routes                      |
-| `library/coverArt.ts`         | Library cover-art delivery routes                             |
-| `library/imageBackfill.ts`    | Image-backfill administration routes                          |
-| `library/maintenance.ts`      | Scan and library-maintenance routes                           |
-| `library/metadataBackfill.ts` | Metadata-backfill administration routes                       |
-| `library/radio.ts`            | Library radio generation routes                               |
-| `library/radioPlaylists.ts`   | Persisted generated-radio playlist mutation routes            |
-| `library/remoteTracks.ts`     | Remote-track preference routes                                |
-| `library/tracks.ts`           | Track browse, detail, preference, stream, and deletion routes |
+| Module                                                     | Responsibility                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------- |
+| `backend/src/routes/library/albums.ts`                     | Album browse, preference, and deletion routes                 |
+| `backend/src/routes/library/artistCounts.ts`               | Artist-count status and backfill routes                       |
+| `backend/src/routes/library/artistPageMatching.ts`         | Artist-page matching helper; not a router                     |
+| `backend/src/routes/library/artists.ts`                    | Artist list, detail, and deletion routes                      |
+| `backend/src/routes/library/coverArt.ts`                   | Library cover-art delivery routes                             |
+| `backend/src/routes/library/federationStreamPeer.ts`       | Federated stream-peer resolution helper                       |
+| `backend/src/routes/library/imageBackfill.ts`              | Image-backfill administration routes                          |
+| `backend/src/routes/library/libraryNativeTrackStream.ts`   | Native-track stream handler                                   |
+| `backend/src/routes/library/libraryPeerStream.ts`          | Peer-track stream handler                                     |
+| `backend/src/routes/library/maintenance.ts`                | Scan and library-maintenance routes                           |
+| `backend/src/routes/library/metadataBackfill.ts`           | Metadata-backfill administration routes                       |
+| `backend/src/routes/library/radio.ts`                      | Library radio generation routes                               |
+| `backend/src/routes/library/radioPlaylists.ts`             | Persisted generated-radio playlist mutation routes            |
+| `backend/src/routes/library/remoteTracks.ts`               | Remote-track preference routes                                |
+| `backend/src/routes/library/trackAudioInfo.ts`             | Track audio-information helper                                |
+| `backend/src/routes/library/tracks.ts`                     | Track browse, detail, preference, stream, and deletion routes |
+
+Sub-router mount order is part of the route contract. Register specific,
+guarded, and stream routers before overlapping parameterized routers, and add
+new mounts at the deliberate position in `library/index.ts`.
+
+### Discover Submodules
+
+`backend/src/routes/discover/index.ts` selects modern or legacy handlers while
+preserving one mounted `/api/discover` route stack:
+
+| Module                                                        | Responsibility                                  |
+| ------------------------------------------------------------- | ----------------------------------------------- |
+| `backend/src/routes/discover/albumActions.ts`                 | Modern like and unlike handlers                 |
+| `backend/src/routes/discover/batchStatus.ts`                  | Modern batch-status handler                     |
+| `backend/src/routes/discover/clear.ts`                        | Modern playlist-clear handler                   |
+| `backend/src/routes/discover/configuration.ts`                | Discovery configuration handlers                |
+| `backend/src/routes/discover/current.ts`                      | Modern current-playlist handler                  |
+| `backend/src/routes/discover/exclusions.ts`                   | Discovery exclusion handlers                    |
+| `backend/src/routes/discover/generation.ts`                   | Modern generation handlers                      |
+| `backend/src/routes/discover/maintenance.ts`                  | Modern maintenance handlers                     |
+| `backend/src/routes/discover/popularArtists.ts`               | Popular-artist handler                           |
+| `backend/src/routes/discover/shared.ts`                       | Shared discovery request helpers                 |
+| `backend/src/routes/discover/legacy/albumActions.ts`          | Legacy like and unlike handlers                  |
+| `backend/src/routes/discover/legacy/batchStatus.ts`           | Legacy batch-status handler                      |
+| `backend/src/routes/discover/legacy/clear.ts`                 | Legacy playlist-clear handler                    |
+| `backend/src/routes/discover/legacy/current.ts`               | Legacy current-playlist handler                  |
+| `backend/src/routes/discover/legacy/generation.ts`            | Legacy generation handler                        |
+| `backend/src/routes/discover/legacy/maintenance.ts`           | Legacy maintenance handlers                      |
 
 ### Auth Submodules
 
@@ -145,15 +183,15 @@ composed from these eleven domain modules:
 `backend/src/routes/auth/index.ts`. The mounted `/api/auth` router preserves a
 single top-level route stack composed from these concern modules:
 
-| Module                     | Responsibility                                                    |
-| -------------------------- | ----------------------------------------------------------------- |
-| `auth/oidc.ts`             | Public auth config and OIDC login, callback, linking, and exchange |
-| `auth/localCredentials.ts` | Local login, logout, token refresh, and current-user routes         |
-| `auth/accountSecurity.ts`  | Password, email, 2FA, and Subsonic credential routes               |
-| `auth/appPasswords.ts`     | App-password listing, creation, and revocation                     |
-| `auth/linkedIdentities.ts` | External-identity listing and unlinking                            |
-| `auth/adminUserInvites.ts` | User administration, invite administration, and registration      |
-| `auth/shared.ts`           | Shared auth schemas and credential-verification helpers            |
+| Module                                                   | Responsibility                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| `backend/src/routes/auth/oidc.ts`                        | Public auth config and OIDC login, callback, linking, and exchange |
+| `backend/src/routes/auth/localCredentials.ts`            | Local login, logout, token refresh, and current-user routes         |
+| `backend/src/routes/auth/accountSecurity.ts`             | Password, email, 2FA, and Subsonic credential routes               |
+| `backend/src/routes/auth/appPasswords.ts`                | App-password listing, creation, and revocation                     |
+| `backend/src/routes/auth/linkedIdentities.ts`            | External-identity listing and unlinking                            |
+| `backend/src/routes/auth/adminUserInvites.ts`            | User administration, invite administration, and registration      |
+| `backend/src/routes/auth/shared.ts`                      | Shared auth schemas and credential-verification helpers            |
 
 ### Subsonic Submodules
 
@@ -161,19 +199,20 @@ single top-level route stack composed from these concern modules:
 `backend/src/routes/subsonic/index.ts`. The mounted `/rest` router preserves a
 single middleware and endpoint stack composed from these domain modules:
 
-| Module                           | Responsibility                                                        |
-| -------------------------------- | --------------------------------------------------------------------- |
-| `subsonic/system.ts`             | Protocol capability, license, token-info, and library-scan endpoints  |
-| `subsonic/browsing.ts`           | Music folders, directories, artists, albums, songs, and genres        |
-| `subsonic/discovery.ts`          | Similar-song and top-song discovery                                   |
-| `subsonic/albumSongLists.ts`     | Album/song lists, random songs, genre songs, and starred collections  |
-| `subsonic/searching.ts`          | Legacy and current search endpoints                                   |
-| `subsonic/playlists.ts`          | Playlist reads and mutations                                          |
-| `subsonic/mediaRetrieval.ts`     | Audio, cover art, lyrics, and avatar retrieval                        |
-| `subsonic/mediaAnnotation.ts`    | Ratings, scrobbles, stars, and unstars                                |
-| `subsonic/bookmarksQueue.ts`     | Bookmarks and play-queue state                                        |
-| `subsonic/usersMisc.ts`          | User profile and now-playing endpoints                                |
-| `subsonic/shared.ts`             | Shared predicates, parsers, ID mapping, and response-formatting input |
+| Module                                                   | Responsibility                                                        |
+| -------------------------------------------------------- | --------------------------------------------------------------------- |
+| `backend/src/routes/subsonic/system.ts`                  | Protocol capability, license, token-info, and library-scan endpoints  |
+| `backend/src/routes/subsonic/browsing.ts`                | Music folders, directories, artists, albums, songs, and genres        |
+| `backend/src/routes/subsonic/discovery.ts`               | Similar-song and top-song discovery                                   |
+| `backend/src/routes/subsonic/albumSongLists.ts`          | Album/song lists, random songs, genre songs, and starred collections  |
+| `backend/src/routes/subsonic/searching.ts`               | Legacy and current search endpoints                                   |
+| `backend/src/routes/subsonic/playlists.ts`               | Playlist reads and mutations                                          |
+| `backend/src/routes/subsonic/mediaRetrieval.ts`          | Audio, cover art, lyrics, and avatar retrieval                        |
+| `backend/src/routes/subsonic/mediaAnnotation.ts`         | Ratings, scrobbles, stars, and unstars                                |
+| `backend/src/routes/subsonic/bookmarksQueue.ts`          | Bookmarks and play-queue state                                        |
+| `backend/src/routes/subsonic/usersMisc.ts`               | User profile and now-playing endpoints                                |
+| `backend/src/routes/subsonic/shared.ts`                  | Shared predicates, parsers, ID mapping, and response-formatting input |
+| `backend/src/routes/subsonic/songEnrichment.ts`          | Shared song-enrichment helper                                         |
 
 ## Feature-Gated Prefixes
 

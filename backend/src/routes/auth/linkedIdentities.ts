@@ -7,7 +7,7 @@ import {
     acquireUserScopedLock,
     USER_LOCK_NAMESPACES,
 } from "../../utils/advisoryLocks";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 import { credentialLog, hasErrorCode, resourceIdParamsSchema } from "./shared";
 
 type UnlinkIdentityResult = "notFound" | "lastCredential" | "unlinked";

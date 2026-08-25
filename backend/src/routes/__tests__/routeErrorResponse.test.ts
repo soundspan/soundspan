@@ -1,5 +1,8 @@
 import type { Response } from "express";
-import { sendRouteFailure, sendValidationError } from "../routeErrorResponse";
+import {
+    sendRouteFailure,
+    sendValidationError,
+} from "../../utils/routeErrorResponse";
 
 function createResponse(): Response {
     const response = {

@@ -17,7 +17,10 @@ import {
     resizeCoverArt,
     snapCoverArtSize,
 } from "../../services/coverArtResize";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 import {
     getAlbumIdFromNativeCoverPath,
     persistHealedAlbumCover,

@@ -17,7 +17,10 @@ import {
     hasConnectedProviderToken,
     toLikedResponseTrack,
 } from "../../services/libraryTrackPreferences";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 import { trackMappingService } from "../../services/trackMappingService";
 import { resolveRemoteTrackMetadataForRequest } from "../../services/remoteTrackMetadataResolver";
 

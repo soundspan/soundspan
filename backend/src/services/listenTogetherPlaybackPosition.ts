@@ -1,4 +1,4 @@
-import type { GroupPlayback } from "./listenTogetherManager";
+import type { GroupPlayback } from "./listenTogetherTypes";
 
 /** Return the active track duration in milliseconds when it is valid. */
 export function currentTrackDurationMs(pb: GroupPlayback): number | null {

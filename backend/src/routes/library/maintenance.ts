@@ -12,7 +12,10 @@ import { config } from "../../config";
 import { scanQueue } from "../../workers/queues";
 import { organizeSingles } from "../../workers/organizeSingles";
 import { parseBoundedInt } from "../../utils/queryParams";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 import {
     DEFAULT_MY_LIKED_LIMIT,
     isLibraryDeletionEnabled,

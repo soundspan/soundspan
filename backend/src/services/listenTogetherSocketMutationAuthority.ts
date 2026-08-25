@@ -2,11 +2,8 @@ import type { Namespace } from "socket.io";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { enqueueGroupEndedBroadcast } from "./listenTogetherCallbacks";
-import {
-    GroupError,
-    groupManager,
-    type GroupSnapshot,
-} from "./listenTogetherManager";
+import { GroupError, groupManager } from "./listenTogetherManager";
+import type { GroupSnapshot } from "./listenTogetherTypes";
 import { releaseLocalGroupMutationState } from "./listenTogetherMutationLock";
 import { endAllGroupSockets } from "./listenTogetherSocketRevocation";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";

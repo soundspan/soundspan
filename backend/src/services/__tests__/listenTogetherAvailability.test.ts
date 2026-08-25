@@ -2,7 +2,7 @@ import {
     captureAvailabilityIdentity,
     matchesAvailabilityIdentity,
 } from "../listenTogetherAvailability";
-import type { GroupSnapshot } from "../listenTogetherManager";
+import type { GroupSnapshot } from "../listenTogetherTypes";
 
 function snapshot(
     queueId: string,

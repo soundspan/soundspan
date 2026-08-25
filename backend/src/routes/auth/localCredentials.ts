@@ -12,7 +12,7 @@ import {
 import { apiLimiter } from "../../middleware/rateLimiter";
 import { config } from "../../config";
 import { runDummyBcrypt } from "../../utils/dummyCredential";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 import { sendLoginSuccess, verifyLoginSecondFactor } from "./shared";
 
 const loginSchema = z.object({

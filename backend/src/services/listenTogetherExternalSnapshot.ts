@@ -3,7 +3,7 @@ import type {
     GroupSnapshot,
     GroupState,
     SyncQueueItem,
-} from "./listenTogetherManager";
+} from "./listenTogetherTypes";
 import {
     advanceSnapshotWatermark,
     compensateSnapshotPosition,

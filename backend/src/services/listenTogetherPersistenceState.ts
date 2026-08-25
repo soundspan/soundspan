@@ -1,4 +1,4 @@
-import type { GroupState } from "./listenTogetherManager";
+import type { GroupState } from "./listenTogetherTypes";
 
 /** Make a captured group reference ineligible for persistence. */
 export function invalidateGroupPersistence(group: GroupState): void {

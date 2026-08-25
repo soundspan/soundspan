@@ -1,8 +1,8 @@
 /**
  * Shared queue-item shape for Listen Together group state.
  *
- * Extracted from listenTogetherManager.ts (which re-exports it) so the
- * manager stays inside its file-size baseline.
+ * Extracted from listenTogetherManager.ts and exposed through the dedicated
+ * Listen Together type home.
  */
 
 import type {

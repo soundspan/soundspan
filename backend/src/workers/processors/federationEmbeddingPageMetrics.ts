@@ -1,5 +1,5 @@
 import { recordFederationEmbeddingPageOutcome } from "../../metrics";
-import type { FederationEmbeddingPageOutcome } from "../../services/federationEmbeddingSpace";
+import type { FederationEmbeddingPageOutcome } from "../../services/federationMetricsTypes";
 import type { TrackEnvelope } from "./federationSyncPage";
 
 /** Record a page outcome only when its corresponding vector action occurred. */

@@ -23,7 +23,10 @@ import {
 } from "../services/federationDedupArbitration";
 import { listFederationPeerHealth } from "../services/federationPeerHealth";
 import { enqueueFederationSyncNow } from "../workers/federationJobs";
-import { sendRouteError, sendValidationError } from "./routeErrorResponse";
+import {
+    sendRouteError,
+    sendValidationError,
+} from "../utils/routeErrorResponse";
 
 const router = Router();
 const scopeSchema = z.enum(FEDERATION_SCOPE_VALUES);

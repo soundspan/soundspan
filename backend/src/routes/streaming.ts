@@ -9,7 +9,10 @@ import {
     playbackTraceDurationMs,
 } from "../services/playbackTrace";
 import { logger } from "../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 
 const router = express.Router();
 const playbackRouteLogger = logger.child("Playback");

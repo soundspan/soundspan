@@ -21,8 +21,8 @@ check_routes() {
   local missing=""
   for f in "$dir"/*.ts; do
     basename_f=$(basename "$f")
-    # Skip test dirs, helpers, and error response module
-    if [[ "$basename_f" == index.ts ]] || [[ "$basename_f" == routeErrorResponse.ts ]]; then
+    # Skip the optional route composition entrypoint.
+    if [[ "$basename_f" == index.ts ]]; then
       continue
     fi
     if ! grep -q "$basename_f" "$readme"; then

@@ -2,7 +2,7 @@ import type {
     GroupSnapshot,
     PlaybackDelta,
     QueueDelta,
-} from "./listenTogetherManager";
+} from "./listenTogetherTypes";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { listenTogetherClusterSync } from "./listenTogetherClusterSync";
@@ -695,69 +695,4 @@ export async function flushGroupPublications(groupId: string): Promise<void> {
 export function resetGroupPublications(): void {
     pendingGroupPublications.clear();
     publicationBroadcaster = null;
-}
-
-/** Controls whether a manager callback must also synchronize cluster state. */
-export interface StatePublicationOptions {
-    synchronize?: boolean;
-}
-
-/** Socket-facing callbacks emitted by the in-memory group manager. */
-export interface ManagerCallbacks {
-    onGroupState(
-        groupId: string,
-        snapshot: GroupSnapshot,
-        options?: StatePublicationOptions,
-        fence?: GroupMutationFence,
-    ): void | Promise<void>;
-    onPlaybackDelta(
-        groupId: string,
-        delta: PlaybackDelta,
-        fence?: GroupMutationFence,
-    ): void;
-    onQueueDelta(
-        groupId: string,
-        delta: QueueDelta,
-        fence?: GroupMutationFence,
-    ): void;
-    onWaiting(
-        groupId: string,
-        data: { trackId: string | null; currentIndex: number },
-        fence?: GroupMutationFence,
-    ): void;
-    onPlayAt(
-        groupId: string,
-        data: { positionMs: number; serverTime: number; stateVersion: number },
-        fence?: GroupMutationFence,
-    ): void;
-    onMemberJoined(
-        groupId: string,
-        member: { userId: string; username: string },
-    ): void;
-    onMemberPresence(
-        groupId: string,
-        member: { userId: string; isConnected: boolean },
-    ): void;
-    onMemberLeft(
-        groupId: string,
-        data: {
-            userId: string;
-            username: string;
-            newHostUserId?: string;
-            newHostUsername?: string;
-        },
-    ): void;
-    onGroupEnded(
-        groupId: string,
-        reason: string,
-        options?: StatePublicationOptions,
-    ): void | Promise<void>;
-    onBoundaryWatchdog?(
-        groupId: string,
-        data: { currentIndex: number; stateVersion: number },
-    ): void;
-    onReadyGateCompletion(
-        groupId: string,
-        data: { currentIndex: number; stateVersion: number },
-    ): void;
 }

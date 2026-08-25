@@ -1,8 +1,8 @@
-import {
-    groupManager,
-    type GroupSnapshot,
-    type SyncQueueItem,
-} from "../services/listenTogetherManager";
+import { groupManager } from "../services/listenTogetherManager";
+import type {
+    GroupSnapshot,
+    SyncQueueItem,
+} from "../services/listenTogetherTypes";
 
 function buildTrack(id: string, title: string): SyncQueueItem {
     return {

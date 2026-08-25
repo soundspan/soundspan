@@ -43,7 +43,7 @@ import {
 import type {
     FederationEmbeddingExportOutcome,
     FederationEmbeddingPageOutcome,
-} from "../services/federationEmbeddingSpace";
+} from "../services/federationMetricsTypes";
 import {
     createVibeEmbedMetrics,
     type VibeEmbedJobOutcome,

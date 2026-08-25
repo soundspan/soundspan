@@ -15,7 +15,7 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { BRAND_SLUG } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
-import { sendInternalRouteError } from "./routeErrorResponse";
+import { sendInternalRouteError } from "../utils/routeErrorResponse";
 
 const router = Router();
 const LEGACY_SERVICE_ALIASES = [BRAND_SLUG];

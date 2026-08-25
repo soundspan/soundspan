@@ -15,7 +15,7 @@ import { logger } from "../../../utils/logger";
 import {
     sendInternalRouteError,
     sendRouteError,
-} from "../../routeErrorResponse";
+} from "../../../utils/routeErrorResponse";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 

@@ -16,7 +16,10 @@ import {
 } from "../services/musicRequestService";
 import { enqueueAlbumDownloadInBackground } from "../services/albumDownloadQueueService";
 import { logger } from "../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 
 const router = Router();
 const log = logger.child("Requests");

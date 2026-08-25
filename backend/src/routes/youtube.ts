@@ -29,7 +29,7 @@ import {
 } from "../services/youtubeDownload";
 import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
 import { logger } from "../utils/logger";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 const router = Router();
 const downloadWatcherLogger = logger.child("YouTubeDownloadWatcher");

@@ -20,7 +20,10 @@ import {
     MAX_EXTERNAL_IMAGE_BYTES,
     readResponseBodyWithByteCap,
 } from "../services/imageProxy";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 import { config } from "../config";
 import {

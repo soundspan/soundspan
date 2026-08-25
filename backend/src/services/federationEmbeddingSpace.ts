@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import { embeddingPreprocessingHash } from "./embeddingSpaces";
+import type {
+    FederationEmbeddingExportOutcome,
+    FederationEmbeddingPageOutcome,
+} from "./federationMetricsTypes";
 
 /** Embedding-space identity transmitted once on a federation vector page. */
 export interface FederationEmbeddingSpaceIdentity {
@@ -18,15 +22,6 @@ export interface LocalFederationEmbeddingSpace extends FederationEmbeddingSpaceI
     id: string;
     preprocessing: Prisma.JsonValue;
 }
-
-/** Bounded outcomes for one federation page carrying peer vectors. */
-export type FederationEmbeddingPageOutcome =
-    | "stored"
-    | "skipped_mismatch"
-    | "skipped_legacy_strict";
-
-/** Bounded outcomes for exporter-side embedding compatibility guards. */
-export type FederationEmbeddingExportOutcome = "suppressed_legacy_peer";
 
 const SEEDED_CANONICAL_SPACE_ID = "space_clap_music_audioset_v1";
 

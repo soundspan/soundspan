@@ -40,7 +40,10 @@ import {
 } from "../services/trackEmbeddings";
 import { getActiveSpace } from "../services/embeddingSpaces";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
-import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
+import {
+    sendRouteError,
+    sendInternalRouteError,
+} from "../utils/routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
 import {
     TextEmbeddingBadGatewayError,

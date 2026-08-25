@@ -4,7 +4,7 @@ import { requireAuth, requireInteractiveSession } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { getApiKeyExpiresAt, hashApiKey } from "../utils/apiKeyHash";
 import crypto from "crypto";
-import { sendRouteError } from "./routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 const router = Router();
 const routeLogger = logger.child("ApiKeys");

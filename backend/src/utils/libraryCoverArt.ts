@@ -16,7 +16,7 @@ import {
     MAX_EXTERNAL_IMAGE_BYTES,
     readResponseBodyWithByteCap,
 } from "../services/imageProxy";
-import { sendRouteError } from "../routes/routeErrorResponse";
+import { sendRouteError } from "./routeErrorResponse";
 import { isOriginAllowed } from "./cors";
 import { logger } from "./logger";
 import { redisClient } from "./redis";

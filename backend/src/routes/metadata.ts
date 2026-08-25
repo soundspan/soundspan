@@ -4,7 +4,10 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { resolveAlbumForExternalTrack } from "../services/trackAlbumResolution";
 import { logger } from "../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 
 const router = Router();
 const log = logger.child("MetadataRoutes");

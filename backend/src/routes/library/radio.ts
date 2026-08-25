@@ -31,7 +31,7 @@ import {
     hasConnectedProviderToken,
     toLikedResponseTrack,
 } from "../../services/libraryTrackPreferences";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 import {
     buildMultiTrackRadio,
     getRadioArtistCapForLimit,

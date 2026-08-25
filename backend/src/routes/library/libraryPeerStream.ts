@@ -11,7 +11,7 @@ import { normalizeStreamingQuality } from "../../utils/libraryAudioInfo";
 import { TRACK_VISIBLE_WHERE } from "../../utils/librarySorting";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
-import { sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../../utils/routeErrorResponse";
 
 const log = logger.child("LibraryPeerStream");
 

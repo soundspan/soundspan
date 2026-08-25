@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { logger } from "../../utils/logger";
-import { sendInternalRouteError } from "../routeErrorResponse";
+import { sendInternalRouteError } from "../../utils/routeErrorResponse";
 
 /** Rejects legacy-only like requests in recommendation mode. */
 export async function handleModernLike(

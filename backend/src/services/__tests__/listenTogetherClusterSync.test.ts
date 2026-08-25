@@ -1,9 +1,9 @@
-import {
-    groupManager,
-    type GroupSnapshot,
-    type ManagerCallbacks,
-    type SyncQueueItem,
-} from "../listenTogetherManager";
+import { groupManager } from "../listenTogetherManager";
+import type {
+    GroupSnapshot,
+    ManagerCallbacks,
+    SyncQueueItem,
+} from "../listenTogetherTypes";
 import { DeterministicRedisServer } from "./support/deterministicRedis";
 
 describe("listenTogetherClusterSync", () => {

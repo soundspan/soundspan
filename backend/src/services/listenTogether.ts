@@ -18,12 +18,14 @@ import { trackMappingService } from "./trackMappingService";
 import {
     groupManager,
     MAX_QUEUE_SIZE,
-    type SyncQueueItem,
-    type GroupSnapshot,
-    type GroupState,
-    type PersistedGroupMember,
     GroupError,
 } from "./listenTogetherManager";
+import type {
+    GroupSnapshot,
+    GroupState,
+    PersistedGroupMember,
+    SyncQueueItem,
+} from "./listenTogetherTypes";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
 import { withGroupMutationLock } from "./listenTogetherMutationLock";
 import {

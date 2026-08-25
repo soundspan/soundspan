@@ -1,7 +1,10 @@
 import type { Request, Response } from "express";
 import { discoverQueue } from "../../workers/queues";
 import { logger } from "../../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 
 const ACTIVE_JOB_STATES = new Set(["active", "waiting", "delayed", "paused"]);
 

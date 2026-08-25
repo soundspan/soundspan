@@ -334,6 +334,12 @@ jobs:
       - name: Test source file-size gate
         run: npm run check:file-size:test
 
+      - name: Check routes README index
+        run: node scripts/ci/check-routes-readme.mjs
+
+      - name: Test routes README index gate
+        run: npm run check:routes-readme:test
+
       - name: Check npm override staleness
         run: npm run check:override-staleness
 

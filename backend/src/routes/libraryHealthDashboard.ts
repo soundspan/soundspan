@@ -13,7 +13,10 @@ import {
     METADATA_GAP_KINDS,
 } from "../services/libraryHealthDashboard";
 import { logger } from "../utils/logger";
-import { sendRouteFailure, sendValidationError } from "./routeErrorResponse";
+import {
+    sendRouteFailure,
+    sendValidationError,
+} from "../utils/routeErrorResponse";
 
 const router = Router();
 const log = logger.child("LibraryHealthDashboard");

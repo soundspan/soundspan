@@ -33,7 +33,10 @@ import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
 import { parseBoundedInt } from "../utils/queryParams";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
 import { updateAlbumMetadataWithOwnership } from "../services/albumMetadataPersistence";
 import {
@@ -44,11 +47,8 @@ import {
     applyAlbumEnrichmentFields,
     enrichAlbumFields,
 } from "../services/metadata/albumEnrichmentFields";
-
 const router = Router();
-
 router.use(requireAuth);
-
 const MBID_FORMAT_EXAMPLE = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
 const MBID_UUID_REGEX =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

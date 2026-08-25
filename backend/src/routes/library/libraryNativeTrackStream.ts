@@ -7,7 +7,10 @@ import {
 import { config } from "../../config";
 import { safeResolvePath } from "../../utils/safeResolvePath";
 import { logger } from "../../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 
 const log = logger.child("LibraryNativeTrackStream");
 

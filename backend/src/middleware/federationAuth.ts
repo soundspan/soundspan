@@ -1,5 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { sendRouteError } from "../routes/routeErrorResponse";
+import { sendRouteError } from "../utils/routeErrorResponse";
 import {
     parseFederationScopes,
     type FederationScope,

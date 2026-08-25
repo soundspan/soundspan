@@ -1,6 +1,6 @@
 import { prisma } from "../utils/db";
 import type { Prisma } from "@prisma/client";
-import type { PersistedGroupMember } from "./listenTogetherManager";
+import type { PersistedGroupMember } from "./listenTogetherTypes";
 import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
 import { withSyncGroupMembershipFence } from "./listenTogetherMembershipFence";
 import { selectHostSuccessor } from "./listenTogetherSnapshot";

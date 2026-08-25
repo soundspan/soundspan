@@ -3,7 +3,7 @@ import axios from "axios";
 import { prisma } from "../../../utils/db";
 import { logger } from "../../../utils/logger";
 import { getSystemSettings } from "../../../utils/systemSettings";
-import { sendRouteError } from "../../routeErrorResponse";
+import { sendRouteError } from "../../../utils/routeErrorResponse";
 import { sendCleanupLidarrFailure, sendFixTaggingFailure } from "../shared";
 import { DISCOVERY_LIKED_OWNERSHIP_SOURCE } from "../../../services/albumOwnershipPromotion";
 

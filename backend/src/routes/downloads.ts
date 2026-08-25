@@ -20,7 +20,7 @@ import {
     sendRouteFailure,
     sendInternalRouteError,
     sendRouteError,
-} from "./routeErrorResponse";
+} from "../utils/routeErrorResponse";
 import { probeDownloadSourceAvailability } from "../services/downloadSourcePolicy";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,

@@ -9,7 +9,10 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { ENCRYPTED_SETTINGS_COLUMNS } from "../utils/encryptedColumns";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
 import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
-import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 import { config } from "../config";
 import { federationInstanceNameSchema } from "./systemSettingsFederationSchema";
 import { isPlaybackSourceOrder } from "../services/playbackSourcePriority";
@@ -22,13 +25,11 @@ import {
     loadQueueCleanerWorkerStatus,
     queueCleanerLog,
 } from "../services/systemSettingsQueueCleaner";
-
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
 const WEBHOOK_URL_ALIASES = [BRAND_SLUG];
-// Shared validation message for admin outbound connection-test URLs.
+/** Shared validation message for admin outbound connection-test URLs. */
 const ADMIN_TEST_URL_ERROR = "URL must be a valid public HTTP(S) URL";
-
 function normalizeAdminTestUrl(url: string): string | null {
     // Deliberately the STRING check only (no DNS resolution): admin connection
     // tests legitimately target Docker-network and LAN hostnames
@@ -36,7 +37,6 @@ function normalizeAdminTestUrl(url: string): string | null {
     // deployment), the endpoints are admin-only, and an admin probing their own
     // integrations is not the SSRF vector the DNS-resolving guard exists for.
     const normalizedUrl = normalizeSafeOutboundUrl(url);
-
     return normalizedUrl ? normalizedUrl.replace(/\/+$/, "") : null;
 }
 

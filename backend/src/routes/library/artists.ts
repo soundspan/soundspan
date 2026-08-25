@@ -20,7 +20,10 @@ import {
     getArtistDisplaySummary,
 } from "../../utils/metadataOverrides";
 import { safeResolvePath } from "../../utils/safeResolvePath";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 import {
     DEFAULT_MY_LIKED_LIMIT,
     isLibraryDeletionEnabled,

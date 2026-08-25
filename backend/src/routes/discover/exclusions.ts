@@ -2,7 +2,10 @@ import type { Prisma } from "@prisma/client";
 import type { Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../../utils/routeErrorResponse";
 
 type DiscoverExclusionRow = Prisma.DiscoverExclusionGetPayload<object>;
 

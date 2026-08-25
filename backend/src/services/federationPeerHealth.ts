@@ -4,6 +4,11 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import type { FederationHealthErrorClass } from "./federationErrorClassifier";
+import type {
+    FederationCatalogCounts,
+    FederationLeaseMetricSnapshot,
+    FederationWorkerMetricSnapshot,
+} from "./federationMetricsTypes";
 
 const MAX_HEALTH_PEERS = 500;
 const LEASE_QUERY_BATCH_SIZE = 25;
@@ -22,9 +27,8 @@ const warnedCappedCollectors = new Set<CappedCollector>();
 
 type CappedCollector = "admin_health" | "worker_metrics" | "lease_metrics";
 
-export type FederationCatalogType = (typeof CATALOG_TYPES)[number];
+export type FederationCatalogType = keyof FederationCatalogCounts;
 export type FederationHealthState = "green" | "amber" | "red" | "revoked";
-export type FederationCatalogCounts = Record<FederationCatalogType, number>;
 
 /** Inputs used by the pure federation health-state decision. */
 export interface FederationHealthStateInput {
@@ -42,19 +46,6 @@ interface CountRow {
 
 interface LeaseCountRedis {
     zCount(key: string, min: string, max: string): Promise<number>;
-}
-
-/** Worker-side scrape snapshot for per-peer sync and catalog gauges. */
-export interface FederationWorkerMetricSnapshot {
-    peerId: string;
-    lastSyncSuccessAt: Date | null;
-    catalog: FederationCatalogCounts;
-}
-
-/** API-side scrape snapshot for active per-peer stream leases. */
-export interface FederationLeaseMetricSnapshot {
-    peerId: string;
-    activeLeases: number;
 }
 
 /** Admin health response for one federation peer. */

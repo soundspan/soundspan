@@ -1,8 +1,8 @@
-import {
-    groupManager,
-    type GroupSnapshot,
-    type PersistedGroupMember,
-} from "./listenTogetherManager";
+import { groupManager } from "./listenTogetherManager";
+import type {
+    GroupSnapshot,
+    PersistedGroupMember,
+} from "./listenTogetherTypes";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
 import {
     enqueueGroupEndedPublication,

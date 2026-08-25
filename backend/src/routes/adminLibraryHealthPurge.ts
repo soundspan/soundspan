@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 import { schedulerQueue } from "../workers/queues";
 import { TRACK_REMOVAL_PURGE_JOB_NAME } from "../workers/processors/trackRemovalPurgeProcessor";
 import { readLibraryHealthPurgeMarker } from "../services/libraryHealthDashboard/purgeMarker";
-import { sendInternalRouteError } from "./routeErrorResponse";
+import { sendInternalRouteError } from "../utils/routeErrorResponse";
 
 const log = logger.child("AdminLibraryHealthPurge");
 const PURGE_NOW_JOB_ID = "scheduler:track-removal-purge:purge-now";

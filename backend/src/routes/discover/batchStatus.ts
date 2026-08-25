@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { discoverQueue } from "../../workers/queues";
 import { logger } from "../../utils/logger";
-import { sendInternalRouteError } from "../routeErrorResponse";
+import { sendInternalRouteError } from "../../utils/routeErrorResponse";
 
 interface DiscoverQueuePayload {
     userId: string;

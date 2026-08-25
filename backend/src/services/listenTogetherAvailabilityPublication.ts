@@ -5,7 +5,8 @@ import {
     resolveQueueForUser,
     type ResolvedSource,
 } from "./listenTogetherResolution";
-import { groupManager, type GroupSnapshot } from "./listenTogetherManager";
+import { groupManager } from "./listenTogetherManager";
+import type { GroupSnapshot } from "./listenTogetherTypes";
 import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
 import {
     captureAvailabilityIdentity,

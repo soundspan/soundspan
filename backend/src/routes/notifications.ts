@@ -7,7 +7,10 @@ import { prisma } from "../utils/db";
 import { enqueueAlbumDownload } from "../services/albumDownloadQueueService";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
 import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
-import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
+import {
+    sendRouteError,
+    sendInternalRouteError,
+} from "../utils/routeErrorResponse";
 import { parseArtistAlbumSubject } from "../utils/downloadSubject";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,

@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { createIORedisClient } from "../utils/ioredis";
 import { logger } from "../utils/logger";
-import type { GroupSnapshot } from "./listenTogetherManager";
+import type { GroupSnapshot } from "./listenTogetherTypes";
 import { config } from "../config";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
 import { withLocalGroupMutationBoundary } from "./listenTogetherMutationLock";

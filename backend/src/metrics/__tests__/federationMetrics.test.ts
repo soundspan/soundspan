@@ -2,7 +2,7 @@ import { Registry } from "prom-client";
 import type {
     FederationLeaseMetricSnapshot,
     FederationWorkerMetricSnapshot,
-} from "../../services/federationPeerHealth";
+} from "../../services/federationMetricsTypes";
 
 const logWarn = jest.fn();
 jest.mock("../../utils/logger", () => ({
