@@ -288,20 +288,13 @@ jobs:
       - name: Ruff format check
         run: ruff format --check services/
 
-      - name: Mypy shared services
-        run: mypy
-
-      - name: Mypy TIDAL streamer
-        run: MYPYPATH=services mypy services/tidal-streamer/app.py services/tidal-streamer/tests
-
-      - name: Mypy YouTube Music streamer
-        run: MYPYPATH=services mypy services/ytmusic-streamer/app.py services/ytmusic-streamer/yt_download.py services/ytmusic-streamer/ytmusic_auth.py services/ytmusic-streamer/ytmusic_browse.py services/ytmusic-streamer/ytmusic_client.py services/ytmusic-streamer/ytmusic_downloads.py services/ytmusic-streamer/ytmusic_library.py services/ytmusic-streamer/ytmusic_lifecycle.py services/ytmusic-streamer/ytmusic_models.py services/ytmusic-streamer/ytmusic_runtime.py services/ytmusic-streamer/ytmusic_search.py services/ytmusic-streamer/ytmusic_stream.py services/ytmusic-streamer/tests
-
-      - name: Mypy audio analyzer
-        run: MYPYPATH=services mypy services/audio-analyzer/analyzer.py services/audio-analyzer/loudness.py services/audio-analyzer/model_paths.py
-
-      - name: Mypy DCLAP provider
-        run: MYPYPATH=services mypy services/vibe-provider-dclap/__main__.py services/vibe-provider-dclap/http_server.py services/vibe-provider-dclap/inference.py services/vibe-provider-dclap/model_provider.py services/vibe-provider-dclap/music_path.py services/vibe-provider-dclap/preprocessing.py services/vibe-provider-dclap/settings.py
+      - name: Mypy services
+        run: >-
+          MYPYPATH=. mypy
+          --exclude 'services/(?:[^/]+)/(?:tests|tests-scale)(?:/|$)'
+          --exclude 'services/ytmusic-streamer/app\.py$'
+          --exclude 'services/audio-analyzer/music_path\.py$'
+          services
 
   enforcement-gates:
     name: Enforcement Gates

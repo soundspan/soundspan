@@ -7,7 +7,6 @@ import threading
 import time
 from typing import Any, Literal, cast
 
-from common.sidecar_runtime_utils import env_float, env_int
 from fastapi import HTTPException, Query
 from ytmusic_client import (
     SEARCH_MODE,
@@ -22,6 +21,8 @@ from ytmusic_client import (
 from ytmusic_models import BatchSearchQuery, BatchSearchRequest, SearchRequest
 from ytmusic_runtime import JsonList, JsonObject, _bound_cache, _sanitized_http_error, app, log
 from ytmusicapi import YTMusic
+
+from services.common.sidecar_runtime_utils import env_float, env_int
 
 # Max queries accepted in a single batch search request.
 _BATCH_SEARCH_MAX_QUERIES = 50

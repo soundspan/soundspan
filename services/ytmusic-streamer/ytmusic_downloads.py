@@ -4,8 +4,6 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-from common.job_registry import JobRegistry
-from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException
 from yt_download import (
     _stamp_audio_tags,
@@ -18,6 +16,9 @@ from yt_download import (
 from ytmusic_models import YtDownloadRequest
 from ytmusic_runtime import _USER_AGENT, JsonObject, app, log
 from ytmusic_stream import YTDLP_SOCKET_TIMEOUT, _extract_pacer
+
+from services.common.job_registry import JobRegistry
+from services.common.sidecar_runtime_utils import env_int
 
 # Default destination for /yt/ downloads inside the shared music volume.
 YT_DOWNLOAD_DIR = os.getenv("YT_DOWNLOAD_DIR", "/music/YouTube Downloads")

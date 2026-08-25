@@ -21,7 +21,8 @@ def test_shared_http_error_logs_detail_and_returns_generic_exception(
 ) -> None:
     """Keep provider details in logs while returning only the stable client detail."""
     import app  # noqa: F401 -- the runtime bootstraps the shared module path
-    from common.sidecar_runtime_utils import sanitized_http_error
+
+    from services.common.sidecar_runtime_utils import sanitized_http_error
 
     logger = logging.getLogger("ytmusic-shared-error-test")
     with caplog.at_level(logging.ERROR, logger=logger.name):
@@ -60,7 +61,7 @@ def test_shared_pool_warning_filter_throttles_repeated_warnings(
 
 def test_shared_pool_warning_filter_installs_once() -> None:
     """Repeated installs (module reimports) must not stack duplicate filters."""
-    from common.sidecar_runtime_utils import (
+    from services.common.sidecar_runtime_utils import (
         _ThrottlePoolFullWarning,
         install_urllib3_pool_warning_throttle,
     )

@@ -17,19 +17,20 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
-from common.download_identity import build_bounded_filename as _build_bounded_filename
-from common.download_identity import build_identity_candidates
-from common.download_paths import (
-    require_contained_download_path as _require_contained_download_path,
-)
-from common.download_paths import (
-    sanitize_download_relative_path as _sanitize_download_relative_path,
-)
-from common.download_paths import sanitize_path_component as _sanitize_path_component
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 from mutagen.mp4 import MP4
 from mutagen.oggopus import OggOpus
+
+from services.common.download_identity import build_bounded_filename as _build_bounded_filename
+from services.common.download_identity import build_identity_candidates
+from services.common.download_paths import (
+    require_contained_download_path as _require_contained_download_path,
+)
+from services.common.download_paths import (
+    sanitize_download_relative_path as _sanitize_download_relative_path,
+)
+from services.common.download_paths import sanitize_path_component as _sanitize_path_component
 
 # Audio file extensions produced by the download postprocessors (plus raw
 # bestaudio containers in case postprocessing is skipped).

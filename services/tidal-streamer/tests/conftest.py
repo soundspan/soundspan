@@ -12,7 +12,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-SERVICES_ROOT = SERVICE_ROOT.parent
+REPOSITORY_ROOT = SERVICE_ROOT.parents[1]
 
 
 def _install_tiddl_stub() -> None:
@@ -83,6 +83,26 @@ _install_tiddl_stub()
 # that exercise the auth gate itself (test_internal_auth.py) build their own
 # clients and manage this env var directly.
 INTERNAL_API_SECRET = "test-internal-secret-value"
+APP_MODULES = (
+    "app",
+    "tidal_auth",
+    "tidal_browse",
+    "tidal_cache",
+    "tidal_download_routes",
+    "tidal_downloads",
+    "tidal_lifecycle",
+    "tidal_models",
+    "tidal_runtime",
+    "tidal_search",
+    "tidal_serializers",
+    "tidal_stream",
+)
+
+
+def _clear_app_modules() -> None:
+    """Remove the entrypoint and split modules so each test gets fresh state."""
+    for module_name in APP_MODULES:
+        sys.modules.pop(module_name, None)
 
 
 @pytest.fixture(autouse=True)
@@ -94,19 +114,17 @@ def internal_api_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def local_app_module() -> Iterator[None]:
     """Ensure `import app` resolves to this sidecar during the test."""
-    sys.modules.pop("app", None)
-    sys.modules.pop("tidal_downloads", None)
+    _clear_app_modules()
     sys.path.insert(0, str(SERVICE_ROOT))
-    sys.path.insert(0, str(SERVICES_ROOT))
+    sys.path.insert(0, str(REPOSITORY_ROOT))
     try:
         yield
     finally:
-        sys.modules.pop("app", None)
-        sys.modules.pop("tidal_downloads", None)
+        _clear_app_modules()
         while str(SERVICE_ROOT) in sys.path:
             sys.path.remove(str(SERVICE_ROOT))
-        while str(SERVICES_ROOT) in sys.path:
-            sys.path.remove(str(SERVICES_ROOT))
+        while str(REPOSITORY_ROOT) in sys.path:
+            sys.path.remove(str(REPOSITORY_ROOT))
 
 
 @pytest.fixture()

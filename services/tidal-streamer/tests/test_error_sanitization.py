@@ -16,7 +16,7 @@ def test_shared_http_error_logs_detail_and_returns_generic_exception(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Keep provider details in logs while returning only the stable client detail."""
-    from common.sidecar_runtime_utils import sanitized_http_error
+    from services.common.sidecar_runtime_utils import sanitized_http_error
 
     logger = logging.getLogger("tidal-shared-error-test")
     with caplog.at_level(logging.ERROR, logger=logger.name):

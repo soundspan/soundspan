@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 
 SIDECAR_ROOT = Path(__file__).resolve().parents[1]
-SERVICES_ROOT = SIDECAR_ROOT.parent
-if str(SERVICES_ROOT) not in sys.path:
-    sys.path.insert(0, str(SERVICES_ROOT))
+REPOSITORY_ROOT = SIDECAR_ROOT.parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from common.download_paths import (  # noqa: E402
+from services.common.download_paths import (  # noqa: E402
     require_contained_download_path,
     sanitize_download_relative_path,
     sanitize_path_component,

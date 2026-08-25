@@ -83,7 +83,7 @@ def _patch_client_factory(
     def factory(user_agent: Any = None) -> Any:
         return fake_client
 
-    monkeypatch.setattr("common.sidecar_runtime_utils.build_stream_proxy_client", factory)
+    monkeypatch.setattr("services.common.sidecar_runtime_utils.build_stream_proxy_client", factory)
     # The legacy routes imported the factory directly. This patch keeps the
     # pre-refactor regression run bounded; shared-helper routes ignore it.
     monkeypatch.setattr(app, "build_stream_proxy_client", factory, raising=False)

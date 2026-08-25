@@ -1,6 +1,6 @@
 """Behavioral coverage for the shared in-memory TTL job registry."""
 
-from common.job_registry import JobRegistry
+from services.common.job_registry import JobRegistry
 
 
 def test_registry_prunes_only_expired_terminal_jobs() -> None:

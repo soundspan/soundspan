@@ -22,9 +22,9 @@ import types
 from pathlib import Path
 from typing import Any
 
-SERVICES_ROOT = Path(__file__).resolve().parents[1]
-if str(SERVICES_ROOT) not in sys.path:
-    sys.path.append(str(SERVICES_ROOT))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if (REPOSITORY_ROOT / "services").is_dir() and str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.append(str(REPOSITORY_ROOT))
 
 import ytmusic_album_downloads as _album_downloads
 import ytmusic_auth as _auth

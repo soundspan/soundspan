@@ -6,12 +6,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, cast
 
-from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException, Query
 from ytmusic_client import _get_public_ytmusic, _run_ytmusic_with_auth_retry
 from ytmusic_runtime import JsonObject, _sanitized_http_error, app, log
 from ytmusic_stream import BROWSE_TIMEOUT, _browse_public_bounded, _validate_video_id
 from ytmusicapi.exceptions import YTMusicServerError
+
+from services.common.sidecar_runtime_utils import env_int
 
 _AUTO_PLAYLIST_PREFIXES = ("RDTMAK", "RDEM", "RDAMPL", "RDAuto", "RDCLAK", "RDAO")
 _SPECIAL_PLAYLIST_IDS = {"LM", "SE", "RDPN"}

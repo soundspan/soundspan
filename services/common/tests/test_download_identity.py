@@ -3,7 +3,8 @@
 from pathlib import Path
 
 import pytest
-from common.download_identity import (
+
+from services.common.download_identity import (
     MAX_COLLISION_COUNTER,
     MAX_FILENAME_BYTES,
     build_bounded_filename,

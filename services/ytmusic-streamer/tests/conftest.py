@@ -11,6 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = SERVICE_ROOT.parents[1]
 
 # Shared secret the `client` fixture presents on every request so the F31
 # inbound-auth dependency lets the existing behaviour suites through. Tests
@@ -50,12 +51,15 @@ def local_app_module() -> Iterator[None]:
     """Ensure `import app` resolves to this sidecar during the test."""
     _clear_app_modules()
     sys.path.insert(0, str(SERVICE_ROOT))
+    sys.path.insert(0, str(REPOSITORY_ROOT))
     try:
         yield
     finally:
         _clear_app_modules()
         while str(SERVICE_ROOT) in sys.path:
             sys.path.remove(str(SERVICE_ROOT))
+        while str(REPOSITORY_ROOT) in sys.path:
+            sys.path.remove(str(REPOSITORY_ROOT))
 
 
 @pytest.fixture()

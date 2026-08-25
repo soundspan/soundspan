@@ -24,10 +24,9 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 # surface alongside the other removed network tools.
 RUN python3 -m pip uninstall -y pip
 
-# Copy application code
-COPY services/tidal-streamer/app.py ./app.py
-COPY services/tidal-streamer/tidal_downloads.py ./tidal_downloads.py
-COPY services/common ./common
+# Copy the entrypoint and its split sidecar modules.
+COPY services/tidal-streamer/*.py ./
+COPY services/common ./services/common
 
 # Create writable directories and non-root user
 # - /data/.tiddl : tiddl library cache/config (RWO — single pod)

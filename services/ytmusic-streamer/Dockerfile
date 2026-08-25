@@ -47,7 +47,7 @@ RUN python3 -m pip uninstall -y pip
 
 # Copy the entrypoint and its split sidecar modules.
 COPY services/ytmusic-streamer/*.py ./
-COPY services/common ./common
+COPY services/common ./services/common
 COPY services/ytmusic-streamer/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 

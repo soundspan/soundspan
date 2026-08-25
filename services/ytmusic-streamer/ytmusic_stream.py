@@ -12,13 +12,6 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
-from common.sidecar_runtime_utils import (
-    ThreadSafeRatePacer,
-    build_full_proxy_response,
-    build_range_proxy_response,
-    env_float,
-    env_int,
-)
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from yt_download import (
@@ -39,6 +32,14 @@ from ytmusic_runtime import (
     _sanitized_http_error,
     app,
     log,
+)
+
+from services.common.sidecar_runtime_utils import (
+    ThreadSafeRatePacer,
+    build_full_proxy_response,
+    build_range_proxy_response,
+    env_float,
+    env_int,
 )
 
 T = TypeVar("T")

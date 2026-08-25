@@ -8,12 +8,12 @@ from typing import Any
 
 from fastapi import Depends, FastAPI
 
-SERVICES_ROOT = Path(__file__).resolve().parents[1]
-if str(SERVICES_ROOT) not in sys.path:
-    sys.path.append(str(SERVICES_ROOT))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if (REPOSITORY_ROOT / "services").is_dir() and str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.append(str(REPOSITORY_ROOT))
 
-from common.logging_utils import configure_service_logger
-from common.sidecar_runtime_utils import (
+from services.common.logging_utils import configure_service_logger
+from services.common.sidecar_runtime_utils import (
     install_urllib3_pool_warning_throttle,
     register_error_handlers,
     require_internal_secret,

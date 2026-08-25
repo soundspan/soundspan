@@ -13,20 +13,21 @@ from uuid import uuid4
 from xml.etree.ElementTree import Element
 from xml.etree.ElementTree import fromstring as xml_fromstring
 
-from common.download_identity import build_bounded_filename as _build_bounded_filename
-from common.download_identity import build_identity_candidates, resolve_identity_path
-from common.download_paths import (
-    require_contained_download_path as _require_contained_download_path,
-)
-from common.download_paths import (
-    sanitize_download_relative_path as _sanitize_download_relative_path,
-)
-from common.sidecar_runtime_utils import env_float
 from mutagen.easymp4 import EasyMP4
 from mutagen.flac import FLAC
 from tiddl.core.metadata import Cover, add_track_metadata
 from tiddl.core.utils import parse_track_stream
 from tiddl.core.utils.format import format_template
+
+from services.common.download_identity import build_bounded_filename as _build_bounded_filename
+from services.common.download_identity import build_identity_candidates, resolve_identity_path
+from services.common.download_paths import (
+    require_contained_download_path as _require_contained_download_path,
+)
+from services.common.download_paths import (
+    sanitize_download_relative_path as _sanitize_download_relative_path,
+)
+from services.common.sidecar_runtime_utils import env_float
 
 __all__ = (
     "_DASH_MANIFEST_MIME_TYPE",

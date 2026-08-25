@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 import requests
-from common.sidecar_runtime_utils import validate_user_id
 from fastapi import HTTPException
 from ytmusic_runtime import DATA_PATH, log
 from ytmusicapi import OAuthCredentials, YTMusic
+
+from services.common.sidecar_runtime_utils import validate_user_id
 
 SEARCH_MODE = (os.getenv("YTMUSIC_SEARCH_MODE", "auto") or "auto").strip().lower()
 if SEARCH_MODE not in {"tv", "native", "auto"}:

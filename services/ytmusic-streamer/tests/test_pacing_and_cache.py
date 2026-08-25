@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-SERVICES_ROOT = Path(__file__).resolve().parents[2]
-if str(SERVICES_ROOT) not in sys.path:
-    sys.path.insert(0, str(SERVICES_ROOT))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from common.sidecar_runtime_utils import ThreadSafeRatePacer  # noqa: E402
+from services.common.sidecar_runtime_utils import ThreadSafeRatePacer  # noqa: E402
 
 
 def test_pacer_is_thread_safe_and_serializes() -> None:
