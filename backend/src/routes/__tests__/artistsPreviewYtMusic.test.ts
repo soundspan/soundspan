@@ -3,6 +3,10 @@ import { PassThrough } from "stream";
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
+jest.mock("../../services/metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),

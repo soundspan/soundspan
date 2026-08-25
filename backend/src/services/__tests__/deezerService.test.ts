@@ -1457,66 +1457,20 @@ describe("deezerService", () => {
         );
     });
 
-    it("logs release-group metadata lookup failures", async () => {
+    it("returns null on a CAA miss without consulting MusicBrainz", async () => {
         mockAxiosGet.mockResolvedValueOnce({
             data: {
                 images: [],
             },
         });
-        mockMusicBrainzGetReleaseGroup.mockRejectedValueOnce(
-            new Error("musicbrainz timeout"),
-        );
 
         await expect(
             coverArtService.getCoverArt("33333333-3333-4333-8333-333333333333"),
         ).resolves.toBeNull();
-        expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "[CoverArt] Failed to resolve release-group metadata for 33333333-3333-4333-8333-333333333333:",
-            expect.any(Error),
-        );
-    });
-
-    it("logs fallback-provider failures and returns null", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                images: [],
-            },
-        });
-        mockMusicBrainzGetReleaseGroup.mockResolvedValueOnce({
-            title: "Provider Album",
-            "artist-credit": [{ name: "Provider Artist" }],
-        });
-        mockMusicBrainzExtractPrimaryArtist.mockReturnValueOnce(
-            "Provider Artist",
-        );
-        mockImageProviderGetAlbumCover.mockRejectedValueOnce(
-            new Error("provider unavailable"),
-        );
-
-        await expect(
-            coverArtService.getCoverArt("44444444-4444-4444-8444-444444444444"),
-        ).resolves.toBeNull();
-        expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "[CoverArt] Fallback providers failed for Provider Artist - Provider Album:",
-            expect.any(Error),
-        );
-    });
-
-    it("logs redis-set warnings when caching successful CAA covers fails", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                images: [{ front: true, image: "https://img/caa-cache.jpg" }],
-            },
-        });
-        mockRedisSetEx.mockRejectedValueOnce(new Error("redis write failed"));
-
-        await expect(
-            coverArtService.getCoverArt("55555555-5555-4555-8555-555555555555"),
-        ).resolves.toBe("https://img/caa-cache.jpg");
-        expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "Redis set error:",
-            expect.any(Error),
-        );
+        // The fallback ladder moved to the album-cover resolver; the CAA
+        // service no longer resolves release-group context on a miss.
+        expect(mockMusicBrainzGetReleaseGroup).not.toHaveBeenCalled();
+        expect(mockImageProviderGetAlbumCover).not.toHaveBeenCalled();
     });
 
     it("clears stale NOT_FOUND cache entries for release groups", async () => {

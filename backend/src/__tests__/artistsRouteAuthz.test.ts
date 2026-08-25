@@ -22,6 +22,10 @@ const mockRequireAuthOrToken = jest.fn(
     },
 );
 
+jest.mock("../services/metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock("../middleware/auth", () => ({
     requireAuthOrToken: (req: any, res: any, next: any) =>
         mockRequireAuthOrToken(req, res, next),

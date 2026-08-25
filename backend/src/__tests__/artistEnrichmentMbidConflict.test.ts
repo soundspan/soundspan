@@ -16,6 +16,10 @@ var mockPrisma = {
     },
 };
 
+jest.mock("../services/metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock("../utils/db", () => ({
     prisma: mockPrisma,
 }));
