@@ -5,8 +5,8 @@ import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
 import crypto from "crypto";
 import path from "path";
-import { deezerService } from "../../services/deezer";
 import { coverArtService } from "../../services/coverArt";
+import { resolveAlbumCover } from "../../services/metadata/albumCoverResolver";
 import { extractColorsFromImage } from "../../utils/colorExtractor";
 import {
     fetchExternalImage,
@@ -38,6 +38,7 @@ import {
     trySendResizedNativeCover,
 } from "../../utils/libraryCoverArt";
 import { normalizeRouteName } from "../routeParamName";
+import { rgMbidKind } from "../../utils/musicIds";
 
 const coverAlbumSelect = {
     id: true,
@@ -418,34 +419,26 @@ export async function handleGetCoverArt(
             const validRgMbid =
                 typeof album.rgMbid === "string" &&
                 album.rgMbid.length > 0 &&
-                !album.rgMbid.startsWith("temp-") &&
-                !album.rgMbid.startsWith("federation:")
+                rgMbidKind(album.rgMbid) === "musicbrainz"
                     ? album.rgMbid
                     : null;
 
             // Clear stale NOT_FOUND cache so retry uses improved matching
             if (validRgMbid) {
                 await coverArtService.clearNotFoundCache(validRgMbid);
-                try {
-                    fetchedCoverUrl =
-                        await coverArtService.getCoverArt(validRgMbid);
-                } catch (err) {
-                    logger.warn(
-                        `[COVER-ART] On-demand CAA fetch failed for ${validRgMbid}:`,
-                        err,
-                    );
-                }
             }
 
-            if (!fetchedCoverUrl && album.artist) {
+            if (album.artist) {
                 try {
-                    fetchedCoverUrl = await deezerService.getAlbumCover(
-                        album.artist.name,
-                        album.title,
-                    );
+                    const resolution = await resolveAlbumCover({
+                        artistName: album.artist.name,
+                        albumTitle: album.title,
+                        rgMbid: album.rgMbid,
+                    });
+                    fetchedCoverUrl = resolution?.url ?? null;
                 } catch (err) {
                     logger.warn(
-                        `[COVER-ART] On-demand Deezer fetch failed for ${album.artist.name} - ${album.title}:`,
+                        `[COVER-ART] On-demand cover resolution failed for ${album.artist.name} - ${album.title}:`,
                         err,
                     );
                 }

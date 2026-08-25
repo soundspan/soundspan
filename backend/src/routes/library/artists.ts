@@ -12,7 +12,7 @@ import { logger } from "../../utils/logger";
 import path from "path";
 import fs from "fs";
 import { config } from "../../config";
-import { deezerService } from "../../services/deezer";
+import { resolveAlbumCover } from "../../services/metadata/albumCoverResolver";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { dataCacheService } from "../../services/dataCache";
 import {
@@ -945,19 +945,19 @@ export async function handleGetArtist(
                 }
             }
 
-            // Fetch Deezer covers for unowned tracks in parallel (cached 24h)
             if (unownedEntries.length > 0) {
                 const covers = await Promise.all(
                     unownedEntries.map((entry) =>
-                        deezerService
-                            .getAlbumCover(artist.name, entry.albumTitle)
-                            .catch(() => null),
+                        resolveAlbumCover({
+                            artistName: artist.name,
+                            albumTitle: entry.albumTitle,
+                        }).catch(() => null),
                     ),
                 );
                 for (let i = 0; i < unownedEntries.length; i++) {
                     if (covers[i]) {
                         combinedTracks[unownedEntries[i].index].album.coverArt =
-                            covers[i];
+                            covers[i]?.url ?? null;
                     }
                 }
             }

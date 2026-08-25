@@ -5,9 +5,9 @@ import { wikidataService } from "../services/wikidata";
 import { lastFmService } from "../services/lastfm";
 import { musicBrainzService } from "../services/musicbrainz";
 import { normalizeArtistName } from "../utils/artistNormalization";
-import { coverArtService } from "../services/coverArt";
 import { redisClient } from "../utils/redis";
 import { downloadAndStoreImage, isNativePath } from "../services/imageStorage";
+import { resolveAlbumCover } from "../services/metadata/albumCoverResolver";
 import { resolveArtistImage } from "../services/metadata/artistImageResolver";
 import { isRealArtistMbid } from "../utils/musicIds";
 
@@ -362,7 +362,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
 
 /**
  * Enrich album covers for an artist
- * Fetches covers from Cover Art Archive for albums without covers
+ * Resolves covers through the canonical provider ladder for albums without covers
  */
 async function enrichAlbumCovers(
     artistId: string,
@@ -380,6 +380,7 @@ async function enrichAlbumCovers(
                 id: true,
                 rgMbid: true,
                 title: true,
+                artist: { select: { name: true } },
             },
         });
 
@@ -395,23 +396,23 @@ async function enrichAlbumCovers(
         let fetchedCount = 0;
         const BATCH_SIZE = 3; // Limit concurrent requests
 
-        // Process in batches to avoid overwhelming Cover Art Archive
+        // Process in batches to avoid overwhelming cover providers
         for (let i = 0; i < albumsWithoutCovers.length; i += BATCH_SIZE) {
             const batch = albumsWithoutCovers.slice(i, i + BATCH_SIZE);
 
             await Promise.all(
                 batch.map(async (album) => {
-                    if (
-                        !album.rgMbid ||
-                        album.rgMbid.startsWith("federation:")
-                    ) {
+                    if (album.rgMbid?.startsWith("federation:")) {
                         return;
                     }
 
                     try {
-                        const coverUrl = await coverArtService.getCoverArt(
-                            album.rgMbid,
-                        );
+                        const resolution = await resolveAlbumCover({
+                            artistName: album.artist.name,
+                            albumTitle: album.title,
+                            rgMbid: album.rgMbid,
+                        });
+                        const coverUrl = resolution?.url;
 
                         if (coverUrl) {
                             // Save to database

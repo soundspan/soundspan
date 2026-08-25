@@ -14,8 +14,8 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { buildFederatedCoverProxyPath } from "../utils/federationCover";
-import { coverArtService } from "./coverArt";
 import { downloadAndStoreImage } from "./imageStorage";
+import { resolveAlbumCover } from "./metadata/albumCoverResolver";
 import { resolveArtistImage } from "./metadata/artistImageResolver";
 
 // Cache TTLs
@@ -81,19 +81,26 @@ class DataCacheService {
 
     /**
      * Get album cover with unified caching
-     * Order: DB -> Redis -> Cover Art Archive -> save to both
+     * Order: DB -> Redis -> provider resolver -> save to both
      */
     async getAlbumCover(
         albumId: string,
         rgMbid: string,
     ): Promise<string | null> {
         const cacheKey = `album-cover:${albumId}`;
+        let albumTitle = "";
+        let artistName = "";
 
         // 1. Check DB first
         try {
             const album = await prisma.album.findUnique({
                 where: { id: albumId },
-                select: { coverUrl: true, location: true },
+                select: {
+                    coverUrl: true,
+                    location: true,
+                    title: true,
+                    artist: { select: { name: true } },
+                },
             });
             if (album?.coverUrl) {
                 this.setRedisCache(cacheKey, album.coverUrl, ALBUM_COVER_TTL);
@@ -102,6 +109,8 @@ class DataCacheService {
             if (album?.location === "FEDERATED") {
                 return buildFederatedCoverProxyPath(albumId);
             }
+            albumTitle = album?.title ?? "";
+            artistName = album?.artist.name ?? "";
         } catch (err) {
             logger.warn("[DataCache] DB lookup failed for album:", albumId);
         }
@@ -118,8 +127,13 @@ class DataCacheService {
             // Redis errors are non-critical
         }
 
-        // 3. Fetch from Cover Art Archive
-        const coverUrl = await coverArtService.getCoverArt(rgMbid);
+        // 3. Resolve through the canonical provider ladder
+        const resolution = await resolveAlbumCover({
+            artistName,
+            albumTitle,
+            rgMbid,
+        });
+        const coverUrl = resolution?.url ?? null;
 
         // 4. Save to both DB and Redis
         if (coverUrl) {

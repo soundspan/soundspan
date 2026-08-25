@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Album covers now resolve through one provider ladder with unified caching, replacing six surface-specific implementations.
 - Artist images now resolve through one provider ladder with unified caching, instead of five surface-specific implementations.
 - Search now matches songs by artist and album name, tolerates typos, and ranks fallback results by similarity instead of alphabetically.
 - Download job metadata updates now flow through guarded helpers instead of ad-hoc merges scattered across the backend.

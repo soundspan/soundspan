@@ -6,15 +6,11 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { buildFederatedCoverProxyPath } from "../utils/federationCover";
-import { coverArtService } from "./coverArt";
-import { imageProviderService } from "./imageProvider";
-import { deezerService } from "./deezer";
-import { isValidMbid } from "./musicbrainz";
 import { normalizeExternalImageUrl } from "./imageProxy";
 import { downloadAndStoreImage } from "./imageStorage";
+import { resolveAlbumCover } from "./metadata/albumCoverResolver";
 
 const ALBUM_COVER_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
-export const NATIVE_COVER_HEAL_TIMEOUT_MS = 5000;
 
 export const nativeCoverHealInFlight = new Map<
     string,
@@ -88,6 +84,20 @@ export const persistHealedAlbumCover = async (
         );
     }
 };
+
+async function storeHealedAlbumCover(
+    albumId: string,
+    coverUrl: string,
+): Promise<string | null> {
+    const localCoverPath = await downloadAndStoreImage(
+        coverUrl,
+        albumId,
+        "album",
+    );
+    if (!localCoverPath) return null;
+    await persistHealedAlbumCover(albumId, localCoverPath);
+    return buildNativeCoverProxyRedirectPath(localCoverPath);
+}
 
 export const tryHealMissingNativeAlbumCover = async (
     nativePath: string,
@@ -177,73 +187,45 @@ export const tryHealMissingNativeAlbumCover = async (
             }
         };
 
+        let persistedExternalCover: string | null = null;
         if (
             typeof album.coverUrl === "string" &&
             (album.coverUrl.startsWith("http://") ||
                 album.coverUrl.startsWith("https://"))
         ) {
-            addCandidateUrl(album.coverUrl);
-        }
-
-        const validRgMbid = isValidMbid(album.rgMbid) ? album.rgMbid : null;
-
-        if (validRgMbid) {
-            try {
-                const coverArtArchiveCover =
-                    await coverArtService.getCoverArt(validRgMbid);
-                addCandidateUrl(coverArtArchiveCover);
-            } catch (error) {
-                logger.warn(
-                    `[COVER-ART] Cover Art Archive recovery failed for ${validRgMbid}:`,
-                    error,
+            persistedExternalCover = normalizeExternalImageUrl(album.coverUrl);
+            if (persistedExternalCover) {
+                const storedCover = await storeHealedAlbumCover(
+                    album.id,
+                    persistedExternalCover,
                 );
-            }
-        }
-
-        if (validRgMbid) {
-            try {
-                const providerCover = await imageProviderService.getAlbumCover(
-                    album.artist.name,
-                    album.title,
-                    validRgMbid,
-                    { timeout: NATIVE_COVER_HEAL_TIMEOUT_MS },
-                );
-                addCandidateUrl(providerCover?.url);
-            } catch (error) {
-                logger.warn(
-                    `[COVER-ART] Provider-chain recovery failed for ${album.artist.name} - ${album.title}:`,
-                    error,
-                );
+                if (storedCover) return storedCover;
+                candidateUrls.add(persistedExternalCover);
             }
         }
 
         try {
-            const deezerCover = await deezerService.getAlbumCover(
-                album.artist.name,
-                album.title,
-            );
-            addCandidateUrl(deezerCover);
+            const resolution = await resolveAlbumCover({
+                artistName: album.artist.name,
+                albumTitle: album.title,
+                rgMbid: album.rgMbid,
+            });
+            addCandidateUrl(resolution?.url);
         } catch (error) {
             logger.warn(
-                `[COVER-ART] Deezer recovery failed for ${album.artist.name} - ${album.title}:`,
+                `[COVER-ART] Album-cover recovery failed for ${album.artist.name} - ${album.title}:`,
                 error,
             );
         }
 
         const orderedCandidateUrls = Array.from(candidateUrls);
         for (const candidateUrl of orderedCandidateUrls) {
-            const localCoverPath = await downloadAndStoreImage(
-                candidateUrl,
+            if (candidateUrl === persistedExternalCover) continue;
+            const storedCover = await storeHealedAlbumCover(
                 album.id,
-                "album",
+                candidateUrl,
             );
-
-            if (!localCoverPath) {
-                continue;
-            }
-
-            await persistHealedAlbumCover(album.id, localCoverPath);
-            return buildNativeCoverProxyRedirectPath(localCoverPath);
+            if (storedCover) return storedCover;
         }
 
         const fallbackExternalUrl = orderedCandidateUrls[0];

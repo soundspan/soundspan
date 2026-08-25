@@ -1,7 +1,5 @@
 import axios from "axios";
 import { redisClient } from "../../utils/redis";
-import { imageProviderService } from "../imageProvider";
-import { musicBrainzService } from "../musicbrainz";
 import { rateLimiter } from "../rateLimiter";
 import { coverArtService } from "../coverArt";
 
@@ -31,18 +29,8 @@ jest.mock("../rateLimiter", () => ({
     },
 }));
 
-jest.mock("../imageProvider", () => ({
-    imageProviderService: {
-        getAlbumCover: jest.fn(),
-    },
-}));
-
 jest.mock("../musicbrainz", () => ({
     isValidMbid: jest.requireActual("../musicbrainz").isValidMbid,
-    musicBrainzService: {
-        getReleaseGroup: jest.fn(),
-        extractPrimaryArtist: jest.fn(),
-    },
 }));
 
 const mockAxiosGet = axios.get as jest.Mock;
@@ -50,14 +38,9 @@ const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
 const mockRedisDel = redisClient.del as jest.Mock;
 const mockRateLimiterExecute = rateLimiter.execute as jest.Mock;
-const mockGetAlbumCover = imageProviderService.getAlbumCover as jest.Mock;
-const mockGetReleaseGroup = musicBrainzService.getReleaseGroup as jest.Mock;
-const mockExtractPrimaryArtist =
-    musicBrainzService.extractPrimaryArtist as jest.Mock;
 
 const CACHE_HIT_MBID = "11111111-1111-4111-8111-111111111111";
 const DEDUPE_MBID = "22222222-2222-4222-8222-222222222222";
-const FALLBACK_MBID = "33333333-3333-4333-8333-333333333333";
 const NOT_FOUND_MBID = "44444444-4444-4444-8444-444444444444";
 const TRANSIENT_ERROR_MBID = "55555555-5555-4555-8555-555555555555";
 
@@ -70,9 +53,6 @@ describe("coverArtService", () => {
             async (_bucket: string, requestFn: () => Promise<unknown>) =>
                 requestFn(),
         );
-        mockGetReleaseGroup.mockResolvedValue(null);
-        mockExtractPrimaryArtist.mockReturnValue("Unknown Artist");
-        mockGetAlbumCover.mockResolvedValue(null);
     });
 
     it("returns cached URL without making upstream calls", async () => {
@@ -90,8 +70,6 @@ describe("coverArtService", () => {
         expect(result).toBeNull();
         expect(mockRedisGet).not.toHaveBeenCalled();
         expect(mockRateLimiterExecute).not.toHaveBeenCalled();
-        expect(mockGetReleaseGroup).not.toHaveBeenCalled();
-        expect(mockGetAlbumCover).not.toHaveBeenCalled();
     });
 
     it("quietly rejects federation placeholders before cache or upstream access", async () => {
@@ -103,8 +81,6 @@ describe("coverArtService", () => {
         expect(mockRedisGet).not.toHaveBeenCalled();
         expect(mockAxiosGet).not.toHaveBeenCalled();
         expect(mockRateLimiterExecute).not.toHaveBeenCalled();
-        expect(mockGetReleaseGroup).not.toHaveBeenCalled();
-        expect(mockGetAlbumCover).not.toHaveBeenCalled();
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 
@@ -164,40 +140,7 @@ describe("coverArtService", () => {
         );
     });
 
-    it("falls back to provider chain when Cover Art Archive is not found", async () => {
-        mockAxiosGet.mockImplementation((url: string) => {
-            if (url.includes("coverartarchive.org")) {
-                return Promise.reject({ response: { status: 404 } });
-            }
-            throw new Error(`Unexpected URL: ${url}`);
-        });
-        mockGetReleaseGroup.mockResolvedValue({
-            title: "Fallback Album",
-            "artist-credit": [{ name: "Fallback Artist" }],
-        });
-        mockExtractPrimaryArtist.mockReturnValue("Fallback Artist");
-        mockGetAlbumCover.mockResolvedValue({
-            url: "https://deezer.example/fallback.jpg",
-            source: "deezer",
-        });
-
-        const result = await coverArtService.getCoverArt(FALLBACK_MBID);
-
-        expect(result).toBe("https://deezer.example/fallback.jpg");
-        expect(mockGetAlbumCover).toHaveBeenCalledWith(
-            "Fallback Artist",
-            "Fallback Album",
-            FALLBACK_MBID,
-            { timeout: 5000 },
-        );
-        expect(mockRedisSetEx).toHaveBeenCalledWith(
-            `caa:${FALLBACK_MBID}`,
-            365 * 24 * 60 * 60,
-            "https://deezer.example/fallback.jpg",
-        );
-    });
-
-    it("negative-caches not-found result when no fallback image exists", async () => {
+    it("negative-caches a Cover Art Archive not-found result", async () => {
         mockAxiosGet.mockImplementation((url: string) => {
             if (url.includes("coverartarchive.org")) {
                 return Promise.reject({ response: { status: 404 } });

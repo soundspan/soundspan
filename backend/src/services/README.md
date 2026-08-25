@@ -137,6 +137,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/listenTogetherUserQuiescence.ts` | Bounded per-group local mutation-tail barrier before administrative user cleanup |
 | `backend/src/services/lyrics.ts` | Core |
 | `backend/src/services/m3uParser.ts` | Core |
+| `backend/src/services/metadata/albumCoverResolver.ts` | Canonical bounded album-cover provider ladder, cache, and in-flight deduplication |
 | `backend/src/services/metadata/artistImageResolver.ts` | Canonical bounded artist-image provider ladder, cache, and in-flight deduplication |
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |

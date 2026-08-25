@@ -1,8 +1,7 @@
 import axios from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { imageProviderService } from "./imageProvider";
-import { isValidMbid, musicBrainzService } from "./musicbrainz";
+import { isValidMbid } from "./musicbrainz";
 import { rateLimiter } from "./rateLimiter";
 
 const COVER_ART_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60;
@@ -12,11 +11,6 @@ const COVER_ART_TIMEOUT_MS = 5000;
 interface CoverArtLookupResult {
     coverUrl: string | null;
     notFound: boolean;
-}
-
-interface ReleaseGroupLookupContext {
-    artistName: string;
-    albumTitle: string;
 }
 
 class CoverArtService {
@@ -64,19 +58,6 @@ class CoverArtService {
             return coverArtResult.coverUrl;
         }
 
-        const releaseGroupContext =
-            await this.resolveReleaseGroupContext(rgMbid);
-        if (releaseGroupContext) {
-            const fallbackCover = await this.fetchFromFallbackProviders(
-                releaseGroupContext,
-                rgMbid,
-            );
-            if (fallbackCover) {
-                await this.cacheCoverUrl(cacheKey, fallbackCover);
-                return fallbackCover;
-            }
-        }
-
         if (coverArtResult.notFound) {
             await this.cacheNotFound(cacheKey);
         }
@@ -114,59 +95,6 @@ class CoverArtService {
             }
             logger.error(`Cover art error for ${rgMbid}:`, error.message);
             return { coverUrl: null, notFound: false };
-        }
-    }
-
-    private async resolveReleaseGroupContext(
-        rgMbid: string,
-    ): Promise<ReleaseGroupLookupContext | null> {
-        try {
-            const releaseGroup =
-                await musicBrainzService.getReleaseGroup(rgMbid);
-            if (!releaseGroup || typeof releaseGroup.title !== "string") {
-                return null;
-            }
-
-            const artistCredits = Array.isArray(releaseGroup["artist-credit"])
-                ? releaseGroup["artist-credit"]
-                : [];
-            const artistName =
-                musicBrainzService.extractPrimaryArtist(artistCredits);
-            if (!artistName || artistName === "Unknown Artist") {
-                return null;
-            }
-
-            return {
-                artistName,
-                albumTitle: releaseGroup.title,
-            };
-        } catch (err) {
-            logger.warn(
-                `[CoverArt] Failed to resolve release-group metadata for ${rgMbid}:`,
-                err,
-            );
-            return null;
-        }
-    }
-
-    private async fetchFromFallbackProviders(
-        context: ReleaseGroupLookupContext,
-        rgMbid: string,
-    ): Promise<string | null> {
-        try {
-            const fallback = await imageProviderService.getAlbumCover(
-                context.artistName,
-                context.albumTitle,
-                rgMbid,
-                { timeout: COVER_ART_TIMEOUT_MS },
-            );
-            return fallback?.url ?? null;
-        } catch (err) {
-            logger.warn(
-                `[CoverArt] Fallback providers failed for ${context.artistName} - ${context.albumTitle}:`,
-                err,
-            );
-            return null;
         }
     }
 

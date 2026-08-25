@@ -6,7 +6,7 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../utils/db";
 import PQueue from "p-queue";
 import { CoverArtExtractor } from "./coverArtExtractor";
-import { deezerService } from "./deezer";
+import { resolveAlbumCover } from "./metadata/albumCoverResolver";
 import {
     normalizeArtistName,
     canonicalizeVariousArtists,
@@ -1324,17 +1324,17 @@ export class MusicScannerService {
                             data: { coverUrl: `native:${coverPath}` },
                         });
                     } else {
-                        // No embedded art, try fetching from Deezer
+                        // No embedded art, use the canonical provider ladder.
                         try {
-                            const deezerCover =
-                                await deezerService.getAlbumCover(
-                                    artistName,
-                                    albumTitle,
-                                );
-                            if (deezerCover) {
+                            const resolution = await resolveAlbumCover({
+                                artistName,
+                                albumTitle,
+                                rgMbid: albumMbid,
+                            });
+                            if (resolution) {
                                 await prisma.album.update({
                                     where: { id: album.id },
-                                    data: { coverUrl: deezerCover },
+                                    data: { coverUrl: resolution.url },
                                 });
                             }
                         } catch (error) {

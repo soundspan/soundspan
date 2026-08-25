@@ -20,24 +20,8 @@ jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn() },
 }));
 
-jest.mock("../coverArt", () => ({
-    coverArtService: { getCoverArt: jest.fn() },
-}));
-
-jest.mock("../imageProvider", () => ({
-    imageProviderService: { getAlbumCover: jest.fn() },
-}));
-
-jest.mock("../deezer", () => ({
-    deezerService: { getAlbumCover: jest.fn() },
-}));
-
-jest.mock("../musicbrainz", () => ({
-    isValidMbid: (value: unknown) =>
-        typeof value === "string" &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-            value,
-        ),
+jest.mock("../metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: jest.fn(),
 }));
 
 jest.mock("../imageStorage", () => ({
@@ -45,9 +29,7 @@ jest.mock("../imageStorage", () => ({
 }));
 
 import { prisma } from "../../utils/db";
-import { coverArtService } from "../coverArt";
-import { deezerService } from "../deezer";
-import { imageProviderService } from "../imageProvider";
+import { resolveAlbumCover } from "../metadata/albumCoverResolver";
 import { downloadAndStoreImage } from "../imageStorage";
 import {
     nativeCoverHealInFlight,
@@ -57,9 +39,7 @@ import {
 const mockAlbumFindUnique = prisma.album.findUnique as jest.Mock;
 const mockAlbumUpdate = prisma.album.update as jest.Mock;
 const mockAlbumUpdateMany = prisma.album.updateMany as jest.Mock;
-const mockCoverArtGet = coverArtService.getCoverArt as jest.Mock;
-const mockProviderGet = imageProviderService.getAlbumCover as jest.Mock;
-const mockDeezerGet = deezerService.getAlbumCover as jest.Mock;
+const mockResolveAlbumCover = resolveAlbumCover as jest.Mock;
 const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
 
 describe("native cover healing", () => {
@@ -91,9 +71,7 @@ describe("native cover healing", () => {
             data: { coverUrl: null },
         });
         expect(mockAlbumUpdate).not.toHaveBeenCalled();
-        expect(mockCoverArtGet).not.toHaveBeenCalled();
-        expect(mockProviderGet).not.toHaveBeenCalled();
-        expect(mockDeezerGet).not.toHaveBeenCalled();
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
     });
 
     it("does not overwrite a cover changed after the stale native value was read", async () => {
@@ -119,7 +97,7 @@ describe("native cover healing", () => {
         expect(mockAlbumUpdate).not.toHaveBeenCalled();
     });
 
-    it("does not call image providers with a malformed release-group MBID", async () => {
+    it("delegates malformed release-group identity gating to the resolver", async () => {
         mockAlbumFindUnique.mockResolvedValue({
             id: "malformed-mbid-album",
             title: "Malformed MBID album",
@@ -131,12 +109,34 @@ describe("native cover healing", () => {
 
         await tryHealMissingNativeAlbumCover("albums/malformed-mbid-album.jpg");
 
-        expect(mockCoverArtGet).not.toHaveBeenCalled();
-        expect(mockProviderGet).not.toHaveBeenCalled();
-        expect(mockDeezerGet).toHaveBeenCalledWith(
-            "Local artist",
-            "Malformed MBID album",
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Local artist",
+            albumTitle: "Malformed MBID album",
+            rgMbid: "not-a-musicbrainz-uuid",
+        });
+    });
+
+    it("uses a working persisted external URL before resolving providers", async () => {
+        mockAlbumFindUnique.mockResolvedValue({
+            id: "existing-cover-album",
+            title: "Existing Cover",
+            rgMbid: "11111111-1111-4111-8111-111111111111",
+            coverUrl: "https://images.example/existing.jpg",
+            location: "LIBRARY",
+            artist: { name: "Existing Artist" },
+        });
+        mockDownloadAndStoreImage.mockResolvedValue(
+            "native:albums/existing-cover-album.jpg",
         );
+
+        await tryHealMissingNativeAlbumCover("albums/existing-cover-album.jpg");
+
+        expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
+            "https://images.example/existing.jpg",
+            "existing-cover-album",
+            "album",
+        );
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
     });
 
     it("removes settled heals so a later request can retry the same album", async () => {
@@ -148,9 +148,15 @@ describe("native cover healing", () => {
             location: "LIBRARY",
             artist: { name: "Local artist" },
         });
-        mockDeezerGet
-            .mockResolvedValueOnce("https://images.example/first.jpg")
-            .mockResolvedValueOnce("https://images.example/second.jpg");
+        mockResolveAlbumCover
+            .mockResolvedValueOnce({
+                url: "https://images.example/first.jpg",
+                source: "deezer",
+            })
+            .mockResolvedValueOnce({
+                url: "https://images.example/second.jpg",
+                source: "deezer",
+            });
         mockDownloadAndStoreImage
             .mockResolvedValueOnce("native:albums/retry-album-first.jpg")
             .mockResolvedValueOnce("native:albums/retry-album-second.jpg");

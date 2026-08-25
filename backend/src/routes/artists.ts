@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { lastFmService } from "../services/lastfm";
 import { musicBrainzService } from "../services/musicbrainz";
-import { deezerService } from "../services/deezer";
+import { resolveAlbumCover } from "../services/metadata/albumCoverResolver";
 import { resolveArtistImage } from "../services/metadata/artistImageResolver";
 import { ytMusicService } from "../services/youtubeMusic";
 import { redisClient } from "../utils/redis";
@@ -497,56 +497,49 @@ router.get<{ nameOrMbid: string }>(
                         },
                     );
 
-                    // Process albums with Deezer fallback
+                    // Resolve covers for the bounded discovery subset.
                     albums = await Promise.all(
-                        filteredReleaseGroups.map(async (rg: any) => {
-                            // Default to Cover Art Archive URL
-                            let coverUrl = `https://coverartarchive.org/release-group/${rg.id}/front-500`;
+                        filteredReleaseGroups.map(
+                            async (rg: any, index: number) => {
+                                const archiveUrl = `https://coverartarchive.org/release-group/${rg.id}/front-500`;
+                                let coverUrl = archiveUrl;
 
-                            // For first 10 albums, try Deezer as fallback if Cover Art Archive doesn't have it
-                            // (to avoid too many requests)
-                            const index = filteredReleaseGroups.indexOf(rg);
-                            if (index < 10) {
-                                try {
-                                    const response = await fetch(coverUrl, {
-                                        method: "HEAD",
-                                        signal: AbortSignal.timeout(2000),
-                                    });
-                                    if (!response.ok) {
-                                        // Cover Art Archive doesn't have it, try Deezer
-                                        const deezerCover =
-                                            await deezerService.getAlbumCover(
+                                // Preserve the existing ten-album provider-work cap.
+                                if (index < 10) {
+                                    try {
+                                        const resolution =
+                                            await resolveAlbumCover({
                                                 artistName,
-                                                rg.title,
-                                            );
-                                        if (deezerCover) {
-                                            coverUrl = deezerCover;
-                                        }
+                                                albumTitle: rg.title,
+                                                rgMbid: rg.id,
+                                            });
+                                        coverUrl =
+                                            resolution?.url ?? archiveUrl;
+                                    } catch (error) {
+                                        // Keep the legacy archive URL fallback.
                                     }
-                                } catch (error) {
-                                    // Silently fail and keep Cover Art Archive URL
                                 }
-                            }
 
-                            return {
-                                id: rg.id, // MBID - used for linking
-                                rgMbid: rg.id, // Release group MBID - used for downloads
-                                mbid: rg.id, // Fallback MBID
-                                title: rg.title,
-                                type: rg["primary-type"],
-                                year: rg["first-release-date"]
-                                    ? parseInt(
-                                          rg["first-release-date"].substring(
-                                              0,
-                                              4,
-                                          ),
-                                      )
-                                    : null,
-                                releaseDate: rg["first-release-date"] || null,
-                                coverUrl,
-                                owned: false, // Discovery albums are never owned
-                            };
-                        }),
+                                return {
+                                    id: rg.id, // MBID - used for linking
+                                    rgMbid: rg.id, // Release group MBID - used for downloads
+                                    mbid: rg.id, // Fallback MBID
+                                    title: rg.title,
+                                    type: rg["primary-type"],
+                                    year: rg["first-release-date"]
+                                        ? parseInt(
+                                              rg[
+                                                  "first-release-date"
+                                              ].substring(0, 4),
+                                          )
+                                        : null,
+                                    releaseDate:
+                                        rg["first-release-date"] || null,
+                                    coverUrl,
+                                    owned: false, // Discovery albums are never owned
+                                };
+                            },
+                        ),
                     );
 
                     // Sort albums
@@ -799,54 +792,22 @@ router.get<{ mbid: string }>(
                 }
             }
 
-            // Get album cover art - try Cover Art Archive first
-            let coverUrl = null;
+            // Get album cover art through the canonical provider ladder.
             let coverArtUrl = `https://coverartarchive.org/release/${mbid}/front-500`;
             if (!release) {
                 coverArtUrl = `https://coverartarchive.org/release-group/${releaseGroupId}/front-500`;
             }
 
-            // Check if Cover Art Archive actually has the image
+            let coverUrl = coverArtUrl;
             try {
-                const response = await fetch(coverArtUrl, {
-                    method: "HEAD",
-                    signal: AbortSignal.timeout(2000),
+                const resolution = await resolveAlbumCover({
+                    artistName,
+                    albumTitle,
+                    rgMbid: releaseGroupId,
                 });
-                if (response.ok) {
-                    coverUrl = coverArtUrl;
-                    logger.debug(
-                        `Cover Art Archive has cover for ${albumTitle}`,
-                    );
-                } else {
-                    logger.debug(
-                        `✗ Cover Art Archive 404 for ${albumTitle}, trying Deezer...`,
-                    );
-                }
+                coverUrl = resolution?.url ?? coverArtUrl;
             } catch (error) {
-                logger.debug(
-                    `✗ Cover Art Archive check failed for ${albumTitle}, trying Deezer...`,
-                );
-            }
-
-            // Fallback to Deezer if Cover Art Archive doesn't have it
-            if (!coverUrl) {
-                try {
-                    const deezerCover = await deezerService.getAlbumCover(
-                        artistName,
-                        albumTitle,
-                    );
-                    if (deezerCover) {
-                        coverUrl = deezerCover;
-                        logger.debug(`Deezer has cover for ${albumTitle}`);
-                    } else {
-                        // Final fallback to Cover Art Archive URL (might 404, but better than nothing)
-                        coverUrl = coverArtUrl;
-                    }
-                } catch (error) {
-                    logger.debug(` Deezer lookup failed for ${albumTitle}`);
-                    // Final fallback to Cover Art Archive URL
-                    coverUrl = coverArtUrl;
-                }
+                logger.debug(`Album cover lookup failed for ${albumTitle}`);
             }
 
             // Format response

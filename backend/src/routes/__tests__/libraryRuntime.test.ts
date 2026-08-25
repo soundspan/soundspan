@@ -3274,7 +3274,18 @@ describe("library catalog list runtime coverage", () => {
                 id: "artist-cacheless",
                 coverArt: "hero-from-cacheless-cache",
                 discographyComplete: true,
-                topTracks: [],
+                // The cover-resolver miss no longer aborts the Last.fm merge,
+                // so the unowned top track survives with the page artist.
+                topTracks: [
+                    expect.objectContaining({
+                        title: "One-Track",
+                        playCount: 88,
+                        artist: { name: "Cacheless Artist" },
+                        album: expect.objectContaining({
+                            title: "Single Album",
+                        }),
+                    }),
+                ],
                 similarArtists: [
                     expect.objectContaining({
                         id: "Similar Cacheless",

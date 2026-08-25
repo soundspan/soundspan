@@ -34,7 +34,6 @@ jest.mock("../../services/youtubeMusic", () => ({
 
 const deezerService = {
     getTrackPreview: jest.fn(),
-    getAlbumCover: jest.fn(),
 };
 
 jest.mock("../../services/deezer", () => ({
@@ -68,6 +67,11 @@ jest.mock("../../services/metadata/artistImageResolver", () => ({
     resolveArtistImage: mockResolveArtistImage,
 }));
 
+const mockResolveAlbumCover = jest.fn();
+jest.mock("../../services/metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: mockResolveAlbumCover,
+}));
+
 const redisClient = {
     get: jest.fn(),
     set: jest.fn(),
@@ -86,7 +90,6 @@ const mockLoggerError = logger.error as jest.Mock;
 
 const mockYtSearch = ytMusicService.search as jest.Mock;
 const mockGetTrackPreview = deezerService.getTrackPreview as jest.Mock;
-const mockGetAlbumCover = deezerService.getAlbumCover as jest.Mock;
 
 const mockSearchArtist = musicBrainzService.searchArtist as jest.Mock;
 const mockGetArtist = musicBrainzService.getArtist as jest.Mock;
@@ -152,7 +155,7 @@ describe("artists routes runtime", () => {
         mockGetSystemSettings.mockResolvedValue({ ytMusicEnabled: true });
         mockYtSearch.mockResolvedValue({ results: [], total: 0 });
         mockGetTrackPreview.mockResolvedValue(null);
-        mockGetAlbumCover.mockResolvedValue(null);
+        mockResolveAlbumCover.mockResolvedValue(null);
 
         mockSearchArtist.mockResolvedValue([]);
         mockGetArtist.mockResolvedValue(null);
@@ -648,13 +651,12 @@ describe("artists routes runtime", () => {
             },
         ]);
 
-        fetchMock
-            .mockResolvedValueOnce({ ok: false })
-            .mockResolvedValueOnce({ ok: true });
-
-        mockGetAlbumCover.mockResolvedValueOnce(
-            "https://deezer/covers/older.jpg",
-        );
+        mockResolveAlbumCover
+            .mockResolvedValueOnce({
+                url: "https://deezer/covers/older.jpg",
+                source: "deezer",
+            })
+            .mockResolvedValueOnce(null);
 
         const req = {
             params: { nameOrMbid: "The Artist" },
@@ -675,6 +677,17 @@ describe("artists routes runtime", () => {
             10,
         );
         expect(mockGetReleaseGroups).toHaveBeenCalledWith("artist-mbid-1");
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Resolved Artist",
+            albumTitle: "Older Album",
+            rgMbid: "rg-older",
+        });
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Resolved Artist",
+            albumTitle: "Newer EP",
+            rgMbid: "rg-newer",
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
         expect(mockResolveArtistImage).toHaveBeenCalledWith({
             artistName: "Resolved Artist",
             mbid: "artist-mbid-1",
@@ -856,10 +869,10 @@ describe("artists routes runtime", () => {
             tags: { tag: { name: "electronic" } },
         });
 
-        fetchMock.mockResolvedValueOnce({ ok: false });
-        mockGetAlbumCover.mockResolvedValueOnce(
-            "https://deezer/covers/rg-123.jpg",
-        );
+        mockResolveAlbumCover.mockResolvedValueOnce({
+            url: "https://deezer/covers/rg-123.jpg",
+            source: "deezer",
+        });
 
         const req = {
             params: { mbid: "rg-123" },
@@ -871,6 +884,12 @@ describe("artists routes runtime", () => {
 
         expect(mockGetReleaseGroup).toHaveBeenCalledWith("rg-123");
         expect(mockGetRelease).toHaveBeenCalledWith("release-1");
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "RG Artist",
+            albumTitle: "Release Group Album",
+            rgMbid: "rg-123",
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual(
@@ -952,8 +971,6 @@ describe("artists routes runtime", () => {
                 },
             ],
         });
-
-        fetchMock.mockResolvedValueOnce({ ok: true });
 
         const req = {
             params: { mbid: "release-mbid-9" },
@@ -1039,8 +1056,6 @@ describe("artists routes runtime", () => {
         mockGetRelease.mockRejectedValueOnce(
             new Error("release tracks failed"),
         );
-        fetchMock.mockResolvedValueOnce({ ok: true });
-
         const req = {
             params: { mbid: "rg-album-fail" },
             query: { includeTracks: "1" },
@@ -1058,7 +1073,7 @@ describe("artists routes runtime", () => {
         );
     });
 
-    it("falls back to Cover Art Archive URL when album art HEAD request fails", async () => {
+    it("falls back to the Cover Art Archive URL when resolution misses", async () => {
         mockGetReleaseGroup.mockResolvedValueOnce({
             id: "rg-cover-fallback",
             title: "Cover Fallback Album",
@@ -1068,8 +1083,7 @@ describe("artists routes runtime", () => {
                 { name: "Fallback Artist", artist: { id: "artist-fallback" } },
             ],
         });
-        fetchMock.mockRejectedValueOnce(new Error("cover head check failed"));
-        mockGetAlbumCover.mockResolvedValueOnce(null);
+        mockResolveAlbumCover.mockResolvedValueOnce(null);
 
         const req = {
             params: { mbid: "rg-cover-fallback" },
@@ -1079,10 +1093,11 @@ describe("artists routes runtime", () => {
 
         await getAlbum(req, res);
 
-        expect(mockGetAlbumCover).toHaveBeenCalledWith(
-            "Fallback Artist",
-            "Cover Fallback Album",
-        );
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Fallback Artist",
+            albumTitle: "Cover Fallback Album",
+            rgMbid: "rg-cover-fallback",
+        });
         expect(res.statusCode).toBe(200);
         expect(res.body.coverUrl).toBe(
             "https://coverartarchive.org/release-group/rg-cover-fallback/front-500",
@@ -1105,8 +1120,6 @@ describe("artists routes runtime", () => {
                 { name: "Cache Artist", artist: { id: "artist-cache" } },
             ],
         });
-        fetchMock.mockResolvedValueOnce({ ok: true });
-
         const req = {
             params: { mbid: "rg-cache-fail" },
             query: { includeTracks: "0" },

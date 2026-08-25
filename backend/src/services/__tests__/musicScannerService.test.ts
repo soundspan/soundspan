@@ -79,7 +79,7 @@ mockLogger.child.mockReturnValue(mockLogger);
 
 const mockUpdateArtistCountsInBatches = jest.fn();
 const mockComputeAudioStreamHash = jest.fn();
-const mockGetAlbumCover = jest.fn();
+const mockResolveAlbumCover = jest.fn();
 const mockNormalizeArtistName = jest.fn((name: string) =>
     name.trim().toLowerCase(),
 );
@@ -215,10 +215,8 @@ jest.mock("../coverArtExtractor", () => ({
     })),
 }));
 
-jest.mock("../deezer", () => ({
-    deezerService: {
-        getAlbumCover: mockGetAlbumCover,
-    },
+jest.mock("../metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: mockResolveAlbumCover,
 }));
 
 jest.mock("../../utils/artistNormalization", () => ({
@@ -437,7 +435,7 @@ describe("MusicScannerService.scanLibrary", () => {
             updated: 0,
             failed: 0,
         });
-        mockGetAlbumCover.mockResolvedValue(null);
+        mockResolveAlbumCover.mockResolvedValue(null);
         mockComputeAudioStreamHash.mockResolvedValue(
             "sha256:" + "ab".repeat(32),
         );
@@ -3976,15 +3974,16 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         expect(mockPrisma.ownedAlbum.upsert).not.toHaveBeenCalled();
     });
 
-    it("falls back to Deezer cover when extractor returns no local art", async () => {
+    it("falls back to the album-cover resolver when extractor returns no local art", async () => {
         const scanner = new MusicScannerService(
             undefined,
             "/tmp/covers",
         ) as any;
         mockExtractCoverArt.mockResolvedValueOnce(null);
-        mockGetAlbumCover.mockResolvedValueOnce(
-            "https://example.com/cover.jpg",
-        );
+        mockResolveAlbumCover.mockResolvedValueOnce({
+            url: "https://example.com/cover.jpg",
+            source: "deezer",
+        });
 
         await scanner.processAudioFile(
             "/music/DiscFallback/Track.flac",
@@ -3996,10 +3995,11 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             "/music/DiscFallback/Track.flac",
             "album-new",
         );
-        expect(mockGetAlbumCover).toHaveBeenCalledWith(
-            "DiscFallback",
-            "Album Name",
-        );
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "DiscFallback",
+            albumTitle: "Album Name",
+            rgMbid: undefined,
+        });
         expect(mockPrisma.album.update).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: { id: "album-new" },

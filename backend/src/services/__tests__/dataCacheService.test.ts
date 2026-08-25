@@ -35,10 +35,8 @@ jest.mock("../metadata/artistImageResolver", () => ({
     resolveArtistImage: jest.fn(),
 }));
 
-jest.mock("../coverArt", () => ({
-    coverArtService: {
-        getCoverArt: jest.fn(),
-    },
+jest.mock("../metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: jest.fn(),
 }));
 
 jest.mock("../imageStorage", () => ({
@@ -49,7 +47,7 @@ import { dataCacheService } from "../dataCache";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { resolveArtistImage } from "../metadata/artistImageResolver";
-import { coverArtService } from "../coverArt";
+import { resolveAlbumCover } from "../metadata/albumCoverResolver";
 import { downloadAndStoreImage } from "../imageStorage";
 import { logger } from "../../utils/logger";
 
@@ -66,7 +64,7 @@ const mockRedisMGet = redisClient.mGet as jest.Mock;
 const mockRedisMulti = redisClient.multi as jest.Mock;
 
 const mockResolveArtistImage = resolveArtistImage as jest.Mock;
-const mockCoverArtGet = coverArtService.getCoverArt as jest.Mock;
+const mockResolveAlbumCover = resolveAlbumCover as jest.Mock;
 const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
 
 const mockWarn = logger.warn as jest.Mock;
@@ -99,7 +97,7 @@ describe("dataCacheService", () => {
         mockRedisMulti.mockImplementation(() => createRedisMulti());
 
         mockResolveArtistImage.mockResolvedValue(null);
-        mockCoverArtGet.mockResolvedValue(null);
+        mockResolveAlbumCover.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(null);
     });
 
@@ -253,6 +251,7 @@ describe("dataCacheService", () => {
             ONE_YEAR_SECONDS,
             "native:albums/from-db.jpg",
         );
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
     });
 
     it("uses Redis album cover cache and syncs DB", async () => {
@@ -265,26 +264,53 @@ describe("dataCacheService", () => {
             where: { id: "album-2" },
             data: { coverUrl: "native:albums/from-redis.jpg" },
         });
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
     });
 
-    it("fetches album cover from Cover Art service and persists", async () => {
-        mockCoverArtGet.mockResolvedValue("https://cover.art/cover.jpg");
+    it("resolves an album cover through the facade and persists it", async () => {
+        mockAlbumFindUnique.mockResolvedValue({
+            coverUrl: null,
+            location: "LIBRARY",
+            title: "Album Three",
+            artist: { name: "Artist Three" },
+        });
+        mockResolveAlbumCover.mockResolvedValue({
+            url: "https://cover.art/cover.jpg",
+            source: "deezer",
+        });
 
         const result = await dataCacheService.getAlbumCover("album-3", "rg-3");
 
         expect(result).toBe("https://cover.art/cover.jpg");
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Artist Three",
+            albumTitle: "Album Three",
+            rgMbid: "rg-3",
+        });
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "album-3" },
             data: { coverUrl: "https://cover.art/cover.jpg" },
         });
     });
 
-    it("stores negative cache for missing album cover", async () => {
-        mockCoverArtGet.mockResolvedValue(null);
+    it("stores negative cache when the album cover facade misses", async () => {
+        mockAlbumFindUnique.mockResolvedValue({
+            coverUrl: null,
+            location: "LIBRARY",
+            title: "Album Four",
+            artist: { name: "Artist Four" },
+        });
+        mockResolveAlbumCover.mockResolvedValue(null);
 
         const result = await dataCacheService.getAlbumCover("album-4", "rg-4");
 
         expect(result).toBeNull();
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Artist Four",
+            albumTitle: "Album Four",
+            rgMbid: "rg-4",
+        });
+        expect(mockAlbumUpdate).not.toHaveBeenCalled();
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "album-cover:album-4",
             NEGATIVE_CACHE_SECONDS,
@@ -304,7 +330,7 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBe("/api/library/cover-art/federated-album");
-        expect(mockCoverArtGet).not.toHaveBeenCalled();
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
         expect(mockRedisSetEx).not.toHaveBeenCalledWith(
             "album-cover:federated-album",
             NEGATIVE_CACHE_SECONDS,
@@ -312,7 +338,12 @@ describe("dataCacheService", () => {
         );
         expect(mockAlbumFindUnique).toHaveBeenCalledWith({
             where: { id: "federated-album" },
-            select: { coverUrl: true, location: true },
+            select: {
+                coverUrl: true,
+                location: true,
+                title: true,
+                artist: { select: { name: true } },
+            },
         });
     });
 
@@ -329,15 +360,25 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBe("native:albums/existing.jpg");
-        expect(mockCoverArtGet).not.toHaveBeenCalled();
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
     });
 
     it("resolves rgMbid from album and delegates to album cover retrieval", async () => {
-        mockAlbumFindUnique.mockResolvedValue({
-            rgMbid: "rg-from-db",
-            coverUrl: null,
+        mockAlbumFindUnique
+            .mockResolvedValueOnce({
+                rgMbid: "rg-from-db",
+                coverUrl: null,
+            })
+            .mockResolvedValueOnce({
+                coverUrl: null,
+                location: "LIBRARY",
+                title: "Album Six",
+                artist: { name: "Artist Six" },
+            });
+        mockResolveAlbumCover.mockResolvedValue({
+            url: "https://cover.art/from-rg.jpg",
+            source: "coverartarchive",
         });
-        mockCoverArtGet.mockResolvedValue("https://cover.art/from-rg.jpg");
 
         const result = await dataCacheService.getTrackCover(
             "track-2",
@@ -346,7 +387,11 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBe("https://cover.art/from-rg.jpg");
-        expect(mockCoverArtGet).toHaveBeenCalledWith("rg-from-db");
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "Artist Six",
+            albumTitle: "Album Six",
+            rgMbid: "rg-from-db",
+        });
     });
 
     it("returns null when track cover has no rgMbid source", async () => {

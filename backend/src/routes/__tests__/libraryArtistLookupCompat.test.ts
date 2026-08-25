@@ -84,10 +84,8 @@ jest.mock("../../services/fanart", () => ({
     fanartService: {},
 }));
 
-jest.mock("../../services/deezer", () => ({
-    deezerService: {
-        getAlbumCover: jest.fn(),
-    },
+jest.mock("../../services/metadata/albumCoverResolver", () => ({
+    resolveAlbumCover: jest.fn(),
 }));
 
 jest.mock("../../services/imageProvider", () => ({
@@ -166,7 +164,7 @@ import router from "../library";
 import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { prisma } from "../../utils/db";
 import { lastFmService } from "../../services/lastfm";
-import { deezerService } from "../../services/deezer";
+import { resolveAlbumCover } from "../../services/metadata/albumCoverResolver";
 import { dataCacheService } from "../../services/dataCache";
 import { musicBrainzService } from "../../services/musicbrainz";
 
@@ -174,7 +172,7 @@ const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
 const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
 const mockLastFmGetArtistTopTracks =
     lastFmService.getArtistTopTracks as jest.Mock;
-const mockDeezerGetAlbumCover = deezerService.getAlbumCover as jest.Mock;
+const mockResolveAlbumCover = resolveAlbumCover as jest.Mock;
 const mockDataCacheGetArtistImage =
     dataCacheService.getArtistImage as jest.Mock;
 const mockMusicBrainzGetReleaseGroups =
@@ -227,7 +225,7 @@ describe("library artist lookup compatibility", () => {
         mockArtistFindFirst.mockResolvedValue(createMockArtist());
         mockPlayGroupBy.mockResolvedValue([]);
         mockLastFmGetArtistTopTracks.mockResolvedValue([]);
-        mockDeezerGetAlbumCover.mockResolvedValue(null);
+        mockResolveAlbumCover.mockResolvedValue(null);
         mockDataCacheGetArtistImage.mockResolvedValue(null);
         mockMusicBrainzGetReleaseGroups.mockResolvedValue([]);
     });
@@ -567,7 +565,7 @@ describe("library artist lookup compatibility", () => {
                     album: expect.objectContaining({ id: "album-1" }),
                 }),
             ]);
-            expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+            expect(mockResolveAlbumCover).not.toHaveBeenCalled();
         },
     );
 
@@ -619,7 +617,7 @@ describe("library artist lookup compatibility", () => {
         expect(res.body.discographyComplete).toBe(true);
     });
 
-    it("hydrates unmatched Last.fm top tracks and skips Deezer lookup for unknown albums", async () => {
+    it("hydrates unmatched Last.fm top tracks and skips cover resolution for unknown albums", async () => {
         mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
         mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
             {
@@ -639,9 +637,10 @@ describe("library artist lookup compatibility", () => {
                 album: {},
             },
         ]);
-        mockDeezerGetAlbumCover.mockResolvedValueOnce(
-            "https://cdn.deezer.com/rare-ep.jpg",
-        );
+        mockResolveAlbumCover.mockResolvedValueOnce({
+            url: "https://cdn.deezer.com/rare-ep.jpg",
+            source: "deezer",
+        });
 
         const req = {
             params: { id: "artist-local-id-123" },
@@ -662,11 +661,11 @@ describe("library artist lookup compatibility", () => {
             "AC/DC",
             10,
         );
-        expect(mockDeezerGetAlbumCover).toHaveBeenCalledTimes(1);
-        expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith(
-            "AC/DC",
-            "Rare EP",
-        );
+        expect(mockResolveAlbumCover).toHaveBeenCalledTimes(1);
+        expect(mockResolveAlbumCover).toHaveBeenCalledWith({
+            artistName: "AC/DC",
+            albumTitle: "Rare EP",
+        });
         const unownedTrack = res.body.topTracks.find(
             (track: any) => track.title === "Unmatched With Cover",
         );
@@ -697,7 +696,7 @@ describe("library artist lookup compatibility", () => {
         );
     });
 
-    it("continues top-track hydration when a Deezer cover lookup rejects", async () => {
+    it("continues top-track hydration when cover resolution rejects", async () => {
         mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
         mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
             {
@@ -709,7 +708,7 @@ describe("library artist lookup compatibility", () => {
                 album: { "#text": "Broken Cover Album" },
             },
         ]);
-        mockDeezerGetAlbumCover.mockRejectedValueOnce(
+        mockResolveAlbumCover.mockRejectedValueOnce(
             new Error("deezer timeout"),
         );
 
@@ -738,7 +737,7 @@ describe("library artist lookup compatibility", () => {
         ]);
     });
 
-    it("skips Deezer batch lookups when Last.fm contributes no non-unknown unowned albums", async () => {
+    it("skips cover lookups when Last.fm contributes no non-unknown unowned albums", async () => {
         mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
         mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
             {
@@ -765,7 +764,7 @@ describe("library artist lookup compatibility", () => {
         await artistHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
         expect(res.body.topTracks).toEqual([
             expect.objectContaining({
                 title: "Unknown Album Track",

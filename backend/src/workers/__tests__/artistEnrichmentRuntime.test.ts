@@ -33,11 +33,11 @@ describe("artistEnrichment runtime", () => {
         const artistImageResolver = {
             resolveArtistImage: jest.fn().mockResolvedValue(null),
         };
+        const albumCoverResolver = {
+            resolveAlbumCover: jest.fn().mockResolvedValue(null),
+        };
         const musicBrainzService = {
             searchArtist: jest.fn().mockResolvedValue([]),
-        };
-        const coverArtService = {
-            getCoverArt: jest.fn().mockResolvedValue(null),
         };
         const redisClient = {
             setEx: jest.fn().mockResolvedValue(undefined),
@@ -55,6 +55,10 @@ describe("artistEnrichment runtime", () => {
             "../../services/metadata/artistImageResolver",
             () => artistImageResolver,
         );
+        jest.doMock(
+            "../../services/metadata/albumCoverResolver",
+            () => albumCoverResolver,
+        );
         jest.doMock("../../utils/musicIds", () => ({
             isRealArtistMbid: (value: unknown) =>
                 typeof value === "string" && !value.startsWith("temp-"),
@@ -70,7 +74,6 @@ describe("artistEnrichment runtime", () => {
         jest.doMock("../../services/musicbrainz", () => ({
             musicBrainzService,
         }));
-        jest.doMock("../../services/coverArt", () => ({ coverArtService }));
         jest.doMock("../../utils/redis", () => ({ redisClient }));
         jest.doMock("../../services/imageStorage", () => imageStorage);
 
@@ -85,8 +88,8 @@ describe("artistEnrichment runtime", () => {
             wikidataService,
             lastFmService,
             artistImageResolver,
+            albumCoverResolver,
             musicBrainzService,
-            coverArtService,
             redisClient,
             imageStorage,
         };
@@ -139,12 +142,23 @@ describe("artistEnrichment runtime", () => {
         );
 
         runtime.prisma.album.findMany.mockResolvedValueOnce([
-            { id: "album-1", rgMbid: "rg-1", title: "Album One" },
-            { id: "album-2", rgMbid: null, title: "Album Two" },
+            {
+                id: "album-1",
+                rgMbid: "rg-1",
+                title: "Album One",
+                artist: { name: "Artist One" },
+            },
+            {
+                id: "album-2",
+                rgMbid: null,
+                title: "Album Two",
+                artist: { name: "Artist One" },
+            },
         ]);
-        runtime.coverArtService.getCoverArt.mockResolvedValueOnce(
-            "https://covers/rg-1.jpg",
-        );
+        runtime.albumCoverResolver.resolveAlbumCover.mockResolvedValueOnce({
+            url: "https://covers/rg-1.jpg",
+            source: "coverartarchive",
+        });
 
         const artist = {
             id: "a1",
@@ -193,9 +207,13 @@ describe("artistEnrichment runtime", () => {
             where: { fromArtistId: "a1" },
         });
         expect(runtime.prisma.similarArtist.upsert).toHaveBeenCalledTimes(2);
-        expect(runtime.coverArtService.getCoverArt).toHaveBeenCalledWith(
-            "rg-1",
-        );
+        expect(
+            runtime.albumCoverResolver.resolveAlbumCover,
+        ).toHaveBeenCalledWith({
+            artistName: "Artist One",
+            albumTitle: "Album One",
+            rgMbid: "rg-1",
+        });
         expect(runtime.prisma.album.update).toHaveBeenCalledWith({
             where: { id: "album-1" },
             data: { coverUrl: "https://covers/rg-1.jpg" },
@@ -470,7 +488,7 @@ describe("artistEnrichment runtime", () => {
         expect(runtime.prisma.similarArtist.upsert).not.toHaveBeenCalled();
     });
 
-    it("continues when album cover lookup fails for an owned album", async () => {
+    it("skips album persistence when the album cover resolver misses", async () => {
         const runtime = setupRuntime();
 
         runtime.lastFmService.getArtistInfo.mockResolvedValueOnce({
@@ -485,10 +503,11 @@ describe("artistEnrichment runtime", () => {
                 id: "owned-album-1",
                 rgMbid: "rg-cover-miss",
                 title: "Missing cover",
+                artist: { name: "Album Cover Miss" },
             },
         ]);
-        runtime.coverArtService.getCoverArt.mockRejectedValueOnce(
-            new Error("cover lookup failed"),
+        runtime.albumCoverResolver.resolveAlbumCover.mockResolvedValueOnce(
+            null,
         );
 
         const artist = {
@@ -498,9 +517,13 @@ describe("artistEnrichment runtime", () => {
         } as any;
         await runtime.enrichSimilarArtist(artist);
 
-        expect(runtime.coverArtService.getCoverArt).toHaveBeenCalledWith(
-            "rg-cover-miss",
-        );
+        expect(
+            runtime.albumCoverResolver.resolveAlbumCover,
+        ).toHaveBeenCalledWith({
+            artistName: "Album Cover Miss",
+            albumTitle: "Missing cover",
+            rgMbid: "rg-cover-miss",
+        });
         expect(runtime.prisma.album.update).not.toHaveBeenCalled();
         const completed = runtime.prisma.artist.update.mock.calls
             .map((call: any[]) => call[0] as any)
@@ -510,10 +533,17 @@ describe("artistEnrichment runtime", () => {
         expect(completed.data.genres).toEqual(["rock"]);
     });
 
-    it("excludes federated albums with real release-group MBIDs from cover enrichment", async () => {
+    it("skips federation release-group placeholders during cover enrichment", async () => {
         const runtime = setupRuntime();
 
-        runtime.prisma.album.findMany.mockResolvedValueOnce([]);
+        runtime.prisma.album.findMany.mockResolvedValueOnce([
+            {
+                id: "federated-album",
+                rgMbid: "federation:peer:album",
+                title: "Federated Album",
+                artist: { name: "Federated Artist" },
+            },
+        ]);
 
         const artist = {
             id: "federated-artist",
@@ -532,9 +562,12 @@ describe("artistEnrichment runtime", () => {
                 id: true,
                 rgMbid: true,
                 title: true,
+                artist: { select: { name: true } },
             },
         });
-        expect(runtime.coverArtService.getCoverArt).not.toHaveBeenCalled();
+        expect(
+            runtime.albumCoverResolver.resolveAlbumCover,
+        ).not.toHaveBeenCalled();
         expect(runtime.prisma.album.update).not.toHaveBeenCalled();
     });
 
