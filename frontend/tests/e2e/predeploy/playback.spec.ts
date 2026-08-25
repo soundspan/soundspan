@@ -71,10 +71,9 @@ test.describe("Playback", () => {
         });
 
         await upNextTab.click();
-        await expect(page.locator('[data-queue-index="0"]')).toBeVisible({
-            timeout: 10000,
-        });
 
+        // The queue list is windowed (GH #787): only rows near the centered
+        // playing row are mounted, so the playing row is the render sentinel.
         const currentQueueRow = page
             .locator("[data-queue-index]")
             .filter({ has: page.locator('button[title="Now playing"]') })
@@ -83,16 +82,19 @@ test.describe("Playback", () => {
 
         await lyricsTab.click();
         await upNextTab.click();
+        await expect(currentQueueRow).toBeVisible({ timeout: 10000 });
 
         const queueSize = await page.locator("[data-queue-index]").count();
         test.skip(
             queueSize <= 8,
-            `Need at least 9 queue rows to validate centering, found ${queueSize}`,
+            `Need at least 9 mounted queue rows to validate centering, found ${queueSize}`,
         );
 
         const getQueueAlignment = async () =>
             currentQueueRow.evaluate((row) => {
-                const container = row.parentElement as HTMLElement | null;
+                const container = row.closest<HTMLElement>(
+                    '[data-testid="virtuoso-scroller"]',
+                );
                 if (!container) return null;
 
                 const rowRect = row.getBoundingClientRect();
