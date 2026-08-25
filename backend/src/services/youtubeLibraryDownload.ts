@@ -6,17 +6,25 @@ import {
     runLibraryAlbumDownload,
 } from "./libraryDownloadProcessor";
 import { patchDownloadJobMetadata } from "./downloadJobStatus";
-import { normalizeForExactKey } from "../utils/artistNormalization";
+import { logger } from "../utils/logger";
+import { pickBestAlbumMatch } from "./albumMatchPolicy";
 import {
     type YtAlbumDownloadJobStatus,
     watchYouTubeDownloadJobUntilTerminal,
     youtubeDownloadService,
 } from "./youtubeDownload";
 
+const youtubeLibraryDownloadLogger = logger.child("YoutubeLibraryDownload");
+
 interface AlbumSearchCandidate {
     browseId: string;
     title: string;
     artists: string[];
+}
+
+interface CandidateArtist {
+    candidate: AlbumSearchCandidate;
+    artistName: string;
 }
 
 /** Controls hand-off behavior when this processor is itself a fallback. */
@@ -44,25 +52,29 @@ function selectAlbumBrowseId(
     artistName: string,
     albumTitle: string,
 ): string | null {
-    const normalizedTitle = normalizeForExactKey(albumTitle);
-    const normalizedArtist = normalizeForExactKey(artistName);
-    const exactMatch = candidates.find(
-        (candidate) =>
-            normalizeForExactKey(candidate.title) === normalizedTitle &&
-            candidate.artists.some(
-                (artist) => normalizeForExactKey(artist) === normalizedArtist,
-            ),
+    const candidateArtists = candidates.flatMap((candidate) =>
+        candidate.artists.map((candidateArtist) => ({
+            candidate,
+            artistName: candidateArtist,
+        })),
     );
-    const titleMatch = candidates.find(
-        (candidate) =>
-            normalizeForExactKey(candidate.title) === normalizedTitle,
+    const match = pickBestAlbumMatch(
+        { artistName, albumTitle },
+        candidateArtists,
+        ({ candidate, artistName: candidateArtist }: CandidateArtist) => ({
+            artistName: candidateArtist,
+            albumTitle: candidate.title,
+        }),
     );
-    return (
-        exactMatch?.browseId ??
-        titleMatch?.browseId ??
-        candidates[0]?.browseId ??
-        null
-    );
+    if (match) return match.candidate.browseId;
+    if (candidates.length > 0) {
+        youtubeLibraryDownloadLogger.debug("No acceptable album match found", {
+            artistName,
+            albumTitle,
+            candidateCount: candidates.length,
+        });
+    }
+    return null;
 }
 
 /** Find the best public album-search result using TIDAL-compatible matching. */

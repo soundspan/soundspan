@@ -1,12 +1,16 @@
+const mockLoggerDebug = jest.fn();
 const mockLoggerWarn = jest.fn();
+const mockLogger = {
+    debug: mockLoggerDebug,
+    info: jest.fn(),
+    warn: mockLoggerWarn,
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: mockLoggerWarn,
-        error: jest.fn(),
-    },
+    logger: mockLogger,
 }));
 
 jest.mock("../../utils/db", () => ({
@@ -147,7 +151,7 @@ describe("youtubeLibraryDownload", () => {
         ).resolves.toBe("CANONICAL");
     });
 
-    it("falls back to an exact normalized title match", async () => {
+    it("returns null for a matching title when every artist is wrong", async () => {
         mockSearch.mockResolvedValueOnce([
             {
                 browseId: "LOOSE",
@@ -157,16 +161,23 @@ describe("youtubeLibraryDownload", () => {
             {
                 browseId: "TITLE",
                 title: "Al-bum",
-                artists: ["Different Artist"],
+                artists: ["DJ Khaled"],
             },
         ]);
 
-        await expect(findAlbumBrowseId("Artist", "Album")).resolves.toBe(
-            "TITLE",
+        await expect(findAlbumBrowseId("Artist", "Album")).resolves.toBeNull();
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "No acceptable album match found",
+            {
+                artistName: "Artist",
+                albumTitle: "Album",
+                candidateCount: 2,
+            },
         );
+        expect(mockLoggerDebug).toHaveBeenCalledTimes(1);
     });
 
-    it("falls back to the first result carrying a browse id", async () => {
+    it("returns null instead of falling back to the first browse id", async () => {
         mockSearch.mockResolvedValueOnce([
             { title: "No Identifier", artists: ["Artist"] },
             {
@@ -181,10 +192,78 @@ describe("youtubeLibraryDownload", () => {
             },
         ]);
 
-        await expect(findAlbumBrowseId("Artist", "Album")).resolves.toBe(
-            "FIRST",
+        await expect(findAlbumBrowseId("Artist", "Album")).resolves.toBeNull();
+    });
+
+    it("matches an edition-suffixed candidate after stripping both titles", async () => {
+        mockSearch.mockResolvedValueOnce([
+            {
+                browseId: "DELUXE",
+                title: "Renaissance (Deluxe Edition)",
+                artists: ["Beyoncé"],
+            },
+        ]);
+
+        await expect(findAlbumBrowseId("Beyoncé", "Renaissance")).resolves.toBe(
+            "DELUXE",
         );
     });
+
+    it("rejects a sole candidate with the wrong artist", async () => {
+        mockSearch.mockResolvedValueOnce([
+            {
+                browseId: "TROPHIES",
+                title: "Trophies",
+                artists: ["Young Money"],
+            },
+        ]);
+
+        await expect(
+            findAlbumBrowseId("Drake", "Trophies"),
+        ).resolves.toBeNull();
+    });
+
+    it("accepts a candidate when any listed artist matches", async () => {
+        mockSearch.mockResolvedValueOnce([
+            {
+                browseId: "COLLAB",
+                title: "Her Loss",
+                artists: ["21 Savage", "Drake"],
+            },
+        ]);
+
+        await expect(findAlbumBrowseId("Drake", "Her Loss")).resolves.toBe(
+            "COLLAB",
+        );
+    });
+
+    it.each([
+        {
+            description: "an empty artist list",
+            candidate: {
+                browseId: "EMPTY-ARTISTS",
+                title: "Album",
+                artists: [],
+            },
+        },
+        {
+            description: "an omitted artist list",
+            candidate: {
+                browseId: "MISSING-ARTISTS",
+                title: "Album",
+            },
+        },
+    ])(
+        "returns null without starting a download for $description",
+        async ({ candidate }) => {
+            mockSearch.mockResolvedValueOnce([candidate]);
+
+            await expect(
+                findAlbumBrowseId("Artist", "Album"),
+            ).resolves.toBeNull();
+            expect(mockStartAlbum).not.toHaveBeenCalled();
+        },
+    );
 
     it("returns null when no result carries a browse id", async () => {
         mockSearch.mockResolvedValueOnce([

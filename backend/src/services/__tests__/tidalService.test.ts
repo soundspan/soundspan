@@ -12,7 +12,9 @@ const mockLogger = {
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
+    child: jest.fn(),
 };
+mockLogger.child.mockReturnValue(mockLogger);
 
 const mockPrisma = {
     systemSettings: {
@@ -486,7 +488,7 @@ describe("tidalService", () => {
             });
         });
 
-        it("returns first album as fallback when there is no normalized title match", async () => {
+        it("returns null when no candidate passes artist and title verification", async () => {
             jest.spyOn(tidalService, "search").mockResolvedValue({
                 tracks: [],
                 artists: [],
@@ -516,12 +518,39 @@ describe("tidalService", () => {
 
             await expect(
                 tidalService.findAlbum("Different Artist", "Nonexistent Title"),
-            ).resolves.toEqual({
-                albumId: 101,
-                title: "Unexpected Pick",
-                artist: "Artist A",
-                numberOfTracks: 8,
+            ).resolves.toBeNull();
+            expect(mockLogger.debug).toHaveBeenCalledWith(
+                "No acceptable album match found",
+                {
+                    artistName: "Different Artist",
+                    albumTitle: "Nonexistent Title",
+                    candidateCount: 2,
+                },
+            );
+            expect(mockLogger.debug).toHaveBeenCalledTimes(1);
+        });
+
+        it("rejects an exact title when the candidate artist is wrong", async () => {
+            jest.spyOn(tidalService, "search").mockResolvedValue({
+                tracks: [],
+                artists: [],
+                albums: [
+                    {
+                        id: 303,
+                        title: "Trophies",
+                        artist: "Young Money",
+                        numberOfTracks: 1,
+                        releaseDate: null,
+                        type: "SINGLE",
+                        quality: "HIGH",
+                        cover: null,
+                    },
+                ],
             });
+
+            await expect(
+                tidalService.findAlbum("Drake", "Trophies"),
+            ).resolves.toBeNull();
         });
 
         it("returns null and logs when album search throws", async () => {

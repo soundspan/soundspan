@@ -13,6 +13,9 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
+import { pickBestAlbumMatch } from "./albumMatchPolicy";
+
+const tidalLogger = logger.child("TidalService");
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -378,20 +381,22 @@ class TidalService {
             const results = await this.search(`${artistName} ${albumTitle}`);
             if (!results.albums || results.albums.length === 0) return null;
 
-            // Find best match — prefer exact album title match
-            const normalise = (s: string) =>
-                s.toLowerCase().replace(/[^a-z0-9]/g, "");
-            const normAlbum = normalise(albumTitle);
-            const normArtist = normalise(artistName);
-
-            const match =
-                results.albums.find(
-                    (a) =>
-                        normalise(a.title) === normAlbum &&
-                        normalise(a.artist) === normArtist,
-                ) ||
-                results.albums.find((a) => normalise(a.title) === normAlbum) ||
-                results.albums[0];
+            const match = pickBestAlbumMatch(
+                { artistName, albumTitle },
+                results.albums,
+                (album) => ({
+                    artistName: album.artist,
+                    albumTitle: album.title,
+                }),
+            );
+            if (!match) {
+                tidalLogger.debug("No acceptable album match found", {
+                    artistName,
+                    albumTitle,
+                    candidateCount: results.albums.length,
+                });
+                return null;
+            }
 
             return {
                 albumId: match.id,
