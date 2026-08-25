@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import { SettingsRow, SettingsInput, IntegrationCard } from "../ui";
 import { SystemSettings } from "../../types";
 import { AlertTriangle, ExternalLink, Share2 } from "lucide-react";
-import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { InlineStatus } from "@/components/ui/InlineStatus";
+import { useConnectionTest } from "@/features/settings/hooks/useConnectionTest";
 
 interface SoulseekCardProps {
     settings: SystemSettings;
@@ -24,21 +24,17 @@ export function SoulseekCard({
     onTest,
     isTesting,
 }: SoulseekCardProps) {
-    const [testStatus, setTestStatus] = useState<StatusType>("idle");
-    const [testMessage, setTestMessage] = useState("");
+    const {
+        status: testStatus,
+        message: testMessage,
+        runTest,
+        reset,
+    } = useConnectionTest({
+        loadingMessage: "Connecting...",
+        successMessage: "Connected to Soulseek",
+    });
 
-    const handleTest = async () => {
-        setTestStatus("loading");
-        setTestMessage("Connecting...");
-        const result = await onTest("soulseek");
-        if (result.success) {
-            setTestStatus("success");
-            setTestMessage("Connected to Soulseek");
-        } else {
-            setTestStatus("error");
-            setTestMessage(result.error || "Connection failed");
-        }
-    };
+    const handleTest = () => runTest(() => onTest("soulseek"));
 
     const hasCredentials =
         settings.soulseekUsername && settings.soulseekPassword;
@@ -119,7 +115,7 @@ export function SoulseekCard({
                         <InlineStatus
                             status={testStatus}
                             message={testMessage}
-                            onClear={() => setTestStatus("idle")}
+                            onClear={reset}
                         />
                     </div>
                     <p className="text-xs text-white/40">

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
     SettingsSection,
     SettingsRow,
@@ -8,7 +7,8 @@ import {
     SettingsToggle,
 } from "../ui";
 import { SystemSettings } from "../../types";
-import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { InlineStatus } from "@/components/ui/InlineStatus";
+import { useConnectionTest } from "@/features/settings/hooks/useConnectionTest";
 
 interface AIServicesSectionProps {
     settings: SystemSettings;
@@ -28,38 +28,30 @@ export function AIServicesSection({
     onTest,
     isTesting,
 }: AIServicesSectionProps) {
-    const [fanartTestStatus, setFanartTestStatus] =
-        useState<StatusType>("idle");
-    const [fanartTestMessage, setFanartTestMessage] = useState("");
-    const [lastfmTestStatus, setLastfmTestStatus] =
-        useState<StatusType>("idle");
-    const [lastfmTestMessage, setLastfmTestMessage] = useState("");
+    const {
+        status: fanartTestStatus,
+        message: fanartTestMessage,
+        runTest: runFanartTest,
+        reset: resetFanartTest,
+    } = useConnectionTest({
+        loadingMessage: "Testing...",
+        successMessage: "Connected",
+        failureMessage: "Failed",
+    });
+    const {
+        status: lastfmTestStatus,
+        message: lastfmTestMessage,
+        runTest: runLastfmTest,
+        reset: resetLastfmTest,
+    } = useConnectionTest({
+        loadingMessage: "Testing...",
+        successMessage: "Connected",
+        failureMessage: "Failed",
+    });
 
-    const handleFanartTest = async () => {
-        setFanartTestStatus("loading");
-        setFanartTestMessage("Testing...");
-        const result = await onTest("fanart");
-        if (result.success) {
-            setFanartTestStatus("success");
-            setFanartTestMessage("Connected");
-        } else {
-            setFanartTestStatus("error");
-            setFanartTestMessage(result.error || "Failed");
-        }
-    };
+    const handleFanartTest = () => runFanartTest(() => onTest("fanart"));
 
-    const handleLastfmTest = async () => {
-        setLastfmTestStatus("loading");
-        setLastfmTestMessage("Testing...");
-        const result = await onTest("lastfm");
-        if (result.success) {
-            setLastfmTestStatus("success");
-            setLastfmTestMessage("Connected");
-        } else {
-            setLastfmTestStatus("error");
-            setLastfmTestMessage(result.error || "Failed");
-        }
-    };
+    const handleLastfmTest = () => runLastfmTest(() => onTest("lastfm"));
 
     return (
         <SettingsSection
@@ -107,7 +99,7 @@ export function AIServicesSection({
                             <InlineStatus
                                 status={fanartTestStatus}
                                 message={fanartTestMessage}
-                                onClear={() => setFanartTestStatus("idle")}
+                                onClear={resetFanartTest}
                             />
                         </div>
                     </div>
@@ -149,7 +141,7 @@ export function AIServicesSection({
                             <InlineStatus
                                 status={lastfmTestStatus}
                                 message={lastfmTestMessage}
-                                onClear={() => setLastfmTestStatus("idle")}
+                                onClear={resetLastfmTest}
                             />
                         </div>
                     </div>

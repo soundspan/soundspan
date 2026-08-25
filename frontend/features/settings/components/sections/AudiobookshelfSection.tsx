@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
     SettingsSection,
     SettingsRow,
@@ -8,7 +7,8 @@ import {
     SettingsToggle,
 } from "../ui";
 import { SystemSettings } from "../../types";
-import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { InlineStatus } from "@/components/ui/InlineStatus";
+import { useConnectionTest } from "@/features/settings/hooks/useConnectionTest";
 
 interface AudiobookshelfSectionProps {
     settings: SystemSettings;
@@ -28,21 +28,23 @@ export function AudiobookshelfSection({
     onTest,
     isTesting,
 }: AudiobookshelfSectionProps) {
-    const [testStatus, setTestStatus] = useState<StatusType>("idle");
-    const [testMessage, setTestMessage] = useState("");
+    const {
+        status: testStatus,
+        message: testMessage,
+        runTest,
+        reset,
+    } = useConnectionTest<{
+        success: boolean;
+        error?: string;
+        version?: string;
+    }>({
+        loadingMessage: "Testing...",
+        successMessage: (result) =>
+            result.version ? `v${result.version}` : "Connected",
+        failureMessage: "Failed",
+    });
 
-    const handleTest = async () => {
-        setTestStatus("loading");
-        setTestMessage("Testing...");
-        const result = await onTest("audiobookshelf");
-        if (result.success) {
-            setTestStatus("success");
-            setTestMessage(result.version ? `v${result.version}` : "Connected");
-        } else {
-            setTestStatus("error");
-            setTestMessage(result.error || "Failed");
-        }
-    };
+    const handleTest = () => runTest(() => onTest("audiobookshelf"));
 
     return (
         <SettingsSection
@@ -106,7 +108,7 @@ export function AudiobookshelfSection({
                             <InlineStatus
                                 status={testStatus}
                                 message={testMessage}
-                                onClear={() => setTestStatus("idle")}
+                                onClear={reset}
                             />
                         </div>
                     </div>

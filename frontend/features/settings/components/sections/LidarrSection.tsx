@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
     SettingsRow,
     SettingsInput,
@@ -8,8 +7,9 @@ import {
     IntegrationCard,
 } from "../ui";
 import { SystemSettings } from "../../types";
-import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { InlineStatus } from "@/components/ui/InlineStatus";
 import { Download } from "lucide-react";
+import { useConnectionTest } from "@/features/settings/hooks/useConnectionTest";
 
 interface LidarrCardProps {
     settings: SystemSettings;
@@ -29,21 +29,23 @@ export function LidarrCard({
     onTest,
     isTesting,
 }: LidarrCardProps) {
-    const [testStatus, setTestStatus] = useState<StatusType>("idle");
-    const [testMessage, setTestMessage] = useState("");
+    const {
+        status: testStatus,
+        message: testMessage,
+        runTest,
+        reset,
+    } = useConnectionTest<{
+        success: boolean;
+        error?: string;
+        version?: string;
+    }>({
+        loadingMessage: "Testing...",
+        successMessage: (result) =>
+            result.version ? `v${result.version}` : "Connected",
+        failureMessage: "Failed",
+    });
 
-    const handleTest = async () => {
-        setTestStatus("loading");
-        setTestMessage("Testing...");
-        const result = await onTest("lidarr");
-        if (result.success) {
-            setTestStatus("success");
-            setTestMessage(result.version ? `v${result.version}` : "Connected");
-        } else {
-            setTestStatus("error");
-            setTestMessage(result.error || "Failed");
-        }
-    };
+    const handleTest = () => runTest(() => onTest("lidarr"));
 
     const isConfigured =
         settings.lidarrEnabled && settings.lidarrUrl && settings.lidarrApiKey;
@@ -111,7 +113,7 @@ export function LidarrCard({
                         <InlineStatus
                             status={testStatus}
                             message={testMessage}
-                            onClear={() => setTestStatus("idle")}
+                            onClear={reset}
                         />
                     </div>
                 </div>

@@ -15,6 +15,11 @@ Start-here guide for `frontend/features/explore`.
 
 | Path | Kind |
 | --- | --- |
+| `browseTrack.tsx` | shared TIDAL browse track types, mappers, and list |
+| `browseCollectionCopy.ts` | pure copy + duration formatting for browse collection pages |
+| `hooks/useBrowseCollection.ts` | hooks |
+| `hooks/useBrowseCollectionActions.ts` | hooks |
+| `components/BrowseCollectionPage.tsx` | components |
 | `components/FeaturedShelvesSection.tsx` | components |
 | `components/ExploreDegradedNotice.tsx` | components |
 | `components/MadeForYouSection.tsx` | components |

@@ -26,6 +26,7 @@ import { api } from "@/lib/api";
 import Link from "next/link";
 import Image from "next/image";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { formatRelativeDate } from "@/utils/formatTime";
 
 interface ReleaseItem {
     id: number | string;
@@ -128,29 +129,6 @@ export default function ReleasesPage() {
         }
     };
 
-    const formatDate = (dateStr: string) => {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diffDays = Math.ceil(
-            (date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
-        );
-
-        if (diffDays === 0) return "Today";
-        if (diffDays === 1) return "Tomorrow";
-        if (diffDays > 0 && diffDays <= 7) return `In ${diffDays} days`;
-        if (diffDays < 0 && diffDays >= -7)
-            return `${Math.abs(diffDays)} days ago`;
-
-        return date.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year:
-                date.getFullYear() !== now.getFullYear()
-                    ? "numeric"
-                    : undefined,
-        });
-    };
-
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
@@ -213,7 +191,7 @@ export default function ReleasesPage() {
                                 <ReleaseCard
                                     key={`${release.albumMbid}-${release.id}`}
                                     release={release}
-                                    formatDate={formatDate}
+                                    formatDate={formatRelativeDate}
                                     onAcquire={handleAcquire}
                                     isDownloading={downloadingId === release.id}
                                     mode={
@@ -250,7 +228,7 @@ export default function ReleasesPage() {
                                 <ReleaseCard
                                     key={`${release.albumMbid}-${release.id}`}
                                     release={release}
-                                    formatDate={formatDate}
+                                    formatDate={formatRelativeDate}
                                     onAcquire={handleAcquire}
                                     isDownloading={downloadingId === release.id}
                                     mode={

@@ -8,6 +8,7 @@ import { ReactNode, lazy, Suspense } from "react";
 import { useAlbumDisplayData } from "@/hooks/useMetadataDisplay";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { getArtistHref } from "@/utils/artistRoute";
+import { formatDuration } from "@/utils/formatTime";
 
 // Lazy load MetadataEditor - modal component opened on user action
 const MetadataEditor = lazy(() =>
@@ -37,17 +38,7 @@ export function AlbumHero({
     children,
 }: AlbumHeroProps) {
     const displayData = useAlbumDisplayData(album);
-    const formatDuration = (seconds?: number) => {
-        if (!seconds) return "";
-        const hours = Math.floor(seconds / 3600);
-        const mins = Math.floor((seconds % 3600) / 60);
-        if (hours > 0) {
-            return `${hours} hr ${mins} min`;
-        }
-        return `${mins} min`;
-    };
-
-    const totalDuration = formatDuration(album.duration);
+    const totalDuration = album.duration ? formatDuration(album.duration) : "";
     const artistHref =
         getArtistHref({
             id: album.artist?.id,

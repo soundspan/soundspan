@@ -26,6 +26,7 @@ import type { LikeableTrack } from "@/hooks/useCollectionLikeAll";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { shuffleArray } from "@/utils/shuffle";
+import { decodeRouteId } from "@/utils/routeId";
 import { cn } from "@/utils/cn";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
@@ -82,14 +83,6 @@ function browseTrackToQueueTrack(t: YtMusicBrowseTrack): Track {
         streamSource: "youtube",
         youtubeVideoId: t.videoId,
     };
-}
-
-function decodeRouteId(id: string): string {
-    try {
-        return decodeURIComponent(id);
-    } catch {
-        return id;
-    }
 }
 
 function isNotFoundError(error: unknown): boolean {

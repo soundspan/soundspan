@@ -37,6 +37,41 @@ export function formatDuration(seconds: number): string {
     return `${mins}m`;
 }
 
+/**
+ * Format a date as a short en-US calendar date (e.g., "Jan 5, 2026").
+ */
+export function formatDate(dateInput: string | number | Date): string {
+    return new Date(dateInput).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+    });
+}
+
+/**
+ * Format a date relative to today for near dates ("Today", "Tomorrow",
+ * "In 3 days", "2 days ago") and as a short calendar date otherwise; the
+ * year is shown only when it differs from the current year.
+ */
+export function formatRelativeDate(dateInput: string | number | Date): string {
+    const date = new Date(dateInput);
+    const now = new Date();
+    const diffDays = Math.ceil(
+        (date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+    );
+
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Tomorrow";
+    if (diffDays > 0 && diffDays <= 7) return `In ${diffDays} days`;
+    if (diffDays < 0 && diffDays >= -7) return `${Math.abs(diffDays)} days ago`;
+
+    return date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+    });
+}
+
 /** Custom labels used when formatting compact relative times. */
 export interface RelativeTimeOptions {
     justNowLabel?: string;

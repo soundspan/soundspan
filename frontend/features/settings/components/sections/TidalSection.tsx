@@ -17,9 +17,10 @@ import {
     AlertTriangle,
     Music2,
 } from "lucide-react";
-import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { InlineStatus } from "@/components/ui/InlineStatus";
 import { api } from "@/lib/api";
 import { useDeviceAuthPolling } from "@/hooks/useDeviceAuthPolling";
+import { useConnectionTest } from "@/features/settings/hooks/useConnectionTest";
 
 interface TidalCardProps {
     settings: SystemSettings;
@@ -49,26 +50,22 @@ export function TidalCard({
     onTest,
     isTesting,
 }: TidalCardProps) {
-    const [testStatus, setTestStatus] = useState<StatusType>("idle");
-    const [testMessage, setTestMessage] = useState("");
+    const {
+        status: testStatus,
+        message: testMessage,
+        runTest,
+        reset,
+    } = useConnectionTest({
+        loadingMessage: "Checking TIDAL...",
+        successMessage: "Connected to TIDAL",
+    });
 
     const [authMessage, setAuthMessage] = useState("");
     const authResultRef = useRef<Awaited<
         ReturnType<typeof api.tidalPollAuth>
     > | null>(null);
 
-    const handleTest = async () => {
-        setTestStatus("loading");
-        setTestMessage("Checking TIDAL...");
-        const result = await onTest("tidal");
-        if (result.success) {
-            setTestStatus("success");
-            setTestMessage("Connected to TIDAL");
-        } else {
-            setTestStatus("error");
-            setTestMessage(result.error || "Connection failed");
-        }
-    };
+    const handleTest = () => runTest(() => onTest("tidal"));
 
     const initiateAuth = useCallback(async () => {
         const deviceAuth = await api.tidalDeviceAuth();
@@ -444,7 +441,7 @@ export function TidalCard({
                         <InlineStatus
                             status={testStatus}
                             message={testMessage}
-                            onClear={() => setTestStatus("idle")}
+                            onClear={reset}
                         />
                     </div>
                     <p className="text-xs text-white/40">

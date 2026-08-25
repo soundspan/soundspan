@@ -5,6 +5,7 @@ import { Copy, Trash2 } from "lucide-react";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import { Badge, type BadgeProps } from "@/components/ui/Badge";
 import { SettingsSection } from "../ui";
+import { formatDate } from "@/utils/formatTime";
 
 const EXPIRING_SOON_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -18,14 +19,6 @@ function getExpiryBadge(
         return { label: "Expires soon", variant: "warning" };
     }
     return null;
-}
-
-function formatDate(dateString: string): string {
-    return new Date(dateString).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-    });
 }
 
 function ApiKeyExpiry({ expiresAt }: { expiresAt: string }) {

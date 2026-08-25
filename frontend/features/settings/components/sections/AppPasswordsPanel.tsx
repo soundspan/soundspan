@@ -6,16 +6,9 @@ import { Modal } from "@/components/ui/Modal";
 import { api } from "@/lib/api";
 import type { AppPasswordMetadata, CreatedAppPassword } from "@/lib/api/auth";
 import { createFrontendLogger } from "@/lib/logger";
+import { formatDate } from "@/utils/formatTime";
 
 const logger = createFrontendLogger("Settings.AppPasswordsPanel");
-
-function formatDate(value: string): string {
-    return new Date(value).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-    });
-}
 
 interface SecretDisplayProps {
     credential: CreatedAppPassword;

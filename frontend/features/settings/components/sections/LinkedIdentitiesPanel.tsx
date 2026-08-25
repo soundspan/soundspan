@@ -6,16 +6,9 @@ import { Modal } from "@/components/ui/Modal";
 import { api } from "@/lib/api";
 import type { ExternalIdentity } from "@/lib/api/auth";
 import { createFrontendLogger } from "@/lib/logger";
+import { formatDate } from "@/utils/formatTime";
 
 const logger = createFrontendLogger("Settings.LinkedIdentitiesPanel");
-
-function formatDate(value: string): string {
-    return new Date(value).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-    });
-}
 
 interface IdentityCardProps {
     identity: ExternalIdentity;

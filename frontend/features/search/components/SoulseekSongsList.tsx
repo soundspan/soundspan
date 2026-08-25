@@ -8,13 +8,6 @@ interface SoulseekSongsListProps {
     onDownload: (result: SoulseekResult) => void;
 }
 
-// Helper function to format file size
-export const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
 // Helper function to get quality badge
 /**
  * Implements getQualityBadge.
