@@ -5,7 +5,12 @@ import {
     type Request,
     type Response,
 } from "express";
+import rateLimit from "express-rate-limit";
 import type { Registry } from "prom-client";
+import { createRedisRateLimitOptions } from "../middleware/rateLimitStore";
+
+const METRICS_AUTH_RATE_LIMIT_MAX = 120;
+const METRICS_AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
 
 /** Configuration for the Prometheus scrape route. */
 export interface MetricsEndpointOptions {
@@ -57,11 +62,28 @@ function createMetricsHandler(registry: Registry) {
     };
 }
 
+function createMetricsAccessLimiter() {
+    // A 120-attempt budget leaves 30x headroom for a 15-second scraper, while
+    // successful scrapes do not consume the failed-authentication budget.
+    return rateLimit({
+        windowMs: METRICS_AUTH_RATE_LIMIT_WINDOW_MS,
+        max: METRICS_AUTH_RATE_LIMIT_MAX,
+        skipSuccessfulRequests: true,
+        message: "Too many metrics access attempts. Please try again later.",
+        standardHeaders: true,
+        legacyHeaders: false,
+        ...createRedisRateLimitOptions("metrics-auth", {
+            fallback: "memory",
+        }),
+    });
+}
+
 /** Creates the isolated `/metrics` router with fail-closed bearer auth. */
 export function createMetricsRouter(options: MetricsEndpointOptions): Router {
     const router = Router();
     router.get(
         "/metrics",
+        createMetricsAccessLimiter(),
         requireMetricsAccess(options),
         createMetricsHandler(options.registry),
     );

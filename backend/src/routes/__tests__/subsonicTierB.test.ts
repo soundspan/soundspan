@@ -122,9 +122,13 @@ import {
     handleTokenInfo,
 } from "../subsonic";
 
-function buildReq(query: Record<string, unknown>): Request {
+function buildReq(
+    query: Record<string, unknown>,
+    subsonicAuthType: "apiKey" | "token" | "password" = "password",
+): Request {
     return {
         query,
+        subsonicAuthType,
         user: {
             id: "user-1",
             username: "alice",
@@ -2090,11 +2094,14 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
-    it("returns token-based authType for tokenInfo when apiKey is supplied", async () => {
+    it("returns middleware-stamped apiKey authType for tokenInfo", async () => {
         await handleTokenInfo(
-            buildReq({
-                apiKey: "key-123",
-            }),
+            buildReq(
+                {
+                    t: "handler-must-ignore-this-token",
+                },
+                "apiKey",
+            ),
             buildRes(),
         );
 
@@ -2112,11 +2119,14 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
-    it("returns token-based authType for tokenInfo when token is supplied", async () => {
+    it("returns middleware-stamped token authType for tokenInfo", async () => {
         await handleTokenInfo(
-            buildReq({
-                t: "token-123",
-            }),
+            buildReq(
+                {
+                    apiKey: "handler-must-ignore-this-key",
+                },
+                "token",
+            ),
             buildRes(),
         );
 
@@ -2134,8 +2144,17 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
-    it("returns password-based authType for tokenInfo without credentials", async () => {
-        await handleTokenInfo(buildReq({}), buildRes());
+    it("returns middleware-stamped password authType for tokenInfo", async () => {
+        await handleTokenInfo(
+            buildReq(
+                {
+                    apiKey: "handler-must-ignore-this-key",
+                    t: "handler-must-ignore-this-token",
+                },
+                "password",
+            ),
+            buildRes(),
+        );
 
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),

@@ -84,9 +84,6 @@ export function handleGetNewestPodcasts(req: Request, res: Response): void {
  */
 export function handleTokenInfo(req: Request, res: Response): void {
     const { format, callback } = getRequestContext(req);
-    const hasApiKey =
-        typeof req.query.apiKey === "string" && req.query.apiKey.length > 0;
-    const hasToken = typeof req.query.t === "string" && req.query.t.length > 0;
 
     sendSubsonicSuccess(
         res,
@@ -94,11 +91,7 @@ export function handleTokenInfo(req: Request, res: Response): void {
             tokenInfo: {
                 valid: true,
                 username: req.user?.username,
-                authType: hasApiKey
-                    ? "apiKey"
-                    : hasToken
-                      ? "token"
-                      : "password",
+                authType: req.subsonicAuthType ?? "password",
             },
         },
         format,

@@ -94,10 +94,12 @@ function buildReq(
         username: "alice",
         role: "user",
     },
+    subsonicAuthType: "apiKey" | "token" | "password" = "password",
 ): Request {
     return {
         query,
         user,
+        subsonicAuthType,
     } as unknown as Request;
 }
 
@@ -985,12 +987,7 @@ describe("subsonic core compatibility handlers", () => {
     });
 
     it("returns tokenInfo with authType derived from apiKey auth", () => {
-        handleTokenInfo(
-            buildReq({
-                apiKey: "api-key-1",
-            }),
-            buildRes(),
-        );
+        handleTokenInfo(buildReq({}, undefined, "apiKey"), buildRes());
 
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),

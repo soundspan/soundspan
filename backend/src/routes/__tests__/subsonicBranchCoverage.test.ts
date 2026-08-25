@@ -157,6 +157,7 @@ function buildReq(query: Record<string, unknown>): Request {
     return {
         query,
         headers: {},
+        subsonicAuthType: "password",
         user: {
             id: "user-1",
             username: "alice",
@@ -271,8 +272,10 @@ describe("subsonic branch coverage focused handlers", () => {
         );
     });
 
-    it("uses token auth type when t is present", () => {
-        handleTokenInfo(buildReq({ t: "abcdef" }), buildRes());
+    it("uses the middleware-stamped token auth type", () => {
+        const req = buildReq({});
+        req.subsonicAuthType = "token";
+        handleTokenInfo(req, buildRes());
 
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),

@@ -4,6 +4,10 @@ import request from "supertest";
 import { createMetricsRouter } from "../endpoint";
 import { createVibeEmbedMetrics } from "../vibeEmbedMetrics";
 
+jest.mock("../../middleware/rateLimitStore", () => ({
+    createRedisRateLimitOptions: jest.fn(() => ({})),
+}));
+
 describe("metrics endpoint", () => {
     function createApp(options: { token?: string; publicAccess?: boolean }) {
         const registry = new Registry();
@@ -45,6 +49,30 @@ describe("metrics endpoint", () => {
         expect(response.text).toContain("soundspan_test_known_value 1");
     });
 
+    it("rate-limits failed access attempts without blocking authorized scrapes", async () => {
+        const app = createApp({ token: "scrape-token" });
+
+        await request(app)
+            .get("/metrics")
+            .set("Authorization", "Bearer scrape-token")
+            .expect(200);
+
+        const failedAttempts = await Promise.all(
+            Array.from({ length: 120 }, () =>
+                request(app)
+                    .get("/metrics")
+                    .set("Authorization", "Bearer wrong-token"),
+            ),
+        );
+        expect(failedAttempts).toHaveLength(120);
+        expect(failedAttempts.every(({ status }) => status === 401)).toBe(true);
+
+        await request(app)
+            .get("/metrics")
+            .set("Authorization", "Bearer wrong-token")
+            .expect(429);
+    });
+
     it("fails closed when no token is configured", async () => {
         await request(createApp({})).get("/metrics").expect(401);
     });
@@ -81,13 +109,13 @@ describe("metrics endpoint", () => {
             }),
         } as any;
         let authorized = false;
-        route.stack[0].handle(
+        route.stack[1].handle(
             { get: jest.fn() },
             response,
             () => (authorized = true),
         );
         expect(authorized).toBe(true);
-        await route.stack[1].handle({}, response, jest.fn());
+        await route.stack[2].handle({}, response, jest.fn());
 
         expect(response.send).toHaveBeenCalledTimes(1);
         expect(response.statusCode).toBe(200);
@@ -99,7 +127,7 @@ describe("metrics endpoint", () => {
                 nextResponse.body = body;
             }),
         } as any;
-        await route.stack[1].handle({}, nextResponse, jest.fn());
+        await route.stack[2].handle({}, nextResponse, jest.fn());
 
         expect(nextResponse.statusCode).toBe(200);
         expect(nextResponse.body).toMatch(

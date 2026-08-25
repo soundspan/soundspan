@@ -24,6 +24,7 @@ declare global {
         interface Request {
             subsonicClient?: string;
             subsonicVersion?: string;
+            subsonicAuthType?: "apiKey" | "token" | "password";
         }
     }
 }
@@ -420,6 +421,11 @@ function attachSubsonicContext(
     req.user = principal;
     req.subsonicClient = input.client;
     req.subsonicVersion = input.version;
+    req.subsonicAuthType = input.hasApiKeyAuth
+        ? "apiKey"
+        : input.hasTokenAuth
+          ? "token"
+          : "password";
 }
 
 /** Validates OpenSubsonic credentials and enriches request context for `/rest` handlers. */

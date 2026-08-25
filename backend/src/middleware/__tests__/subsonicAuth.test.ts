@@ -231,6 +231,7 @@ describe("requireSubsonicAuth", () => {
         });
         expect((req as any).subsonicClient).toBe("symfonium");
         expect((req as any).subsonicVersion).toBe("1.16.1");
+        expect((req as any).subsonicAuthType).toBe("password");
         expect(next).toHaveBeenCalled();
     });
 
@@ -310,6 +311,7 @@ describe("requireSubsonicAuth", () => {
             username: "alice",
             role: "admin",
         });
+        expect((req as any).subsonicAuthType).toBe("token");
         expect(next).toHaveBeenCalled();
     });
 
@@ -429,6 +431,7 @@ describe("requireSubsonicAuth", () => {
             username: "alice",
             role: "user",
         });
+        expect((req as any).subsonicAuthType).toBe("token");
         expect(next).toHaveBeenCalled();
     });
 
@@ -771,6 +774,7 @@ describe("requireSubsonicAuth", () => {
             username: "alice",
             role: "user",
         });
+        expect((req as any).subsonicAuthType).toBe("apiKey");
         expect(next).toHaveBeenCalled();
     });
 
