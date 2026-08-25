@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Artists and albums you browse are now remembered locally, so repeat visits load instantly and survive MusicBrainz outages; a retention sweep clears entries untouched for 180 days (`CATALOG_RETENTION_DAYS`), and `CATALOG_PERSISTENCE=off` disables the feature (#760).
 - Search now shows one Songs section: songs you own and songs you don't sit together (external matches carry provider badges and skip anything already in your library) instead of being split across distant "Songs in Your Library" and "Songs to Discover" sections (#756).
 
 - Songs now have shareable links: "Copy link to song" in a track's menu copies a link that opens the album with that song highlighted and starts playing it (browsers may require a tap first on brand-new devices) (#756).

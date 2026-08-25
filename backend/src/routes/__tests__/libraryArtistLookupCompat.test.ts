@@ -160,6 +160,14 @@ jest.mock("../../services/imageProxy", () => ({
     normalizeExternalImageUrl: jest.fn(() => null),
 }));
 
+const mockReadFreshCatalogReleaseGroups = jest.fn();
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: jest.fn(async () => undefined),
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: mockReadFreshCatalogReleaseGroups,
+}));
+
 import router from "../library";
 import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { prisma } from "../../utils/db";
@@ -167,6 +175,7 @@ import { lastFmService } from "../../services/lastfm";
 import { resolveAlbumCover } from "../../services/metadata/albumCoverResolver";
 import { dataCacheService } from "../../services/dataCache";
 import { musicBrainzService } from "../../services/musicbrainz";
+import { redisClient } from "../../utils/redis";
 
 const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
 const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
@@ -177,6 +186,7 @@ const mockDataCacheGetArtistImage =
     dataCacheService.getArtistImage as jest.Mock;
 const mockMusicBrainzGetReleaseGroups =
     musicBrainzService.getReleaseGroups as jest.Mock;
+const mockRedisGet = redisClient.get as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
     const layer = flattenLibraryRouteLayers(router).find(
@@ -214,6 +224,7 @@ function createMockArtist(name = "AC/DC") {
         albums: [],
         ownedAlbums: [],
         similarArtistsJson: null,
+        catalogSyncedAt: null,
     };
 }
 
@@ -228,6 +239,8 @@ describe("library artist lookup compatibility", () => {
         mockResolveAlbumCover.mockResolvedValue(null);
         mockDataCacheGetArtistImage.mockResolvedValue(null);
         mockMusicBrainzGetReleaseGroups.mockResolvedValue([]);
+        mockRedisGet.mockResolvedValue(null);
+        mockReadFreshCatalogReleaseGroups.mockReturnValue(null);
     });
 
     it.each([
@@ -615,6 +628,98 @@ describe("library artist lookup compatibility", () => {
             }),
         ]);
         expect(res.body.discographyComplete).toBe(true);
+    });
+
+    it("uses a fresh persisted discography on Redis miss without MusicBrainz", async () => {
+        const artist = {
+            ...createMockArtist(),
+            catalogSyncedAt: new Date("2026-08-24T00:00:00.000Z"),
+            albums: [
+                {
+                    id: "catalog-album-1",
+                    title: "Catalog Album",
+                    rgMbid: "rg-catalog-1",
+                    year: 2012,
+                    primaryType: "Album",
+                    coverUrl: null,
+                    location: "CATALOG",
+                    tracks: [],
+                },
+            ],
+        };
+        mockArtistFindFirst.mockResolvedValueOnce(artist);
+        mockReadFreshCatalogReleaseGroups.mockReturnValueOnce([
+            {
+                id: "rg-catalog-1",
+                title: "Catalog Album",
+                "first-release-date": "2012",
+                "primary-type": "Album",
+                "secondary-types": [],
+            },
+        ]);
+
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(mockReadFreshCatalogReleaseGroups).toHaveBeenCalledWith({
+            artistId: artist.id,
+            catalogSyncedAt: artist.catalogSyncedAt,
+            albums: artist.albums,
+        });
+        expect(mockMusicBrainzGetReleaseGroups).not.toHaveBeenCalled();
+        expect(res.body.albums).toEqual([
+            expect.objectContaining({
+                id: "rg-catalog-1",
+                title: "Catalog Album",
+                year: 2012,
+                owned: false,
+                source: "musicbrainz",
+            }),
+        ]);
+        expect(res.body.discographyComplete).toBe(true);
+    });
+
+    it("keeps Redis ahead of persisted discography reads", async () => {
+        mockRedisGet.mockResolvedValueOnce(
+            JSON.stringify([
+                {
+                    id: "rg-redis",
+                    title: "Redis Album",
+                    "first-release-date": "2020",
+                    "primary-type": "Album",
+                    "secondary-types": [],
+                },
+            ]),
+        );
+
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(mockReadFreshCatalogReleaseGroups).not.toHaveBeenCalled();
+        expect(mockMusicBrainzGetReleaseGroups).not.toHaveBeenCalled();
+        expect(res.body.albums).toEqual([
+            expect.objectContaining({ id: "rg-redis", title: "Redis Album" }),
+        ]);
     });
 
     it("hydrates unmatched Last.fm top tracks and skips cover resolution for unknown albums", async () => {

@@ -714,7 +714,7 @@ describe("artistEnrichment runtime", () => {
             expect.objectContaining({
                 where: expect.objectContaining({
                     artistId: "federated-artist",
-                    location: { not: "FEDERATED" },
+                    location: { in: ["LIBRARY", "DISCOVER", "REMOTE"] },
                 }),
                 select: expect.objectContaining({
                     id: true,

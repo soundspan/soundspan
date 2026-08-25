@@ -95,6 +95,15 @@ jest.mock("../utils/logger", () => ({
 
 import express from "express";
 import request from "supertest";
+jest.mock("../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshCatalogReleaseGroups: jest.fn(async () => null),
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: jest.fn(async () => undefined),
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: jest.fn(() => null),
+}));
+
 import artistsRouter from "../routes/artists";
 
 function buildApp() {

@@ -39,8 +39,10 @@ import {
 import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
+    LIBRARY_SURFACE_ALBUM_LOCATIONS,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
+    isLibrarySurfaceAlbumLocation,
     parseLibraryOrigin,
     trackBrowseWhere,
 } from "../../utils/librarySorting";
@@ -167,6 +169,7 @@ export async function handleGetAlbums(req: Request, res: Response) {
         };
 
         let where: Prisma.AlbumWhereInput = {
+            location: { in: [...LIBRARY_SURFACE_ALBUM_LOCATIONS] },
             tracks: { some: browseTrackWhere }, // Only albums with visible tracks
         };
 
@@ -186,6 +189,7 @@ export async function handleGetAlbums(req: Request, res: Response) {
                 },
                 {
                     rgMbid: { in: ownedMbids },
+                    location: { in: ["LIBRARY", "DISCOVER"] },
                     tracks: { some: browseTrackWhere },
                 },
             ];
@@ -239,18 +243,20 @@ export async function handleGetAlbums(req: Request, res: Response) {
         ]);
 
         // Normalize coverArt field for frontend
-        const albums = albumsData.map(({ federationPeer, ...album }) => ({
-            ...album,
-            source: album.location === "FEDERATED" ? "federated" : "local",
-            peer: federationPeer
-                ? {
-                      id: federationPeer.id,
-                      name: federationPeer.name,
-                      online: federationPeer.outboundStatus === "ACTIVE",
-                  }
-                : undefined,
-            coverArt: album.coverUrl,
-        }));
+        const albums = albumsData
+            .filter((album) => isLibrarySurfaceAlbumLocation(album.location))
+            .map(({ federationPeer, ...album }) => ({
+                ...album,
+                source: album.location === "FEDERATED" ? "federated" : "local",
+                peer: federationPeer
+                    ? {
+                          id: federationPeer.id,
+                          name: federationPeer.name,
+                          online: federationPeer.outboundStatus === "ACTIVE",
+                      }
+                    : undefined,
+                coverArt: album.coverUrl,
+            }));
 
         res.json({
             albums,
@@ -797,7 +803,7 @@ export async function handleDeleteAlbum(
         },
     });
 
-    if (!album) {
+    if (!album || !isLibrarySurfaceAlbumLocation(album.location)) {
         return sendRouteError(res, 404, "Album not found");
     }
 

@@ -62,6 +62,7 @@ import {
     createAlbumDownloadMetrics,
     type AlbumDownloadOutcome,
 } from "./albumDownloadMetrics";
+import { createCatalogMetrics, type CatalogWriteKind } from "./catalogMetrics";
 
 export type {
     FederationAuthFailureReason,
@@ -90,6 +91,7 @@ const providerMetrics = createProviderMetrics(metricsRegistry);
 const providerTrackGcMetrics = createProviderTrackGcMetrics(metricsRegistry);
 const requestMetrics = createRequestMetrics(metricsRegistry);
 const albumDownloadMetrics = createAlbumDownloadMetrics(metricsRegistry);
+const catalogMetrics = createCatalogMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -152,6 +154,21 @@ export function recordAlbumDownloadOutcome(
     outcome: AlbumDownloadOutcome,
 ): void {
     albumDownloadMetrics.downloads.inc({ outcome });
+}
+
+/** Records one successful metadata catalog write-through operation. */
+export function recordCatalogWrite(kind: CatalogWriteKind): void {
+    catalogMetrics.writes.inc({ kind });
+}
+
+/** Adds albums removed by one metadata catalog retention sweep. */
+export function recordCatalogReaped(count: number): void {
+    catalogMetrics.reaped.inc(count);
+}
+
+/** Replaces the current persisted CATALOG album count. */
+export function setCatalogAlbumCount(count: number): void {
+    catalogMetrics.albums.set(count);
 }
 
 /** Records one Library Health panel cache outcome. */

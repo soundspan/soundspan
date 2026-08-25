@@ -135,6 +135,15 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({}));
 jest.mock("../../utils/systemSettings", () => ({}));
 jest.mock("../../utils/colorExtractor", () => ({}));
 
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshCatalogReleaseGroups: jest.fn(async () => null),
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: jest.fn(async () => undefined),
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: jest.fn(() => null),
+}));
+
 import router from "../library";
 import * as albums from "../library/albums";
 import * as artistCounts from "../library/artistCounts";

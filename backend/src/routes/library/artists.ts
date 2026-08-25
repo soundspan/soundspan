@@ -35,6 +35,7 @@ import {
     ARTIST_SORT_MAP,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
+    isLibrarySurfaceAlbumLocation,
     parseLibraryOrigin,
     trackBrowseWhere,
 } from "../../utils/librarySorting";
@@ -55,6 +56,12 @@ import {
 } from "./artistPageMatching";
 import { resolveArtistImage } from "../../services/metadata/artistImageResolver";
 import { isRealArtistMbid } from "../../utils/musicIds";
+import { filterLibraryArtistReleaseGroups } from "../../services/metadata/discographyFiltering";
+import {
+    logCatalogPersistenceError,
+    persistCatalogReleaseGroups,
+    readFreshCatalogReleaseGroups,
+} from "../../services/metadata/catalogPersistence";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -585,13 +592,14 @@ export async function handleGetArtist(
         }
     }
 
-    // Track whether we successfully loaded the full discography
     let discographyComplete = !includeDiscography;
 
-    // Only LIBRARY/DISCOVER albums represent files on disk — REMOTE albums
-    // are created by provider entity resolution and should not appear as owned.
     const dbAlbums = artist.albums
-        .filter((album) => album.location !== "REMOTE")
+        .filter(
+            (album) =>
+                isLibrarySurfaceAlbumLocation(album.location) &&
+                album.location !== "REMOTE",
+        )
         .map((album) => ({
             ...album,
             tracks: album.tracks.map(({ federationPeer, ...track }) =>
@@ -619,14 +627,13 @@ export async function handleGetArtist(
     if (!includeDiscography) {
         albumsWithOwnership = dbAlbums;
     } else {
-        // Always fetch discography if we have a valid MBID - users need to see what's available
         const shouldFetchDiscography = isRealArtistMbid(effectiveMbid);
 
         if (shouldFetchDiscography) {
             const discoCacheKey = `discography:${effectiveMbid}`;
             try {
-                // Check Redis cache first (cache for 24 hours)
                 let releaseGroups: any[] = [];
+                let fetchedFromProvider = false;
 
                 const cachedDisco = await redisClient.get(discoCacheKey);
                 if (cachedDisco && cachedDisco !== "NOT_FOUND") {
@@ -635,15 +642,25 @@ export async function handleGetArtist(
                         `[Artist] Using cached discography (${releaseGroups.length} albums)`,
                     );
                 } else {
-                    logger.debug(
-                        `[Artist] Fetching discography from MusicBrainz...`,
-                    );
-                    releaseGroups = await musicBrainzService.getReleaseGroups(
-                        effectiveMbid,
-                        ["album", "ep"],
-                        100,
-                    );
-                    // Cache for 24 hours
+                    const catalogReleaseGroups = readFreshCatalogReleaseGroups({
+                        artistId: artist.id,
+                        catalogSyncedAt: artist.catalogSyncedAt,
+                        albums: artist.albums,
+                    });
+                    if (catalogReleaseGroups !== null) {
+                        releaseGroups = catalogReleaseGroups;
+                    } else {
+                        logger.debug(
+                            `[Artist] Fetching discography from MusicBrainz...`,
+                        );
+                        releaseGroups =
+                            await musicBrainzService.getReleaseGroups(
+                                effectiveMbid,
+                                ["album", "ep"],
+                                100,
+                            );
+                        fetchedFromProvider = true;
+                    }
                     await redisClient.setEx(
                         discoCacheKey,
                         24 * 60 * 60,
@@ -652,53 +669,27 @@ export async function handleGetArtist(
                 }
 
                 logger.debug(
-                    `  Got ${releaseGroups.length} albums from MusicBrainz (before filtering)`,
+                    `  Got ${releaseGroups.length} discography albums before filtering`,
                 );
 
-                // Filter out live albums, compilations, soundtracks, remixes, etc.
-                const excludedSecondaryTypes = [
-                    "Live",
-                    "Compilation",
-                    "Soundtrack",
-                    "Remix",
-                    "DJ-mix",
-                    "Mixtape/Street",
-                    "Demo",
-                    "Interview",
-                    "Audio drama",
-                    "Audiobook",
-                    "Spokenword",
-                ];
-
-                const filteredReleaseGroups = releaseGroups.filter(
-                    (rg: any) => {
-                        // Keep if no secondary types (pure studio album/EP)
-                        if (
-                            !rg["secondary-types"] ||
-                            rg["secondary-types"].length === 0
-                        ) {
-                            return true;
-                        }
-                        // Exclude if any secondary type matches our exclusion list
-                        return !rg["secondary-types"].some((type: string) =>
-                            excludedSecondaryTypes.includes(type),
-                        );
-                    },
-                );
+                const filteredReleaseGroups =
+                    filterLibraryArtistReleaseGroups(releaseGroups);
 
                 logger.debug(
                     `  Filtered to ${filteredReleaseGroups.length} studio albums/EPs`,
                 );
 
-                // Transform MusicBrainz release groups to album format
-                // PERFORMANCE: Only check Redis cache for covers, don't make API calls
-                // This makes artist pages load instantly after the first visit
+                if (fetchedFromProvider) {
+                    void persistCatalogReleaseGroups({
+                        artistId: artist.id,
+                        releaseGroups: filteredReleaseGroups,
+                    }).catch(logCatalogPersistenceError);
+                }
+
                 const mbAlbums = await Promise.all(
                     filteredReleaseGroups.map(async (rg: any) => {
                         let coverUrl = null;
 
-                        // Only check Redis cache - don't make external API calls
-                        // Covers will be fetched lazily by the frontend or during enrichment
                         const cacheKey = `caa:${rg.id}`;
                         try {
                             const cached = await redisClient.get(cacheKey);

@@ -260,7 +260,9 @@ async function enrichAlbums(artistId: string): Promise<void> {
     const albums = await prisma.album.findMany({
         where: {
             artistId,
-            location: { not: "FEDERATED" },
+            // Allowlist: CATALOG skeletons and future locations stay out of
+            // provider enrichment.
+            location: { in: ["LIBRARY", "DISCOVER", "REMOTE"] },
             OR: [
                 { coverUrl: null },
                 { coverUrl: "" },

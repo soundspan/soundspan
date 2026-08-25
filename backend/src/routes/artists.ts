@@ -13,6 +13,13 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { findRouteNameMatch } from "./artistRouteName";
+import {
+    findFreshCatalogAlbum,
+    findFreshCatalogReleaseGroups,
+    logCatalogPersistenceError,
+    persistCatalogReleaseGroups,
+    persistCatalogTracklist,
+} from "../services/metadata/catalogPersistence";
 
 const router = Router();
 
@@ -462,12 +469,16 @@ router.get<{ nameOrMbid: string }>(
             });
             const image = artistImage?.url ?? null;
 
-            // Get discography from MusicBrainz
+            // Get discography from the local catalog or MusicBrainz.
             let albums: any[] = [];
             if (includeDiscography && mbid) {
                 try {
+                    const catalogReleaseGroups =
+                        await findFreshCatalogReleaseGroups(mbid);
+                    const fetchedFromProvider = catalogReleaseGroups === null;
                     const releaseGroups =
-                        await musicBrainzService.getReleaseGroups(mbid);
+                        catalogReleaseGroups ??
+                        (await musicBrainzService.getReleaseGroups(mbid));
 
                     // Filter albums - only show studio albums and EPs
                     // Exclude live albums, compilations, soundtracks, remixes, etc.
@@ -496,6 +507,13 @@ router.get<{ nameOrMbid: string }>(
                             return !hasExcludedType;
                         },
                     );
+
+                    if (fetchedFromProvider) {
+                        void persistCatalogReleaseGroups({
+                            artistMbid: mbid,
+                            releaseGroups: filteredReleaseGroups,
+                        }).catch(logCatalogPersistenceError);
+                    }
 
                     // Resolve covers for the bounded discovery subset.
                     albums = await Promise.all(
@@ -698,34 +716,55 @@ router.get<{ mbid: string }>(
             let releaseGroup: any = null;
             let release: any = null;
             let releaseGroupId: string = mbid;
+            const catalogAlbum = await findFreshCatalogAlbum(mbid);
 
             // Try as release-group first, then as release
-            try {
-                releaseGroup = await musicBrainzService.getReleaseGroup(mbid);
-            } catch (error: any) {
-                // If 404, try as a release instead
-                if (error.response?.status === 404) {
-                    logger.debug(
-                        `${mbid} is not a release-group, trying as release...`,
-                    );
-                    release = await musicBrainzService.getRelease(mbid);
-                    releaseGroupId = release["release-group"]?.id || mbid;
+            if (catalogAlbum) {
+                releaseGroup = {
+                    id: catalogAlbum.rgMbid,
+                    title: catalogAlbum.title,
+                    "primary-type": catalogAlbum.primaryType,
+                    "first-release-date":
+                        catalogAlbum.year === null
+                            ? ""
+                            : String(catalogAlbum.year),
+                    "artist-credit": [
+                        {
+                            name: catalogAlbum.artist.name,
+                            artist: { id: catalogAlbum.artist.mbid },
+                        },
+                    ],
+                };
+                releaseGroupId = catalogAlbum.rgMbid;
+            } else {
+                try {
+                    releaseGroup =
+                        await musicBrainzService.getReleaseGroup(mbid);
+                } catch (error: any) {
+                    // If 404, try as a release instead
+                    if (error.response?.status === 404) {
+                        logger.debug(
+                            `${mbid} is not a release-group, trying as release...`,
+                        );
+                        release = await musicBrainzService.getRelease(mbid);
+                        releaseGroupId = release["release-group"]?.id || mbid;
 
-                    // Now get the release group to get the type and first-release-date
-                    if (releaseGroupId) {
-                        try {
-                            releaseGroup =
-                                await musicBrainzService.getReleaseGroup(
-                                    releaseGroupId,
+                        // Now get the release group to get the type and first-release-date
+                        if (releaseGroupId) {
+                            try {
+                                releaseGroup =
+                                    await musicBrainzService.getReleaseGroup(
+                                        releaseGroupId,
+                                    );
+                            } catch (err) {
+                                logger.error(
+                                    `Failed to get release-group ${releaseGroupId}`,
                                 );
-                        } catch (err) {
-                            logger.error(
-                                `Failed to get release-group ${releaseGroupId}`,
-                            );
+                            }
                         }
+                    } else {
+                        throw error;
                     }
-                } else {
-                    throw error;
                 }
             }
 
@@ -771,7 +810,17 @@ router.get<{ mbid: string }>(
             };
 
             if (includeTracks) {
-                if (release) {
+                if (catalogAlbum) {
+                    allDiscTracks = catalogAlbum.tracks.map((track) => ({
+                        track: {
+                            id: track.recordingMbid ?? undefined,
+                            title: track.title,
+                            position: track.trackNo,
+                            length: track.duration * 1000,
+                        },
+                        discNumber: track.discNo,
+                    }));
+                } else if (release) {
                     collectFromMedia(release.media);
                 } else if (
                     releaseGroup?.releases &&
@@ -812,6 +861,34 @@ router.get<{ mbid: string }>(
 
             // Format response
             const releaseMbid = release?.id || null;
+            const tracks = includeTracks
+                ? allDiscTracks.map((dt: DiscTrack, index: number) => ({
+                      id: `mb-${releaseGroupId}-${dt.track.id || index}`,
+                      title: dt.track.title,
+                      trackNo: dt.track.position || index + 1,
+                      discNo: dt.discNumber,
+                      duration: dt.track.length
+                          ? Math.floor(dt.track.length / 1000)
+                          : 0,
+                      artist: { name: artistName },
+                  }))
+                : [];
+
+            if (includeTracks && !catalogAlbum) {
+                void persistCatalogTracklist({
+                    rgMbid: releaseGroupId,
+                    tracks: tracks.map(
+                        ({ title, trackNo, discNo, duration }, index) => ({
+                            recordingMbid:
+                                allDiscTracks[index]?.track?.id ?? null,
+                            title,
+                            trackNo,
+                            discNo,
+                            duration,
+                        }),
+                    ),
+                }).catch(logCatalogPersistenceError);
+            }
 
             const response = {
                 id: releaseGroupId,
@@ -839,18 +916,7 @@ router.get<{ mbid: string }>(
                 tags: normalizeToArray(lastFmInfo?.tags?.tag)
                     .map((t: any) => t?.name)
                     .filter(Boolean),
-                tracks: includeTracks
-                    ? allDiscTracks.map((dt: DiscTrack, index: number) => ({
-                          id: `mb-${releaseGroupId}-${dt.track.id || index}`,
-                          title: dt.track.title,
-                          trackNo: dt.track.position || index + 1,
-                          discNo: dt.discNumber,
-                          duration: dt.track.length
-                              ? Math.floor(dt.track.length / 1000)
-                              : 0,
-                          artist: { name: artistName },
-                      }))
-                    : [],
+                tracks,
                 similarAlbums: [], // Similar album recommendations not yet implemented
                 owned: false,
                 source: "discovery",

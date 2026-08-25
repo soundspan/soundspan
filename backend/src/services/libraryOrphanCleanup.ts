@@ -8,6 +8,7 @@ import {
     providerTrackRetentionCutoff,
 } from "./providerTrackRetention";
 import { bumpSearchCacheVersion } from "./searchCacheVersion";
+import { LIBRARY_SURFACE_ALBUM_LOCATIONS } from "../utils/librarySorting";
 
 const cleanupLogger = logger.child("LibraryOrphanCleanup");
 /** Keeps each deletion transaction near the provider GC's 100-row write cost. */
@@ -42,6 +43,7 @@ async function selectOrphanedAlbums(
         where: {
             ...cursorWhere(afterId),
             peerId: null,
+            location: { in: [...LIBRARY_SURFACE_ALBUM_LOCATIONS] },
             tracks: { none: {} },
             ...albumOrphanRetentionGuardWhere(cutoff),
         },
@@ -62,6 +64,7 @@ async function deleteOrphanedAlbums(
         where: {
             id: { in: candidates.map((album) => album.id) },
             peerId: null,
+            location: { in: [...LIBRARY_SURFACE_ALBUM_LOCATIONS] },
             tracks: { none: {} },
             ...albumOrphanRetentionGuardWhere(cutoff),
         },

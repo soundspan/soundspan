@@ -299,6 +299,7 @@ model Artist {
   libraryAlbumCount   Int                      @default(0)
   totalTrackCount     Int                      @default(0)
   remoteTrackCount    Int                      @default(0)
+  catalogSyncedAt     DateTime?
   peerId              String?
   remoteId            String?
   albums              Album[]
@@ -345,6 +346,7 @@ model Album {
   remoteId          String?
   albumLoudnessLufs Float?
   albumTruePeakDb   Float?
+  catalogTouchedAt  DateTime?
   artist            Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   federationPeer    FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
   tracks            Track[]
@@ -357,6 +359,7 @@ model Album {
   @@index([artistId])
   @@index([location])
   @@index([artistId, location])
+  @@index([location, catalogTouchedAt, id])
   @@index([title])
   @@index([searchVector], type: Gin)
   @@index([hasUserOverrides])
@@ -1371,6 +1374,7 @@ enum AlbumLocation {
   DISCOVER
   REMOTE
   FEDERATED
+  CATALOG
 }
 
 enum TrackOrigin {

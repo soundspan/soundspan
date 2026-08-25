@@ -1,6 +1,6 @@
 import path from "path";
 import { type Request, type Response } from "express";
-import { Prisma } from "@prisma/client";
+import { Prisma, type AlbumLocation } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import {
     getResponseFormat,
@@ -18,6 +18,7 @@ import { config } from "../../config";
 import { safeResolvePath } from "../../utils/safeResolvePath";
 import { fetchExternalImage } from "../../services/imageProxy";
 import {
+    isLibrarySurfaceAlbumLocation,
     TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
@@ -641,7 +642,7 @@ function formatAlbumForSubsonic(
         year: number | null;
         lastSynced: Date;
         coverUrl: string | null;
-        location: "LIBRARY" | "DISCOVER" | "REMOTE" | "FEDERATED";
+        location: AlbumLocation;
         genres?: unknown;
         userGenres?: unknown;
         artist: {
@@ -653,6 +654,9 @@ function formatAlbumForSubsonic(
     },
     enrichment: SongEnrichment = {},
 ): Record<string, unknown> {
+    if (!isLibrarySurfaceAlbumLocation(album.location)) {
+        throw new Error("Album location is not visible through Subsonic");
+    }
     const formatted: Record<string, unknown> = {
         id: toSubsonicId("album", album.id),
         parent: toSubsonicId("artist", album.artist.id),
@@ -704,7 +708,7 @@ type SongForSubsonicInput = {
         title: string;
         year: number | null;
         coverUrl: string | null;
-        location: "LIBRARY" | "DISCOVER" | "REMOTE" | "FEDERATED";
+        location: AlbumLocation;
         genres?: unknown;
         userGenres?: unknown;
         albumLoudnessLufs?: number | null;
@@ -720,6 +724,9 @@ function formatSongForSubsonic(
     song: SongForSubsonicInput,
     enrichment: SongEnrichment = {},
 ): Record<string, unknown> {
+    if (!isLibrarySurfaceAlbumLocation(song.album.location)) {
+        throw new Error("Album location is not visible through Subsonic");
+    }
     const suffix =
         song.filePath === null ? undefined : getFileSuffix(song.filePath);
 

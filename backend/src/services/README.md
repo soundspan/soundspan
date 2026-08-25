@@ -90,7 +90,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/libraryRadioBuilder.ts` | Core |
 | `backend/src/services/libraryRadioStationSelection.ts` | Shared Quick Start, genre, and decade radio selection |
 | `backend/src/services/libraryRadioTrackResponse.ts` | Library-radio playback response mapping |
-| `backend/src/services/libraryOrphanCleanup.ts` | Deletes catalog parents after their final track row is purged |
+| `backend/src/services/libraryOrphanCleanup.ts` | Deletes non-CATALOG library parents after their final track row is purged |
 | `backend/src/services/libraryHealthDashboard/index.ts` | Library Health read-model composition and cached panel surface |
 | `backend/src/services/libraryHealthDashboard/analysisCoverage.ts` | Local analysis, vibe, loudness, and failure coverage |
 | `backend/src/services/libraryHealthDashboard/cache.ts` | Redis caching, invalidation, and request coalescing |
@@ -141,6 +141,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/metadata/albumEnrichmentFields.ts` | Shared MusicBrainz, Last.fm, cover, and album-column enrichment rules |
 | `backend/src/services/metadata/artistEnrichmentFields.ts` | Shared Wikidata-first bio, Last.fm genre, image, and artist-column enrichment rules |
 | `backend/src/services/metadata/artistImageResolver.ts` | Canonical bounded artist-image provider ladder, cache, and in-flight deduplication |
+| `backend/src/services/metadata/catalogPersistence.ts` | Kill-switchable write-through and fresh read-first access for MusicBrainz album and track skeletons |
+| `backend/src/services/metadata/discographyFiltering.ts` | Library artist discography secondary-type filtering policy |
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |
 | `backend/src/services/musicScanner.ts` | Core |

@@ -274,6 +274,15 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({
 
 // ── Router under test ────────────────────────────────────────────
 
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshCatalogReleaseGroups: jest.fn(async () => null),
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: jest.fn(async () => undefined),
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: jest.fn(() => null),
+}));
+
 import router from "../library";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 import { errorHandler } from "../../middleware/errorHandler";

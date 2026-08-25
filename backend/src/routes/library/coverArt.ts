@@ -39,6 +39,7 @@ import {
 } from "../../utils/libraryCoverArt";
 import { normalizeRouteName } from "../routeParamName";
 import { rgMbidKind } from "../../utils/musicIds";
+import { isLibrarySurfaceAlbumLocation } from "../../utils/librarySorting";
 
 const coverAlbumSelect = {
     id: true,
@@ -68,11 +69,14 @@ function isDirectCoverResource(id: string): boolean {
     );
 }
 
-function findCoverAlbum(id: string) {
-    return prisma.album.findUnique({
+async function findCoverAlbum(id: string) {
+    const album = await prisma.album.findUnique({
         where: { id },
         select: coverAlbumSelect,
     });
+    return album && isLibrarySurfaceAlbumLocation(album.location)
+        ? album
+        : null;
 }
 
 type CoverAlbum = Prisma.AlbumGetPayload<{ select: typeof coverAlbumSelect }>;

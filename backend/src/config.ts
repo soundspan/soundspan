@@ -525,6 +525,8 @@ const envSchema = z
         LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS: positiveIntegerEnvSchema,
         LISTEN_TOGETHER_STATE_SYNC_ENABLED: booleanEnvSchema,
         LISTEN_TOGETHER_STATE_STORE_ENABLED: booleanEnvSchema,
+        CATALOG_PERSISTENCE: z.string().optional(),
+        CATALOG_RETENTION_DAYS: positiveIntegerEnvSchema,
     })
     .superRefine((env, context) => {
         const encryptionKey = resolveSettingsEncryptionKey(env);
@@ -845,6 +847,16 @@ export const config = {
             process.env.DISCOVERY_MODE === "legacy"
                 ? "legacy"
                 : "recommendation",
+    },
+
+    catalogPersistence: {
+        enabled: !["off", "false", "0"].includes(
+            (process.env.CATALOG_PERSISTENCE ?? "").trim().toLowerCase(),
+        ),
+        retentionDays: Number.parseInt(
+            process.env.CATALOG_RETENTION_DAYS ?? "180",
+            10,
+        ),
     },
 
     // Coarse feature flags for ML/recommendation subsystems.

@@ -82,6 +82,9 @@ describe("cleanupOrphanedLibraryEntities", () => {
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: {
                 peerId: null,
+                location: {
+                    in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                },
                 hasUserOverrides: false,
                 ownedBy: { none: {} },
                 tracks: { none: {} },
@@ -96,6 +99,9 @@ describe("cleanupOrphanedLibraryEntities", () => {
             where: {
                 id: { in: ["local-album"] },
                 peerId: null,
+                location: {
+                    in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                },
                 hasUserOverrides: false,
                 ownedBy: { none: {} },
                 tracks: { none: {} },

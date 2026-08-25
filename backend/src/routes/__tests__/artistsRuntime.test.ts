@@ -11,6 +11,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -70,6 +76,18 @@ jest.mock("../../services/metadata/artistImageResolver", () => ({
 const mockResolveAlbumCover = jest.fn();
 jest.mock("../../services/metadata/albumCoverResolver", () => ({
     resolveAlbumCover: mockResolveAlbumCover,
+}));
+
+const mockPersistCatalogReleaseGroups = jest.fn();
+const mockPersistCatalogTracklist = jest.fn();
+const mockFindFreshCatalogReleaseGroups = jest.fn();
+const mockFindFreshCatalogAlbum = jest.fn();
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: mockFindFreshCatalogAlbum,
+    findFreshCatalogReleaseGroups: mockFindFreshCatalogReleaseGroups,
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: mockPersistCatalogReleaseGroups,
+    persistCatalogTracklist: mockPersistCatalogTracklist,
 }));
 
 const redisClient = {
@@ -156,6 +174,10 @@ describe("artists routes runtime", () => {
         mockYtSearch.mockResolvedValue({ results: [], total: 0 });
         mockGetTrackPreview.mockResolvedValue(null);
         mockResolveAlbumCover.mockResolvedValue(null);
+        mockPersistCatalogReleaseGroups.mockResolvedValue(undefined);
+        mockPersistCatalogTracklist.mockResolvedValue(undefined);
+        mockFindFreshCatalogReleaseGroups.mockResolvedValue(null);
+        mockFindFreshCatalogAlbum.mockResolvedValue(null);
 
         mockSearchArtist.mockResolvedValue([]);
         mockGetArtist.mockResolvedValue(null);
@@ -269,8 +291,102 @@ describe("artists routes runtime", () => {
         );
         expect(mockGetArtistInfo).not.toHaveBeenCalled();
         expect(mockSearchArtist).not.toHaveBeenCalled();
+        expect(mockFindFreshCatalogReleaseGroups).not.toHaveBeenCalled();
+        expect(mockFindFreshCatalogAlbum).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual(cachedPayload);
+    });
+
+    it("keeps Redis ahead of persisted album reads", async () => {
+        const cachedPayload = {
+            id: "rg-redis",
+            rgMbid: "rg-redis",
+            title: "Redis Album",
+            tracks: [],
+        };
+        mockRedisGet.mockResolvedValueOnce(JSON.stringify(cachedPayload));
+        const req = {
+            params: { mbid: "rg-redis" },
+            query: { includeTracks: "true" },
+        } as any;
+        const res = createRes();
+
+        await getAlbum(req, res);
+
+        expect(mockFindFreshCatalogAlbum).not.toHaveBeenCalled();
+        expect(mockGetReleaseGroup).not.toHaveBeenCalled();
+        expect(res.body).toEqual(cachedPayload);
+    });
+
+    it("uses a fresh persisted discography on discovery cache miss without MusicBrainz", async () => {
+        mockSearchArtist.mockResolvedValueOnce([
+            { id: "artist-catalog-mbid", name: "Catalog Artist" },
+        ]);
+        mockFindFreshCatalogReleaseGroups.mockResolvedValueOnce([
+            {
+                id: "rg-catalog",
+                title: "Catalog Album",
+                "first-release-date": "2014",
+                "primary-type": "Album",
+                "secondary-types": [],
+            },
+        ]);
+
+        const req = {
+            params: { nameOrMbid: "Catalog Artist" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+        } as any;
+        const res = createRes();
+
+        await getDiscover(req, res);
+
+        expect(mockFindFreshCatalogReleaseGroups).toHaveBeenCalledWith(
+            "artist-catalog-mbid",
+        );
+        expect(mockGetReleaseGroups).not.toHaveBeenCalled();
+        expect(mockPersistCatalogReleaseGroups).not.toHaveBeenCalled();
+        expect(res.body.albums).toEqual([
+            {
+                id: "rg-catalog",
+                rgMbid: "rg-catalog",
+                mbid: "rg-catalog",
+                title: "Catalog Album",
+                type: "Album",
+                year: 2014,
+                releaseDate: "2014",
+                coverUrl:
+                    "https://coverartarchive.org/release-group/rg-catalog/front-500",
+                owned: false,
+            },
+        ]);
+    });
+
+    it("fetches the discovery discography from MusicBrainz when persisted rows are stale", async () => {
+        mockSearchArtist.mockResolvedValueOnce([
+            { id: "artist-stale-mbid", name: "Stale Artist" },
+        ]);
+        mockGetReleaseGroups.mockResolvedValueOnce([]);
+
+        const req = {
+            params: { nameOrMbid: "Stale Artist" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+        } as any;
+        const res = createRes();
+
+        await getDiscover(req, res);
+
+        expect(mockFindFreshCatalogReleaseGroups).toHaveBeenCalledWith(
+            "artist-stale-mbid",
+        );
+        expect(mockGetReleaseGroups).toHaveBeenCalledWith("artist-stale-mbid");
     });
 
     it("continues when /discover cache lookup fails", async () => {
@@ -677,6 +793,13 @@ describe("artists routes runtime", () => {
             10,
         );
         expect(mockGetReleaseGroups).toHaveBeenCalledWith("artist-mbid-1");
+        expect(mockPersistCatalogReleaseGroups).toHaveBeenCalledWith({
+            artistMbid: "artist-mbid-1",
+            releaseGroups: [
+                expect.objectContaining({ id: "rg-older" }),
+                expect.objectContaining({ id: "rg-newer" }),
+            ],
+        });
         expect(mockResolveAlbumCover).toHaveBeenCalledWith({
             artistName: "Resolved Artist",
             albumTitle: "Older Album",
@@ -821,6 +944,81 @@ describe("artists routes runtime", () => {
         );
     });
 
+    it("serves a fresh persisted album tracklist without MusicBrainz", async () => {
+        mockFindFreshCatalogAlbum.mockResolvedValueOnce({
+            id: "album-catalog",
+            rgMbid: "rg-catalog",
+            title: "Catalog Album",
+            year: 2015,
+            primaryType: "Album",
+            artist: {
+                id: "artist-catalog",
+                mbid: "artist-catalog-mbid",
+                name: "Catalog Artist",
+            },
+            tracks: [
+                {
+                    id: "catalog-track-1",
+                    recordingMbid: "recording-1",
+                    title: "Catalog Song",
+                    trackNo: 1,
+                    discNo: 1,
+                    duration: 181,
+                },
+            ],
+        });
+        mockGetAlbumInfo.mockResolvedValueOnce({
+            wiki: { summary: "Catalog album summary" },
+            tags: { tag: [{ name: "ambient" }] },
+        });
+
+        const req = {
+            params: { mbid: "rg-catalog" },
+            query: { includeTracks: "true" },
+        } as any;
+        const res = createRes();
+
+        await getAlbum(req, res);
+
+        expect(mockFindFreshCatalogAlbum).toHaveBeenCalledWith("rg-catalog");
+        expect(mockGetReleaseGroup).not.toHaveBeenCalled();
+        expect(mockGetRelease).not.toHaveBeenCalled();
+        expect(mockPersistCatalogTracklist).not.toHaveBeenCalled();
+        expect(res.body).toEqual({
+            id: "rg-catalog",
+            rgMbid: "rg-catalog",
+            mbid: "rg-catalog",
+            releaseMbid: null,
+            title: "Catalog Album",
+            artist: {
+                name: "Catalog Artist",
+                id: "artist-catalog-mbid",
+                mbid: "artist-catalog-mbid",
+            },
+            year: 2015,
+            type: "Album",
+            coverUrl:
+                "https://coverartarchive.org/release-group/rg-catalog/front-500",
+            coverArt:
+                "https://coverartarchive.org/release-group/rg-catalog/front-500",
+            bio: "Catalog album summary",
+            tags: ["ambient"],
+            tracks: [
+                {
+                    id: "mb-rg-catalog-recording-1",
+                    title: "Catalog Song",
+                    trackNo: 1,
+                    discNo: 1,
+                    duration: 181,
+                    artist: { name: "Catalog Artist" },
+                },
+            ],
+            similarAlbums: [],
+            owned: false,
+            source: "discovery",
+        });
+    });
+
     it("builds /album payload via release-group path with includeTracks=true", async () => {
         mockGetReleaseGroup.mockResolvedValueOnce({
             id: "rg-123",
@@ -922,6 +1120,25 @@ describe("artists routes runtime", () => {
                 duration: 202,
             }),
         ]);
+        expect(mockPersistCatalogTracklist).toHaveBeenCalledWith({
+            rgMbid: "rg-123",
+            tracks: [
+                {
+                    recordingMbid: "track-1",
+                    title: "Song One",
+                    trackNo: 1,
+                    discNo: 1,
+                    duration: 181,
+                },
+                {
+                    recordingMbid: "track-2",
+                    title: "Song Two",
+                    trackNo: 3,
+                    discNo: 2,
+                    duration: 202,
+                },
+            ],
+        });
 
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "discovery:album:rg-123:tracks:1",

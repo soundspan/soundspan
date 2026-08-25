@@ -1,8 +1,31 @@
 import type { Prisma } from "@prisma/client";
 
+/** Album locations that existed before metadata-only catalog rows were added. */
+export const LIBRARY_SURFACE_ALBUM_LOCATIONS = [
+    "LIBRARY",
+    "DISCOVER",
+    "REMOTE",
+    "FEDERATED",
+] as const;
+
+/** Rejects CATALOG and future album locations from library-facing responses. */
+export function isLibrarySurfaceAlbumLocation(
+    location: unknown,
+): location is (typeof LIBRARY_SURFACE_ALBUM_LOCATIONS)[number] {
+    return (
+        typeof location === "string" &&
+        LIBRARY_SURFACE_ALBUM_LOCATIONS.some(
+            (allowedLocation) => allowedLocation === location,
+        )
+    );
+}
+
 /** Shared predicate for user-facing reads of tracks that still exist. */
 export const TRACK_VISIBLE_WHERE = {
     removedAt: null,
+    album: {
+        location: { in: [...LIBRARY_SURFACE_ALBUM_LOCATIONS] },
+    },
 } satisfies Prisma.TrackWhereInput;
 
 /** Shared predicate for tracks physically owned by this soundspan instance. */

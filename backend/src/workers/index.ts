@@ -69,6 +69,7 @@ import { processAudioHashBackfill } from "./processors/audioHashBackfillProcesso
 import { processLoudnessBackfill } from "./processors/loudnessBackfillProcessor";
 import { processTrackRemovalPurge } from "./processors/trackRemovalPurgeProcessor";
 import { processRequestFulfillmentBatch } from "./processors/requestFulfillmentProcessor";
+import { processCatalogRetention } from "./processors/catalogRetentionProcessor";
 import {
     REQUEST_FULFILLMENT_INTERVAL_MS,
     REQUEST_FULFILLMENT_JOB_ID,
@@ -327,6 +328,15 @@ async function processAlbumDownloadRecoveryJob(): Promise<void> {
                 );
             }
         },
+    );
+}
+
+async function processCatalogRetentionJob(): Promise<void> {
+    await runWithSchedulerClaim(
+        "scheduler-claim:catalog-retention",
+        30 * ONE_MINUTE_MS,
+        "catalog retention sweep",
+        processCatalogRetention,
     );
 }
 
@@ -678,6 +688,9 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
             break;
         case SCHEDULER_JOB_TYPES.albumDownloadRecovery:
             await processAlbumDownloadRecoveryJob();
+            break;
+        case SCHEDULER_JOB_TYPES.catalogRetention:
+            await processCatalogRetentionJob();
             break;
         case SCHEDULER_JOB_TYPES.lidarrCleanup:
             await processLidarrCleanupJob(mode);

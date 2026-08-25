@@ -3,6 +3,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import {
+    LIBRARY_SURFACE_ALBUM_LOCATIONS,
     type LibraryOriginFilter,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
@@ -119,6 +120,11 @@ function trackSourceSql(source: LibraryOriginFilter): Prisma.Sql {
     return trackBrowseSql("t", source);
 }
 
+function albumLocationSql(alias: "a" | "alb"): Prisma.Sql {
+    const column = Prisma.raw(`${alias}."location"`);
+    return Prisma.sql`${column} IN (${Prisma.join([...LIBRARY_SURFACE_ALBUM_LOCATIONS])})`;
+}
+
 function peerProjectionSql(alias: "a" | "t"): Prisma.Sql {
     return Prisma.raw(
         `CASE WHEN ${alias}."peerId" IS NOT NULL THEN json_build_object('id', fp.id, 'name', fp.name, 'online', COALESCE(fp."outboundStatus" = 'ACTIVE', false)) ELSE NULL END`,
@@ -168,6 +174,7 @@ export class SearchService {
     }: SearchOptions): Promise<ArtistSearchResult[]> {
         const pattern = `%${escapeLikePattern(query)}%`;
         const sourceSql = trackSourceSql(source);
+        const albumLocation = albumLocationSql("alb");
         const peerSql = peerProjectionSql("a");
         const rows = await prisma.$queryRaw<
             Array<
@@ -188,7 +195,8 @@ export class SearchService {
                 EXISTS (
                   SELECT 1 FROM "Album" alb
                   JOIN "Track" t ON t."albumId" = alb.id
-                  WHERE alb."artistId" = a.id AND t."removedAt" IS NULL AND ${sourceSql}
+                  WHERE alb."artistId" = a.id AND ${albumLocation}
+                    AND t."removedAt" IS NULL AND ${sourceSql}
                 )
                 OR (${source === "all"} AND a."remoteTrackCount" > 0)
               )
@@ -221,6 +229,7 @@ export class SearchService {
 
         try {
             const sourceSql = trackSourceSql(source);
+            const albumLocation = albumLocationSql("alb");
             const peerSql = peerProjectionSql("a");
             const results = await prisma.$queryRaw<ArtistSearchResult[]>`
         SELECT
@@ -239,7 +248,8 @@ export class SearchService {
             EXISTS (
               SELECT 1 FROM "Album" alb
               JOIN "Track" t ON t."albumId" = alb.id
-              WHERE alb."artistId" = a.id AND t."removedAt" IS NULL AND ${sourceSql}
+              WHERE alb."artistId" = a.id AND ${albumLocation}
+                AND t."removedAt" IS NULL AND ${sourceSql}
             )
             OR (${source === "all"} AND a."remoteTrackCount" > 0)
           )
@@ -275,6 +285,7 @@ export class SearchService {
     }: SearchOptions): Promise<AlbumSearchResult[]> {
         const pattern = `%${escapeLikePattern(query)}%`;
         const sourceSql = trackSourceSql(source);
+        const albumLocation = albumLocationSql("a");
         const peerSql = peerProjectionSql("a");
         const includeEmpty = source !== "peers";
         const rows = await prisma.$queryRaw<
@@ -294,6 +305,7 @@ export class SearchService {
             INNER JOIN "Artist" ar ON ar.id = a."artistId"
             LEFT JOIN "FederationPeer" fp ON fp.id = a."peerId"
             WHERE (a.title ILIKE ${pattern} ESCAPE '\\' OR a.title % ${query})
+              AND ${albumLocation}
               AND (
                 (${includeEmpty} AND NOT EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id))
                 OR EXISTS (
@@ -330,6 +342,7 @@ export class SearchService {
 
         try {
             const sourceSql = trackSourceSql(source);
+            const albumLocation = albumLocationSql("a");
             const peerSql = peerProjectionSql("a");
             const includeEmpty = source !== "peers";
             const results = await prisma.$queryRaw<AlbumSearchResult[]>`
@@ -350,6 +363,7 @@ export class SearchService {
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
             LEFT JOIN "FederationPeer" fp ON fp.id = a."peerId"
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND ${albumLocation}
               AND (
                 (${includeEmpty} AND NOT EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id))
                 OR EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."removedAt" IS NULL AND ${sourceSql})
@@ -371,6 +385,7 @@ export class SearchService {
             INNER JOIN "Artist" ar ON a."artistId" = ar.id
             LEFT JOIN "FederationPeer" fp ON fp.id = a."peerId"
             WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND ${albumLocation}
               AND (
                 (${includeEmpty} AND NOT EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id))
                 OR EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."removedAt" IS NULL AND ${sourceSql})
@@ -410,6 +425,7 @@ export class SearchService {
     }: SearchOptions): Promise<TrackSearchResult[]> {
         const pattern = `%${escapeLikePattern(query)}%`;
         const sourceSql = trackSourceSql(source);
+        const albumLocation = albumLocationSql("a");
         const peerSql = peerProjectionSql("t");
         const rows = await prisma.$queryRaw<
             Array<
@@ -431,6 +447,7 @@ export class SearchService {
             LEFT JOIN "Artist" ar ON ar.id = a."artistId"
             LEFT JOIN "FederationPeer" fp ON fp.id = t."peerId"
             WHERE t."removedAt" IS NULL
+              AND ${albumLocation}
               AND ${sourceSql}
               AND (t.title ILIKE ${pattern} ESCAPE '\\' OR t.title % ${query})
             ORDER BY rank DESC, t.title ASC
@@ -481,6 +498,7 @@ export class SearchService {
 
         try {
             const sourceSql = trackSourceSql(source);
+            const albumLocation = albumLocationSql("a");
             const peerSql = peerProjectionSql("t");
             const results = await prisma.$queryRaw<TrackSearchResult[]>`
         SELECT
@@ -505,6 +523,7 @@ export class SearchService {
         LEFT JOIN "Artist" ar ON a."artistId" = ar.id
         LEFT JOIN "FederationPeer" fp ON fp.id = t."peerId"
         WHERE t."removedAt" IS NULL
+          AND ${albumLocation}
           AND ${sourceSql}
           AND ${termConditions}
         ORDER BY rank DESC, t.title ASC

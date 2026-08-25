@@ -81,6 +81,13 @@ describe("workers runtime behavior", () => {
             fulfilled: 0,
             failed: 0,
         }));
+        const processCatalogRetention = jest.fn(async () => ({
+            skipped: false,
+            scanned: 0,
+            protected: 0,
+            reaped: 0,
+            remaining: 0,
+        }));
         const finalizeGenericImportQueueFailure = jest.fn(
             async () => undefined,
         );
@@ -260,6 +267,9 @@ describe("workers runtime behavior", () => {
         jest.doMock("../processors/requestFulfillmentProcessor", () => ({
             processRequestFulfillmentBatch,
         }));
+        jest.doMock("../processors/catalogRetentionProcessor", () => ({
+            processCatalogRetention,
+        }));
         jest.doMock("../../services/genericImportJobRunner", () => ({
             genericImportJobRunner: {
                 registerRecoveryJobs,
@@ -363,6 +373,7 @@ describe("workers runtime behavior", () => {
             processTrackRemovalPurge,
             processLoudnessBackfill,
             processRequestFulfillmentBatch,
+            processCatalogRetention,
             finalizeGenericImportQueueFailure,
             processAlbumDownload,
             processArtistDownloadExpansion,
@@ -458,6 +469,26 @@ describe("workers runtime behavior", () => {
             {
                 jobId: "scheduler:album-download-recovery:startup",
                 delay: 60_000,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "catalog-retention-sweep",
+            { mode: "startup" },
+            {
+                jobId: "scheduler:catalog-retention:startup",
+                delay: 2 * 60_000,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "catalog-retention-sweep",
+            { mode: "repeat" },
+            {
+                jobId: "scheduler:catalog-retention:repeat",
+                repeat: { every: 60 * 60_000 },
                 removeOnComplete: true,
                 removeOnFail: 10,
             },

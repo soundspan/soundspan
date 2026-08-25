@@ -222,6 +222,15 @@ jest.mock("../../services/coverArtResize", () => {
 
 import crypto from "crypto";
 import path from "path";
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshCatalogReleaseGroups: jest.fn(async () => null),
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: jest.fn(async () => undefined),
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: jest.fn(() => null),
+}));
+
 import router from "../library";
 import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
@@ -743,6 +752,7 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-123",
+            location: "LIBRARY",
             title: "Example Album",
             artist: { name: "Example Artist" },
         });
@@ -802,6 +812,7 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-456",
+            location: "LIBRARY",
             title: "Fallback Album",
             rgMbid: "44444444-4444-4444-8444-444444444444",
             artist: { name: "Fallback Artist" },
@@ -852,6 +863,7 @@ describe("library cover-art proxy compatibility", () => {
             .mockReturnValueOnce(true);
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-123",
+            location: "LIBRARY",
             title: "Example Album",
             coverUrl: "native:albums/album-123.jpg",
             artist: { name: "Example Artist" },
@@ -884,6 +896,7 @@ describe("library cover-art proxy compatibility", () => {
             );
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "missing-path",
+            location: "LIBRARY",
             title: "Legacy Album",
             coverUrl: "native:legacy-healed.jpg",
             artist: { name: "Legacy Artist" },
@@ -933,6 +946,7 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-no-cover",
+            location: "LIBRARY",
             title: "Album Without Cover",
             artist: { name: "No Cover Artist" },
         });
@@ -997,6 +1011,7 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-789",
+            location: "LIBRARY",
             title: "Album Title",
             artist: { name: "Artist Name" },
         });
@@ -1561,6 +1576,7 @@ describe("library cover-art proxy compatibility", () => {
     it("redirects on-demand album ids to native cover proxy urls when coverUrl already exists", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-native",
+            location: "LIBRARY",
             title: "Native Album",
             rgMbid: null,
             coverUrl: "native:albums/album-native.jpg",
@@ -1586,6 +1602,7 @@ describe("library cover-art proxy compatibility", () => {
     it("redirects on-demand album ids directly when a remote coverUrl already exists", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-remote",
+            location: "REMOTE",
             title: "Remote Album",
             rgMbid: null,
             coverUrl: "https://images.example/album-remote.jpg",
@@ -1608,6 +1625,31 @@ describe("library cover-art proxy compatibility", () => {
         expect(mockResolveAlbumCover).not.toHaveBeenCalled();
     });
 
+    it("fails closed for CATALOG album cover ids", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-catalog",
+            location: "CATALOG",
+            title: "Catalog Skeleton",
+            rgMbid: "rg-catalog",
+            coverUrl: null,
+            artist: { name: "Catalog Artist" },
+        });
+        const res = createRes();
+
+        await coverArtHandler(
+            {
+                query: {},
+                params: { id: "album-catalog" },
+                headers: {},
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Album not found" });
+        expect(mockResolveAlbumCover).not.toHaveBeenCalled();
+    });
+
     it.each(["album-100%", "album%2Fpart", "\u30a2\u30eb\u30d0\u30e0"])(
         "preserves the Express-decoded opaque cover ID %s verbatim",
         async (coverId) => {
@@ -1616,6 +1658,7 @@ describe("library cover-art proxy compatibility", () => {
                     where.id === coverId
                         ? {
                               id: coverId,
+                              location: "LIBRARY",
                               title: "Opaque ID Album",
                               rgMbid: null,
                               coverUrl: "https://images.example/opaque-id.jpg",
@@ -1685,6 +1728,7 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-stale-native",
+            location: "LIBRARY",
             title: "Stale Native Album",
             rgMbid: null,
             coverUrl: "native:albums/stale-native.jpg",
@@ -1712,6 +1756,7 @@ describe("library cover-art proxy compatibility", () => {
     it("uses Deezer on-demand lookup when rgMbid is temporary and persists the fetched cover", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-temp-rg",
+            location: "DISCOVER",
             title: "Temporary RG Album",
             rgMbid: "temp-rg-123",
             coverUrl: null,
@@ -1756,6 +1801,7 @@ describe("library cover-art proxy compatibility", () => {
     it("skips Deezer on-demand fallback when cover-art service already returns a cover", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-caa-hit",
+            location: "DISCOVER",
             title: "CAA Hit Album",
             rgMbid: "rg-caa-hit",
             coverUrl: null,
@@ -1798,6 +1844,7 @@ describe("library cover-art proxy compatibility", () => {
     it("returns 404 when on-demand cover lookup warnings are raised for both CAA and Deezer failures", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-on-demand-errors",
+            location: "DISCOVER",
             title: "On Demand Errors",
             rgMbid: "rg-on-demand-errors",
             coverUrl: null,
@@ -1823,6 +1870,7 @@ describe("library cover-art proxy compatibility", () => {
     it("still streams on-demand covers when persistence fails after discovery", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-on-demand-persist-fail",
+            location: "DISCOVER",
             title: "Persist Fail Album",
             rgMbid: "temp-rg-persist-fail",
             coverUrl: null,
@@ -1896,6 +1944,7 @@ describe("library cover-art proxy compatibility", () => {
     it("clears stale NOT_FOUND MBID cache before on-demand cover retries", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-rg-clear",
+            location: "DISCOVER",
             title: "Retry Album",
             rgMbid: "rg-clear-1",
             coverUrl: null,

@@ -319,6 +319,15 @@ jest.mock("../../services/radioVibeEngine", () => ({
     scoreTracksAgainstSeed: jest.fn(),
 }));
 
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshCatalogReleaseGroups: jest.fn(async () => null),
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: jest.fn(async () => undefined),
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: jest.fn(() => null),
+}));
+
 import router from "../library";
 import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
@@ -1064,6 +1073,16 @@ describe("library branch coverage focus", () => {
                                 tracks: {
                                     some: {
                                         removedAt: null,
+                                        album: {
+                                            location: {
+                                                in: [
+                                                    "LIBRARY",
+                                                    "DISCOVER",
+                                                    "REMOTE",
+                                                    "FEDERATED",
+                                                ],
+                                            },
+                                        },
                                         OR: [
                                             { origin: "LOCAL" },
                                             {
@@ -1113,6 +1132,16 @@ describe("library branch coverage focus", () => {
                                     tracks: {
                                         some: {
                                             removedAt: null,
+                                            album: {
+                                                location: {
+                                                    in: [
+                                                        "LIBRARY",
+                                                        "DISCOVER",
+                                                        "REMOTE",
+                                                        "FEDERATED",
+                                                    ],
+                                                },
+                                            },
                                             OR: [
                                                 { origin: "LOCAL" },
                                                 {
@@ -1244,6 +1273,11 @@ describe("library branch coverage focus", () => {
                 trackId: { not: null },
                 track: {
                     removedAt: null,
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
                     AND: [
                         {
                             OR: [

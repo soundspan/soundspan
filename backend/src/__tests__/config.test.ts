@@ -706,6 +706,39 @@ describe("config module", () => {
         expect(fallback.config.requests).toEqual({ dailyCapPerUser: 10 });
     });
 
+    it.each(["off", "false", "0", "OFF", " FALSE "])(
+        "disables catalog persistence for %p",
+        async (value) => {
+            const { config } = await loadConfigModule({
+                CATALOG_PERSISTENCE: value,
+            });
+
+            expect(config.catalogPersistence.enabled).toBe(false);
+        },
+    );
+
+    it("enables catalog persistence by default", async () => {
+        const { config } = await loadConfigModule({
+            CATALOG_PERSISTENCE: undefined,
+            CATALOG_RETENTION_DAYS: undefined,
+        });
+
+        expect(config.catalogPersistence.enabled).toBe(true);
+        expect(config.catalogPersistence.retentionDays).toBe(180);
+    });
+
+    it("parses catalog retention days and rejects values below one", async () => {
+        const { config } = await loadConfigModule({
+            CATALOG_RETENTION_DAYS: "45",
+        });
+        expect(config.catalogPersistence.retentionDays).toBe(45);
+
+        await expectStartupValidationFailure(
+            { CATALOG_RETENTION_DAYS: "0" },
+            "CATALOG_RETENTION_DAYS",
+        );
+    });
+
     it("keeps explicit empty allowed-origins input without fallback", async () => {
         const { config } = await loadConfigModule({
             NODE_ENV: "production",

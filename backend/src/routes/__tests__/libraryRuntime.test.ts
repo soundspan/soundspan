@@ -377,6 +377,16 @@ jest.mock("../../services/searchCacheVersion", () => ({
     bumpSearchCacheVersion: mockBumpSearchCacheVersion,
 }));
 
+const mockPersistCatalogReleaseGroups = jest.fn();
+jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshCatalogReleaseGroups: jest.fn(async () => null),
+    logCatalogPersistenceError: jest.fn(),
+    persistCatalogReleaseGroups: mockPersistCatalogReleaseGroups,
+    persistCatalogTracklist: jest.fn(async () => undefined),
+    readFreshCatalogReleaseGroups: jest.fn(() => null),
+}));
+
 const mockLidarrDeleteArtist = jest.fn();
 jest.mock("../../services/lidarr", () => ({
     lidarrService: {
@@ -698,6 +708,14 @@ function createRadioTrack(id: string, overrides?: Partial<any>) {
         ...overrides,
     };
 }
+
+const visibleAlbumRelationWhere = {
+    album: {
+        location: {
+            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+        },
+    },
+};
 
 function expectBoundedRandomQuery(call: unknown[], limit: number) {
     const [strings, ...values] = call as [TemplateStringsArray, ...unknown[]];
@@ -2199,6 +2217,8 @@ describe("library catalog list runtime coverage", () => {
         mockAlbumDelete.mockReset();
         mockAlbumUpdate.mockReset();
         mockAlbumUpdateMany.mockReset();
+        mockPersistCatalogReleaseGroups.mockReset();
+        mockPersistCatalogReleaseGroups.mockResolvedValue(undefined);
         mockOwnedAlbumGroupBy.mockReset();
         mockOwnedAlbumFindMany.mockReset();
         mockOwnedAlbumFindUnique.mockReset();
@@ -2790,6 +2810,7 @@ describe("library catalog list runtime coverage", () => {
                     id: "album-db-1",
                     title: "Owned Album",
                     rgMbid: "rg-db-same",
+                    location: "LIBRARY",
                     year: 2010,
                     coverUrl: "db-cover.jpg",
                     tracks: [
@@ -2807,6 +2828,15 @@ describe("library catalog list runtime coverage", () => {
                             },
                         },
                     ],
+                },
+                {
+                    id: "album-catalog",
+                    title: "Catalog Skeleton",
+                    rgMbid: "rg-catalog",
+                    location: "CATALOG",
+                    year: 2013,
+                    coverUrl: null,
+                    tracks: [],
                 },
             ],
         });
@@ -2912,6 +2942,13 @@ describe("library catalog list runtime coverage", () => {
             ["album", "ep"],
             100,
         );
+        expect(mockPersistCatalogReleaseGroups).toHaveBeenCalledWith({
+            artistId: "artist-1",
+            releaseGroups: [
+                expect.objectContaining({ id: "rg-db-same" }),
+                expect.objectContaining({ id: "rg-new-1" }),
+            ],
+        });
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "discography:artist-real-mbid",
             24 * 60 * 60,
@@ -2975,6 +3012,9 @@ describe("library catalog list runtime coverage", () => {
                 ]),
             }),
         );
+        expect(res.body.albums).not.toContainEqual(
+            expect.objectContaining({ id: "album-catalog" }),
+        );
     });
 
     it("falls back to local artist data when external lookups fail", async () => {
@@ -2994,6 +3034,7 @@ describe("library catalog list runtime coverage", () => {
                     id: "album-owned",
                     title: "Owned Album",
                     rgMbid: "rg-owned",
+                    location: "LIBRARY",
                     year: 2020,
                     coverUrl: "owned-cover.jpg",
                     tracks: [
@@ -3088,6 +3129,7 @@ describe("library catalog list runtime coverage", () => {
                     id: "album-flags",
                     title: "Flag Album",
                     rgMbid: "rg-flags",
+                    location: "LIBRARY",
                     year: 2024,
                     coverUrl: "cover-flags.jpg",
                     tracks: [
@@ -3213,6 +3255,7 @@ describe("library catalog list runtime coverage", () => {
                     id: "album-cacheless",
                     title: "Owned Cache Album",
                     rgMbid: "rg-owned-cacheless",
+                    location: "LIBRARY",
                     year: 2021,
                     coverUrl: "owned-cacheless.jpg",
                     tracks: [],
@@ -3320,7 +3363,17 @@ describe("library catalog list runtime coverage", () => {
                 title: "Album One",
                 artistId: "artist-1",
                 rgMbid: "rg-1",
+                location: "LIBRARY",
                 coverUrl: "cover-1.jpg",
+                artist: { id: "artist-1", mbid: "mbid-1", name: "Artist One" },
+            },
+            {
+                id: "album-catalog",
+                title: "Catalog Skeleton",
+                artistId: "artist-1",
+                rgMbid: "rg-catalog",
+                location: "CATALOG",
+                coverUrl: null,
                 artist: { id: "artist-1", mbid: "mbid-1", name: "Artist One" },
             },
         ]);
@@ -3353,6 +3406,16 @@ describe("library catalog list runtime coverage", () => {
                                     tracks: {
                                         some: {
                                             removedAt: null,
+                                            album: {
+                                                location: {
+                                                    in: [
+                                                        "LIBRARY",
+                                                        "DISCOVER",
+                                                        "REMOTE",
+                                                        "FEDERATED",
+                                                    ],
+                                                },
+                                            },
                                             OR: [
                                                 { origin: "LOCAL" },
                                                 {
@@ -3382,9 +3445,22 @@ describe("library catalog list runtime coverage", () => {
                                 },
                                 {
                                     rgMbid: { in: ["rg-1"] },
+                                    location: {
+                                        in: ["LIBRARY", "DISCOVER"],
+                                    },
                                     tracks: {
                                         some: {
                                             removedAt: null,
+                                            album: {
+                                                location: {
+                                                    in: [
+                                                        "LIBRARY",
+                                                        "DISCOVER",
+                                                        "REMOTE",
+                                                        "FEDERATED",
+                                                    ],
+                                                },
+                                            },
                                             OR: [
                                                 { origin: "LOCAL" },
                                                 {
@@ -3417,6 +3493,16 @@ describe("library catalog list runtime coverage", () => {
                                     tracks: {
                                         some: {
                                             removedAt: null,
+                                            album: {
+                                                location: {
+                                                    in: [
+                                                        "LIBRARY",
+                                                        "DISCOVER",
+                                                        "REMOTE",
+                                                        "FEDERATED",
+                                                    ],
+                                                },
+                                            },
                                             OR: [
                                                 { origin: "LOCAL" },
                                                 {
@@ -3466,6 +3552,9 @@ describe("library catalog list runtime coverage", () => {
             offset: 2,
             limit: 5,
         });
+        expect(res.body.albums).not.toContainEqual(
+            expect.objectContaining({ id: "album-catalog" }),
+        );
     });
 
     it("supports discovery filter with optional artist scoping", async () => {
@@ -3475,6 +3564,7 @@ describe("library catalog list runtime coverage", () => {
                 title: "Discovered Album",
                 artistId: "artist-discovery",
                 rgMbid: "rg-discovery",
+                location: "DISCOVER",
                 coverUrl: "discovery-cover.jpg",
                 artist: {
                     id: "artist-discovery",
@@ -3503,6 +3593,16 @@ describe("library catalog list runtime coverage", () => {
                     tracks: {
                         some: {
                             removedAt: null,
+                            album: {
+                                location: {
+                                    in: [
+                                        "LIBRARY",
+                                        "DISCOVER",
+                                        "REMOTE",
+                                        "FEDERATED",
+                                    ],
+                                },
+                            },
                             OR: [
                                 { origin: "LOCAL" },
                                 {
@@ -3713,6 +3813,7 @@ describe("library catalog list runtime coverage", () => {
                 where: {
                     albumId: "album-10",
                     removedAt: null,
+                    ...visibleAlbumRelationWhere,
                     OR: [
                         { origin: "LOCAL" },
                         {
@@ -3806,7 +3907,10 @@ describe("library catalog list runtime coverage", () => {
 
         expect(firstRes.statusCode).toBe(200);
         expect(mockLikedTrackFindMany).toHaveBeenNthCalledWith(1, {
-            where: { userId: "user-1", track: { removedAt: null } },
+            where: {
+                userId: "user-1",
+                track: { removedAt: null, ...visibleAlbumRelationWhere },
+            },
             select: { trackId: true, likedAt: true },
             orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
             take: 6,
@@ -3845,7 +3949,7 @@ describe("library catalog list runtime coverage", () => {
         expect(mockLikedTrackFindMany).toHaveBeenNthCalledWith(2, {
             where: {
                 userId: "user-1",
-                track: { removedAt: null },
+                track: { removedAt: null, ...visibleAlbumRelationWhere },
                 OR: [
                     { likedAt: { lt: tiedLikedAt } },
                     {
@@ -4274,6 +4378,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    ...visibleAlbumRelationWhere,
                     AND: expect.any(Array),
                     random: { gte: expect.any(Number) },
                 },
@@ -4290,6 +4395,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    ...visibleAlbumRelationWhere,
                     AND: expect.any(Array),
                     id: { in: ["track-9", "track-8"] },
                 },
@@ -4340,6 +4446,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    ...visibleAlbumRelationWhere,
                     AND: expect.any(Array),
                     random: { gte: expect.any(Number) },
                 },
@@ -4354,6 +4461,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    ...visibleAlbumRelationWhere,
                     AND: expect.any(Array),
                     random: { lt: expect.any(Number) },
                 },
@@ -5056,6 +5164,30 @@ describe("library catalog list runtime coverage", () => {
         expect(mockAlbumDelete).not.toHaveBeenCalled();
     });
 
+    it("fails closed when deletion targets a CATALOG album", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            libraryDeletionEnabled: true,
+        });
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-catalog",
+            rgMbid: "rg-catalog",
+            title: "Catalog Skeleton",
+            location: "CATALOG",
+            artist: { name: "Catalog Artist" },
+            tracks: [],
+        });
+        const res = createRes();
+
+        await deleteAlbumHandler(
+            { params: { id: "album-catalog" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Album not found" });
+        expect(mockAlbumDelete).not.toHaveBeenCalled();
+    });
+
     it("returns 500 when album deletion persistence fails", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             libraryDeletionEnabled: true,
@@ -5064,6 +5196,7 @@ describe("library catalog list runtime coverage", () => {
             id: "album-delete-fail",
             rgMbid: "rg-album-delete-fail",
             title: "Album Delete Fail",
+            location: "LIBRARY",
             artist: { name: "Failing Artist" },
             tracks: [],
         });
@@ -5144,6 +5277,7 @@ describe("library catalog list runtime coverage", () => {
             id: "album-2",
             rgMbid: "rg-album-2",
             title: "Album Two",
+            location: "LIBRARY",
             artist: { name: "Artist Two" },
             tracks: [],
         });
@@ -5742,6 +5876,7 @@ describe("library catalog list runtime coverage", () => {
             id: "album-del",
             rgMbid: "rg-album-del",
             title: "Deletion Album",
+            location: "LIBRARY",
             artist: { name: "Delete Artist" },
             tracks: [{ filePath: "Delete Artist/Deletion Album/track.flac" }],
         });
@@ -5796,6 +5931,7 @@ describe("library catalog list runtime coverage", () => {
             id: "album-contained",
             rgMbid: "rg-album-contained",
             title: "..",
+            location: "LIBRARY",
             artist: { name: ".." },
             tracks: [
                 { filePath: "../outside.flac" },
@@ -7491,7 +7627,11 @@ describe("library catalog list runtime coverage", () => {
         expect(mockLikedTrackFindMany).toHaveBeenCalledWith({
             where: {
                 userId: "user-1",
-                track: { removedAt: null, AND: expect.any(Array) },
+                track: {
+                    removedAt: null,
+                    ...visibleAlbumRelationWhere,
+                    AND: expect.any(Array),
+                },
             },
             select: { trackId: true },
             orderBy: { likedAt: "desc" },
@@ -7929,7 +8069,11 @@ describe("library album cover and media route edge coverage", () => {
 
         expect(mockTrackFindUnique).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { id: "track-stream", removedAt: null },
+                where: {
+                    id: "track-stream",
+                    removedAt: null,
+                    ...visibleAlbumRelationWhere,
+                },
             }),
         );
         expect(mockPlayFindFirst).toHaveBeenCalledWith({

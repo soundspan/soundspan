@@ -481,6 +481,49 @@ describe("search service", () => {
         );
     });
 
+    it("excludes CATALOG album fixtures from library-scoped album search", async () => {
+        const fixtures = [
+            {
+                id: "album-library",
+                title: "Library Result",
+                artistId: "artist-1",
+                artistName: "Artist",
+                year: 2025,
+                coverUrl: null,
+                rank: 1,
+                location: "LIBRARY",
+            },
+            {
+                id: "album-catalog",
+                title: "Catalog Result",
+                artistId: "artist-1",
+                artistName: "Artist",
+                year: 2026,
+                coverUrl: null,
+                rank: 0.9,
+                location: "CATALOG",
+            },
+        ];
+        prisma.$queryRaw.mockImplementationOnce(
+            async (strings: TemplateStringsArray, ...values: unknown[]) => {
+                const query = collectSql({ strings: [...strings], values });
+                const allowedLocations = new Set(query.values);
+                return fixtures.filter((album) =>
+                    allowedLocations.has(album.location),
+                );
+            },
+        );
+
+        const results = await searchService.searchAlbums({ query: "***" });
+
+        expect(results).toEqual([
+            expect.objectContaining({ id: "album-library" }),
+        ]);
+        expect(results).not.toContainEqual(
+            expect.objectContaining({ id: "album-catalog" }),
+        );
+    });
+
     it("uses the remote-only escape in both album FTS branches", async () => {
         prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) => {
             const sql = strings.join(" ");
