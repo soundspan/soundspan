@@ -1,9 +1,11 @@
+import type { DownloadJob } from "@prisma/client";
 import { logger as rootLogger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { getSystemSettings } from "../utils/systemSettings";
 import {
     type DownloadSource,
     type DownloadSourceAvailability,
+    type DownloadSourceResolution,
     probeDownloadSourceAvailability,
     resolveDownloadSource,
 } from "./downloadSourcePolicy";
@@ -30,6 +32,27 @@ interface AlbumNames {
     artist: string;
     album: string;
 }
+
+type FailedDownloadSourceResolution = Extract<
+    DownloadSourceResolution,
+    { kind: "fail" }
+> & { source: DownloadSource };
+
+/** Resolved album-download routing snapshot used by queue workers. */
+export type AlbumDownloadRouting =
+    | {
+          kind: "fail";
+          job: DownloadJob;
+          resolution: FailedDownloadSourceResolution;
+      }
+    | {
+          kind: "dispatch";
+          source: DownloadSource;
+          availability: DownloadSourceAvailability;
+          job: DownloadJob;
+          names: AlbumNames;
+          userId: string;
+      };
 
 function parseAlbumNames({
     subject,
@@ -119,21 +142,18 @@ async function dispatchResolvedSource(
     }
 }
 
-/**
- * Dispatch an existing album download job through the configured source and
- * fallback policy. Missing jobs and non-album types are left undispatched.
- */
-export async function dispatchAlbumDownload(
+/** Resolve one album download against a single settings and availability snapshot. */
+export async function resolveAlbumDownloadRouting(
     params: AlbumDownloadDispatchParams,
-): Promise<void> {
+): Promise<AlbumDownloadRouting | null> {
     const job = await prisma.downloadJob.findUnique({
         where: { id: params.jobId },
     });
     if (!job) {
         logger.error(`Job ${params.jobId} not found`);
-        return;
+        return null;
     }
-    if (params.type !== "album") return;
+    if (params.type !== "album") return null;
 
     const names = parseAlbumNames(params);
     logger.debug(`Parsed: Artist="${names.artist}", Album="${names.album}"`);
@@ -148,24 +168,62 @@ export async function dispatchAlbumDownload(
         availability,
     });
     if (resolution.kind === "fail") {
-        await failJobWithoutDispatch(
-            params.jobId,
-            job.metadata,
-            configuredSource,
-            resolution.error,
-            resolution.statusText,
-        );
-        return;
+        return {
+            kind: "fail",
+            job,
+            resolution: { ...resolution, source: configuredSource },
+        };
     }
 
     logger.debug(
         `Download source: configured=${configuredSource}, effective=${resolution.source}`,
     );
-    await dispatchResolvedSource(
-        resolution.source,
+    return {
+        kind: "dispatch",
+        source: resolution.source,
         availability,
-        params,
+        job,
         names,
-        job.userId,
+        userId: job.userId,
+    };
+}
+
+/**
+ * Dispatch a previously resolved routing snapshot without probing settings or
+ * availability again. Configuration changes after resolution affect later jobs.
+ */
+export async function dispatchResolvedAlbumDownload(
+    routing: AlbumDownloadRouting | null,
+    params: AlbumDownloadDispatchParams,
+): Promise<void> {
+    if (!routing) return;
+    if (routing.kind === "fail") {
+        await failJobWithoutDispatch(
+            params.jobId,
+            routing.job.metadata,
+            routing.resolution.source,
+            routing.resolution.error,
+            routing.resolution.statusText,
+        );
+        return;
+    }
+
+    await dispatchResolvedSource(
+        routing.source,
+        routing.availability,
+        params,
+        routing.names,
+        routing.userId,
     );
+}
+
+/**
+ * Dispatch an existing album download job through the configured source and
+ * fallback policy. Missing jobs and non-album types are left undispatched.
+ */
+export async function dispatchAlbumDownload(
+    params: AlbumDownloadDispatchParams,
+): Promise<void> {
+    const routing = await resolveAlbumDownloadRouting(params);
+    await dispatchResolvedAlbumDownload(routing, params);
 }

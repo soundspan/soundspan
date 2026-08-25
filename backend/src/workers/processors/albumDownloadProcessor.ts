@@ -1,6 +1,10 @@
 import type { Job } from "bull";
 import { z } from "zod";
-import { dispatchAlbumDownload } from "../../services/downloadDispatcher";
+import {
+    type AlbumDownloadRouting,
+    dispatchResolvedAlbumDownload,
+    resolveAlbumDownloadRouting,
+} from "../../services/downloadDispatcher";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -58,17 +62,21 @@ async function getPersistedStatus(jobId: string): Promise<string | null> {
     return persistedJob?.status ?? null;
 }
 
+async function skipCompletedRedelivery(
+    payload: AlbumDownloadPayload,
+): Promise<boolean> {
+    if ((await getPersistedStatus(payload.jobId)) !== "completed") return false;
+    log.info("Skipping completed album download redelivery", {
+        jobId: payload.jobId,
+    });
+    return true;
+}
+
 async function dispatchPersistedAlbumDownload(
     payload: AlbumDownloadPayload,
+    routing: AlbumDownloadRouting | null,
 ): Promise<void> {
-    if ((await getPersistedStatus(payload.jobId)) === "completed") {
-        log.info("Skipping completed album download redelivery", {
-            jobId: payload.jobId,
-        });
-        return;
-    }
-
-    await dispatchAlbumDownload(payload);
+    await dispatchResolvedAlbumDownload(routing, payload);
     if ((await getPersistedStatus(payload.jobId)) === "failed") {
         throw new AlbumDownloadFailedError(payload.jobId);
     }
@@ -94,6 +102,7 @@ async function renewAlbumDownloadClaim(
 
 async function dispatchWithClaimRenewal(
     payload: AlbumDownloadPayload,
+    routing: AlbumDownloadRouting,
     claimToken: string,
 ): Promise<void> {
     let renewalPromise: Promise<void> | null = null;
@@ -107,7 +116,9 @@ async function dispatchWithClaimRenewal(
     }, ALBUM_DOWNLOAD_CLAIM_RENEW_INTERVAL_MS);
     renewalTimer.unref();
     try {
-        await dispatchPersistedAlbumDownload(payload);
+        if (!(await skipCompletedRedelivery(payload))) {
+            await dispatchPersistedAlbumDownload(payload, routing);
+        }
     } finally {
         clearInterval(renewalTimer);
         if (renewalPromise) await renewalPromise;
@@ -116,13 +127,15 @@ async function dispatchWithClaimRenewal(
 
 async function waitForAlbumDownloadClaim(
     payload: AlbumDownloadPayload,
+    routing: AlbumDownloadRouting,
 ): Promise<void> {
     for (let poll = 0; poll < ALBUM_DOWNLOAD_CLAIM_MAX_POLLS; poll += 1) {
         const result = await runWithSchedulerClaim(
             ALBUM_DOWNLOAD_CLAIM_KEY,
             ALBUM_DOWNLOAD_CLAIM_TTL_MS,
             "album download",
-            (claimToken) => dispatchWithClaimRenewal(payload, claimToken),
+            (claimToken) =>
+                dispatchWithClaimRenewal(payload, routing, claimToken),
         );
         if (result.acquired) return;
         await new Promise<void>((resolve) =>
@@ -132,11 +145,30 @@ async function waitForAlbumDownloadClaim(
     throw new Error("Timed out waiting for the album download claim");
 }
 
+function requiresAlbumDownloadClaim(
+    routing: AlbumDownloadRouting | null,
+): routing is Extract<AlbumDownloadRouting, { kind: "dispatch" }> {
+    return (
+        routing?.kind === "dispatch" &&
+        (routing.source === "tidal" || routing.source === "youtube")
+    );
+}
+
 /** Validate and dispatch one queued album download. */
 export async function processAlbumDownload(job: Job<unknown>): Promise<void> {
     const payload = payloadSchema.parse(job.data);
     await job.progress(0);
-    await waitForAlbumDownloadClaim(payload);
+    if (await skipCompletedRedelivery(payload)) {
+        await job.progress(100);
+        return;
+    }
+
+    const routing = await resolveAlbumDownloadRouting(payload);
+    if (requiresAlbumDownloadClaim(routing)) {
+        await waitForAlbumDownloadClaim(payload, routing);
+    } else {
+        await dispatchPersistedAlbumDownload(payload, routing);
+    }
     await job.progress(100);
 }
 

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Python sidecars now share one hardened implementation of their path-safety and runtime helpers instead of maintaining copies.
 - The TIDAL playlist and mix explore pages now share one implementation, settings connection tests share one status hook, and dates and durations render through shared formatters. Album pages now show total length compactly (for example "2h 30m").
 - Album downloads now use queued, serialized processing, one album at a time across the deployment, with renewable claims, restart recovery, and queue-owned lifecycle reconciliation.
+- Lidarr-routed album downloads no longer wait behind in-flight TIDAL/YouTube downloads; the one-at-a-time throttle now applies only to the streaming providers.
 - The DCLAP vibe provider now answers malformed requests with the same 422 response the other sidecars use (previously 400).
 - Library scans now process several files at once within a configurable bound, making large-library scans significantly faster.
 

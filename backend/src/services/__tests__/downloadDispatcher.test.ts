@@ -74,7 +74,11 @@ jest.mock("../simpleDownloadManager", () => ({
     },
 }));
 
-import { dispatchAlbumDownload } from "../downloadDispatcher";
+import {
+    dispatchAlbumDownload,
+    dispatchResolvedAlbumDownload,
+    resolveAlbumDownloadRouting,
+} from "../downloadDispatcher";
 
 const baseParams = {
     jobId: "job-1",
@@ -145,6 +149,24 @@ describe("dispatchAlbumDownload", () => {
         expect(mockSoulseekAvailable).toHaveBeenCalledTimes(1);
         expect(mockYoutubeAvailable).toHaveBeenCalledTimes(1);
         expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+
+    it("dispatches a resolved routing snapshot without probing sources twice", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            downloadSource: "tidal",
+            primaryFailureFallback: "none",
+        });
+        mockTidalAvailable.mockResolvedValue(true);
+        const routing = await resolveAlbumDownloadRouting(baseParams);
+
+        await dispatchResolvedAlbumDownload(routing, baseParams);
+
+        expect(mockGetSystemSettings).toHaveBeenCalledTimes(1);
+        expect(mockTidalAvailable).toHaveBeenCalledTimes(1);
+        expect(mockLidarrAvailable).toHaveBeenCalledTimes(1);
+        expect(mockSoulseekAvailable).toHaveBeenCalledTimes(1);
+        expect(mockYoutubeAvailable).toHaveBeenCalledTimes(1);
+        expect(mockProcessTidalDownload).toHaveBeenCalledTimes(1);
     });
 
     it("uses YouTube as an available explicit fallback", async () => {
