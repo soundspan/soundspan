@@ -4,6 +4,10 @@ import { logger } from "../utils/logger";
 import { organizeSingles } from "../workers/organizeSingles";
 import { scanQueue } from "../workers/queues";
 import { isPlainObject } from "../utils/plainObject";
+import {
+    acquireSchedulerClaim,
+    releaseSchedulerClaim,
+} from "../utils/schedulerClaim";
 
 /** Stable queue job identifier for global library maintenance. */
 export const LIBRARY_MAINTENANCE_JOB_ID = "library-global-maintenance";
@@ -36,21 +40,8 @@ type LibraryMaintenanceAdmission =
     | AdmittedLibraryMaintenance
     | RejectedLibraryMaintenance;
 
-const releaseRedisClaim = async (key: string, token: string): Promise<void> => {
-    try {
-        await scanQueue.client.eval(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-            1,
-            key,
-            token,
-        );
-    } catch (error) {
-        libraryMaintenanceLogger.warn("Failed to release admission claim", {
-            key,
-            error,
-        });
-    }
-};
+const releaseRedisClaim = (key: string, token: string): Promise<void> =>
+    releaseSchedulerClaim(key, token, "library maintenance admission");
 
 const findPendingLibraryMaintenanceJob = async () => {
     const jobs = await scanQueue.getJobs(
@@ -86,15 +77,12 @@ const removeRetainedTerminalLibraryMaintenanceJob = async (): Promise<void> => {
 export const admitLibraryMaintenance = async (
     userId: string,
 ): Promise<LibraryMaintenanceAdmission> => {
-    const claimToken = crypto.randomUUID();
-    const acquired = await scanQueue.client.set(
+    const claimToken = await acquireSchedulerClaim(
         LIBRARY_MAINTENANCE_CLAIM_KEY,
-        claimToken,
-        "EX",
-        LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS,
-        "NX",
+        LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS * 1_000,
+        "library maintenance admission",
     );
-    if (acquired !== "OK") {
+    if (!claimToken) {
         return { admitted: false, reason: "active" };
     }
 

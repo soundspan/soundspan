@@ -123,7 +123,7 @@ describe("unified enrichment runtime behavior", () => {
                 return client;
             }
 
-            if (clientName === "enrichment-cycle-claims") {
+            if (clientName === "worker-scheduler-locks") {
                 const client =
                     claimClientCreationCount === 0
                         ? claimRedisPrimary
@@ -191,16 +191,16 @@ describe("unified enrichment runtime behavior", () => {
             notifySystem: jest.fn(async () => undefined),
         };
 
-        jest.doMock("../../utils/db", () => ({
-            prisma,
-            Prisma: {
-                PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
-                    code = "P1001";
-                },
-                PrismaClientRustPanicError: class PrismaClientRustPanicError extends Error {},
-                PrismaClientUnknownRequestError: class PrismaClientUnknownRequestError extends Error {},
+        const Prisma = {
+            ...jest.requireActual("@prisma/client").Prisma,
+            PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
+                code = "P1001";
             },
-        }));
+            PrismaClientRustPanicError: class PrismaClientRustPanicError extends Error {},
+            PrismaClientUnknownRequestError: class PrismaClientUnknownRequestError extends Error {},
+        };
+        jest.doMock("../../utils/db", () => ({ prisma, Prisma }));
+        jest.doMock("@prisma/client", () => ({ Prisma }));
         jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../artistEnrichment", () => ({
             enrichSimilarArtist,
@@ -1872,7 +1872,9 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.triggerEnrichmentNow();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "Failed to release cycle claim for immediate enrichment cycle",
+            expect.stringContaining(
+                "Failed to release claim for immediate enrichment cycle",
+            ),
             expect.any(Error),
         );
     });
@@ -3189,13 +3191,13 @@ describe("unified enrichment runtime behavior", () => {
             .mockResolvedValueOnce("string-reset-recovered");
 
         await expect(
-            enrichment.__unifiedEnrichmentTestables.withEnrichmentPrismaRetry(
+            enrichment.__unifiedEnrichmentTestables.withPrismaRetry(
                 "engine-exited-op",
                 engineExitedOperation,
             ),
         ).resolves.toBe("engine-exited-recovered");
         await expect(
-            enrichment.__unifiedEnrichmentTestables.withEnrichmentPrismaRetry(
+            enrichment.__unifiedEnrichmentTestables.withPrismaRetry(
                 "string-reset-op",
                 stringResetOperation,
             ),
@@ -3227,9 +3229,11 @@ describe("unified enrichment runtime behavior", () => {
         );
 
         const retryPromise =
-            enrichment.__unifiedEnrichmentTestables.withEnrichmentPrismaRetry(
+            enrichment.__unifiedEnrichmentTestables.withPrismaRetry(
                 "p2037-retry-swallow",
                 operation,
+                enrichment.__unifiedEnrichmentTestables
+                    .enrichmentPrismaRetryOptions,
             );
 
         await jest.advanceTimersByTimeAsync(1_000);
@@ -3562,13 +3566,13 @@ describe("unified enrichment runtime behavior", () => {
             .mockRejectedValueOnce(undefined);
 
         await expect(
-            enrichment.__unifiedEnrichmentTestables.withEnrichmentPrismaRetry(
+            enrichment.__unifiedEnrichmentTestables.withPrismaRetry(
                 "unknown-empty-op",
                 unknownEmptyOperation,
             ),
         ).rejects.toBeInstanceOf(Error);
         await expect(
-            enrichment.__unifiedEnrichmentTestables.withEnrichmentPrismaRetry(
+            enrichment.__unifiedEnrichmentTestables.withPrismaRetry(
                 "undefined-error-op",
                 undefinedErrorOperation,
             ),

@@ -619,7 +619,8 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
 
     if (runWorkerRole) {
         // Initialize Bull queue workers
-        await import("./workers");
+        const { startWorkers } = await import("./workers");
+        startWorkers();
         workersInitialized = true;
 
         // Note: Native library scanning is now triggered manually via POST /library/scan

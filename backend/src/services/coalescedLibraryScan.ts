@@ -23,6 +23,7 @@ async function getScanQueue() {
 }
 import { createIORedisClient } from "../utils/ioredis";
 import { logger } from "../utils/logger";
+import { compareAndDeleteSchedulerClaim } from "../utils/schedulerClaim";
 
 const log = logger.child("CoalescedLibraryScan");
 const FOLLOW_UP_KEY = "coalesced-library-scan:follow-up";
@@ -85,13 +86,16 @@ async function setFollowUp(
 }
 
 async function compareAndDeleteFollowUp(stored: string): Promise<boolean> {
-    const deleted = await getFollowUpRedis().eval(
-        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-        1,
+    if (closed) {
+        throw new Error(
+            "Coalesced library scan follow-up Redis is closed for shutdown",
+        );
+    }
+    return compareAndDeleteSchedulerClaim(
         FOLLOW_UP_KEY,
         stored,
+        "coalesced library scan follow-up",
     );
-    return deleted === 1;
 }
 
 async function markFollowUpAndRecheck(

@@ -3,6 +3,10 @@ import { logger } from "../../utils/logger";
 import { createPlaylistLogger } from "../../utils/playlistLogger";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
+import {
+    isRetryablePrismaError,
+    withPrismaRetry,
+} from "../../utils/prismaRetry";
 import type { ImportJob } from "./types";
 
 // Store loggers for each job
@@ -10,7 +14,6 @@ export const jobLoggers = new Map<
     string,
     ReturnType<typeof createPlaylistLogger>
 >();
-const SPOTIFY_IMPORT_PRISMA_RETRY_ATTEMPTS = 3;
 export const MATCHABLE_TRACK_WHERE = {
     removedAt: null,
     origin: "LOCAL",
@@ -18,59 +21,7 @@ export const MATCHABLE_TRACK_WHERE = {
 const spotifyImportBasePrisma = prisma;
 let spotifyImportRedis: typeof redisClient = redisClient;
 
-export function isRetryableSpotifyImportPrismaError(error: unknown): boolean {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
-            error.code,
-        );
-    }
-
-    if (error instanceof Prisma.PrismaClientRustPanicError) {
-        return true;
-    }
-
-    if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-        const message = error.message || "";
-        return (
-            message.includes("Response from the Engine was empty") ||
-            message.includes("Engine has already exited")
-        );
-    }
-
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Response from the Engine was empty") ||
-        message.includes("Engine has already exited") ||
-        message.includes("Can't reach database server") ||
-        message.includes("Connection reset")
-    );
-}
-
-async function withSpotifyImportPrismaRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            return await operation();
-        } catch (error) {
-            if (
-                !isRetryableSpotifyImportPrismaError(error) ||
-                attempt === SPOTIFY_IMPORT_PRISMA_RETRY_ATTEMPTS
-            ) {
-                throw error;
-            }
-
-            logger.warn(
-                `[SpotifyImport/Prisma] ${operationName} failed (attempt ${attempt}/${SPOTIFY_IMPORT_PRISMA_RETRY_ATTEMPTS}), retrying`,
-                error,
-            );
-            await spotifyImportBasePrisma.$connect().catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        }
-    }
-}
+export const isRetryableSpotifyImportPrismaError = isRetryablePrismaError;
 
 export function createPrismaRetryProxy<T extends object>(
     client: T,
@@ -82,9 +33,8 @@ export function createPrismaRetryProxy<T extends object>(
 
             if (typeof value === "function" && typeof property === "string") {
                 return (...args: unknown[]) =>
-                    withSpotifyImportPrismaRetry(
-                        `${namespace}.${property}`,
-                        () => value.apply(target, args),
+                    withPrismaRetry(`${namespace}.${property}`, () =>
+                        value.apply(target, args),
                     );
             }
 
@@ -106,7 +56,7 @@ export function createPrismaRetryProxy<T extends object>(
                             typeof modelProperty === "string"
                         ) {
                             return (...args: unknown[]) =>
-                                withSpotifyImportPrismaRetry(
+                                withPrismaRetry(
                                     `${namespace}.${property}.${modelProperty}`,
                                     () => modelValue.apply(modelTarget, args),
                                 );

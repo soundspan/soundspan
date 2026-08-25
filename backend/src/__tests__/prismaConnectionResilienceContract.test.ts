@@ -7,7 +7,7 @@ describe("prisma connection resilience contract", () => {
         "utf8",
     );
     const enrichmentRetrySource = fs.readFileSync(
-        path.resolve(__dirname, "../workers/enrichmentPrismaRetry.ts"),
+        path.resolve(__dirname, "../utils/prismaRetry.ts"),
         "utf8",
     );
     const moodBucketSource = fs.readFileSync(

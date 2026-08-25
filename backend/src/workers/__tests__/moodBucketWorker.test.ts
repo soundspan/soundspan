@@ -99,7 +99,6 @@ describe("moodBucketWorker", () => {
         expect(prisma.$queryRaw).toHaveBeenCalled();
         expect(moodBucketService.assignTrackToMoods).toHaveBeenCalledWith("t1");
         expect(claimClient.eval).toHaveBeenCalled();
-        expect(claimClient.disconnect).toHaveBeenCalled();
     });
 
     it("runs claimed processing again on interval ticks", async () => {
@@ -176,7 +175,7 @@ describe("moodBucketWorker", () => {
         expect(prisma.$queryRaw).toHaveBeenCalled();
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining(
-                "Failed to release cycle claim for startup mood-bucket cycle",
+                "Failed to release claim for startup mood-bucket cycle",
             ),
             expect.any(Error),
         );

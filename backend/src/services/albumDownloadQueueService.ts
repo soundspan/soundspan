@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import {
     ALBUM_DOWNLOAD_QUEUE_OWNER,
     ARTIST_DOWNLOAD_EXPANSION_OWNER,
+    albumDownloadQueueJobId,
 } from "./albumDownloadQueueOwnership";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,
@@ -16,10 +17,6 @@ const ALBUM_DOWNLOAD_JOB_NAME = "album-download";
 export const ARTIST_DOWNLOAD_EXPANSION_JOB_NAME = "artist-download-expand";
 const ALBUM_DOWNLOAD_RECOVERY_AGE_MS = 5 * 60_000;
 const ALBUM_DOWNLOAD_RECOVERY_LIMIT = 20;
-
-function albumDownloadQueueJobId(jobId: string): string {
-    return `albumdl:${jobId}`;
-}
 
 function artistDownloadQueueJobId(jobId: string): string {
     return `artistdl:${jobId}`;

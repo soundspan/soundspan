@@ -20,7 +20,7 @@ export const SCHEDULER_TIMEOUT_OPERATIONS = [
     "warmupCache",
     "cleanupExpiredCache",
     "audiobookCacheService.syncMissing",
-    "downloadQueueManager.reconcileOnStartup",
+    "albumDownloadQueue.getJobCounts",
     "backfillAllArtistCounts",
     "backfillAllImages",
 ] as const;

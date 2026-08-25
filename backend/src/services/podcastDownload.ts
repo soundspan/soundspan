@@ -1,4 +1,5 @@
-import { prisma, Prisma } from "../utils/db";
+import { prisma } from "../utils/db";
+import { withPrismaRetry } from "../utils/prismaRetry";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import fs from "fs/promises";
@@ -31,7 +32,6 @@ interface DownloadProgress {
     totalBytes: number;
 }
 const downloadProgress = new Map<string, DownloadProgress>();
-const PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS = 3;
 const PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MAX_PODCAST_DOWNLOAD_REDIRECTS = 5;
 const MAX_PODCAST_EPISODE_ID_LENGTH = 128;
@@ -103,65 +103,6 @@ async function openSafePodcastDownloadStream(
     throw new PodcastDownloadBlockedError(current);
 }
 
-function isRetryablePodcastDownloadPrismaError(error: unknown): boolean {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
-            error.code,
-        );
-    }
-
-    if (error instanceof Prisma.PrismaClientRustPanicError) {
-        return true;
-    }
-
-    if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-        const message = error.message || "";
-        return (
-            message.includes("Response from the Engine was empty") ||
-            message.includes("Engine has already exited")
-        );
-    }
-
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Response from the Engine was empty") ||
-        message.includes("Engine has already exited") ||
-        message.includes("Can't reach database server") ||
-        message.includes("Connection reset")
-    );
-}
-
-async function withPodcastDownloadPrismaRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    for (
-        let attempt = 1;
-        attempt <= PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS;
-        attempt += 1
-    ) {
-        try {
-            return await operation();
-        } catch (error) {
-            if (
-                !isRetryablePodcastDownloadPrismaError(error) ||
-                attempt === PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS
-            ) {
-                throw error;
-            }
-
-            podcastDownloadLogger.warn(
-                `${operationName} failed (attempt ${attempt}/${PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS}), retrying`,
-                error,
-            );
-            await prisma.$connect().catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        }
-    }
-    throw new Error(`${operationName} exhausted its retry bound`);
-}
-
 // Cache directory for podcast audio files
 const getPodcastCacheDir = (): string => {
     return path.resolve(config.music.transcodeCachePath, "../podcast-audio");
@@ -199,7 +140,7 @@ interface AuthorizedCacheMetadata {
 async function findAuthorizedCacheMetadata(
     episodeId: string,
 ): Promise<AuthorizedCacheMetadata | null> {
-    const episode = await withPodcastDownloadPrismaRetry(
+    const episode = await withPrismaRetry(
         "getCachedFilePath.podcastEpisode.findUnique",
         () =>
             prisma.podcastEpisode.findUnique({
@@ -209,7 +150,7 @@ async function findAuthorizedCacheMetadata(
     );
     if (!episode) return null;
 
-    const download = await withPodcastDownloadPrismaRetry(
+    const download = await withPrismaRetry(
         "getCachedFilePath.podcastDownload.findFirst",
         () =>
             prisma.podcastDownload.findFirst({
@@ -219,7 +160,7 @@ async function findAuthorizedCacheMetadata(
     );
     if (!download) return null;
 
-    const subscription = await withPodcastDownloadPrismaRetry(
+    const subscription = await withPrismaRetry(
         "getCachedFilePath.podcastSubscription.findUnique",
         () =>
             prisma.podcastSubscription.findUnique({
@@ -242,7 +183,7 @@ async function deleteInvalidCachedFile(
 ): Promise<void> {
     podcastDownloadLogger.debug(`${reason} for ${episodeId}, deleting cache`);
     await fs.unlink(cachedPath).catch(() => {});
-    await withPodcastDownloadPrismaRetry(
+    await withPrismaRetry(
         "getCachedFilePath.podcastDownload.deleteMany.invalidSize",
         () => prisma.podcastDownload.deleteMany({ where: { episodeId } }),
     );
@@ -341,7 +282,7 @@ export async function getCachedFilePath(
             return null;
         }
 
-        await withPodcastDownloadPrismaRetry(
+        await withPrismaRetry(
             "getCachedFilePath.podcastDownload.updateMany.lastAccessedAt",
             () =>
                 prisma.podcastDownload.updateMany({
@@ -474,7 +415,7 @@ function getPodcastDownloadPaths(episodeId: string): PodcastDownloadPaths {
 }
 
 async function authorizePodcastDownload(episodeId: string, userId: string) {
-    const episode = await withPodcastDownloadPrismaRetry(
+    const episode = await withPrismaRetry(
         "performDownload.podcastEpisode.findUnique.authorization",
         () =>
             prisma.podcastEpisode.findUnique({
@@ -484,7 +425,7 @@ async function authorizePodcastDownload(episodeId: string, userId: string) {
     );
     if (!episode) throw new PodcastDownloadAuthorizationError();
 
-    const subscription = await withPodcastDownloadPrismaRetry(
+    const subscription = await withPrismaRetry(
         "performDownload.podcastSubscription.findUnique.authorization",
         () =>
             prisma.podcastSubscription.findUnique({
@@ -538,7 +479,7 @@ async function determineExpectedDownloadBytes(
             !storedBytes ||
             Math.abs(storedBytes - declaredBytes) / storedBytes > 0.01
         ) {
-            await withPodcastDownloadPrismaRetry(
+            await withPrismaRetry(
                 "performDownload.podcastEpisode.update.fileSize",
                 () =>
                     prisma.podcastEpisode.update({
@@ -695,26 +636,24 @@ async function finalizePodcastDownload(
 
     await fs.rename(paths.tempPath, paths.finalPath);
     const fileSizeMb = stats.size / 1024 / 1024;
-    await withPodcastDownloadPrismaRetry(
-        "performDownload.podcastDownload.upsert",
-        () =>
-            prisma.podcastDownload.upsert({
-                where: { userId_episodeId: { userId, episodeId } },
-                create: {
-                    userId,
-                    episodeId,
-                    localPath: paths.finalPath,
-                    fileSizeMb,
-                    downloadedAt: new Date(),
-                    lastAccessedAt: new Date(),
-                },
-                update: {
-                    localPath: paths.finalPath,
-                    fileSizeMb,
-                    downloadedAt: new Date(),
-                    lastAccessedAt: new Date(),
-                },
-            }),
+    await withPrismaRetry("performDownload.podcastDownload.upsert", () =>
+        prisma.podcastDownload.upsert({
+            where: { userId_episodeId: { userId, episodeId } },
+            create: {
+                userId,
+                episodeId,
+                localPath: paths.finalPath,
+                fileSizeMb,
+                downloadedAt: new Date(),
+                lastAccessedAt: new Date(),
+            },
+            update: {
+                localPath: paths.finalPath,
+                fileSizeMb,
+                downloadedAt: new Date(),
+                lastAccessedAt: new Date(),
+            },
+        }),
     );
     podcastDownloadLogger.debug(
         `Successfully cached episode ${episodeId} (${fileSizeMb.toFixed(1)}MB)`,
@@ -828,7 +767,7 @@ async function deleteExpiredPodcastDownload(
                 "Skipped unsafe podcast cache cleanup path",
             );
         }
-        await withPodcastDownloadPrismaRetry(
+        await withPrismaRetry(
             "cleanupExpiredCache.podcastDownload.delete",
             () =>
                 prisma.podcastDownload.delete({
@@ -862,7 +801,7 @@ export async function cleanupExpiredCache(): Promise<{
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     // Find expired downloads
-    const expiredDownloads = await withPodcastDownloadPrismaRetry(
+    const expiredDownloads = await withPrismaRetry(
         "cleanupExpiredCache.podcastDownload.findMany",
         () =>
             prisma.podcastDownload.findMany({
@@ -897,7 +836,7 @@ export async function getCacheStats(): Promise<{
     totalSizeMb: number;
     oldestFile: Date | null;
 }> {
-    const downloads = await withPodcastDownloadPrismaRetry(
+    const downloads = await withPrismaRetry(
         "getCacheStats.podcastDownload.findMany",
         () =>
             prisma.podcastDownload.findMany({

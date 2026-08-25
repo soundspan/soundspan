@@ -111,7 +111,8 @@ import {
     mockScanQueueGetJob,
     mockScanQueueGetJobs,
     mockScanQueueClientSet,
-    mockScanQueueClientEval,
+    mockAcquireSchedulerClaim,
+    mockReleaseSchedulerClaim,
     mockOrganizeSingles,
     mockLoggerInfo,
     mockLoggerError,
@@ -174,7 +175,8 @@ describe("library scan and organize runtime coverage", () => {
         mockScanQueueGetJob.mockResolvedValue(null);
         mockScanQueueGetJobs.mockResolvedValue([]);
         mockScanQueueClientSet.mockResolvedValue("OK");
-        mockScanQueueClientEval.mockResolvedValue(1);
+        mockAcquireSchedulerClaim.mockResolvedValue("claim-token");
+        mockReleaseSchedulerClaim.mockResolvedValue(undefined);
     });
 
     it("short-circuits scan when MUSIC_PATH is missing", async () => {
@@ -256,10 +258,10 @@ describe("library scan and organize runtime coverage", () => {
                 finishOrganization = resolve;
             });
         });
-        mockScanQueueClientSet
-            .mockResolvedValueOnce("OK")
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce("OK");
+        mockAcquireSchedulerClaim
+            .mockResolvedValueOnce("claim-token")
+            .mockResolvedValueOnce(null);
+        mockScanQueueClientSet.mockResolvedValueOnce("OK");
 
         const firstRes = createRes();
         const secondRes = createRes();
@@ -311,7 +313,7 @@ describe("library scan and organize runtime coverage", () => {
         });
         expect(mockOrganizeSingles).not.toHaveBeenCalled();
         expect(mockScanQueueAdd).not.toHaveBeenCalled();
-        expect(mockScanQueueClientEval).toHaveBeenCalledTimes(1);
+        expect(mockReleaseSchedulerClaim).toHaveBeenCalledTimes(1);
     });
 
     it("reuses the maintenance identity after preserving the prior result for status polling", async () => {
@@ -371,9 +373,7 @@ describe("library scan and organize runtime coverage", () => {
     });
 
     it("rate limits a user who started maintenance during the cooldown", async () => {
-        mockScanQueueClientSet
-            .mockResolvedValueOnce("OK")
-            .mockResolvedValueOnce(null);
+        mockScanQueueClientSet.mockResolvedValueOnce(null);
 
         const res = createRes();
         await scanHandler({ user: { id: "user-2" } } as any, res);
@@ -384,7 +384,7 @@ describe("library scan and organize runtime coverage", () => {
         });
         expect(mockOrganizeSingles).not.toHaveBeenCalled();
         expect(mockScanQueueAdd).not.toHaveBeenCalled();
-        expect(mockScanQueueClientEval).toHaveBeenCalledTimes(1);
+        expect(mockReleaseSchedulerClaim).toHaveBeenCalledTimes(1);
     });
 
     it("returns scan trigger error when queue add fails", async () => {

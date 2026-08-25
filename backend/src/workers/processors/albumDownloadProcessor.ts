@@ -5,6 +5,8 @@ import {
     dispatchResolvedAlbumDownload,
     resolveAlbumDownloadRouting,
 } from "../../services/downloadDispatcher";
+import { albumDownloadQueueJobId } from "../../services/albumDownloadQueueOwnership";
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import {
@@ -22,6 +24,7 @@ const payloadSchema = z
         artistName: z.string().optional(),
         artistMbid: z.string().optional(),
         albumTitle: z.string().optional(),
+        claimWaitAttempts: z.number().int().min(0).max(480).optional(),
     })
     .strict();
 const finalizerPayloadSchema = z
@@ -32,10 +35,21 @@ const finalizerPayloadSchema = z
 const ALBUM_DOWNLOAD_CLAIM_KEY = "scheduler-claim:album-download";
 const ALBUM_DOWNLOAD_CLAIM_TTL_MS = 15 * 60_000;
 const ALBUM_DOWNLOAD_CLAIM_RENEW_INTERVAL_MS = 5 * 60_000;
-const ALBUM_DOWNLOAD_CLAIM_POLL_INTERVAL_MS = 15_000;
-const ALBUM_DOWNLOAD_CLAIM_MAX_POLLS = 960;
+const ALBUM_DOWNLOAD_CLAIM_REQUEUE_DELAY_MS = 30_000;
+const ALBUM_DOWNLOAD_CLAIM_MAX_WAIT_ATTEMPTS = 480;
 
 type AlbumDownloadPayload = z.infer<typeof payloadSchema>;
+
+/** Result returned to the Bull completion event for an album-download pass. */
+export type AlbumDownloadProcessOutcome =
+    | Readonly<{ kind: "completed" }>
+    | Readonly<{
+          kind: "contention-wait";
+          payload: AlbumDownloadPayload;
+          delayMs: number;
+      }>;
+
+const COMPLETED_OUTCOME: AlbumDownloadProcessOutcome = { kind: "completed" };
 
 /** Bull job name used for durable album downloads. */
 export const ALBUM_DOWNLOAD_JOB_NAME = "album-download";
@@ -62,11 +76,12 @@ async function getPersistedStatus(jobId: string): Promise<string | null> {
     return persistedJob?.status ?? null;
 }
 
-async function skipCompletedRedelivery(
+async function skipTerminalRedelivery(
     payload: AlbumDownloadPayload,
 ): Promise<boolean> {
-    if ((await getPersistedStatus(payload.jobId)) !== "completed") return false;
-    log.info("Skipping completed album download redelivery", {
+    const status = await getPersistedStatus(payload.jobId);
+    if (status !== "completed" && status !== "failed") return false;
+    log.info(`Skipping ${status} album download redelivery`, {
         jobId: payload.jobId,
     });
     return true;
@@ -116,7 +131,7 @@ async function dispatchWithClaimRenewal(
     }, ALBUM_DOWNLOAD_CLAIM_RENEW_INTERVAL_MS);
     renewalTimer.unref();
     try {
-        if (!(await skipCompletedRedelivery(payload))) {
+        if (!(await skipTerminalRedelivery(payload))) {
             await dispatchPersistedAlbumDownload(payload, routing);
         }
     } finally {
@@ -125,24 +140,69 @@ async function dispatchWithClaimRenewal(
     }
 }
 
-async function waitForAlbumDownloadClaim(
+interface AlbumDownloadClaimWaitPolicy {
+    delayMs: number;
+    maxWaitAttempts: number;
+}
+
+const DEFAULT_CLAIM_WAIT_POLICY: AlbumDownloadClaimWaitPolicy = {
+    delayMs: ALBUM_DOWNLOAD_CLAIM_REQUEUE_DELAY_MS,
+    maxWaitAttempts: ALBUM_DOWNLOAD_CLAIM_MAX_WAIT_ATTEMPTS,
+};
+
+function requeueOptions(
+    job: Job<unknown>,
+    jobId: string,
+    delayMs: number,
+): Record<string, unknown> {
+    const preserved = {
+        priority: job.opts.priority,
+        attempts: job.opts.attempts,
+        backoff: job.opts.backoff,
+        removeOnComplete: job.opts.removeOnComplete,
+        removeOnFail: job.opts.removeOnFail,
+    };
+    return Object.fromEntries(
+        Object.entries({ ...preserved, jobId, delay: delayMs }).filter(
+            ([, value]) => value !== undefined,
+        ),
+    );
+}
+
+function contentionWaitOutcome(
     payload: AlbumDownloadPayload,
-    routing: AlbumDownloadRouting,
-): Promise<void> {
-    for (let poll = 0; poll < ALBUM_DOWNLOAD_CLAIM_MAX_POLLS; poll += 1) {
-        const result = await runWithSchedulerClaim(
-            ALBUM_DOWNLOAD_CLAIM_KEY,
-            ALBUM_DOWNLOAD_CLAIM_TTL_MS,
-            "album download",
-            (claimToken) =>
-                dispatchWithClaimRenewal(payload, routing, claimToken),
-        );
-        if (result.acquired) return;
-        await new Promise<void>((resolve) =>
-            setTimeout(resolve, ALBUM_DOWNLOAD_CLAIM_POLL_INTERVAL_MS),
-        );
+    policy: AlbumDownloadClaimWaitPolicy,
+): AlbumDownloadProcessOutcome {
+    const waitAttempts = payload.claimWaitAttempts ?? 0;
+    if (waitAttempts >= policy.maxWaitAttempts) {
+        throw new Error("Timed out waiting for the album download claim");
     }
-    throw new Error("Timed out waiting for the album download claim");
+    return {
+        kind: "contention-wait",
+        payload: { ...payload, claimWaitAttempts: waitAttempts + 1 },
+        delayMs: policy.delayMs,
+    };
+}
+
+/** Replace a completed contention pass with its same stable delayed job. */
+export async function requeueAlbumDownloadAfterContention(
+    job: Job<unknown>,
+    outcome: AlbumDownloadProcessOutcome,
+): Promise<void> {
+    if (outcome.kind !== "contention-wait") return;
+    const queueJobId = albumDownloadQueueJobId(outcome.payload.jobId);
+    await job.remove();
+    await job.queue.add(
+        ALBUM_DOWNLOAD_JOB_NAME,
+        outcome.payload,
+        requeueOptions(job, queueJobId, outcome.delayMs),
+    );
+    log.debug("Re-enqueued album download after claim contention", {
+        jobId: outcome.payload.jobId,
+        queueJobId,
+        waitAttempts: outcome.payload.claimWaitAttempts,
+        delayMs: outcome.delayMs,
+    });
 }
 
 function requiresAlbumDownloadClaim(
@@ -155,22 +215,46 @@ function requiresAlbumDownloadClaim(
 }
 
 /** Validate and dispatch one queued album download. */
-export async function processAlbumDownload(job: Job<unknown>): Promise<void> {
+async function processAlbumDownloadWithPolicy(
+    job: Job<unknown>,
+    policy: AlbumDownloadClaimWaitPolicy,
+): Promise<AlbumDownloadProcessOutcome> {
     const payload = payloadSchema.parse(job.data);
     await job.progress(0);
-    if (await skipCompletedRedelivery(payload)) {
+    if (await skipTerminalRedelivery(payload)) {
         await job.progress(100);
-        return;
+        return COMPLETED_OUTCOME;
     }
 
     const routing = await resolveAlbumDownloadRouting(payload);
     if (requiresAlbumDownloadClaim(routing)) {
-        await waitForAlbumDownloadClaim(payload, routing);
+        const result = await runWithSchedulerClaim(
+            ALBUM_DOWNLOAD_CLAIM_KEY,
+            ALBUM_DOWNLOAD_CLAIM_TTL_MS,
+            "album download",
+            (claimToken) =>
+                dispatchWithClaimRenewal(payload, routing, claimToken),
+        );
+        if (!result.acquired) {
+            return contentionWaitOutcome(payload, policy);
+        }
     } else {
         await dispatchPersistedAlbumDownload(payload, routing);
     }
     await job.progress(100);
+    return COMPLETED_OUTCOME;
 }
+
+/** Validate and dispatch one queued album download. */
+export function processAlbumDownload(
+    job: Job<unknown>,
+): Promise<AlbumDownloadProcessOutcome> {
+    return processAlbumDownloadWithPolicy(job, DEFAULT_CLAIM_WAIT_POLICY);
+}
+
+export const __albumDownloadProcessorTestables = {
+    processAlbumDownloadWithPolicy,
+};
 
 /** Finalize persisted state after Bull exhausts album-download recovery. */
 export async function finalizeAlbumDownloadQueueFailure(
@@ -201,4 +285,3 @@ export async function finalizeAlbumDownloadQueueFailure(
         });
     }
 }
-import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";

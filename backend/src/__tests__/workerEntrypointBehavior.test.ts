@@ -125,6 +125,7 @@ describe("worker entrypoint behavior", () => {
         const shutdownWorkers = jest.fn(
             shutdownWorkersImpl || (async () => undefined),
         );
+        const startWorkers = jest.fn();
 
         jest.doMock("http", () => ({
             createServer,
@@ -155,6 +156,7 @@ describe("worker entrypoint behavior", () => {
             createDependencyReadinessTracker,
         }));
         jest.doMock("../workers", () => ({
+            startWorkers,
             shutdownWorkers,
         }));
         const metricsRegistry =

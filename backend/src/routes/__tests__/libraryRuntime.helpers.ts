@@ -17,6 +17,8 @@ const mockBumpSearchCacheVersion = jest.fn().mockResolvedValue(undefined);
 const mockLoadGenreRadioAggregates = jest.fn();
 const mockLoadDecadeRadioAggregates = jest.fn();
 const mockLoadVibeRadioCandidateIds = jest.fn();
+const mockAcquireSchedulerClaim = jest.fn();
+const mockReleaseSchedulerClaim = jest.fn();
 const mockLoadRadioIdCandidatePool = jest.fn(
     (_discriminator: string, loader: () => Promise<string[]>) => loader(),
 );
@@ -184,6 +186,13 @@ jest.mock("../../utils/redis", () => ({
         get: jest.fn(),
         setEx: jest.fn(),
     },
+}));
+
+jest.mock("../../utils/schedulerClaim", () => ({
+    acquireSchedulerClaim: (...args: unknown[]) =>
+        mockAcquireSchedulerClaim(...args),
+    releaseSchedulerClaim: (...args: unknown[]) =>
+        mockReleaseSchedulerClaim(...args),
 }));
 
 jest.mock("../../config", () => ({
@@ -868,6 +877,8 @@ export {
     mockScanQueueGetJobs,
     mockScanQueueClientSet,
     mockScanQueueClientEval,
+    mockAcquireSchedulerClaim,
+    mockReleaseSchedulerClaim,
     mockOrganizeSingles,
     mockLoggerInfo,
     mockLoggerError,

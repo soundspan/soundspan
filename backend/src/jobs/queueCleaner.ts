@@ -1,7 +1,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
-import { Prisma } from "@prisma/client";
+import { withPrismaRetry } from "../utils/prismaRetry";
 import {
     cleanStuckDownloads,
     getRecentCompletedDownloads,
@@ -25,7 +25,6 @@ class QueueCleanerService {
     private emptyQueueChecks = 0;
     private maxEmptyChecks = 3; // Stop after 3 consecutive empty checks
     private timeoutId?: NodeJS.Timeout;
-    private readonly prismaRetryAttempts = 3;
 
     // Cached dynamic imports (lazy-loaded once, reused on subsequent calls)
     private discoverWeeklyService:
@@ -55,62 +54,6 @@ class QueueCleanerService {
             this.matchAlbum = module.matchAlbum;
         }
         return this.matchAlbum;
-    }
-
-    private isRetryablePrismaError(error: unknown): boolean {
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
-                error.code,
-            );
-        }
-
-        if (error instanceof Prisma.PrismaClientRustPanicError) {
-            return true;
-        }
-
-        if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-            const message = error.message || "";
-            return (
-                message.includes("Response from the Engine was empty") ||
-                message.includes("Engine has already exited")
-            );
-        }
-
-        const message =
-            error instanceof Error ? error.message : String(error ?? "");
-        return (
-            message.includes("Response from the Engine was empty") ||
-            message.includes("Engine has already exited") ||
-            message.includes("Can't reach database server") ||
-            message.includes("Connection reset")
-        );
-    }
-
-    private async withPrismaRetry<T>(
-        operationName: string,
-        operation: () => Promise<T>,
-    ): Promise<T> {
-        for (let attempt = 1; ; attempt += 1) {
-            try {
-                return await operation();
-            } catch (error) {
-                if (
-                    !this.isRetryablePrismaError(error) ||
-                    attempt === this.prismaRetryAttempts
-                ) {
-                    throw error;
-                }
-
-                logger.warn(
-                    `[QueueCleaner/Prisma] ${operationName} failed (attempt ${attempt}/${this.prismaRetryAttempts}), retrying`,
-                    error,
-                );
-                await prisma.$connect().catch(() => {});
-                await new Promise((resolve) =>
-                    setTimeout(resolve, 250 * attempt),
-                );
-            }
-        }
     }
 
     /**
@@ -230,7 +173,7 @@ class QueueCleanerService {
                         const albumTitle = stripAlbumYearSuffix(parsed.album);
 
                         // Find matching processing jobs
-                        const matchingJobs = await this.withPrismaRetry(
+                        const matchingJobs = await withPrismaRetry(
                             "runCleanup.downloadJob.findMany.matchingJobs",
                             () =>
                                 prisma.downloadJob.findMany({
@@ -250,7 +193,7 @@ class QueueCleanerService {
                             );
                             const currentRetryCount = metadata.retryCount || 0;
 
-                            await this.withPrismaRetry(
+                            await withPrismaRetry(
                                 "runCleanup.downloadJob.update.retryMetadata",
                                 () =>
                                     patchDownloadJobMetadataFrom(
@@ -294,7 +237,7 @@ class QueueCleanerService {
                 const mbid = download.album.foreignAlbumId;
 
                 // Find matching job(s) in database by MBID or downloadId
-                const orphanedJobs = await this.withPrismaRetry(
+                const orphanedJobs = await withPrismaRetry(
                     "runCleanup.downloadJob.findMany.orphaned",
                     () =>
                         prisma.downloadJob.findMany({
@@ -320,7 +263,7 @@ class QueueCleanerService {
                     recoveredCount += orphanedJobs.length;
 
                     // Mark all matching jobs as complete
-                    await this.withPrismaRetry(
+                    await withPrismaRetry(
                         "runCleanup.downloadJob.updateMany.recoverCompleted",
                         () =>
                             prisma.downloadJob.updateMany({
@@ -389,7 +332,7 @@ class QueueCleanerService {
             }
 
             // PART 3: Check if we should stop (no activity)
-            const activeJobs = await this.withPrismaRetry(
+            const activeJobs = await withPrismaRetry(
                 "runCleanup.downloadJob.count.active",
                 () =>
                     prisma.downloadJob.count({
@@ -451,7 +394,7 @@ class QueueCleanerService {
      * Fetches all local albums once, then checks jobs against in-memory data.
      */
     async reconcileWithLocalLibrary(): Promise<{ reconciled: number }> {
-        const processingJobs = await this.withPrismaRetry(
+        const processingJobs = await withPrismaRetry(
             "reconcileWithLocalLibrary.downloadJob.findMany.processing",
             () =>
                 prisma.downloadJob.findMany({
@@ -488,7 +431,7 @@ class QueueCleanerService {
         }
 
         // Fetch ALL local albums with tracks in ONE query
-        const localAlbums = await this.withPrismaRetry(
+        const localAlbums = await withPrismaRetry(
             "reconcileWithLocalLibrary.album.findMany.localAlbums",
             () =>
                 prisma.album.findMany({
@@ -590,7 +533,7 @@ class QueueCleanerService {
 
         // Batch update all matched jobs
         if (toComplete.length > 0) {
-            await this.withPrismaRetry(
+            await withPrismaRetry(
                 "reconcileWithLocalLibrary.downloadJob.updateMany.complete",
                 () =>
                     prisma.downloadJob.updateMany({

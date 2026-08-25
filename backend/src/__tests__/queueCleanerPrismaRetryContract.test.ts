@@ -6,12 +6,18 @@ describe("queue cleaner prisma retry contract", () => {
         path.resolve(__dirname, "../jobs/queueCleaner.ts"),
         "utf8",
     );
+    const retrySource = fs.readFileSync(
+        path.resolve(__dirname, "../utils/prismaRetry.ts"),
+        "utf8",
+    );
 
     it("retries transient prisma failures for queue-cleaner loops", () => {
-        expect(source).toContain("private async withPrismaRetry<T>(");
-        expect(source).toContain("Response from the Engine was empty");
-        expect(source).toContain("[QueueCleaner/Prisma]");
-        expect(source).toContain("await prisma.$connect().catch(() => {});");
+        expect(source).toContain("withPrismaRetry(");
+        expect(retrySource).toContain("Response from the Engine was empty");
+        expect(retrySource).toContain("P2037");
+        expect(retrySource).toContain(
+            "await prisma.$connect().catch(() => {});",
+        );
     });
 
     it("uses retry wrapper for reconciliation and recovery updates", () => {

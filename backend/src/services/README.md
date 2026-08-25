@@ -57,7 +57,6 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/downloadDispatcher.ts` | Configured-source album download dispatch (policy resolution and provider routing) |
 | `backend/src/services/downloadArtistMbid.ts` | Artist-MBID reuse and MusicBrainz fallback for manager-backed album downloads |
 | `backend/src/services/downloadJobStatus.ts` | Shared download-job status transitions and guarded metadata patch writes |
-| `backend/src/services/downloadQueue.ts` | Core |
 | `backend/src/services/embeddingSpaceLifecycle.ts` | Blue/green embedding-space cutover and retirement cleanup |
 | `backend/src/services/embeddingSpaces.ts` | Provider-space registry resolution, active cache, and worker target |
 | `backend/src/services/enrichment.ts` | Enrichment settings and compatibility facade over shared metadata field rules |

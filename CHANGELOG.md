@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - App screens now share one catalog of data-cache keys, so library, playlist, download, and notification views refresh reliably after changes instead of occasionally showing stale lists.
 - `DISCOVERY_MODE=legacy` remains accepted but now serves the modern discovery implementation and logs one deprecation warning at process startup (#795).
 - The TIDAL streamer now uses focused internal modules, and all Python sidecars use one shared-package import prefix without changing their HTTP APIs.
+- Worker claims and transient Prisma retries now use shared internal primitives, and worker modules can be imported without registering processors or schedules.
 - Internal TIDAL and YouTube provider plumbing now uses shared types and routing adapters, and Deezer API calls now use the shared rate limiter.
 - The enrichment worker now idles cheaply when the library is fully enriched.
 - Subsonic apps load artist lists much faster on large libraries, and genre shuffle pages now load consistently fast.
@@ -49,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Playing music no longer re-renders large parts of the app once per second: pages and controls now subscribe only to the playback details they actually show, and dragging the volume slider updates just the volume controls instead of rippling through every open page (#785).
+- Queued album downloads waiting on the deployment-wide claim now return to Bull with a delay instead of occupying an active worker slot for up to four hours.
 - Pressing get-all-missing-albums now queues the artist's albums immediately even while other downloads are running (#808).
 - Radio stations now start quickly on large libraries, and genre and decade stations load instantly without recounting the full library on every request (#776). Preferences now reorder the selected station without promoting liked tracks into it or displacing disliked tracks near the cutoff.
 - Provider matching now treats accents, punctuation, conjunctions, and album edition suffixes consistently, reducing wrong or missed album and track matches (#791).

@@ -12,7 +12,8 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { withPrismaRetry } from "../utils/prismaRetry";
 import { config } from "../config";
 import { cleanupOrphanedLibraryEntities } from "../services/libraryOrphanCleanup";
 import { DISCOVERY_LIKED_OWNERSHIP_SOURCE } from "../services/albumOwnershipPromotion";
@@ -32,73 +33,10 @@ import {
     type DiscoveryMarkers,
 } from "./dataIntegrityBatches";
 
-const DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS = 3;
 const DATA_INTEGRITY_BATCH_SIZE = 250;
 const DATA_INTEGRITY_MAX_PAGES = 1_000;
 const DATA_INTEGRITY_MAX_MARKERS = 250_000;
 const log = logger.child("DataIntegrity");
-
-function isRetryableDataIntegrityPrismaError(error: unknown): boolean {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
-            error.code,
-        );
-    }
-
-    if (error instanceof Prisma.PrismaClientRustPanicError) {
-        return true;
-    }
-
-    if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-        const message = error.message || "";
-        return (
-            message.includes("Response from the Engine was empty") ||
-            message.includes("Engine has already exited")
-        );
-    }
-
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Response from the Engine was empty") ||
-        message.includes("Engine has already exited") ||
-        message.includes("Can't reach database server") ||
-        message.includes("Connection reset")
-    );
-}
-
-/** Runs a data-integrity database operation with bounded transient retries. */
-export async function withDataIntegrityPrismaRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    let lastError: unknown;
-    for (
-        let attempt = 1;
-        attempt <= DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS;
-        attempt += 1
-    ) {
-        try {
-            return await operation();
-        } catch (error) {
-            lastError = error;
-            if (
-                !isRetryableDataIntegrityPrismaError(error) ||
-                attempt === DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS
-            ) {
-                throw error;
-            }
-
-            log.warn(
-                `${operationName} failed (attempt ${attempt}/${DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS}), retrying`,
-                error,
-            );
-            await prisma.$connect().catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        }
-    }
-    throw lastError ?? new Error(`${operationName} retry attempts exhausted`);
-}
 
 interface IntegrityReport {
     expiredExclusions: number;
@@ -120,17 +58,13 @@ async function scanBatches<T extends CursorRow>(
 ): Promise<void> {
     let cursor: string | undefined;
     for (let page = 0; page < DATA_INTEGRITY_MAX_PAGES; page += 1) {
-        const rows = await withDataIntegrityPrismaRetry(operationName, () =>
-            load(cursor),
-        );
+        const rows = await withPrismaRetry(operationName, () => load(cursor));
         if (rows.length === 0) return;
         await consume(rows);
         if (rows.length < DATA_INTEGRITY_BATCH_SIZE) return;
         cursor = rows[rows.length - 1].id;
     }
-    const overflow = await withDataIntegrityPrismaRetry(operationName, () =>
-        load(cursor),
-    );
+    const overflow = await withPrismaRetry(operationName, () => load(cursor));
     if (overflow.length > 0) {
         log.warn(
             `${operationName} truncated at ${DATA_INTEGRITY_MAX_PAGES * DATA_INTEGRITY_BATCH_SIZE} rows`,
@@ -142,7 +76,7 @@ async function removeExpiredRows(
     report: IntegrityReport,
     now: Date,
 ): Promise<void> {
-    const exclusions = await withDataIntegrityPrismaRetry(
+    const exclusions = await withPrismaRetry(
         "runDataIntegrityCheck.discoverExclusion.deleteMany",
         () =>
             prisma.discoverExclusion.deleteMany({
@@ -150,7 +84,7 @@ async function removeExpiredRows(
             }),
     );
     report.expiredExclusions = exclusions.count;
-    const tracks = await withDataIntegrityPrismaRetry(
+    const tracks = await withPrismaRetry(
         "runDataIntegrityCheck.discoveryTrack.deleteMany",
         () => prisma.discoveryTrack.deleteMany({ where: { trackId: null } }),
     );
@@ -158,7 +92,7 @@ async function removeExpiredRows(
 }
 
 async function findDiscoveryReferences(albums: AlbumCandidate[]) {
-    return withDataIntegrityPrismaRetry(
+    return withPrismaRetry(
         "runDataIntegrityCheck.discoveryAlbum.findMany.activeBatch",
         () =>
             prisma.discoveryAlbum.findMany({
@@ -184,7 +118,7 @@ async function findDiscoveryReferences(albums: AlbumCandidate[]) {
 }
 
 async function findOwnedReferences(albums: AlbumCandidate[]) {
-    return withDataIntegrityPrismaRetry(
+    return withPrismaRetry(
         "runDataIntegrityCheck.ownedAlbum.findMany.batch",
         () =>
             prisma.ownedAlbum.findMany({
@@ -233,7 +167,7 @@ async function removeOrphanedDiscoverTracks(
                 owned,
             );
             if (orphanIds.length === 0) return;
-            await withDataIntegrityPrismaRetry(
+            await withPrismaRetry(
                 "runDataIntegrityCheck.track.deleteMany.orphanedAlbumBatch",
                 () =>
                     prisma.track.deleteMany({
@@ -286,7 +220,7 @@ async function collectDiscoveryMarkers(): Promise<DiscoveryMarkers> {
 }
 
 async function findProtectedArtistIds(albums: AlbumCandidate[]) {
-    const rows = await withDataIntegrityPrismaRetry(
+    const rows = await withPrismaRetry(
         "runDataIntegrityCheck.ownedAlbum.findMany.protectedBatch",
         () =>
             prisma.ownedAlbum.findMany({
@@ -308,7 +242,7 @@ async function findLikedArtistMbids(albums: AlbumCandidate[]) {
         album.artist.mbid ? [album.artist.mbid] : [],
     );
     if (mbids.length === 0) return new Set<string>();
-    const rows = await withDataIntegrityPrismaRetry(
+    const rows = await withPrismaRetry(
         "runDataIntegrityCheck.discoveryAlbum.findMany.likedBatch",
         () =>
             prisma.discoveryAlbum.findMany({
@@ -342,7 +276,7 @@ async function relocateLibraryBatch(
     if (mislocated.length === 0) return 0;
     const ids = mislocated.map((album) => album.id);
     const rgMbids = mislocated.map((album) => album.rgMbid);
-    const updated = await withDataIntegrityPrismaRetry(
+    const updated = await withPrismaRetry(
         "runDataIntegrityCheck.album.updateMany.mislocatedBatch",
         () =>
             prisma.album.updateMany({
@@ -350,7 +284,7 @@ async function relocateLibraryBatch(
                 data: { location: "DISCOVER" },
             }),
     );
-    await withDataIntegrityPrismaRetry(
+    await withPrismaRetry(
         "runDataIntegrityCheck.ownedAlbum.deleteMany.mislocatedBatch",
         () =>
             prisma.ownedAlbum.deleteMany({
@@ -393,7 +327,7 @@ async function fixMislocatedAlbums(markers: DiscoveryMarkers): Promise<number> {
 async function consolidateArtistBatch(
     artists: Array<{ id: string; normalizedName: string }>,
 ): Promise<number> {
-    const realArtists = await withDataIntegrityPrismaRetry(
+    const realArtists = await withPrismaRetry(
         "runDataIntegrityCheck.artist.findMany.realBatch",
         () =>
             prisma.artist.findMany({
@@ -417,7 +351,7 @@ async function consolidateArtistBatch(
     for (const artist of artists) {
         const realId = realByName.get(artist.normalizedName);
         if (!realId) continue;
-        await withDataIntegrityPrismaRetry(
+        await withPrismaRetry(
             "runDataIntegrityCheck.album.updateMany.consolidateArtist",
             () =>
                 prisma.album.updateMany({
@@ -456,7 +390,7 @@ async function consolidateTempArtists(
 
 async function removeOldDownloadJobs(now: Date): Promise<number> {
     const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000);
-    const result = await withDataIntegrityPrismaRetry(
+    const result = await withPrismaRetry(
         "runDataIntegrityCheck.downloadJob.deleteMany.oldJobs",
         () =>
             prisma.downloadJob.deleteMany({

@@ -7,16 +7,17 @@ describe("discover processor idempotency contract", () => {
         "../workers/processors/discoverProcessor.ts",
     );
     const source = fs.readFileSync(processorPath, "utf8");
+    const claimSource = fs.readFileSync(
+        path.resolve(__dirname, "../utils/schedulerClaim.ts"),
+        "utf8",
+    );
 
     it("uses a per-user redis claim lock before generating playlists", () => {
         expect(source).toContain("discover:processor:lock");
-        expect(source).toContain(
-            'createIORedisClient(\n    "discover-processor-locks"',
-        );
         expect(source).toContain("DISCOVER_PROCESSOR_LOCK_TTL_MS");
-        expect(source).toContain('"NX"');
-        expect(source).toContain("withDiscoverLockRedisRetry(");
-        expect(source).toContain("recreating client and retrying once");
+        expect(source).toContain("acquireSchedulerClaim(");
+        expect(claimSource).toContain('"NX"');
+        expect(claimSource).toContain("recreating client and retrying");
         expect(source).toContain("processDiscoverWeekly");
     });
 
@@ -26,7 +27,7 @@ describe("discover processor idempotency contract", () => {
     });
 
     it("releases lock ownership with token compare-and-delete semantics", () => {
-        expect(source).toContain("redis.call('get', KEYS[1]) == ARGV[1]");
-        expect(source).toContain("Failed to release processor claim");
+        expect(claimSource).toContain("redis.call('get', KEYS[1]) == ARGV[1]");
+        expect(source).toContain("releaseSchedulerClaim(");
     });
 });

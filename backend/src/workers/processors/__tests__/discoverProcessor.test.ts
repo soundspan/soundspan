@@ -87,7 +87,11 @@ describe("discoverProcessor", () => {
             discoveryRecommendationsService,
         }));
         jest.doMock("../../../config", () => ({
-            config: { discover: { mode: options?.mode ?? "strict" } },
+            config: {
+                underJest: true,
+                workers: { schedulerClaimSkipWarnThreshold: 3 },
+                discover: { mode: options?.mode ?? "strict" },
+            },
         }));
         jest.doMock("../../../utils/ioredis", () => ({ createIORedisClient }));
 
@@ -176,7 +180,7 @@ describe("discoverProcessor", () => {
         );
         expect(createIORedisClient).toHaveBeenCalledTimes(2);
         expect(createIORedisClient).toHaveBeenCalledWith(
-            "discover-processor-locks",
+            "worker-scheduler-locks",
             expect.objectContaining({ lazyConnect: true }),
         );
         expect(replacementLockClient.set).toHaveBeenCalled();
@@ -185,7 +189,7 @@ describe("discoverProcessor", () => {
         );
     });
 
-    it("re-throws on generation failure so Bull retries, and supports shutdown fallback", async () => {
+    it("re-throws on generation failure so Bull retries", async () => {
         const { module, lockClient, logger } = loadDiscoverProcessor({
             generateError: "generation-boom",
         });
@@ -197,13 +201,9 @@ describe("discoverProcessor", () => {
             "generation-boom",
         );
 
-        lockClient.quit.mockRejectedValueOnce(new Error("quit-failed"));
-        await module.shutdownDiscoverProcessor();
-        expect(logger.warn).toHaveBeenCalledWith(
-            "Failed to gracefully close lock Redis client; disconnecting forcefully",
-            expect.any(Error),
-        );
-        expect(lockClient.disconnect).toHaveBeenCalled();
+        await expect(
+            module.shutdownDiscoverProcessor(),
+        ).resolves.toBeUndefined();
     });
 
     it("logs a warning when processor claim release fails", async () => {
@@ -221,7 +221,7 @@ describe("discoverProcessor", () => {
         );
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining(
-                "Failed to release processor claim for user u1",
+                "Failed to release claim for user u1 discover generation",
             ),
             expect.any(Error),
         );

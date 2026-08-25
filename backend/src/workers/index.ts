@@ -30,8 +30,10 @@ import {
 import {
     ALBUM_DOWNLOAD_JOB_NAME,
     ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
+    type AlbumDownloadProcessOutcome,
     finalizeAlbumDownloadQueueFailure,
     processAlbumDownload,
+    requeueAlbumDownloadAfterContention,
 } from "./processors/albumDownloadProcessor";
 import { processArtistDownloadExpansion } from "./processors/artistDownloadExpansionProcessor";
 import {
@@ -58,9 +60,7 @@ import {
     startTrackMappingStalenessWorker,
     stopTrackMappingStalenessWorker,
 } from "./trackMappingStaleness";
-import { downloadQueueManager } from "../services/downloadQueue";
 import { config } from "../config";
-import { prisma } from "../utils/db";
 import {
     startDiscoverWeeklyCron,
     stopDiscoverWeeklyCron,
@@ -583,14 +583,14 @@ async function processDownloadQueueReconcileJob(): Promise<boolean> {
         "startup download queue reconciliation",
         async () => {
             const result = await runSchedulerTimedOperation(
-                "downloadQueueManager.reconcileOnStartup",
+                "albumDownloadQueue.getJobCounts",
                 20 * ONE_MINUTE_MS,
-                () => downloadQueueManager.reconcileOnStartup(),
+                () => albumDownloadQueue.getJobCounts(),
             );
 
             if (result) {
                 log.debug(
-                    `Download queue reconciled: ${result.loaded} active, ${result.failed} marked failed`,
+                    `Album download queue ready: ${result.active} active, ${result.waiting} waiting, ${result.delayed} delayed`,
                 );
             }
             return result !== undefined;
@@ -864,49 +864,50 @@ async function removeRequestFulfillmentSchedules(): Promise<void> {
     }
 }
 
-// Register processors with named job types
-queueProcessorLog.info(
-    `workerId=${WORKER_PROCESSOR_ID} owner=${SCHEDULER_CLAIM_OWNER_ID} hostname=${process.env.HOSTNAME ?? "unknown"} pid=${process.pid}`,
-);
-scanQueue.process("scan", processScan);
-if (config.features.discovery) {
-    discoverQueue.process("discover-recommendation", processDiscoverWeekly);
-    discoverQueue.process("discover-cron-tick", processDiscoverCronTick);
-    // Keep legacy unnamed handler for older callers that still enqueue without a job name.
-    discoverQueue.process(processDiscoverWeekly);
-} else {
-    log.info(
-        "Discovery disabled (DISCOVERY_ENABLED=false); discover queue processors not registered",
+function registerQueueProcessors(): void {
+    queueProcessorLog.info(
+        `workerId=${WORKER_PROCESSOR_ID} owner=${SCHEDULER_CLAIM_OWNER_ID} hostname=${process.env.HOSTNAME ?? "unknown"} pid=${process.pid}`,
     );
-}
-imageQueue.process(processImageOptimization);
-validationQueue.process(processValidation);
-genericImportQueue.process(
-    "*",
-    GENERIC_IMPORT_WORKER_CONCURRENCY,
-    processGenericImport,
-);
-albumDownloadQueue.process(
-    ALBUM_DOWNLOAD_JOB_NAME,
-    ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
-    processAlbumDownload,
-);
-artistExpansionQueue.process(
-    ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
-    processArtistDownloadExpansion,
-);
-// Legacy drain: process expansion jobs admitted to album-download before upgrade.
-albumDownloadQueue.process(
-    ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
-    ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
-    processArtistDownloadExpansion,
-);
-if (config.features.federation) {
-    registerFederationProcessors();
-} else {
-    log.info(
-        "Federation disabled (FEDERATION_ENABLED=false); federation processors and schedules not registered",
+    scanQueue.process("scan", processScan);
+    if (config.features.discovery) {
+        discoverQueue.process("discover-recommendation", processDiscoverWeekly);
+        discoverQueue.process("discover-cron-tick", processDiscoverCronTick);
+        // Keep legacy unnamed handler for older callers that still enqueue without a job name.
+        discoverQueue.process(processDiscoverWeekly);
+    } else {
+        log.info(
+            "Discovery disabled (DISCOVERY_ENABLED=false); discover queue processors not registered",
+        );
+    }
+    imageQueue.process(processImageOptimization);
+    validationQueue.process(processValidation);
+    genericImportQueue.process(
+        "*",
+        GENERIC_IMPORT_WORKER_CONCURRENCY,
+        processGenericImport,
     );
+    albumDownloadQueue.process(
+        ALBUM_DOWNLOAD_JOB_NAME,
+        ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
+        processAlbumDownload,
+    );
+    artistExpansionQueue.process(
+        ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
+        processArtistDownloadExpansion,
+    );
+    // Legacy drain: process expansion jobs admitted to album-download before upgrade.
+    albumDownloadQueue.process(
+        ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
+        ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
+        processArtistDownloadExpansion,
+    );
+    if (config.features.federation) {
+        registerFederationProcessors();
+    } else {
+        log.info(
+            "Federation disabled (FEDERATION_ENABLED=false); federation processors and schedules not registered",
+        );
+    }
 }
 async function processPrimarySchedulerJob(
     job: Bull.Job<any>,
@@ -1051,218 +1052,206 @@ function registerSchedulerProcessors(): void {
     schedulerQueue.process("*", processSchedulerLaneJob);
 }
 
-// Register download queue callback for unavailable albums
-downloadQueueManager.onUnavailableAlbum(async (info) => {
-    log.debug(
-        ` Recording unavailable album: ${info.artistName} - ${info.albumTitle}`,
-    );
-
-    if (!info.userId) {
-        log.debug(` No userId provided, skipping database record`);
-        return;
-    }
-
-    try {
-        // Get week start date from discovery album if it exists
-        const discoveryAlbum = await prisma.discoveryAlbum.findFirst({
-            where: { rgMbid: info.albumMbid },
-            orderBy: { downloadedAt: "desc" },
-        });
-
-        await prisma.unavailableAlbum.create({
-            data: {
-                userId: info.userId,
-                artistName: info.artistName,
-                albumTitle: info.albumTitle,
-                albumMbid: info.albumMbid,
-                artistMbid: info.artistMbid,
-                similarity: info.similarity || 0,
-                tier: info.tier || "unknown",
-                weekStartDate: discoveryAlbum?.weekStartDate || new Date(),
-                attemptNumber: 0,
-            },
-        });
-
-        log.debug(`   Recorded in database`);
-    } catch (error: any) {
-        // Handle duplicate entries (album already marked as unavailable)
-        if (error.code === "P2002") {
-            log.debug(`     Album already marked as unavailable`);
-        } else {
-            log.error(` Failed to record unavailable album:`, error.message);
-        }
-    }
-});
-
-// Start unified enrichment worker
-// Handles: artist metadata, track tags (Last.fm), audio analysis queueing (Essentia)
-startUnifiedEnrichmentWorker().catch((err) => {
-    log.error("Failed to start unified enrichment worker:", err);
-});
-
-startVibeEmbedWorker()
-    .then((started) => {
-        if (!started) {
-            log.info(
-                "Vibe provider embedding worker not started; provider mode or audio analysis is disabled",
-            );
-        }
-    })
-    .catch((error: unknown) => {
-        log.error("Failed to start vibe provider embedding worker", error);
+function startBackgroundWorkers(): void {
+    startUnifiedEnrichmentWorker().catch((err) => {
+        log.error("Failed to start unified enrichment worker:", err);
     });
 
-// Start mood bucket worker
-// Assigns newly analyzed tracks to mood buckets for fast mood mix generation
-if (config.features.audioAnalysis) {
-    startMoodBucketWorker().catch((err) => {
-        log.error("Failed to start mood bucket worker:", err);
-    });
-} else {
-    log.info(
-        "Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); mood bucket worker not started",
-    );
+    startVibeEmbedWorker()
+        .then((started) => {
+            if (!started) {
+                log.info(
+                    "Vibe provider embedding worker not started; provider mode or audio analysis is disabled",
+                );
+            }
+        })
+        .catch((error: unknown) => {
+            log.error("Failed to start vibe provider embedding worker", error);
+        });
+
+    // Start mood bucket worker
+    // Assigns newly analyzed tracks to mood buckets for fast mood mix generation
+    if (config.features.audioAnalysis) {
+        startMoodBucketWorker().catch((err) => {
+            log.error("Failed to start mood bucket worker:", err);
+        });
+    } else {
+        log.info(
+            "Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); mood bucket worker not started",
+        );
+    }
+    startTrackMappingStalenessWorker();
 }
 
-startTrackMappingStalenessWorker();
-
-registerQueueProcessorEvents(scanQueue, "library-scan", {
-    record: recordQueueProcessorEvent,
-    recordFailedWithoutJob: true,
-    active: (job) => {
-        log.debug(
-            ` Scan job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    completed: (job, result) => {
-        consumeCoalescedFollowUpAfterSettlement(job);
-        log.debug(
-            `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    failed: (job, error) => {
-        consumeCoalescedFollowUpAfterSettlement(job!);
-        log.error(
-            `Scan job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-            error.message,
-        );
-    },
-});
-
-registerQueueProcessorEvents(discoverQueue, "discover-weekly", {
-    record: recordQueueProcessorEvent,
-    recordFailedWithoutJob: true,
-    active: (job) => {
-        log.debug(
-            ` Discover job ${job.id} started for user ${job.data.userId} (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    completed: (job, result) => {
-        if (result.success) {
+function registerScanQueueEvents(): void {
+    registerQueueProcessorEvents(scanQueue, "library-scan", {
+        record: recordQueueProcessorEvent,
+        recordFailedWithoutJob: true,
+        active: (job) => {
             log.debug(
-                `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs) (workerId=${WORKER_PROCESSOR_ID})`,
+                ` Scan job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
             );
-            return;
-        }
-        log.debug(
-            `Discover job ${job.id} failed: ${result.error} (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    failed: (job, error) => {
-        log.error(
-            `Discover job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-            error.message,
-        );
-    },
-});
+        },
+        completed: (job, result) => {
+            consumeCoalescedFollowUpAfterSettlement(job);
+            log.debug(
+                `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} -${result.tracksRemoved} (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        failed: (job, error) => {
+            consumeCoalescedFollowUpAfterSettlement(job!);
+            log.error(
+                `Scan job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+                error.message,
+            );
+        },
+    });
+}
 
-registerQueueProcessorEvents(imageQueue, "image-optimization", {
-    record: recordQueueProcessorEvent,
-    recordFailedWithoutJob: true,
-    completed: (job, result) => {
-        log.debug(
-            `Image job ${job.id} completed: ${
-                result.success ? "success" : result.error
-            } (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    failed: (job, error) => {
-        log.error(
-            `Image job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-            error.message,
-        );
-    },
-});
-
-registerQueueProcessorEvents(validationQueue, "file-validation", {
-    record: recordQueueProcessorEvent,
-    recordFailedWithoutJob: true,
-    active: (job) => {
-        log.debug(
-            ` Validation job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    completed: (job, result) => {
-        log.debug(
-            `Validation job ${job.id} completed: ${result.tracksChecked} checked, ${result.tracksRemoved} removed (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    failed: (job, error) => {
-        log.error(
-            ` Validation job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
-            error.message,
-        );
-    },
-});
-
-registerQueueProcessorEvents(genericImportQueue, "generic-import", {
-    record: recordQueueProcessorEvent,
-    failed: (job, error) => {
-        if (!job) {
-            queueProcessorLog.error("Generic import queue failure had no job", {
-                error,
-            });
-            return;
-        }
-        void finalizeGenericImportQueueFailure(job, error).catch(
-            (finalizationError) => {
-                queueProcessorLog.error(
-                    "Failed to finalize exhausted generic import job",
-                    { jobId: job.id, error: finalizationError },
+function registerDiscoverQueueEvents(): void {
+    registerQueueProcessorEvents(discoverQueue, "discover-weekly", {
+        record: recordQueueProcessorEvent,
+        recordFailedWithoutJob: true,
+        active: (job) => {
+            log.debug(
+                ` Discover job ${job.id} started for user ${job.data.userId} (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        completed: (job, result) => {
+            if (result.success) {
+                log.debug(
+                    `Discover job ${job.id} completed: ${result.playlistName} (${result.songCount} songs) (workerId=${WORKER_PROCESSOR_ID})`,
                 );
-            },
-        );
-    },
-});
+                return;
+            }
+            log.debug(
+                `Discover job ${job.id} failed: ${result.error} (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        failed: (job, error) => {
+            log.error(
+                `Discover job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+                error.message,
+            );
+        },
+    });
+}
 
-registerQueueProcessorEvents(albumDownloadQueue, "album-download", {
-    record: recordQueueProcessorEvent,
-    completed: () => recordAlbumDownloadOutcome("completed"),
-    failed: (job, error) => {
-        if (!job) {
-            queueProcessorLog.error("Album download queue failure had no job", {
-                error,
-            });
-            return;
-        }
-        void handleAlbumDownloadQueueFailure(job, error).catch(
-            (finalizationError) => {
+function registerMediaQueueEvents(): void {
+    registerQueueProcessorEvents(imageQueue, "image-optimization", {
+        record: recordQueueProcessorEvent,
+        recordFailedWithoutJob: true,
+        completed: (job, result) => {
+            log.debug(
+                `Image job ${job.id} completed: ${
+                    result.success ? "success" : result.error
+                } (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        failed: (job, error) => {
+            log.error(
+                `Image job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+                error.message,
+            );
+        },
+    });
+
+    registerQueueProcessorEvents(validationQueue, "file-validation", {
+        record: recordQueueProcessorEvent,
+        recordFailedWithoutJob: true,
+        active: (job) => {
+            log.debug(
+                ` Validation job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        completed: (job, result) => {
+            log.debug(
+                `Validation job ${job.id} completed: ${result.tracksChecked} checked, ${result.tracksRemoved} removed (workerId=${WORKER_PROCESSOR_ID})`,
+            );
+        },
+        failed: (job, error) => {
+            log.error(
+                ` Validation job ${job!.id} failed (workerId=${WORKER_PROCESSOR_ID}):`,
+                error.message,
+            );
+        },
+    });
+}
+
+function handleAlbumDownloadQueueCompletion(
+    job: Bull.Job<unknown>,
+    result: AlbumDownloadProcessOutcome | undefined,
+): void {
+    if (result?.kind !== "contention-wait") {
+        recordAlbumDownloadOutcome("completed");
+        return;
+    }
+    void requeueAlbumDownloadAfterContention(job, result).catch((error) => {
+        queueProcessorLog.error(
+            "Failed to re-enqueue contended album download",
+            { jobId: job.id, error },
+        );
+    });
+}
+
+function registerImportQueueEvents(): void {
+    registerQueueProcessorEvents(genericImportQueue, "generic-import", {
+        record: recordQueueProcessorEvent,
+        failed: (job, error) => {
+            if (!job) {
                 queueProcessorLog.error(
-                    "Failed to classify or finalize album download queue failure",
-                    { jobId: job.id, error: finalizationError },
+                    "Generic import queue failure had no job",
+                    {
+                        error,
+                    },
                 );
-            },
-        );
-    },
-});
+                return;
+            }
+            void finalizeGenericImportQueueFailure(job, error).catch(
+                (finalizationError) => {
+                    queueProcessorLog.error(
+                        "Failed to finalize exhausted generic import job",
+                        { jobId: job.id, error: finalizationError },
+                    );
+                },
+            );
+        },
+    });
 
-registerQueueProcessorEvents(artistExpansionQueue, "worker-artist-expansion", {
-    record: recordQueueProcessorEvent,
-});
+    registerQueueProcessorEvents(albumDownloadQueue, "album-download", {
+        record: recordQueueProcessorEvent,
+        completed: handleAlbumDownloadQueueCompletion,
+        failed: (job, error) => {
+            if (!job) {
+                queueProcessorLog.error(
+                    "Album download queue failure had no job",
+                    {
+                        error,
+                    },
+                );
+                return;
+            }
+            void handleAlbumDownloadQueueFailure(job, error).catch(
+                (finalizationError) => {
+                    queueProcessorLog.error(
+                        "Failed to classify or finalize album download queue failure",
+                        { jobId: job.id, error: finalizationError },
+                    );
+                },
+            );
+        },
+    });
 
-albumDownloadQueue.on("stalled", () => {
-    recordAlbumDownloadOutcome("retried");
-});
+    registerQueueProcessorEvents(
+        artistExpansionQueue,
+        "worker-artist-expansion",
+        { record: recordQueueProcessorEvent },
+    );
+
+    albumDownloadQueue.on("stalled", () => {
+        recordAlbumDownloadOutcome("retried");
+    });
+}
 
 async function handleAlbumDownloadQueueFailure(
     job: Bull.Job<any>,
@@ -1280,94 +1269,112 @@ async function handleAlbumDownloadQueueFailure(
 // The scheduler queue runs the heavy maintenance cycles (metadata refresh,
 // reconciliation, artist-count backfills) — the primary stall suspects — so
 // it MUST feed the event-loop watchdog's attribution registry.
-registerQueueProcessorEvents(schedulerQueue, "worker-scheduler", {
-    record: recordQueueProcessorEvent,
-    completed: (job) => {
-        log.debug(
-            `Scheduler job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
-        );
-    },
-    failed: (job, error) => {
-        log.error(
-            `Scheduler job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
-            error.message,
-        );
-    },
-});
-
-registerQueueProcessorEvents(
-    schedulerMaintenanceQueue,
-    "worker-scheduler-maintenance",
-    {
+function registerSchedulerQueueEvents(): void {
+    registerQueueProcessorEvents(schedulerQueue, "worker-scheduler", {
         record: recordQueueProcessorEvent,
         completed: (job) => {
             log.debug(
-                `Scheduler maintenance job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
+                `Scheduler job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
             );
         },
         failed: (job, error) => {
             log.error(
-                `Scheduler maintenance job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
+                `Scheduler job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
                 error.message,
             );
         },
-    },
-);
+    });
+
+    registerQueueProcessorEvents(
+        schedulerMaintenanceQueue,
+        "worker-scheduler-maintenance",
+        {
+            record: recordQueueProcessorEvent,
+            completed: (job) => {
+                log.debug(
+                    `Scheduler maintenance job ${job.id} completed (${job.name}) (workerId=${WORKER_PROCESSOR_ID})`,
+                );
+            },
+            failed: (job, error) => {
+                log.error(
+                    `Scheduler maintenance job ${job?.id ?? "unknown"} failed (${job?.name ?? "unknown"}) (workerId=${WORKER_PROCESSOR_ID}):`,
+                    error.message,
+                );
+            },
+        },
+    );
+}
 
 // analysisQueue has no processor in this module, so processor-event wiring remains owner-local.
 // federationQueue processing is owned by federationJobs; no generic wiring is added here.
 
-log.debug("Worker processors registered and event handlers attached");
-
-// Start Discovery Weekly cron scheduler (Sundays at 8 PM)
-if (config.features.discovery) {
-    startDiscoverWeeklyCron();
-    log.debug("Discover Weekly scheduler registered");
-} else {
-    // Remove the repeatable cron job persisted in Redis by a previous run with
-    // the flag on, so no stale schedule lingers (or replays as a backlog the
-    // moment the flag is re-enabled).
-    stopDiscoverWeeklyCron();
-    void discoverQueue
-        .getJobCounts()
-        .then((counts) => {
-            const backlog = (counts.waiting ?? 0) + (counts.delayed ?? 0);
-            if (backlog > 0) {
+function startWorkerSchedules(): void {
+    if (config.features.discovery) {
+        startDiscoverWeeklyCron();
+        log.debug("Discover Weekly scheduler registered");
+    } else {
+        // Remove the repeatable cron job persisted in Redis by a previous run with
+        // the flag on, so no stale schedule lingers (or replays as a backlog the
+        // moment the flag is re-enabled).
+        stopDiscoverWeeklyCron();
+        void discoverQueue
+            .getJobCounts()
+            .then((counts) => {
+                const backlog = (counts.waiting ?? 0) + (counts.delayed ?? 0);
+                if (backlog > 0) {
+                    log.warn(
+                        `Discovery disabled with ${backlog} discover job(s) still in Redis; they will not be processed until DISCOVERY_ENABLED=true`,
+                    );
+                }
+            })
+            .catch((error: any) => {
                 log.warn(
-                    `Discovery disabled with ${backlog} discover job(s) still in Redis; they will not be processed until DISCOVERY_ENABLED=true`,
+                    "Failed to inspect leftover discover queue backlog:",
+                    error.message || error,
                 );
-            }
-        })
-        .catch((error: any) => {
-            log.warn(
-                "Failed to inspect leftover discover queue backlog:",
-                error.message || error,
-            );
-        });
-    log.info(
-        "Discovery disabled (DISCOVERY_ENABLED=false); Discover Weekly scheduler not registered",
-    );
-}
-
-registerSchedulerJobs()
-    .then(() => {
-        log.debug(
-            "Scheduler queue jobs registered (data-integrity, reconciliation, lidarr-cleanup, startup maintenance)",
+            });
+        log.info(
+            "Discovery disabled (DISCOVERY_ENABLED=false); Discover Weekly scheduler not registered",
         );
-    })
-    .catch((err) => {
-        log.error("Failed to register scheduler queue jobs:", err);
-    });
+    }
 
-if (config.features.federation) {
-    registerFederationSchedules().catch((error: unknown) => {
-        log.error("Failed to register federation schedules", error);
+    registerSchedulerJobs()
+        .then(() => {
+            log.debug(
+                "Scheduler queue jobs registered (data-integrity, reconciliation, lidarr-cleanup, startup maintenance)",
+            );
+        })
+        .catch((err) => {
+            log.error("Failed to register scheduler queue jobs:", err);
+        });
+
+    if (config.features.federation) {
+        registerFederationSchedules().catch((error: unknown) => {
+            log.error("Failed to register federation schedules", error);
+        });
+    }
+
+    genericImportJobRunner.registerRecoveryJobs().catch((error) => {
+        log.error("Failed to register generic import recovery jobs", { error });
     });
 }
 
-genericImportJobRunner.registerRecoveryJobs().catch((error) => {
-    log.error("Failed to register generic import recovery jobs", { error });
-});
+let workersStarted = false;
+
+/** Register processors, listeners, and background schedules exactly once. */
+export function startWorkers(): void {
+    if (workersStarted) return;
+    registerQueueProcessors();
+    startBackgroundWorkers();
+    registerScanQueueEvents();
+    registerDiscoverQueueEvents();
+    registerMediaQueueEvents();
+    registerImportQueueEvents();
+    registerSchedulerQueueEvents();
+    log.debug("Worker processors registered and event handlers attached");
+    startWorkerSchedules();
+    workersStarted = true;
+}
 
 /**
  * Gracefully shutdown all workers and cleanup resources
@@ -1385,9 +1392,6 @@ export async function shutdownWorkers(): Promise<void> {
     stopMoodBucketWorker();
 
     stopTrackMappingStalenessWorker();
-
-    // Shutdown download queue manager
-    downloadQueueManager.shutdown();
 
     // Drain expansion first because it can still admit new album jobs.
     await artistExpansionQueue.close();

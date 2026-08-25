@@ -64,7 +64,7 @@ const BASELINE = Object.freeze({
     "backend/src/services/lidarr.ts": 2951,
     "backend/src/services/simpleDownloadManager.ts": 2306,
     "backend/src/services/spotify.ts": 1624,
-    "backend/src/workers/unifiedEnrichment.ts": 1897,
+    "backend/src/workers/unifiedEnrichment.ts": 1825,
     "frontend/app/playlist/[id]/page.tsx": 1506,
     "frontend/app/vibe/page.tsx": 1524,
     "frontend/components/player/AudioPlaybackOrchestrator.tsx": 1595,

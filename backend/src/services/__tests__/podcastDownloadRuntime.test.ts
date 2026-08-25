@@ -99,6 +99,7 @@ describe("podcast download runtime behavior", () => {
         ]);
 
         jest.doMock("../../utils/db", () => ({ prisma, Prisma }));
+        jest.doMock("@prisma/client", () => ({ Prisma }));
         jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../../config", () => ({
             config: {

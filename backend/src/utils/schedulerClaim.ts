@@ -8,6 +8,8 @@ const claimLog = logger.child("WorkerScheduler").child("SchedulerClaim");
 const claimObservabilityLog = claimLog.child("Observability");
 const SCHEDULER_CLAIM_RETRY_ATTEMPTS = 3;
 const OBSERVABILITY_LOG_EVERY = 25;
+const RELEASE_OWNED_CLAIM_SCRIPT =
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 // Optional access keeps partial config mocks in tests from failing at import.
 const SCHEDULER_SKIP_WARN_THRESHOLD =
     config.workers?.schedulerClaimSkipWarnThreshold ?? 3;
@@ -143,7 +145,8 @@ function recordSkippedClaim(claimKey: string, operationName: string): void {
     maybeLogSchedulerClaimObservability("skip");
 }
 
-async function acquireSchedulerClaim(
+/** Attempt to acquire a shared Redis claim without waiting. */
+export async function acquireSchedulerClaim(
     claimKey: string,
     ttlMs: number,
     operationName: string,
@@ -176,21 +179,31 @@ function recordClaimFailure(operationName: string, error: unknown): void {
     maybeLogSchedulerClaimObservability("failed-acquire");
 }
 
-async function releaseSchedulerClaim(
+/** Compare and delete a claim token through the shared Redis client. */
+export async function compareAndDeleteSchedulerClaim(
+    claimKey: string,
+    claimToken: string,
+    operationName: string,
+): Promise<boolean> {
+    const deleted = await withSchedulerClaimRedisRetry(
+        `claim release for ${operationName}`,
+        (client) =>
+            client.eval(RELEASE_OWNED_CLAIM_SCRIPT, 1, claimKey, claimToken),
+    );
+    return deleted === 1;
+}
+
+/** Release a shared claim when the supplied token still owns it. */
+export async function releaseSchedulerClaim(
     claimKey: string,
     claimToken: string,
     operationName: string,
 ): Promise<void> {
     try {
-        await withSchedulerClaimRedisRetry(
-            `claim release for ${operationName}`,
-            (client) =>
-                client.eval(
-                    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                    1,
-                    claimKey,
-                    claimToken,
-                ),
+        await compareAndDeleteSchedulerClaim(
+            claimKey,
+            claimToken,
+            operationName,
         );
     } catch (error) {
         schedulerClaimCounters.failedRelease += 1;

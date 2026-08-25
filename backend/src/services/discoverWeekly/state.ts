@@ -1,8 +1,9 @@
-import { Prisma } from "@prisma/client";
-import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
+import {
+    isRetryablePrismaError,
+    withPrismaRetry,
+} from "../../utils/prismaRetry";
 
-const DISCOVER_WEEKLY_PRISMA_RETRY_ATTEMPTS = 3;
 const discoverWeeklyBasePrisma = prisma;
 
 /** Capture the persisted file identity for a discovery track. */
@@ -18,59 +19,7 @@ export function discoveryTrackFileSnapshot(track: {
 }
 
 /** Return whether a Prisma failure is transient for discovery work. */
-export function isRetryableDiscoverWeeklyPrismaError(error: unknown): boolean {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
-            error.code,
-        );
-    }
-
-    if (error instanceof Prisma.PrismaClientRustPanicError) {
-        return true;
-    }
-
-    if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-        const message = error.message || "";
-        return (
-            message.includes("Response from the Engine was empty") ||
-            message.includes("Engine has already exited")
-        );
-    }
-
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Response from the Engine was empty") ||
-        message.includes("Engine has already exited") ||
-        message.includes("Can't reach database server") ||
-        message.includes("Connection reset")
-    );
-}
-
-async function withDiscoverWeeklyPrismaRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            return await operation();
-        } catch (error) {
-            if (
-                !isRetryableDiscoverWeeklyPrismaError(error) ||
-                attempt === DISCOVER_WEEKLY_PRISMA_RETRY_ATTEMPTS
-            ) {
-                throw error;
-            }
-
-            logger.warn(
-                `[DiscoverWeekly/Prisma] ${operationName} failed (attempt ${attempt}/${DISCOVER_WEEKLY_PRISMA_RETRY_ATTEMPTS}), retrying`,
-                error,
-            );
-            await discoverWeeklyBasePrisma.$connect().catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        }
-    }
-}
+export const isRetryableDiscoverWeeklyPrismaError = isRetryablePrismaError;
 
 /** Wrap Prisma client operations with the Discover Weekly retry policy. */
 export function createPrismaRetryProxy<T extends object>(
@@ -83,9 +32,8 @@ export function createPrismaRetryProxy<T extends object>(
 
             if (typeof value === "function" && typeof property === "string") {
                 return (...args: unknown[]) =>
-                    withDiscoverWeeklyPrismaRetry(
-                        `${namespace}.${property}`,
-                        () => value.apply(target, args),
+                    withPrismaRetry(`${namespace}.${property}`, () =>
+                        value.apply(target, args),
                     );
             }
 
@@ -107,7 +55,7 @@ export function createPrismaRetryProxy<T extends object>(
                             typeof modelProperty === "string"
                         ) {
                             return (...args: unknown[]) =>
-                                withDiscoverWeeklyPrismaRetry(
+                                withPrismaRetry(
                                     `${namespace}.${property}.${modelProperty}`,
                                     () => modelValue.apply(modelTarget, args),
                                 );

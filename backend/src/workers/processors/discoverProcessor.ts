@@ -1,11 +1,12 @@
 import { Job } from "bull";
-import { randomUUID } from "crypto";
-import type Redis from "ioredis";
 import { logger } from "../../utils/logger";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
 import { discoveryRecommendationsService } from "../../services/discovery";
 import { config } from "../../config";
-import { createIORedisClient } from "../../utils/ioredis";
+import {
+    acquireSchedulerClaim,
+    releaseSchedulerClaim,
+} from "../../utils/schedulerClaim";
 
 const log = logger.child("DiscoverProcessor");
 
@@ -22,13 +23,6 @@ export interface DiscoverJobResult {
     error?: string;
 }
 
-const jestLazyConnectOverride =
-    process.env.JEST_WORKER_ID !== undefined ? { lazyConnect: true } : {};
-let discoverProcessorLockRedis: Redis = createIORedisClient(
-    "discover-processor-locks",
-    jestLazyConnectOverride,
-);
-const discoverProcessorNodeId = randomUUID();
 const DEFAULT_DISCOVER_LOCK_TTL_MS = 45 * 60 * 1000;
 const parsedDiscoverLockTtlMs = Number.parseInt(
     process.env.DISCOVER_PROCESSOR_LOCK_TTL_MS ||
@@ -41,50 +35,6 @@ const DISCOVER_PROCESSOR_LOCK_TTL_MS =
         : DEFAULT_DISCOVER_LOCK_TTL_MS;
 const DISCOVER_PROCESSOR_LOCK_KEY_PREFIX = "discover:processor:lock";
 
-function isRetryableDiscoverLockError(error: unknown): boolean {
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Connection is closed") ||
-        message.includes("Connection is in closing state") ||
-        message.includes("ECONNRESET") ||
-        message.includes("ETIMEDOUT") ||
-        message.includes("EPIPE")
-    );
-}
-
-function recreateDiscoverLockRedisClient(): void {
-    try {
-        discoverProcessorLockRedis.disconnect();
-    } catch {
-        // no-op
-    }
-    discoverProcessorLockRedis = createIORedisClient(
-        "discover-processor-locks",
-        jestLazyConnectOverride,
-    );
-}
-
-async function withDiscoverLockRedisRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    try {
-        return await operation();
-    } catch (error) {
-        if (!isRetryableDiscoverLockError(error)) {
-            throw error;
-        }
-
-        log.warn(
-            `${operationName} failed due to Redis connection closure; recreating client and retrying once`,
-            error,
-        );
-        recreateDiscoverLockRedisClient();
-        return await operation();
-    }
-}
-
 function getDiscoverLockKey(userId: string): string {
     return `${DISCOVER_PROCESSOR_LOCK_KEY_PREFIX}:${userId}`;
 }
@@ -93,17 +43,7 @@ function getDiscoverLockKey(userId: string): string {
  * Executes shutdownDiscoverProcessor.
  */
 export async function shutdownDiscoverProcessor(): Promise<void> {
-    try {
-        await withDiscoverLockRedisRetry("shutdown quit", () =>
-            discoverProcessorLockRedis.quit(),
-        );
-    } catch (error) {
-        log.warn(
-            "Failed to gracefully close lock Redis client; disconnecting forcefully",
-            error,
-        );
-        discoverProcessorLockRedis.disconnect();
-    }
+    return Promise.resolve();
 }
 
 /**
@@ -115,30 +55,20 @@ export async function processDiscoverWeekly(
     const jobLog = log.child(`Job ${job.id}`);
     const { userId } = job.data;
     const lockKey = getDiscoverLockKey(userId);
-    const lockToken = `${discoverProcessorNodeId}:${Date.now()}:${job.id}`;
-    const lockTtlSeconds = Math.max(
-        1,
-        Math.ceil(DISCOVER_PROCESSOR_LOCK_TTL_MS / 1000),
-    );
+    let lockToken: string | null = null;
 
     jobLog.debug(`Generating Discover Weekly for user ${userId}`);
 
     await job.progress(10);
 
     try {
-        const claimResult = await withDiscoverLockRedisRetry(
-            `claim acquire for user ${userId}`,
-            () =>
-                discoverProcessorLockRedis.set(
-                    lockKey,
-                    lockToken,
-                    "EX",
-                    lockTtlSeconds,
-                    "NX",
-                ),
+        lockToken = await acquireSchedulerClaim(
+            lockKey,
+            DISCOVER_PROCESSOR_LOCK_TTL_MS,
+            `user ${userId} discover generation`,
         );
 
-        if (claimResult !== "OK") {
+        if (!lockToken) {
             jobLog.warn(
                 `Skipping generation for user ${userId}; processor claim is held by another worker`,
             );
@@ -192,21 +122,11 @@ export async function processDiscoverWeekly(
         // seeds, DB error) as COMPLETED — silently — and never retry it.
         throw error;
     } finally {
-        try {
-            await withDiscoverLockRedisRetry(
-                `claim release for user ${userId}`,
-                () =>
-                    discoverProcessorLockRedis.eval(
-                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                        1,
-                        lockKey,
-                        lockToken,
-                    ),
-            );
-        } catch (releaseError) {
-            jobLog.warn(
-                `Failed to release processor claim for user ${userId}`,
-                releaseError,
+        if (lockToken) {
+            await releaseSchedulerClaim(
+                lockKey,
+                lockToken,
+                `user ${userId} discover generation`,
             );
         }
     }

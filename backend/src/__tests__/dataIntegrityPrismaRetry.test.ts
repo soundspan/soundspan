@@ -1,5 +1,6 @@
 jest.mock("../utils/db", () => ({
-    prisma: { $connect: jest.fn() },
+    Prisma: jest.requireActual("@prisma/client").Prisma,
+    prisma: { $connect: jest.fn(), $disconnect: jest.fn() },
 }));
 
 jest.mock("../utils/logger", () => {
@@ -20,7 +21,7 @@ jest.mock("../config", () => ({
     },
 }));
 
-import { withDataIntegrityPrismaRetry } from "../workers/dataIntegrity";
+import { withPrismaRetry } from "../utils/prismaRetry";
 import { prisma } from "../utils/db";
 
 const mockConnect = prisma.$connect as jest.Mock;
@@ -44,10 +45,7 @@ describe("data integrity Prisma retry", () => {
             )
             .mockResolvedValueOnce("complete");
 
-        const result = withDataIntegrityPrismaRetry(
-            "test.operation",
-            operation,
-        );
+        const result = withPrismaRetry("test.operation", operation);
         await jest.runAllTimersAsync();
 
         await expect(result).resolves.toBe("complete");
@@ -67,10 +65,7 @@ describe("data integrity Prisma retry", () => {
             .fn<Promise<never>, []>()
             .mockRejectedValue(error);
 
-        const result = withDataIntegrityPrismaRetry(
-            "test.operation",
-            operation,
-        );
+        const result = withPrismaRetry("test.operation", operation);
         const rejection = expect(result).rejects.toBe(error);
         await jest.runAllTimersAsync();
 
@@ -85,9 +80,9 @@ describe("data integrity Prisma retry", () => {
             .fn<Promise<never>, []>()
             .mockRejectedValueOnce(error);
 
-        await expect(
-            withDataIntegrityPrismaRetry("test.operation", operation),
-        ).rejects.toBe(error);
+        await expect(withPrismaRetry("test.operation", operation)).rejects.toBe(
+            error,
+        );
         expect(operation).toHaveBeenCalledTimes(1);
         expect(mockConnect).not.toHaveBeenCalled();
     });

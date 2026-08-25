@@ -6,6 +6,13 @@ describe("workers runtime behavior", () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
     };
 
+    function loadWorkers() {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const workers = require("../index");
+        workers.startWorkers();
+        return workers;
+    }
+
     function createQueueMock() {
         return {
             process: jest.fn(),
@@ -94,6 +101,9 @@ describe("workers runtime behavior", () => {
             async () => undefined,
         );
         const processAlbumDownload = jest.fn(async () => undefined);
+        const requeueAlbumDownloadAfterContention = jest.fn(
+            async () => undefined,
+        );
         const processArtistDownloadExpansion = jest.fn(async () => undefined);
         const finalizeAlbumDownloadQueueFailure = jest.fn(
             async () => undefined,
@@ -143,11 +153,6 @@ describe("workers runtime behavior", () => {
             })),
         };
 
-        const downloadQueueManager = {
-            onUnavailableAlbum: jest.fn(),
-            shutdown: jest.fn(),
-            reconcileOnStartup: jest.fn(async () => ({ loaded: 0, failed: 0 })),
-        };
         const simpleDownloadManager = {
             markStaleJobsAsFailed: jest.fn(async () => 0),
             reconcileWithLidarr: jest.fn(async () => ({ reconciled: 0 })),
@@ -250,6 +255,7 @@ describe("workers runtime behavior", () => {
             ALBUM_DOWNLOAD_JOB_NAME: "album-download",
             ALBUM_DOWNLOAD_WORKER_CONCURRENCY: 1,
             processAlbumDownload,
+            requeueAlbumDownloadAfterContention,
             finalizeAlbumDownloadQueueFailure,
         }));
         jest.doMock("../processors/artistDownloadExpansionProcessor", () => ({
@@ -296,9 +302,6 @@ describe("workers runtime behavior", () => {
         jest.doMock("../vibeEmbedWorker", () => ({
             startVibeEmbedWorker,
             stopVibeEmbedWorker,
-        }));
-        jest.doMock("../../services/downloadQueue", () => ({
-            downloadQueueManager,
         }));
         jest.doMock("../../utils/db", () => ({ prisma }));
         jest.doMock("../discoverCron", () => ({
@@ -388,6 +391,7 @@ describe("workers runtime behavior", () => {
             processCatalogRetention,
             finalizeGenericImportQueueFailure,
             processAlbumDownload,
+            requeueAlbumDownloadAfterContention,
             processArtistDownloadExpansion,
             finalizeAlbumDownloadQueueFailure,
             recoverUnqueuedAlbumDownloads,
@@ -400,7 +404,6 @@ describe("workers runtime behavior", () => {
             registerFederationProcessors,
             registerFederationSchedules,
             runDataIntegrityCheck,
-            downloadQueueManager,
             simpleDownloadManager,
             queueCleaner,
             shutdownDiscoverProcessor,
@@ -429,12 +432,15 @@ describe("workers runtime behavior", () => {
         jest.clearAllMocks();
     });
 
-    it("registers queue processors and startup scheduler jobs at module bootstrap", async () => {
+    it("imports without registering processors, then starts explicitly", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        const workers = require("../index");
+        expect(mocks.scanQueue.process).not.toHaveBeenCalled();
+        expect(mocks.startUnifiedEnrichmentWorker).not.toHaveBeenCalled();
+        workers.startWorkers();
         await flushPromises();
 
         expect(mocks.createIORedisClient).toHaveBeenCalledWith(
@@ -656,7 +662,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const fastNames = mocks.schedulerQueue.process.mock.calls.map(
@@ -697,7 +703,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         expect(mocks.schedulerMaintenanceQueue.add).toHaveBeenCalledWith(
@@ -726,7 +732,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
             (call) => call[0] === "*",
@@ -763,7 +769,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
             (call) => call[0] === "*",
@@ -804,7 +810,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks({ requests: false });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         expect(mocks.schedulerQueue.add).not.toHaveBeenCalledWith(
@@ -826,7 +832,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks({ federation: true });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         expect(mocks.registerFederationProcessors).toHaveBeenCalledTimes(1);
@@ -842,7 +848,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const {
@@ -882,7 +888,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -914,7 +920,7 @@ describe("workers runtime behavior", () => {
             .mockRejectedValueOnce(new Error("abs down"));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -952,7 +958,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -973,7 +979,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -995,7 +1001,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1027,7 +1033,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         expect(mocks.discoverQueue.process).not.toHaveBeenCalledWith(
@@ -1049,7 +1055,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         expect(mocks.stopDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
@@ -1064,7 +1070,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -1120,7 +1126,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const workers = require("../index");
+        const workers = loadWorkers();
         await flushPromises();
 
         expect(workers.scanQueue).toBe(mocks.scanQueue);
@@ -1151,7 +1157,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const workers = require("../index");
+        const workers = loadWorkers();
         await flushPromises();
 
         await workers.shutdownWorkers();
@@ -1159,7 +1165,6 @@ describe("workers runtime behavior", () => {
         expect(mocks.stopUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
         expect(mocks.stopMoodBucketWorker).toHaveBeenCalledTimes(1);
         expect(mocks.stopVibeEmbedWorker).toHaveBeenCalledTimes(1);
-        expect(mocks.downloadQueueManager.shutdown).toHaveBeenCalledTimes(1);
         expect(mocks.scanQueue.removeAllListeners).toHaveBeenCalledTimes(1);
         expect(
             mocks.genericImportQueue.removeAllListeners,
@@ -1214,7 +1219,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const workers = require("../index");
+        const workers = loadWorkers();
         await flushPromises();
 
         const shutdown = workers.shutdownWorkers();
@@ -1241,7 +1246,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const workers = require("../index");
+        const workers = loadWorkers();
         await flushPromises();
         const completedHandler = mocks.scanQueue.on.mock.calls.find(
             (call) => call[0] === "completed",
@@ -1269,7 +1274,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerProcessCall =
@@ -1302,7 +1307,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerProcessCall =
@@ -1333,7 +1338,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1355,60 +1360,6 @@ describe("workers runtime behavior", () => {
         expect(mocks.logger.warn).not.toHaveBeenCalledWith(
             expect.stringContaining("data integrity check skipped"),
         );
-    });
-
-    it("handles unavailable-album callback without user id as a no-op", async () => {
-        process.env = { ...originalEnv };
-        const mocks = setupWorkerModuleMocks();
-
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
-        await flushPromises();
-
-        const callback =
-            mocks.downloadQueueManager.onUnavailableAlbum.mock.calls[0][0];
-        await callback({
-            userId: undefined,
-            artistName: "Artist",
-            albumTitle: "Album",
-            albumMbid: "rg-1",
-            artistMbid: "a-1",
-            similarity: 0.5,
-            tier: "high",
-        });
-
-        expect(
-            mocks.downloadQueueManager.onUnavailableAlbum,
-        ).toHaveBeenCalledTimes(1);
-        expect(mocks.schedulerQueue.process).toHaveBeenCalled();
-    });
-
-    it("swallows duplicate unavailable-album insert errors (P2002)", async () => {
-        process.env = { ...originalEnv };
-        const mocks = setupWorkerModuleMocks();
-        const duplicateError: any = new Error("duplicate");
-        duplicateError.code = "P2002";
-
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
-        await flushPromises();
-
-        const callback =
-            mocks.downloadQueueManager.onUnavailableAlbum.mock.calls[0][0];
-        const prisma = require("../../utils/db").prisma;
-        prisma.unavailableAlbum.create.mockRejectedValueOnce(duplicateError);
-
-        await expect(
-            callback({
-                userId: "user-1",
-                artistName: "Artist",
-                albumTitle: "Album",
-                albumMbid: "rg-1",
-                artistMbid: "a-1",
-                similarity: 0.5,
-                tier: "high",
-            }),
-        ).resolves.toBeUndefined();
     });
 
     it("handles startup scheduler maintenance job types and aliases", async () => {
@@ -1437,7 +1388,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1490,9 +1441,7 @@ describe("workers runtime behavior", () => {
 
         expect(mocks.cleanupExpiredCache).toHaveBeenCalled();
         expect(mocks.audiobookCacheService.syncMissing).toHaveBeenCalled();
-        expect(
-            mocks.downloadQueueManager.reconcileOnStartup,
-        ).toHaveBeenCalled();
+        expect(mocks.albumDownloadQueue.getJobCounts).toHaveBeenCalled();
         expect(mocks.backfillAllArtistCounts).toHaveBeenCalled();
         expect(mocks.backfillAllImages).toHaveBeenCalled();
     });
@@ -1504,7 +1453,7 @@ describe("workers runtime behavior", () => {
         mocks.recoverUnqueuedArtistDownloadExpansions.mockResolvedValueOnce(2);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1560,7 +1509,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1607,7 +1556,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1638,7 +1587,7 @@ describe("workers runtime behavior", () => {
         mocks.schedulerLockRedis.get.mockResolvedValueOnce("not-json");
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1666,7 +1615,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1702,7 +1651,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1735,7 +1684,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1772,7 +1721,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1794,7 +1743,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1828,7 +1777,7 @@ describe("workers runtime behavior", () => {
             }) as any);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1865,7 +1814,7 @@ describe("workers runtime behavior", () => {
             }) as any);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -1910,7 +1859,7 @@ describe("workers runtime behavior", () => {
             .mockResolvedValueOnce("OK");
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2011,7 +1960,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const getHandler = (queue: { on: jest.Mock }, event: string) =>
@@ -2063,7 +2012,21 @@ describe("workers runtime behavior", () => {
         const genericImportError = new Error("import-retries-exhausted");
         getHandler(mocks.genericImportQueue, "failed")(job, genericImportError);
         getHandler(mocks.albumDownloadQueue, "active")(job);
-        getHandler(mocks.albumDownloadQueue, "completed")(job);
+        getHandler(mocks.albumDownloadQueue, "completed")(job, {
+            kind: "completed",
+        });
+        const contentionWait = {
+            kind: "contention-wait",
+            payload: {
+                jobId: "download-job-1",
+                type: "album",
+                mbid: "release-group-1",
+                subject: "Artist - Album",
+                claimWaitAttempts: 1,
+            },
+            delayMs: 30_000,
+        };
+        getHandler(mocks.albumDownloadQueue, "completed")(job, contentionWait);
         getHandler(mocks.albumDownloadQueue, "stalled")(job);
         const albumDownloadError = new Error("album-download-failed");
         const finalAlbumJob = {
@@ -2134,6 +2097,15 @@ describe("workers runtime behavior", () => {
         expect(mocks.recordAlbumDownloadOutcome).toHaveBeenCalledWith(
             "completed",
         );
+        expect(
+            mocks.recordAlbumDownloadOutcome.mock.calls.filter(
+                ([outcome]) => outcome === "completed",
+            ),
+        ).toHaveLength(1);
+        expect(mocks.requeueAlbumDownloadAfterContention).toHaveBeenCalledWith(
+            job,
+            contentionWait,
+        );
         expect(mocks.recordAlbumDownloadOutcome).toHaveBeenCalledWith("failed");
         expect(mocks.recordAlbumDownloadOutcome).toHaveBeenCalledWith(
             "retried",
@@ -2150,7 +2122,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const getHandler = (event: string) =>
@@ -2189,7 +2161,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const completedHandler = mocks.scanQueue.on.mock.calls.find(
@@ -2218,7 +2190,7 @@ describe("workers runtime behavior", () => {
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerCompleted = mocks.schedulerQueue.on.mock.calls.find(
@@ -2257,7 +2229,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         expect(mocks.logger.error).toHaveBeenCalledWith(
@@ -2295,7 +2267,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2345,7 +2317,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2382,7 +2354,7 @@ describe("workers runtime behavior", () => {
             .mockResolvedValueOnce({ removed: 1 });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2433,7 +2405,7 @@ describe("workers runtime behavior", () => {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2469,11 +2441,16 @@ describe("workers runtime behavior", () => {
                 ),
             );
         const settleAfterTimeoutReconcile = () =>
-            new Promise<{ loaded: number; failed: number }>(
-                (_resolve, reject) =>
-                    queueMicrotask(() =>
-                        reject(new Error("settled after timeout")),
-                    ),
+            new Promise<{
+                waiting: number;
+                active: number;
+                completed: number;
+                failed: number;
+                delayed: number;
+            }>((_resolve, reject) =>
+                queueMicrotask(() =>
+                    reject(new Error("settled after timeout")),
+                ),
             );
         const settleAfterTimeoutArtistCounts = () =>
             new Promise<{ processed: number; errors: number }>(
@@ -2502,7 +2479,7 @@ describe("workers runtime behavior", () => {
         mocks.audiobookCacheService.syncMissing.mockImplementationOnce(
             settleAfterTimeoutSyncMissing,
         );
-        mocks.downloadQueueManager.reconcileOnStartup.mockImplementationOnce(
+        mocks.albumDownloadQueue.getJobCounts.mockImplementationOnce(
             settleAfterTimeoutReconcile,
         );
         mocks.isBackfillNeeded.mockResolvedValueOnce(true);
@@ -2519,7 +2496,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2562,7 +2539,7 @@ describe("workers runtime behavior", () => {
             expect.stringContaining("Audiobook auto-sync complete:"),
         );
         expect(mocks.logger.debug).not.toHaveBeenCalledWith(
-            expect.stringContaining("Download queue reconciled:"),
+            expect.stringContaining("Album download queue ready:"),
         );
         expect(mocks.logger.info).not.toHaveBeenCalledWith(
             expect.stringContaining("Artist counts backfill complete:"),
@@ -2583,7 +2560,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2644,7 +2621,7 @@ describe("workers runtime behavior", () => {
             }) as any);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2679,7 +2656,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
@@ -2699,104 +2676,12 @@ describe("workers runtime behavior", () => {
         );
     });
 
-    it("logs non-duplicate unavailable-album persistence failures", async () => {
-        process.env = { ...originalEnv };
-        const mocks = setupWorkerModuleMocks();
-
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
-        await flushPromises();
-
-        const callback =
-            mocks.downloadQueueManager.onUnavailableAlbum.mock.calls[0][0];
-        const prisma = require("../../utils/db").prisma;
-        prisma.unavailableAlbum.create.mockRejectedValueOnce(
-            new Error("db write failed"),
-        );
-
-        await expect(
-            callback({
-                userId: "user-2",
-                artistName: "Artist X",
-                albumTitle: "Album X",
-                albumMbid: "rg-x",
-                artistMbid: "a-x",
-                similarity: 0.4,
-                tier: "medium",
-            }),
-        ).resolves.toBeUndefined();
-
-        expect(mocks.logger.error).toHaveBeenCalledWith(
-            " Failed to record unavailable album:",
-            "db write failed",
-        );
-    });
-
-    it("logs successful unavailable-album persistence writes", async () => {
-        process.env = { ...originalEnv };
-        const mocks = setupWorkerModuleMocks();
-
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
-        await flushPromises();
-
-        const callback =
-            mocks.downloadQueueManager.onUnavailableAlbum.mock.calls[0][0];
-
-        await expect(
-            callback({
-                userId: "user-3",
-                artistName: "Artist Success",
-                albumTitle: "Album Success",
-                albumMbid: "rg-success",
-                artistMbid: "artist-success",
-                similarity: 0.88,
-                tier: "high",
-            }),
-        ).resolves.toBeUndefined();
-
-        expect(mocks.logger.debug).toHaveBeenCalledWith(
-            "   Recorded in database",
-        );
-    });
-
-    it("applies unavailable-album fallback defaults for similarity and tier", async () => {
-        process.env = { ...originalEnv };
-        const mocks = setupWorkerModuleMocks();
-        const prisma = require("../../utils/db").prisma;
-
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
-        await flushPromises();
-
-        const callback =
-            mocks.downloadQueueManager.onUnavailableAlbum.mock.calls[0][0];
-        await callback({
-            userId: "user-defaults",
-            artistName: "Artist Defaults",
-            albumTitle: "Album Defaults",
-            albumMbid: "rg-defaults",
-            artistMbid: "artist-defaults",
-            similarity: undefined,
-            tier: undefined,
-        });
-
-        expect(prisma.unavailableAlbum.create).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({
-                    similarity: 0,
-                    tier: "unknown",
-                }),
-            }),
-        );
-    });
-
     it("logs image queue completion success branch", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require("../index");
+        loadWorkers();
         await flushPromises();
 
         const imageCompleted = mocks.imageQueue.on.mock.calls.find(
@@ -2828,7 +2713,7 @@ describe("workers runtime behavior", () => {
         );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const workers = require("../index");
+        const workers = loadWorkers();
         await flushPromises();
 
         await expect(workers.shutdownWorkers()).resolves.toBeUndefined();

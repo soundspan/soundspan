@@ -5,6 +5,8 @@ const mockDownloadJobUpdateMany = jest.fn();
 const mockRunWithSchedulerClaim = jest.fn();
 const mockExtendSchedulerClaim = jest.fn();
 const mockLoggerInfo = jest.fn();
+const mockLoggerDebug = jest.fn();
+const mockLoggerWarn = jest.fn();
 const mockLoggerError = jest.fn();
 const mockProcessTidalDownload = jest.fn();
 const mockProcessYoutubeDownload = jest.fn();
@@ -48,6 +50,8 @@ jest.mock("../../../utils/logger", () => ({
     logger: {
         child: () => ({
             info: mockLoggerInfo,
+            debug: mockLoggerDebug,
+            warn: mockLoggerWarn,
             error: mockLoggerError,
         }),
     },
@@ -71,8 +75,10 @@ jest.mock("../../../services/simpleDownloadManager", () => ({
 
 import {
     AlbumDownloadFailedError,
+    __albumDownloadProcessorTestables,
     finalizeAlbumDownloadQueueFailure,
     processAlbumDownload,
+    requeueAlbumDownloadAfterContention,
 } from "../albumDownloadProcessor";
 
 const payload = {
@@ -110,6 +116,7 @@ function dispatchRouting(source: "tidal" | "youtube" | "lidarr") {
 describe("album download queue processor", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockRunWithSchedulerClaim.mockReset();
         mockResolveAlbumDownloadRouting.mockResolvedValue(
             dispatchRouting("tidal"),
         );
@@ -423,8 +430,7 @@ describe("album download queue processor", () => {
         expect(job.progress).toHaveBeenCalledTimes(1);
     });
 
-    it("waits for a busy deployment claim and dispatches after acquisition", async () => {
-        jest.useFakeTimers();
+    it("re-enqueues a contended job with its stable id and completes after the claim frees", async () => {
         mockRunWithSchedulerClaim
             .mockResolvedValueOnce({ acquired: false })
             .mockImplementationOnce(
@@ -438,39 +444,127 @@ describe("album download queue processor", () => {
                     value: await operation("claim-token"),
                 }),
             );
-        const job = {
+        const queue = {
+            add: jest.fn().mockResolvedValue({ id: "albumdl:download-job-1" }),
+        };
+        const remove = jest.fn().mockResolvedValue(undefined);
+        const firstJob = {
+            id: "albumdl:download-job-1",
+            name: "album-download",
             data: payload,
+            opts: { priority: 7, attempts: 2, removeOnComplete: 100 },
+            queue,
             progress: jest.fn().mockResolvedValue(undefined),
+            remove,
         } as any;
 
-        const processing = processAlbumDownload(job);
-        await Promise.resolve();
-        expect(mockProcessTidalDownload).not.toHaveBeenCalled();
+        const waitOutcome =
+            await __albumDownloadProcessorTestables.processAlbumDownloadWithPolicy(
+                firstJob,
+                { delayMs: 25, maxWaitAttempts: 2 },
+            );
 
-        await jest.advanceTimersByTimeAsync(15_000);
-        await processing;
+        expect(mockProcessTidalDownload).not.toHaveBeenCalled();
+        expect(queue.add).not.toHaveBeenCalled();
+        await requeueAlbumDownloadAfterContention(firstJob, waitOutcome);
+
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(queue.add).toHaveBeenCalledWith(
+            "album-download",
+            { ...payload, claimWaitAttempts: 1 },
+            expect.objectContaining({
+                jobId: "albumdl:download-job-1",
+                delay: 25,
+                priority: 7,
+                attempts: 2,
+            }),
+        );
+        expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+            queue.add.mock.invocationCallOrder[0],
+        );
+        expect(firstJob.progress).toHaveBeenCalledTimes(1);
+
+        const delayedPayload = queue.add.mock.calls[0][1];
+        const delayedJob = {
+            ...firstJob,
+            data: delayedPayload,
+            progress: jest.fn().mockResolvedValue(undefined),
+        } as any;
+        await __albumDownloadProcessorTestables.processAlbumDownloadWithPolicy(
+            delayedJob,
+            { delayMs: 25, maxWaitAttempts: 2 },
+        );
 
         expect(mockRunWithSchedulerClaim).toHaveBeenCalledTimes(2);
         expect(mockProcessTidalDownload).toHaveBeenCalledTimes(1);
+        expect(delayedJob.progress).toHaveBeenLastCalledWith(100);
     });
 
-    it("throws after the bounded deployment-claim wait is exhausted", async () => {
-        jest.useFakeTimers();
+    it("surfaces the existing timeout text after claim re-enqueue exhaustion", async () => {
         mockRunWithSchedulerClaim.mockResolvedValue({ acquired: false });
         const job = {
-            data: payload,
+            id: "bull-job-3",
+            name: "album-download",
+            data: { ...payload, claimWaitAttempts: 2 },
+            opts: {},
+            queue: { add: jest.fn() },
             progress: jest.fn().mockResolvedValue(undefined),
         } as any;
 
-        const processing = processAlbumDownload(job);
-        const rejection = expect(processing).rejects.toThrow(
-            "Timed out waiting for the album download claim",
-        );
-        await jest.runAllTimersAsync();
-        await rejection;
+        await expect(
+            __albumDownloadProcessorTestables.processAlbumDownloadWithPolicy(
+                job,
+                { delayMs: 25, maxWaitAttempts: 2 },
+            ),
+        ).rejects.toThrow("Timed out waiting for the album download claim");
 
-        expect(mockRunWithSchedulerClaim).toHaveBeenCalledTimes(960);
+        expect(mockRunWithSchedulerClaim).toHaveBeenCalledTimes(1);
+        expect(job.queue.add).not.toHaveBeenCalled();
         expect(mockProcessTidalDownload).not.toHaveBeenCalled();
+    });
+
+    it("does not dispatch a residual lineage after another lineage marks the row failed", async () => {
+        mockRunWithSchedulerClaim.mockResolvedValue({ acquired: false });
+        const exhaustedJob = {
+            id: "legacy-lineage-1",
+            name: "album-download",
+            data: { ...payload, claimWaitAttempts: 2 },
+            opts: {},
+            queue: { add: jest.fn() },
+            progress: jest.fn().mockResolvedValue(undefined),
+        } as any;
+
+        await expect(
+            __albumDownloadProcessorTestables.processAlbumDownloadWithPolicy(
+                exhaustedJob,
+                { delayMs: 25, maxWaitAttempts: 2 },
+            ),
+        ).rejects.toThrow("Timed out waiting for the album download claim");
+        await finalizeAlbumDownloadQueueFailure(
+            exhaustedJob,
+            new Error("claim wait exhausted"),
+            "failed",
+        );
+
+        mockDownloadJobFindUnique.mockResolvedValueOnce({ status: "failed" });
+        const residualJob = {
+            id: "legacy-lineage-2",
+            name: "album-download",
+            data: { ...payload, claimWaitAttempts: 1 },
+            opts: {},
+            queue: { add: jest.fn() },
+            progress: jest.fn().mockResolvedValue(undefined),
+        } as any;
+        await __albumDownloadProcessorTestables.processAlbumDownloadWithPolicy(
+            residualJob,
+            { delayMs: 25, maxWaitAttempts: 2 },
+        );
+
+        expect(mockDownloadJobUpdateMany).toHaveBeenCalledTimes(1);
+        expect(mockResolveAlbumDownloadRouting).toHaveBeenCalledTimes(1);
+        expect(mockRunWithSchedulerClaim).toHaveBeenCalledTimes(1);
+        expect(mockProcessTidalDownload).not.toHaveBeenCalled();
+        expect(residualJob.queue.add).not.toHaveBeenCalled();
     });
 
     it("finalizes an additive poison payload when it still carries a valid job id", async () => {

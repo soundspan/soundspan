@@ -5,6 +5,11 @@ export const ALBUM_DOWNLOAD_QUEUE_OWNER = "album-download-queue" as const;
 export const ARTIST_DOWNLOAD_EXPANSION_OWNER =
     "artist-download-expansion" as const;
 
+/** Build the stable Bull identity for one persisted album download. */
+export function albumDownloadQueueJobId(jobId: string): string {
+    return `albumdl:${jobId}`;
+}
+
 /** Return whether persisted metadata assigns lifecycle ownership to the queue. */
 export function isAlbumDownloadQueueOwned(metadata: unknown): boolean {
     if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {

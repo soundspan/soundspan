@@ -258,7 +258,8 @@ async function startWorkerRuntime() {
     const { initializeMusicConfig } = await import("./config");
     await initializeMusicConfig();
 
-    await import("./workers");
+    const { startWorkers } = await import("./workers");
+    startWorkers();
     workersInitialized = true;
     const { queues } = await import("./workers/queues");
     registerQueueMetrics(metricsRegistry, queues);

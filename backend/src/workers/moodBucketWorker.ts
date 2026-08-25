@@ -11,11 +11,9 @@
  */
 
 import { logger } from "../utils/logger";
-import { randomUUID } from "crypto";
-import type Redis from "ioredis";
 import { prisma } from "../utils/db";
 import { moodBucketService } from "../services/moodBucketService";
-import { createIORedisClient } from "../utils/ioredis";
+import { runWithSchedulerClaim } from "../utils/schedulerClaim";
 import { config } from "../config";
 import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
 
@@ -27,112 +25,19 @@ const WORKER_INTERVAL_MS = 30 * 1000; // Run every 30 seconds
 
 let isRunning = false;
 let workerInterval: NodeJS.Timeout | null = null;
-let moodBucketClaimRedis: Redis | null = null;
 const MOOD_BUCKET_CLAIM_KEY = "mood-bucket:cycle:claim";
-const MOOD_BUCKET_CLAIM_OWNER_ID = randomUUID();
 const MOOD_BUCKET_CLAIM_TTL_MS = config.workers.moodBucketClaimTtlMs;
-
-function getMoodBucketClaimRedis() {
-    if (!moodBucketClaimRedis) {
-        moodBucketClaimRedis = createIORedisClient("mood-bucket-cycle-claims");
-    }
-    return moodBucketClaimRedis;
-}
-
-function isRetryableMoodBucketClaimError(error: unknown): boolean {
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Connection is closed") ||
-        message.includes("Connection is in closing state") ||
-        message.includes("ECONNRESET") ||
-        message.includes("ETIMEDOUT") ||
-        message.includes("EPIPE")
-    );
-}
-
-function recreateMoodBucketClaimRedisClient(): void {
-    if (moodBucketClaimRedis) {
-        try {
-            moodBucketClaimRedis.disconnect();
-        } catch {
-            // no-op
-        }
-    }
-    moodBucketClaimRedis = createIORedisClient("mood-bucket-cycle-claims");
-}
-
-async function withMoodBucketClaimRedisRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    try {
-        return await operation();
-    } catch (error) {
-        if (!isRetryableMoodBucketClaimError(error)) {
-            throw error;
-        }
-
-        log.warn(
-            `${operationName} failed due to Redis connection closure; recreating client and retrying once`,
-            error,
-        );
-        recreateMoodBucketClaimRedisClient();
-        return await operation();
-    }
-}
 
 async function processNewlyAnalyzedTracksClaimed(
     operationName: string,
 ): Promise<number> {
-    const claimToken = `${MOOD_BUCKET_CLAIM_OWNER_ID}:${Date.now()}:${Math.random()}`;
-    const ttlSeconds = Math.max(1, Math.ceil(MOOD_BUCKET_CLAIM_TTL_MS / 1000));
-
-    try {
-        const acquired = await withMoodBucketClaimRedisRetry(
-            `claim acquire for ${operationName}`,
-            () =>
-                getMoodBucketClaimRedis().set(
-                    MOOD_BUCKET_CLAIM_KEY,
-                    claimToken,
-                    "EX",
-                    ttlSeconds,
-                    "NX",
-                ),
-        );
-
-        if (acquired !== "OK") {
-            log.debug(
-                `Skipping ${operationName}; cycle claim is held by another worker`,
-            );
-            return 0;
-        }
-    } catch (error) {
-        log.error(`Failed to claim ${operationName}; skipping cycle`, error);
-        return 0;
-    }
-
-    try {
-        return await processNewlyAnalyzedTracks();
-    } finally {
-        try {
-            await withMoodBucketClaimRedisRetry(
-                `claim release for ${operationName}`,
-                () =>
-                    getMoodBucketClaimRedis().eval(
-                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                        1,
-                        MOOD_BUCKET_CLAIM_KEY,
-                        claimToken,
-                    ),
-            );
-        } catch (error) {
-            log.warn(
-                `Failed to release cycle claim for ${operationName}`,
-                error,
-            );
-        }
-    }
+    const claim = await runWithSchedulerClaim(
+        MOOD_BUCKET_CLAIM_KEY,
+        MOOD_BUCKET_CLAIM_TTL_MS,
+        operationName,
+        () => processNewlyAnalyzedTracks(),
+    );
+    return claim.acquired ? claim.value : 0;
 }
 
 /**
@@ -161,10 +66,6 @@ export function stopMoodBucketWorker() {
         clearInterval(workerInterval);
         workerInterval = null;
         log.debug("Worker stopped");
-    }
-    if (moodBucketClaimRedis) {
-        moodBucketClaimRedis.disconnect();
-        moodBucketClaimRedis = null;
     }
 }
 

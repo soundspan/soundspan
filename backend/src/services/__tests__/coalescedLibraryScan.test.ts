@@ -10,6 +10,10 @@ const mockRedis = {
     quit: jest.fn(),
 };
 const mockCreateIORedisClient = jest.fn(() => mockRedis);
+const mockCompareAndDeleteSchedulerClaim = jest.fn(
+    async (key: string, token: string) =>
+        (await mockRedis.eval("shared-claim-release", 1, key, token)) === 1,
+);
 const mockRandomUUID = jest.fn();
 
 const mockLogger = {
@@ -25,6 +29,9 @@ jest.mock("../../workers/queues", () => ({ scanQueue: mockScanQueue }));
 jest.mock("../../config", () => ({ config: { underJest: true } }));
 jest.mock("../../utils/ioredis", () => ({
     createIORedisClient: mockCreateIORedisClient,
+}));
+jest.mock("../../utils/schedulerClaim", () => ({
+    compareAndDeleteSchedulerClaim: mockCompareAndDeleteSchedulerClaim,
 }));
 jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 jest.mock("crypto", () => ({
@@ -441,7 +448,7 @@ describe("coalescedLibraryScan", () => {
         await consumeCoalescedScanFollowUp();
 
         expect(mockRedis.eval).toHaveBeenCalledWith(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            "shared-claim-release",
             1,
             FOLLOW_UP_KEY,
             stored,

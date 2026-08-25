@@ -816,7 +816,7 @@
                 ],
                 "services": [
                     "acquisitionService.ts",
-                    "downloadQueue.ts",
+                    "albumDownloadQueueService.ts",
                     "simpleDownloadManager.ts",
                     "soulseek.ts",
                     "lidarr.ts",

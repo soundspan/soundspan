@@ -279,6 +279,7 @@ describe("api entrypoint runtime behavior", () => {
         const shutdownWorkers = jest.fn(
             shutdownWorkersImpl || (async () => undefined),
         );
+        const startWorkers = jest.fn();
         const shutdownSchedulerClaimRedis = jest.fn(async () => undefined);
         const shutdownUmapProjection = jest.fn(async () => undefined);
         const closeCoalescedLibraryScanRedis = jest.fn(async () => undefined);
@@ -357,6 +358,7 @@ describe("api entrypoint runtime behavior", () => {
             registerQueueMetrics,
         }));
         jest.doMock("../workers", () => ({
+            startWorkers,
             shutdownWorkers,
         }));
         jest.doMock("../utils/schedulerClaim", () => ({

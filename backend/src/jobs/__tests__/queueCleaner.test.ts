@@ -225,7 +225,7 @@ describe("queueCleaner", () => {
         expect(prisma.$connect).toHaveBeenCalled();
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining(
-                "[QueueCleaner/Prisma] reconcileWithLocalLibrary.downloadJob.findMany.processing failed",
+                "reconcileWithLocalLibrary.downloadJob.findMany.processing failed",
             ),
             expect.any(Error),
         );

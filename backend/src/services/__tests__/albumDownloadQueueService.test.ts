@@ -382,11 +382,31 @@ describe("album download queue service", () => {
         expect(mockQueueAdd).not.toHaveBeenCalled();
     });
 
+    it("does not recover a stale row whose stable Bull job is delayed for claim contention", async () => {
+        const remove = jest.fn().mockResolvedValue(undefined);
+        const getState = jest.fn().mockResolvedValue("delayed");
+        mockDownloadJobFindMany.mockResolvedValueOnce([
+            {
+                id: "contended-job",
+                targetMbid: "rg-contended",
+                subject: "Artist - Album",
+                metadata: {},
+            },
+        ]);
+        mockQueueGetJob.mockResolvedValueOnce({ getState, remove });
+
+        await expect(recoverUnqueuedAlbumDownloads()).resolves.toBe(1);
+
+        expect(mockQueueGetJob).toHaveBeenCalledWith("albumdl:contended-job");
+        expect(getState).toHaveBeenCalledTimes(1);
+        expect(remove).not.toHaveBeenCalled();
+        expect(mockQueueAdd).not.toHaveBeenCalled();
+    });
+
     it.each<[string, "skip" | "finalize-and-remove" | "remove-and-re-enqueue"]>(
         [
             ["waiting", "skip"],
             ["active", "skip"],
-            ["delayed", "skip"],
             ["paused", "skip"],
             ["failed", "finalize-and-remove"],
             ["completed", "remove-and-re-enqueue"],

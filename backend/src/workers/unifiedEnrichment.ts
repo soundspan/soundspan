@@ -15,7 +15,6 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { enrichSimilarArtist } from "./artistEnrichment";
 import { lastFmService } from "../services/lastfm";
-import { randomUUID } from "crypto";
 import Redis from "ioredis";
 import { createIORedisClient } from "../utils/ioredis";
 import { config } from "../config";
@@ -46,7 +45,8 @@ import {
     shouldSkipEnrichmentSnapshot,
 } from "./enrichmentIdlePolicy";
 import { scanRedisKeys } from "./enrichmentMixCache";
-import { withEnrichmentPrismaRetry } from "./enrichmentPrismaRetry";
+import { withPrismaRetry } from "../utils/prismaRetry";
+import { runWithSchedulerClaim } from "../utils/schedulerClaim";
 
 const log = logger.child("Enrichment");
 
@@ -60,11 +60,14 @@ const MAX_CONSECUTIVE_SYSTEM_FAILURES = 5; // Circuit breaker threshold
 const ENRICHMENT_STOP_WAIT_INTERVAL_MS = 100;
 const ENRICHMENT_STOP_MAX_WAIT_MS = 30_000;
 const AUDIO_QUEUE_VIBE_HIGH_WATER_MARK = 500;
+const enrichmentPrismaRetryOptions = {
+    disconnectOnP2037: true,
+    p2037DelayMs: 1_000,
+} as const;
 
 let isRunning = false;
 let enrichmentInterval: NodeJS.Timeout | null = null;
 let redis: Redis | null = null;
-let enrichmentClaimRedis: Redis | null = null;
 let controlSubscriber: Redis | null = null;
 let isPaused = false;
 let isStopping = false;
@@ -74,7 +77,6 @@ let lastRunTime = 0;
 let lastCycleProcessedWork = false;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 const ENRICHMENT_CLAIM_KEY = "enrichment:cycle:claim";
-const ENRICHMENT_CLAIM_OWNER_ID = randomUUID();
 const ENRICHMENT_CLAIM_TTL_MS = config.workers.enrichmentClaimTtlMs;
 const enrichmentIdleBackoff = new EnrichmentIdleBackoff(
     ENRICHMENT_INTERVAL_MS,
@@ -109,13 +111,6 @@ function getRedis(): Redis {
     return redis;
 }
 
-function getEnrichmentClaimRedis(): Redis {
-    if (!enrichmentClaimRedis) {
-        enrichmentClaimRedis = createIORedisClient("enrichment-cycle-claims");
-    }
-    return enrichmentClaimRedis;
-}
-
 function isRetryableEnrichmentRedisError(error: unknown): boolean {
     const message =
         error instanceof Error ? error.message : String(error ?? "");
@@ -135,15 +130,6 @@ function recreateEnrichmentQueueRedisClient(): void {
         // no-op
     }
     redis = createIORedisClient("enrichment-queue");
-}
-
-function recreateEnrichmentClaimRedisClient(): void {
-    try {
-        enrichmentClaimRedis?.disconnect();
-    } catch {
-        // no-op
-    }
-    enrichmentClaimRedis = createIORedisClient("enrichment-cycle-claims");
 }
 
 async function withEnrichmentQueueRedisRetry<T>(
@@ -166,26 +152,6 @@ async function withEnrichmentQueueRedisRetry<T>(
     }
 }
 
-async function withEnrichmentClaimRedisRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    try {
-        return await operation();
-    } catch (error) {
-        if (!isRetryableEnrichmentRedisError(error)) {
-            throw error;
-        }
-
-        log.warn(
-            `${operationName} failed due to Redis connection closure; recreating claim client and retrying once`,
-            error,
-        );
-        recreateEnrichmentClaimRedisClient();
-        return await operation();
-    }
-}
-
 async function runEnrichmentCycleClaimed(
     fullMode: boolean,
     operationName: string,
@@ -196,54 +162,13 @@ async function runEnrichmentCycleClaimed(
 }> {
     lastCycleProcessedWork = false;
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
-    const claimToken = `${ENRICHMENT_CLAIM_OWNER_ID}:${Date.now()}:${Math.random()}`;
-    const ttlSeconds = Math.max(1, Math.ceil(ENRICHMENT_CLAIM_TTL_MS / 1000));
-
-    try {
-        const acquired = await withEnrichmentClaimRedisRetry(
-            `claim acquire for ${operationName}`,
-            () =>
-                getEnrichmentClaimRedis().set(
-                    ENRICHMENT_CLAIM_KEY,
-                    claimToken,
-                    "EX",
-                    ttlSeconds,
-                    "NX",
-                ),
-        );
-
-        if (acquired !== "OK") {
-            log.debug(
-                `Skipping ${operationName}; cycle claim is held by another worker`,
-            );
-            return emptyResult;
-        }
-    } catch (error) {
-        log.error(`Failed to claim ${operationName}; skipping cycle`, error);
-        return emptyResult;
-    }
-
-    try {
-        return await runEnrichmentCycle(fullMode);
-    } finally {
-        try {
-            await withEnrichmentClaimRedisRetry(
-                `claim release for ${operationName}`,
-                () =>
-                    getEnrichmentClaimRedis().eval(
-                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                        1,
-                        ENRICHMENT_CLAIM_KEY,
-                        claimToken,
-                    ),
-            );
-        } catch (error) {
-            log.warn(
-                `Failed to release cycle claim for ${operationName}`,
-                error,
-            );
-        }
-    }
+    const claim = await runWithSchedulerClaim(
+        ENRICHMENT_CLAIM_KEY,
+        ENRICHMENT_CLAIM_TTL_MS,
+        operationName,
+        () => runEnrichmentCycle(fullMode),
+    );
+    return claim.acquired ? claim.value : emptyResult;
 }
 
 /**
@@ -376,10 +301,6 @@ export async function stopUnifiedEnrichmentWorker() {
     if (redis) {
         redis.disconnect();
         redis = null;
-    }
-    if (enrichmentClaimRedis) {
-        enrichmentClaimRedis.disconnect();
-        enrichmentClaimRedis = null;
     }
     if (controlSubscriber) {
         controlSubscriber.disconnect();
@@ -1280,12 +1201,13 @@ async function queueAudioAnalysis(): Promise<number> {
  * Feature detection keeps this idle when no provider is available.
  */
 async function queueVibeEmbeddings(): Promise<number> {
-    const tracks = await withEnrichmentPrismaRetry(
+    const tracks = await withPrismaRetry(
         "queueVibeEmbeddings.track.select",
         () =>
             findLocalTracksNeedingActiveEmbedding(
                 config.analysisQueues.vibeMaxDepth,
             ),
+        enrichmentPrismaRetryOptions,
     );
 
     if (tracks.length === 0) {
@@ -1378,12 +1300,13 @@ async function executeMoodTagsPhase(): Promise<number> {
 }
 
 async function executeAudioPhase(): Promise<number> {
-    const audioCompletedBefore = await withEnrichmentPrismaRetry(
+    const audioCompletedBefore = await withPrismaRetry(
         "executeAudioPhase.audioCompletedBefore.count",
         () =>
             prisma.track.count({
                 where: { analysisStatus: "completed" },
             }),
+        enrichmentPrismaRetryOptions,
     );
 
     const cleanupResult =
@@ -1394,12 +1317,13 @@ async function executeAudioPhase(): Promise<number> {
         );
     }
 
-    const audioCompletedAfter = await withEnrichmentPrismaRetry(
+    const audioCompletedAfter = await withPrismaRetry(
         "executeAudioPhase.audioCompletedAfter.count",
         () =>
             prisma.track.count({
                 where: { analysisStatus: "completed" },
             }),
+        enrichmentPrismaRetryOptions,
     );
     if (audioCompletedAfter > audioCompletedBefore) {
         audioAnalysisCleanupService.recordSuccess();
@@ -1414,16 +1338,17 @@ async function executeAudioPhase(): Promise<number> {
 }
 
 async function executePodcastRefreshPhase(): Promise<number> {
-    const podcastCount = await withEnrichmentPrismaRetry(
+    const podcastCount = await withPrismaRetry(
         "executePodcastRefreshPhase.podcast.count",
         () => prisma.podcast.count(),
+        enrichmentPrismaRetryOptions,
     );
     if (podcastCount === 0) return 0;
 
     // Only refresh once per hour (check oldest lastRefreshed)
     const ONE_HOUR = 60 * 60 * 1000;
     const staleThreshold = new Date(Date.now() - ONE_HOUR);
-    const stalePodcasts = await withEnrichmentPrismaRetry(
+    const stalePodcasts = await withPrismaRetry(
         "executePodcastRefreshPhase.podcast.findMany",
         () =>
             prisma.podcast.findMany({
@@ -1432,6 +1357,7 @@ async function executePodcastRefreshPhase(): Promise<number> {
                 },
                 select: { id: true, title: true },
             }),
+        enrichmentPrismaRetryOptions,
     );
 
     if (stalePodcasts.length === 0) return 0;
@@ -1534,7 +1460,7 @@ async function loadEnrichmentProgress() {
         clapEmbeddingCount,
         clapProcessing,
         clapFailedByStatus,
-    ] = await withEnrichmentPrismaRetry(
+    ] = await withPrismaRetry(
         "getEnrichmentProgress.dbReads",
         async () => {
             // Resolved inside the retry wrapper so a transient DB failure here is
@@ -1608,6 +1534,7 @@ async function loadEnrichmentProgress() {
                 }),
             ]);
         },
+        enrichmentPrismaRetryOptions,
     );
 
     const artistTotal = artistCounts.reduce((sum, s) => sum + s._count, 0);
@@ -1836,7 +1763,8 @@ export async function reRunVibeEmbeddingsOnly(): Promise<number> {
 }
 
 export const __unifiedEnrichmentTestables = {
-    withEnrichmentPrismaRetry,
+    withPrismaRetry,
+    enrichmentPrismaRetryOptions,
     waitForActiveCycleToStop,
     runEnrichmentCycle,
     enrichArtistsBatch,
