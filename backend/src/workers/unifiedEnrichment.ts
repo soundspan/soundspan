@@ -12,7 +12,7 @@
  */
 
 import { logger } from "../utils/logger";
-import { prisma, Prisma } from "../utils/db";
+import { prisma } from "../utils/db";
 import { enrichSimilarArtist } from "./artistEnrichment";
 import { lastFmService } from "../services/lastfm";
 import { randomUUID } from "crypto";
@@ -40,6 +40,13 @@ import {
 import { getActiveSpace } from "../services/embeddingSpaces";
 import { findLocalTracksNeedingActiveEmbedding } from "../services/trackEmbeddings";
 import { filterVibeRetryEligibleCandidates } from "../services/vibeEmbedJobs";
+import {
+    EnrichmentIdleBackoff,
+    ExpiringMemo,
+    shouldSkipEnrichmentSnapshot,
+} from "./enrichmentIdlePolicy";
+import { scanRedisKeys } from "./enrichmentMixCache";
+import { withEnrichmentPrismaRetry } from "./enrichmentPrismaRetry";
 
 const log = logger.child("Enrichment");
 
@@ -47,10 +54,11 @@ const log = logger.child("Enrichment");
 const ARTIST_BATCH_SIZE = 10;
 const TRACK_BATCH_SIZE = 20;
 const ENRICHMENT_INTERVAL_MS = 5 * 1000; // 5 seconds - rate limiter handles API limits
+const ENRICHMENT_IDLE_MAX_INTERVAL_MS = 5 * 60 * 1000;
+const ENRICHMENT_PROGRESS_MEMO_TTL_MS = 3 * 1000;
 const MAX_CONSECUTIVE_SYSTEM_FAILURES = 5; // Circuit breaker threshold
 const ENRICHMENT_STOP_WAIT_INTERVAL_MS = 100;
 const ENRICHMENT_STOP_MAX_WAIT_MS = 30_000;
-const ENRICHMENT_PRISMA_RETRY_ATTEMPTS = 3;
 const AUDIO_QUEUE_VIBE_HIGH_WATER_MARK = 500;
 
 let isRunning = false;
@@ -63,10 +71,18 @@ let isStopping = false;
 let immediateEnrichmentRequested = false;
 let consecutiveSystemFailures = 0; // Track consecutive system-level failures
 let lastRunTime = 0;
+let lastCycleProcessedWork = false;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 const ENRICHMENT_CLAIM_KEY = "enrichment:cycle:claim";
 const ENRICHMENT_CLAIM_OWNER_ID = randomUUID();
 const ENRICHMENT_CLAIM_TTL_MS = config.workers.enrichmentClaimTtlMs;
+const enrichmentIdleBackoff = new EnrichmentIdleBackoff(
+    ENRICHMENT_INTERVAL_MS,
+    ENRICHMENT_IDLE_MAX_INTERVAL_MS,
+);
+const enrichmentProgressMemo = new ExpiringMemo<
+    Awaited<ReturnType<typeof loadEnrichmentProgress>>
+>(ENRICHMENT_PROGRESS_MEMO_TTL_MS);
 
 // Batch failure tracking
 interface BatchFailures {
@@ -170,74 +186,6 @@ async function withEnrichmentClaimRedisRetry<T>(
     }
 }
 
-function isRetryableEnrichmentPrismaError(error: unknown): boolean {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return ["P1001", "P1002", "P1017", "P2024", "P2037"].includes(
-            error.code,
-        );
-    }
-
-    if (error instanceof Prisma.PrismaClientRustPanicError) {
-        return true;
-    }
-
-    if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-        const message = error.message || "";
-        return (
-            message.includes("Response from the Engine was empty") ||
-            message.includes("Engine has already exited")
-        );
-    }
-
-    const message =
-        error instanceof Error ? error.message : String(error ?? "");
-    return (
-        message.includes("Response from the Engine was empty") ||
-        message.includes("Engine has already exited") ||
-        message.includes("Can't reach database server") ||
-        message.includes("Connection reset")
-    );
-}
-
-function isTooManyConnectionsPrismaError(error: unknown): boolean {
-    return (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2037"
-    );
-}
-
-async function withEnrichmentPrismaRetry<T>(
-    operationName: string,
-    operation: () => Promise<T>,
-): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            return await operation();
-        } catch (error) {
-            if (
-                !isRetryableEnrichmentPrismaError(error) ||
-                attempt === ENRICHMENT_PRISMA_RETRY_ATTEMPTS
-            ) {
-                throw error;
-            }
-
-            log.warn(
-                `${operationName} failed (attempt ${attempt}/${ENRICHMENT_PRISMA_RETRY_ATTEMPTS}), retrying`,
-                error,
-            );
-
-            const delayMs = isTooManyConnectionsPrismaError(error)
-                ? 1000 * attempt
-                : 250 * attempt;
-            if (isTooManyConnectionsPrismaError(error)) {
-                await prisma.$disconnect().catch(() => {});
-            }
-            await prisma.$connect().catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-    }
-}
-
 async function runEnrichmentCycleClaimed(
     fullMode: boolean,
     operationName: string,
@@ -246,6 +194,7 @@ async function runEnrichmentCycleClaimed(
     tracks: number;
     audioQueued: number;
 }> {
+    lastCycleProcessedWork = false;
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
     const claimToken = `${ENRICHMENT_CLAIM_OWNER_ID}:${Date.now()}:${Math.random()}`;
     const ttlSeconds = Math.max(1, Math.ceil(ENRICHMENT_CLAIM_TTL_MS / 1000));
@@ -367,11 +316,14 @@ export async function startUnifiedEnrichmentWorker() {
 
     // Run immediately
     await runEnrichmentCycleClaimed(false, "startup enrichment cycle");
+    enrichmentIdleBackoff.recordCycle(lastCycleProcessedWork, Date.now());
 
-    // Then run at interval
     enrichmentInterval = setInterval(async () => {
+        if (!enrichmentIdleBackoff.isDue(Date.now())) return;
         await runEnrichmentCycleClaimed(false, "interval enrichment cycle");
+        enrichmentIdleBackoff.recordCycle(lastCycleProcessedWork, Date.now());
     }, ENRICHMENT_INTERVAL_MS);
+    enrichmentInterval.unref();
 }
 
 /**
@@ -448,6 +400,8 @@ export async function runFullEnrichment(options?: {
     audioQueued: number;
 }> {
     log.debug("\n=== FULL ENRICHMENT: Re-enriching everything ===\n");
+    enrichmentIdleBackoff.reset();
+    enrichmentProgressMemo.invalidate();
 
     try {
         const reconciliation =
@@ -572,10 +526,17 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
+    let currentState: Awaited<
+        ReturnType<typeof enrichmentStateService.getState>
+    > = null;
+
     // Sync local pause flag with state service
     if (!isPaused) {
-        const state = await enrichmentStateService.getState();
-        if (state?.status === "paused" || state?.status === "stopping") {
+        currentState = await enrichmentStateService.getState();
+        if (
+            currentState?.status === "paused" ||
+            currentState?.status === "stopping"
+        ) {
             isPaused = true;
         }
     }
@@ -593,6 +554,11 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     // Enforce minimum interval (unless full mode or immediate request)
     const now = Date.now();
     if (!bypassRunningCheck && now - lastRunTime < MIN_INTERVAL_MS) {
+        return emptyResult;
+    }
+
+    if (shouldSkipEnrichmentSnapshot(currentState, bypassRunningCheck)) {
+        consecutiveSystemFailures = 0;
         return emptyResult;
     }
 
@@ -651,6 +617,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             return { artists: 0, tracks: 0, audioQueued: 0 };
         }
         artistsProcessed = artistResult;
+        lastCycleProcessedWork ||= artistsProcessed > 0;
 
         const trackResult = await runPhase("tracks", executeMoodTagsPhase);
         if (trackResult === null) {
@@ -658,6 +625,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             return { artists: artistsProcessed, tracks: 0, audioQueued: 0 };
         }
         tracksProcessed = trackResult;
+        lastCycleProcessedWork ||= tracksProcessed > 0;
 
         // Steps 3-4 (audio analysis + vibe embeddings queueing) are gated by
         // the coarse AUDIO_ANALYSIS_ENABLED feature flag.
@@ -673,6 +641,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 };
             }
             audioQueued = audioResult;
+            lastCycleProcessedWork ||= audioQueued > 0;
 
             const vibeResult = await runPhase("vibe", executeVibePhase);
             if (vibeResult === null) {
@@ -684,20 +653,26 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 };
             }
             vibeQueued = vibeResult;
+            lastCycleProcessedWork ||= vibeQueued > 0;
         }
 
         // Podcast refresh phase -- only runs if subscriptions exist
-        await runPhase("podcasts", executePodcastRefreshPhase);
+        const podcastsProcessed =
+            (await runPhase("podcasts", executePodcastRefreshPhase)) ?? 0;
+        lastCycleProcessedWork ||= podcastsProcessed > 0;
 
         const features = await featureDetection.getFeatures();
 
         // Log progress (only if work was done)
-        if (
+        const processedWorkThisCycle =
             artistsProcessed > 0 ||
             tracksProcessed > 0 ||
             audioQueued > 0 ||
-            vibeQueued > 0
-        ) {
+            vibeQueued > 0 ||
+            podcastsProcessed > 0;
+        lastCycleProcessedWork = processedWorkThisCycle;
+        if (processedWorkThisCycle) {
+            enrichmentProgressMemo.invalidate();
             try {
                 const progress = await getEnrichmentProgress();
                 log.debug(`\nEnrichment Progress`);
@@ -758,6 +733,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
         // If everything is complete, mark as idle and send notification (only once)
         let progress: Awaited<ReturnType<typeof getEnrichmentProgress>>;
+        if (
+            !processedWorkThisCycle &&
+            startingProgress &&
+            !startingProgress.isFullyComplete
+        ) {
+            enrichmentProgressMemo.invalidate();
+        }
         try {
             progress = await getEnrichmentProgress();
         } catch (error) {
@@ -778,7 +760,10 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             if (!state?.coreCacheCleared) {
                 try {
                     const redisInstance = getRedis();
-                    const mixKeys = await redisInstance.keys("mixes:*");
+                    const mixKeys = await scanRedisKeys(
+                        redisInstance,
+                        "mixes:*",
+                    );
                     if (mixKeys.length > 0) {
                         await redisInstance.del(...mixKeys);
                         log.info(
@@ -847,7 +832,10 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             if (!stateBeforeNotify?.fullCacheCleared) {
                 try {
                     const redisInstance = getRedis();
-                    const mixKeys = await redisInstance.keys("mixes:*");
+                    const mixKeys = await scanRedisKeys(
+                        redisInstance,
+                        "mixes:*",
+                    );
                     if (mixKeys.length > 0) {
                         await redisInstance.del(...mixKeys);
                         log.info(
@@ -867,11 +855,6 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
             // Send completion notification only if not already sent
             const state = await enrichmentStateService.getState();
-            const processedWorkThisCycle =
-                artistsProcessed > 0 ||
-                tracksProcessed > 0 ||
-                audioQueued > 0 ||
-                vibeQueued > 0;
             const totalSessionFailures =
                 sessionFailureCount.artists +
                 sessionFailureCount.tracks +
@@ -1535,6 +1518,10 @@ async function executeVibePhase(): Promise<number> {
  * - Audio Analysis: "Background" enrichment (runs in separate container, non-blocking)
  */
 export async function getEnrichmentProgress() {
+    return enrichmentProgressMemo.get(loadEnrichmentProgress);
+}
+
+async function loadEnrichmentProgress() {
     const [
         artistCounts,
         trackTotal,
@@ -1744,6 +1731,8 @@ export async function triggerEnrichmentNow(): Promise<{
     audioQueued: number;
 }> {
     log.debug("Triggering immediate enrichment cycle...");
+    enrichmentIdleBackoff.reset();
+    enrichmentProgressMemo.invalidate();
 
     // Reset pause state when triggering enrichment
     isPaused = false;
@@ -1760,6 +1749,7 @@ export async function triggerEnrichmentNow(): Promise<{
  */
 export async function reRunArtistsOnly(): Promise<{ count: number }> {
     log.debug("Re-running artist enrichment only...");
+    enrichmentProgressMemo.invalidate();
 
     const result = await resetArtistsOnly();
 
@@ -1782,6 +1772,7 @@ export async function reRunArtistsOnly(): Promise<{ count: number }> {
  */
 export async function reRunMoodTagsOnly(): Promise<{ count: number }> {
     log.debug("Re-running mood tags only...");
+    enrichmentProgressMemo.invalidate();
 
     const result = await resetMoodTagsOnly();
 
@@ -1803,6 +1794,7 @@ export async function reRunMoodTagsOnly(): Promise<{ count: number }> {
  */
 export async function reRunAudioAnalysisOnly(): Promise<number> {
     log.debug("Re-running audio analysis only...");
+    enrichmentProgressMemo.invalidate();
 
     await audioAnalysisCleanupService.cleanupStaleProcessing();
 
@@ -1826,6 +1818,7 @@ export async function reRunAudioAnalysisOnly(): Promise<number> {
  */
 export async function reRunVibeEmbeddingsOnly(): Promise<number> {
     log.debug("Re-running vibe embeddings only...");
+    enrichmentProgressMemo.invalidate();
 
     const features = await featureDetection.getFeatures();
     if (!features.vibeEmbeddings) {

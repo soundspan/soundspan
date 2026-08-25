@@ -72,6 +72,7 @@ describe("unified enrichment runtime behavior", () => {
             mget: jest.fn(async (...keys: string[]) => keys.map(() => null)),
             rpush: jest.fn(async (_queue?: string, _payload?: string) => 1),
             eval: jest.fn(async () => 1),
+            scan: jest.fn(async () => ["0", []]),
             keys: jest.fn(async () => []),
             del: jest.fn(async () => 0),
             disconnect: jest.fn(),
@@ -81,6 +82,7 @@ describe("unified enrichment runtime behavior", () => {
             mget: jest.fn(async (...keys: string[]) => keys.map(() => null)),
             rpush: jest.fn(async (_queue?: string, _payload?: string) => 1),
             eval: jest.fn(async () => 1),
+            scan: jest.fn(async () => ["0", []]),
             keys: jest.fn(async () => []),
             del: jest.fn(async () => 0),
             disconnect: jest.fn(),
@@ -543,6 +545,85 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.stopUnifiedEnrichmentWorker();
     });
 
+    it("skips the progress snapshot transaction on authoritative idle ticks", async () => {
+        const { prisma, enrichmentStateService } =
+            setupUnifiedEnrichmentMocks();
+        (enrichmentStateService.getState as jest.Mock).mockResolvedValue({
+            status: "idle",
+            completionNotificationSent: true,
+            coreCacheCleared: true,
+            fullCacheCleared: true,
+            pendingMoodBucketBackfill: false,
+            moodBucketBackfillInProgress: false,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        enrichment.__unifiedEnrichmentTestables.__setRuntimeStateForTests({
+            lastRunTime: 0,
+        });
+
+        await expect(
+            enrichment.__unifiedEnrichmentTestables.runEnrichmentCycle(false),
+        ).resolves.toEqual({ artists: 0, tracks: 0, audioQueued: 0 });
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.artist.findMany).not.toHaveBeenCalled();
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
+    });
+
+    it("runs working-state ticks through the existing ordered phases", async () => {
+        const {
+            prisma,
+            enrichmentStateService,
+            audioAnalysisCleanupService,
+            vibeAnalysisCleanupService,
+        } = setupUnifiedEnrichmentMocks();
+        (enrichmentStateService.getState as jest.Mock).mockResolvedValue({
+            status: "running",
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        enrichment.__unifiedEnrichmentTestables.__setRuntimeStateForTests({
+            lastRunTime: 0,
+        });
+
+        await enrichment.__unifiedEnrichmentTestables.runEnrichmentCycle(false);
+
+        expect(prisma.$transaction).toHaveBeenCalled();
+        expect(prisma.artist.findMany).toHaveBeenCalled();
+        expect(prisma.track.findMany).toHaveBeenCalled();
+        expect(
+            audioAnalysisCleanupService.cleanupStaleProcessing,
+        ).toHaveBeenCalled();
+        expect(
+            vibeAnalysisCleanupService.cleanupStaleProcessing,
+        ).toHaveBeenCalled();
+        const phases = (
+            enrichmentStateService.updateState as jest.Mock
+        ).mock.calls
+            .map(([update]) => update.currentPhase)
+            .filter(Boolean);
+        expect(phases.slice(0, 5)).toEqual([
+            "artists",
+            "tracks",
+            "audio",
+            "vibe",
+            "podcasts",
+        ]);
+    });
+
+    it("memoizes repeated progress reads inside the three-second TTL", async () => {
+        const { prisma } = setupUnifiedEnrichmentMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        await enrichment.getEnrichmentProgress();
+        await enrichment.getEnrichmentProgress();
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
     it("handles state update failures during stop without crashing teardown", async () => {
         const { enrichmentStateService } = setupUnifiedEnrichmentMocks();
         (enrichmentStateService.updateState as jest.Mock).mockRejectedValueOnce(
@@ -864,9 +945,9 @@ describe("unified enrichment runtime behavior", () => {
             0,
             0,
         ]);
-        (queueRedisPrimary.keys as jest.Mock)
-            .mockResolvedValueOnce(["mixes:core"])
-            .mockResolvedValueOnce(["mixes:full"]);
+        (queueRedisPrimary.scan as jest.Mock)
+            .mockResolvedValueOnce(["0", ["mixes:core"]])
+            .mockResolvedValueOnce(["0", ["mixes:full"]]);
         (queueRedisPrimary.del as jest.Mock).mockResolvedValue(1);
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
@@ -883,7 +964,8 @@ describe("unified enrichment runtime behavior", () => {
         const result = await enrichment.runFullEnrichment();
 
         expect(result).toEqual({ artists: 0, tracks: 0, audioQueued: 0 });
-        expect(queueRedisPrimary.keys).toHaveBeenCalledTimes(2);
+        expect(queueRedisPrimary.scan).toHaveBeenCalledTimes(2);
+        expect(queueRedisPrimary.keys).not.toHaveBeenCalled();
         expect(queueRedisPrimary.del).toHaveBeenCalledTimes(2);
         expect(enrichmentStateService.updateState).toHaveBeenCalledWith(
             expect.objectContaining({ completionNotificationSent: true }),
@@ -933,9 +1015,9 @@ describe("unified enrichment runtime behavior", () => {
                 0,
                 0,
             ]);
-        (queueRedisPrimary.keys as jest.Mock)
-            .mockResolvedValueOnce(["mixes:core"])
-            .mockResolvedValueOnce(["mixes:full"]);
+        (queueRedisPrimary.scan as jest.Mock)
+            .mockResolvedValueOnce(["0", ["mixes:core"]])
+            .mockResolvedValueOnce(["0", ["mixes:full"]]);
         (queueRedisPrimary.del as jest.Mock).mockResolvedValue(1);
         (moodBucketService.backfillAllTracks as jest.Mock).mockResolvedValue({
             processed: 3,
@@ -1368,9 +1450,9 @@ describe("unified enrichment runtime behavior", () => {
                 0,
                 0,
             ]);
-        (queueRedisPrimary.keys as jest.Mock)
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([]);
+        (queueRedisPrimary.scan as jest.Mock)
+            .mockResolvedValueOnce(["0", []])
+            .mockResolvedValueOnce(["0", []]);
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
             .mockResolvedValueOnce({ coreCacheCleared: true })
@@ -1455,9 +1537,9 @@ describe("unified enrichment runtime behavior", () => {
                 0,
                 0,
             ]);
-        (queueRedisPrimary.keys as jest.Mock)
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([]);
+        (queueRedisPrimary.scan as jest.Mock)
+            .mockResolvedValueOnce(["0", []])
+            .mockResolvedValueOnce(["0", []]);
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
             .mockResolvedValueOnce({ coreCacheCleared: true })
@@ -1549,9 +1631,9 @@ describe("unified enrichment runtime behavior", () => {
                 0,
                 0,
             ]);
-        (queueRedisPrimary.keys as jest.Mock)
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([]);
+        (queueRedisPrimary.scan as jest.Mock)
+            .mockResolvedValueOnce(["0", []])
+            .mockResolvedValueOnce(["0", []]);
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
             .mockResolvedValueOnce({ coreCacheCleared: true })
@@ -1625,6 +1707,7 @@ describe("unified enrichment runtime behavior", () => {
 
     it("executes the interval callback cycle after startup", async () => {
         jest.useFakeTimers();
+        const setIntervalSpy = jest.spyOn(global, "setInterval");
         const { claimRedisPrimary } = setupUnifiedEnrichmentMocks();
         (claimRedisPrimary.set as jest.Mock).mockResolvedValue(null);
 
@@ -1632,12 +1715,16 @@ describe("unified enrichment runtime behavior", () => {
         const enrichment = require("../unifiedEnrichment");
         await enrichment.startUnifiedEnrichmentWorker();
 
-        await jest.advanceTimersByTimeAsync(5_000);
+        const interval = setIntervalSpy.mock.results.at(-1)?.value;
+        expect(interval.hasRef()).toBe(false);
+
+        await jest.advanceTimersByTimeAsync(10_000);
         expect(
             (claimRedisPrimary.set as jest.Mock).mock.calls.length,
         ).toBeGreaterThan(1);
 
         await enrichment.stopUnifiedEnrichmentWorker();
+        setIntervalSpy.mockRestore();
     });
 
     it("warns when post-batch progress read/update fails after work was processed", async () => {
@@ -1730,8 +1817,8 @@ describe("unified enrichment runtime behavior", () => {
                 0,
                 0,
             ]);
-        (queueRedisPrimary.keys as jest.Mock).mockRejectedValueOnce(
-            new Error("keys failed"),
+        (queueRedisPrimary.scan as jest.Mock).mockRejectedValueOnce(
+            new Error("scan failed"),
         );
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
@@ -1930,9 +2017,9 @@ describe("unified enrichment runtime behavior", () => {
         (
             moodBucketService.backfillAllTracks as jest.Mock
         ).mockRejectedValueOnce(new Error("backfill failed"));
-        (queueRedisPrimary.keys as jest.Mock)
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([]);
+        (queueRedisPrimary.scan as jest.Mock)
+            .mockResolvedValueOnce(["0", []])
+            .mockResolvedValueOnce(["0", []]);
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
             .mockResolvedValueOnce({ coreCacheCleared: true })
@@ -1994,7 +2081,7 @@ describe("unified enrichment runtime behavior", () => {
                 0,
                 0,
             ]);
-        (queueRedisPrimary.keys as jest.Mock).mockRejectedValueOnce(
+        (queueRedisPrimary.scan as jest.Mock).mockRejectedValueOnce(
             new Error("mix key lookup failed"),
         );
         (enrichmentStateService.getState as jest.Mock)
@@ -2011,7 +2098,14 @@ describe("unified enrichment runtime behavior", () => {
         const enrichment = require("../unifiedEnrichment");
         await enrichment.runFullEnrichment();
 
-        expect(queueRedisPrimary.keys).toHaveBeenCalledWith("mixes:*");
+        expect(queueRedisPrimary.scan).toHaveBeenCalledWith(
+            "0",
+            "MATCH",
+            "mixes:*",
+            "COUNT",
+            250,
+        );
+        expect(queueRedisPrimary.keys).not.toHaveBeenCalled();
         expect(logger.error).toHaveBeenCalledWith(
             "Failed to clear mix cache on full complete:",
             expect.any(Error),
@@ -3235,7 +3329,7 @@ describe("unified enrichment runtime behavior", () => {
             0,
             0,
         ]);
-        (queueRedisPrimary.keys as jest.Mock).mockResolvedValue([]);
+        (queueRedisPrimary.scan as jest.Mock).mockResolvedValue(["0", []]);
         (enrichmentStateService.getState as jest.Mock)
             .mockResolvedValueOnce({ status: "idle" })
             .mockResolvedValueOnce({ coreCacheCleared: false })
@@ -3250,7 +3344,14 @@ describe("unified enrichment runtime behavior", () => {
         const enrichment = require("../unifiedEnrichment");
         await enrichment.runFullEnrichment();
 
-        expect(queueRedisPrimary.keys).toHaveBeenCalledWith("mixes:*");
+        expect(queueRedisPrimary.scan).toHaveBeenCalledWith(
+            "0",
+            "MATCH",
+            "mixes:*",
+            "COUNT",
+            250,
+        );
+        expect(queueRedisPrimary.keys).not.toHaveBeenCalled();
         expect(queueRedisPrimary.del).not.toHaveBeenCalled();
     });
 

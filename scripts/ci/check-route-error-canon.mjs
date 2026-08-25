@@ -160,7 +160,7 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/workers/processors/imageProcessor.ts": 1,
     "backend/src/workers/umapWorker.ts": 0,
     // unifiedEnrichment.ts remaining 7: retry classifiers, scoped worker diagnostics, and internal failure/batch-state records.
-    "backend/src/workers/unifiedEnrichment.ts": 7,
+    "backend/src/workers/unifiedEnrichment.ts": 5,
 });
 
 export function countPattern(source) {

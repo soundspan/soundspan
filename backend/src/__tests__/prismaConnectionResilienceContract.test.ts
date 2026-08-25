@@ -6,6 +6,10 @@ describe("prisma connection resilience contract", () => {
         path.resolve(__dirname, "../workers/unifiedEnrichment.ts"),
         "utf8",
     );
+    const enrichmentRetrySource = fs.readFileSync(
+        path.resolve(__dirname, "../workers/enrichmentPrismaRetry.ts"),
+        "utf8",
+    );
     const moodBucketSource = fs.readFileSync(
         path.resolve(__dirname, "../services/moodBucketService.ts"),
         "utf8",
@@ -24,7 +28,7 @@ describe("prisma connection resilience contract", () => {
     );
 
     it("treats Prisma P2037 too-many-connections errors as transient in high-volume enrichment paths", () => {
-        expect(unifiedEnrichmentSource).toContain("P2037");
+        expect(enrichmentRetrySource).toContain("P2037");
         expect(moodBucketSource).toContain("P2037");
     });
 
