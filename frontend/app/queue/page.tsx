@@ -46,6 +46,13 @@ import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { PeerBadge } from "@/components/ui/PeerBadge";
 
 /**
+ * Rows rendered on the first pass before react-virtuoso measures the
+ * viewport; keeps first paint windowed instead of mounting the whole queue
+ * (GH #784).
+ */
+const INITIAL_WINDOW_COUNT = 20;
+
+/**
  * Renders the QueuePage component.
  */
 export default function QueuePage() {
@@ -471,7 +478,10 @@ export default function QueuePage() {
                         <Card>
                             <Virtuoso
                                 totalCount={nextTracks.length}
-                                initialItemCount={nextTracks.length}
+                                initialItemCount={Math.min(
+                                    nextTracks.length,
+                                    INITIAL_WINDOW_COUNT,
+                                )}
                                 computeItemKey={(idx) =>
                                     `next-${nextTracks[idx]?.id ?? idx}-${idx}`
                                 }
@@ -567,7 +577,10 @@ export default function QueuePage() {
                         <Card>
                             <Virtuoso
                                 totalCount={previousTracks.length}
-                                initialItemCount={previousTracks.length}
+                                initialItemCount={Math.min(
+                                    previousTracks.length,
+                                    INITIAL_WINDOW_COUNT,
+                                )}
                                 computeItemKey={(idx) =>
                                     `prev-${previousTracks[idx]?.id ?? idx}-${idx}`
                                 }

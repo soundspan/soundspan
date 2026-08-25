@@ -120,7 +120,11 @@ export interface TrackListProps<T> {
     emptyState?: ReactNode;
     loadingState?: ReactNode;
     isLoading?: boolean;
-    /** When true, render items using react-virtuoso for large lists. Default: false. */
+    /**
+     * Render items using react-virtuoso (windowed DOM). Defaults to true for
+     * lists above ~200 items without `reorder`, false otherwise; pass an
+     * explicit value to pin either mode.
+     */
     virtualized?: boolean;
     /** Estimated row height in px when virtualized. Default: 64. */
     estimatedItemHeight?: number;

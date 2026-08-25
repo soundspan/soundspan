@@ -16,8 +16,8 @@ import {
 import { CachedImage } from "@/components/ui/CachedImage";
 import {
     useAudioControls,
-    useAudioPlayback,
     useAudioState,
+    usePlaybackStatus,
 } from "@/lib/audio-context";
 import {
     api,
@@ -178,7 +178,9 @@ export default function MyLikedPlaylistPage() {
     const queryClient = useQueryClient();
     const { toast } = useToast();
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    // Narrow subscription: this page only reads isPlaying, so it must not
+    // re-render on the once-per-second currentTime tick (GH #784).
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, playNow, pause, resume, addTracksToQueue } =
         useAudioControls();
     const { data, isLoading, isError } = useLikedPlaylistQuery();

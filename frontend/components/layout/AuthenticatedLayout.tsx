@@ -137,6 +137,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                             <main
                                 id="main-content"
                                 tabIndex={-1}
+                                data-app-scroll-container
                                 className="flex-1 bg-gradient-to-b from-surface-hover via-black to-black mx-2 mb-2 rounded-lg overflow-y-auto relative focus:outline-none"
                                 style={{
                                     marginTop:
@@ -182,6 +183,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                         <main
                             id="main-content"
                             tabIndex={-1}
+                            data-app-scroll-container
                             className="flex-1 bg-gradient-to-b from-surface-hover via-black to-black rounded-lg overflow-y-auto relative focus:outline-none"
                         >
                             <GalaxyBackground />
