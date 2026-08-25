@@ -278,6 +278,8 @@ describe("youtubeLibraryDownload", () => {
             "Album",
             "rg-1",
             "user-1",
+            false,
+            undefined,
         );
         expect(mockStartAlbum).not.toHaveBeenCalled();
     });

@@ -196,6 +196,8 @@ describe("tidalLibraryDownload", () => {
             "Album",
             "rg-1",
             "user-1",
+            false,
+            undefined,
         );
         expect(mockUpdate).toHaveBeenCalledWith(
             expect.objectContaining({
