@@ -61,14 +61,44 @@ describe("artistCountsService", () => {
             where: {
                 artistId: "artist-1",
                 location: "LIBRARY",
-                tracks: { some: { removedAt: null, origin: "LOCAL" } },
+                tracks: {
+                    some: {
+                        removedAt: null,
+                        origin: "LOCAL",
+                        album: {
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        },
+                    },
+                },
             },
         });
         expect(prisma.album.count).toHaveBeenNthCalledWith(2, {
             where: {
                 artistId: "artist-1",
                 location: "DISCOVER",
-                tracks: { some: { removedAt: null, origin: "LOCAL" } },
+                tracks: {
+                    some: {
+                        removedAt: null,
+                        origin: "LOCAL",
+                        album: {
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        },
+                    },
+                },
             },
         });
         expect(prisma.track.count).toHaveBeenCalledWith({

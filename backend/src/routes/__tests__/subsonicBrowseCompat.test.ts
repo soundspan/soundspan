@@ -131,6 +131,7 @@ describe("subsonic browse compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
+                location: "LIBRARY",
                 genres: ["synthwave"],
                 userGenres: null,
                 artist: {
@@ -303,6 +304,7 @@ describe("subsonic browse compatibility handlers", () => {
                 year: 2023,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover2.jpg",
+                location: "LIBRARY",
                 genres: ["Rock"],
                 userGenres: null,
                 artist: {
@@ -493,6 +495,7 @@ describe("subsonic browse compatibility handlers", () => {
                     year: 2024,
                     lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     tracks: [{ duration: 120 }, { duration: 140 }],
                 },
             ],
@@ -529,6 +532,7 @@ describe("subsonic browse compatibility handlers", () => {
             title: "A Album",
             year: 2024,
             coverUrl: "https://example.test/cover.jpg",
+            location: "LIBRARY",
             artist: {
                 id: "artist-1",
                 name: "Artist One",
@@ -620,6 +624,7 @@ describe("subsonic browse compatibility handlers", () => {
                     title: "A Album",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     genres: ["rock"],
                     userGenres: null,
                     artist: {
@@ -708,6 +713,7 @@ describe("subsonic browse compatibility handlers", () => {
                     title: "A Album",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     genres: ["jazz"],
                     userGenres: null,
                     artist: {
@@ -771,6 +777,7 @@ describe("subsonic browse compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
+                location: "LIBRARY",
                 artist: {
                     id: "artist-1",
                     name: "Artist One",
@@ -796,6 +803,7 @@ describe("subsonic browse compatibility handlers", () => {
                     title: "A Album",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     artist: {
                         id: "artist-1",
                         name: "Artist One",
@@ -858,6 +866,7 @@ describe("subsonic browse compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
+                location: "LIBRARY",
                 artist: {
                     id: "artist-1",
                     name: "Artist One",
@@ -883,6 +892,7 @@ describe("subsonic browse compatibility handlers", () => {
                     title: "A Album",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     artist: {
                         id: "artist-1",
                         name: "Artist One",
@@ -983,6 +993,7 @@ describe("subsonic browse compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
+                location: "LIBRARY",
                 artist: {
                     id: "artist-1",
                     name: "Artist One",
@@ -1008,6 +1019,7 @@ describe("subsonic browse compatibility handlers", () => {
                     title: "A Album",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     artist: {
                         id: "artist-1",
                         name: "Artist One",
@@ -1136,6 +1148,7 @@ describe("subsonic browse compatibility handlers", () => {
             title: "Album One",
             year: 2024,
             coverUrl: null,
+            location: "LIBRARY",
             genres: [],
             userGenres: null,
             artist: {
@@ -1278,6 +1291,7 @@ describe("subsonic browse compatibility handlers", () => {
                 title: albumTitle,
                 year: 2026,
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: null,
                 artist: {

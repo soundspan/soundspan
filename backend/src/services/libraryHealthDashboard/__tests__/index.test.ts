@@ -84,7 +84,20 @@ describe("library health dashboard summary", () => {
                     some: {
                         location: "LIBRARY",
                         tracks: {
-                            some: { origin: "LOCAL", removedAt: null },
+                            some: {
+                                origin: "LOCAL",
+                                removedAt: null,
+                                album: {
+                                    location: {
+                                        in: [
+                                            "LIBRARY",
+                                            "DISCOVER",
+                                            "REMOTE",
+                                            "FEDERATED",
+                                        ],
+                                    },
+                                },
+                            },
                         },
                     },
                 },

@@ -447,6 +447,11 @@ describe("social presence compatibility", () => {
         expect(mockTrackFindMany).toHaveBeenCalledWith({
             where: {
                 removedAt: null,
+                album: {
+                    location: {
+                        in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                    },
+                },
                 id: { in: ["track-active", "track-removed"] },
             },
             select: { id: true },

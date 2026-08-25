@@ -129,6 +129,7 @@ function buildQueueTrack(id: string, title: string) {
             title: "Album One",
             year: 2023,
             coverUrl: null,
+            location: "LIBRARY",
             genres: [],
             userGenres: [],
             artist: { id: "artist-1", name: "Artist One" },
@@ -653,6 +654,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                         title: "Album One",
                         year: 2023,
                         coverUrl: null,
+                        location: "LIBRARY",
                         genres: [],
                         userGenres: [],
                         artist: {
@@ -953,6 +955,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                         title: "Album Two",
                         year: 2024,
                         coverUrl: null,
+                        location: "LIBRARY",
                         genres: [],
                         userGenres: [],
                         artist: {
@@ -978,6 +981,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                         title: "Album One",
                         year: 2023,
                         coverUrl: null,
+                        location: "LIBRARY",
                         genres: [],
                         userGenres: [],
                         artist: {
@@ -996,6 +1000,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: {
@@ -1009,6 +1014,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                 year: 2023,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: {

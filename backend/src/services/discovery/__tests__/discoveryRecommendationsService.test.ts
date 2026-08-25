@@ -320,7 +320,20 @@ describe("DiscoveryRecommendationsService", () => {
                 where: {
                     userId: "user-1",
                     playedAt: { gte: SUB_120 },
-                    track: { removedAt: null, AND: expect.any(Array) },
+                    track: {
+                        removedAt: null,
+                        album: {
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        },
+                        AND: expect.any(Array),
+                    },
                 },
                 select: {
                     track: {
@@ -1242,6 +1255,11 @@ describe("DiscoveryRecommendationsService", () => {
             expect(mockPrisma.track.findMany).toHaveBeenCalledWith({
                 where: {
                     removedAt: null,
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
                     AND: expect.any(Array),
                     id: { in: ["track-1", "track-2", "missing-track"] },
                 },

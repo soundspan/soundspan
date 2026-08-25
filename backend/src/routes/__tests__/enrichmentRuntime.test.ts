@@ -1536,7 +1536,15 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(mockTrackFindFirst).toHaveBeenCalledWith({
-            where: { id: "track-1", removedAt: null },
+            where: {
+                id: "track-1",
+                removedAt: null,
+                album: {
+                    location: {
+                        in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                    },
+                },
+            },
             select: { id: true },
         });
         expect(mockTrackUpdate).toHaveBeenCalledWith({

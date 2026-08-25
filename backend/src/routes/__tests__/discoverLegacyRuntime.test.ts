@@ -598,7 +598,19 @@ describe("discover legacy-mode runtime behavior", () => {
             expect.objectContaining({
                 include: expect.objectContaining({
                     tracks: {
-                        where: { removedAt: null },
+                        where: {
+                            removedAt: null,
+                            album: {
+                                location: {
+                                    in: [
+                                        "LIBRARY",
+                                        "DISCOVER",
+                                        "REMOTE",
+                                        "FEDERATED",
+                                    ],
+                                },
+                            },
+                        },
                         take: 1,
                         orderBy: { trackNo: "asc" },
                     },

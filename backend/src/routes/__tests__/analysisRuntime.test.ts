@@ -385,6 +385,11 @@ describe("analysis routes runtime", () => {
                     id: "missing",
                     removedAt: null,
                     origin: "LOCAL",
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
                 },
             }),
         );

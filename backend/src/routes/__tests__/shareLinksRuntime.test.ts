@@ -832,6 +832,11 @@ describe("shareLinks routes runtime", () => {
                     albumId: "album-1",
                     removedAt: null,
                     origin: "LOCAL",
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
                 },
                 select: expect.any(Object),
             });
@@ -862,7 +867,20 @@ describe("shareLinks routes runtime", () => {
                 where: {
                     playlistId: "playlist-1",
                     trackId: "track-1",
-                    track: { removedAt: null, origin: "LOCAL" },
+                    track: {
+                        removedAt: null,
+                        origin: "LOCAL",
+                        album: {
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        },
+                    },
                 },
             });
             expect(mockStreamFileWithRangeSupport).toHaveBeenCalled();

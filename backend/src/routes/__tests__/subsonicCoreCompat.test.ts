@@ -289,6 +289,7 @@ describe("subsonic core compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-08-01T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: { id: "artist-1", name: "Artist One" },
@@ -359,6 +360,7 @@ describe("subsonic core compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-08-01T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: { id: "artist-1", name: "Artist One" },
@@ -436,6 +438,7 @@ describe("subsonic core compatibility handlers", () => {
                     title: `Album ${artistNumber}`,
                     year: 2024,
                     coverUrl: null,
+                    location: "LIBRARY",
                     genres: [],
                     userGenres: null,
                     artist: {
@@ -565,6 +568,7 @@ describe("subsonic core compatibility handlers", () => {
                 title: "Album One",
                 year: 2024,
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: null,
                 artist: {
@@ -600,6 +604,7 @@ describe("subsonic core compatibility handlers", () => {
                 title: `${artistId} Album`,
                 year: 2024,
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: null,
                 artist: {
@@ -649,6 +654,7 @@ describe("subsonic core compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2025-12-15T12:34:56.789Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: ["rock"],
                 userGenres: null,
                 artist: {
@@ -736,6 +742,7 @@ describe("subsonic core compatibility handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2025-12-15T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: {
@@ -750,6 +757,7 @@ describe("subsonic core compatibility handlers", () => {
                 year: 2023,
                 lastSynced: new Date("2025-12-14T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: {
@@ -792,6 +800,7 @@ describe("subsonic core compatibility handlers", () => {
                 title: "Album One",
                 year: 2024,
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: {
@@ -833,6 +842,7 @@ describe("subsonic core compatibility handlers", () => {
                 title: "Album One",
                 year: 2024,
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: { id: "artist-1", name: "Artist One" },
@@ -894,6 +904,7 @@ describe("subsonic core compatibility handlers", () => {
                 title: "Album One",
                 year: 2024,
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: { id: "artist-1", name: "Artist One" },

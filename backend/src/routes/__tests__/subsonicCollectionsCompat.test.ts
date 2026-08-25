@@ -116,6 +116,11 @@ function buildRes(): Response {
 
 const PLAYLIST_TRACK_WHERE = {
     removedAt: null,
+    album: {
+        location: {
+            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+        },
+    },
     AND: [
         {
             OR: [
@@ -484,6 +489,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                             title: "Album One",
                             year: 2024,
                             coverUrl: "https://example.test/covers/album-1.jpg",
+                            location: "LIBRARY",
                             genres: ["rock"],
                             userGenres: null,
                             artist: {
@@ -750,6 +756,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                     title: "Album One",
                     year: 2024,
                     coverUrl: "https://example.test/covers/album-1.jpg",
+                    location: "LIBRARY",
                     genres: ["rock"],
                     userGenres: null,
                     artist: {
@@ -862,6 +869,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                 title: "Album Two",
                 year: 2023,
                 coverUrl: "https://example.test/cover-2.jpg",
+                location: "LIBRARY",
                 genres: ["rock"],
                 userGenres: null,
                 artist: {

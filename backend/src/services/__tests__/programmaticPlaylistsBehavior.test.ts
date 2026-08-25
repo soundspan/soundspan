@@ -651,6 +651,16 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
                     genreId: "genre-2",
                     track: {
                         removedAt: null,
+                        album: {
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        },
                         AND: expect.any(Array),
                     },
                 },

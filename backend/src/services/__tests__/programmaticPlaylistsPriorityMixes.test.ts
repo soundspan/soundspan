@@ -139,6 +139,16 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
                 where: expect.objectContaining({
                     track: {
                         removedAt: null,
+                        album: {
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        },
                         AND: expect.any(Array),
                     },
                 }),
@@ -424,6 +434,11 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
                     AND: expect.any(Array),
                     id: { notIn: ["overplayed-1", "overplayed-2"] },
                 },
@@ -456,7 +471,15 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
 
         expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { removedAt: null, AND: expect.any(Array) },
+                where: {
+                    removedAt: null,
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
+                    AND: expect.any(Array),
+                },
                 orderBy: { id: "asc" },
                 take: 1000,
             }),

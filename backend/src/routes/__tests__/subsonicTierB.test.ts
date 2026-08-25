@@ -852,6 +852,7 @@ describe("subsonic Tier B handlers", () => {
                         title: "Album One",
                         year: 2024,
                         coverUrl: "https://example.test/cover.jpg",
+                        location: "LIBRARY",
                         artist: {
                             id: "artist-1",
                             name: "Artist One",
@@ -867,6 +868,7 @@ describe("subsonic Tier B handlers", () => {
                 year: 2024,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
+                location: "LIBRARY",
                 artist: {
                     id: "artist-1",
                     name: "Artist One",
@@ -1290,6 +1292,7 @@ describe("subsonic Tier B handlers", () => {
                             title: "Album One",
                             year: 2026,
                             coverUrl: null,
+                            location: "FEDERATED",
                             genres: ["rock"],
                             userGenres: ["indie"],
                             artist: {
@@ -2017,6 +2020,7 @@ describe("subsonic Tier B handlers", () => {
                 year: 2020,
                 lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: null,
+                location: "LIBRARY",
                 genres: [],
                 userGenres: [],
                 artist: {
@@ -2048,6 +2052,7 @@ describe("subsonic Tier B handlers", () => {
                     title: "Album One",
                     year: 2020,
                     coverUrl: null,
+                    location: "LIBRARY",
                     genres: [],
                     userGenres: [],
                     artist: {

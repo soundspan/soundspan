@@ -130,6 +130,7 @@ describe("subsonic runtime focused handlers", () => {
                     title: "Album One",
                     year: 2020,
                     coverUrl: null,
+                    location: "LIBRARY",
                     genres: [],
                     userGenres: [],
                     artist: {

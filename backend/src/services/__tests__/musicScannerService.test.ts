@@ -2986,6 +2986,9 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(orphanAlbumQuery).toEqual({
             where: {
                 peerId: null,
+                location: {
+                    in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                },
                 tracks: { none: {} },
                 ...albumOrphanRetentionGuardWhere(orphanCutoff),
             },
@@ -3027,6 +3030,9 @@ describe("MusicScannerService.scanLibrary", () => {
             where: {
                 id: { in: ["album-1"] },
                 peerId: null,
+                location: {
+                    in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                },
                 tracks: { none: {} },
                 ...albumOrphanRetentionGuardWhere(deleteCutoff),
             },

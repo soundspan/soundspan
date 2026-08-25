@@ -186,6 +186,11 @@ describe("ProgrammaticPlaylistService data-driven curated vibe mixes", () => {
                 where: {
                     ...definition.where,
                     removedAt: null,
+                    album: {
+                        location: {
+                            in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                        },
+                    },
                     AND: expect.any(Array),
                     analysisStatus: "completed",
                 },

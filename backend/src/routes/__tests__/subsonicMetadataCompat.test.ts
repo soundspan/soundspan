@@ -303,6 +303,7 @@ describe("subsonic metadata compatibility handlers", () => {
                     title: "Album One",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     artist: {
                         id: "artist-1",
                         name: "Artist One",
@@ -323,6 +324,7 @@ describe("subsonic metadata compatibility handlers", () => {
                     title: "Album One",
                     year: 2024,
                     coverUrl: "https://example.test/cover.jpg",
+                    location: "LIBRARY",
                     artist: {
                         id: "artist-1",
                         name: "Artist One",
@@ -438,6 +440,7 @@ describe("subsonic metadata compatibility handlers", () => {
                     title: "Album Two",
                     year: 2023,
                     coverUrl: "https://example.test/cover-2.jpg",
+                    location: "LIBRARY",
                     genres: ["rock"],
                     userGenres: null,
                     artist: {
@@ -516,6 +519,7 @@ describe("subsonic metadata compatibility handlers", () => {
                         title: "Album Two",
                         year: 2023,
                         coverUrl: "https://example.test/cover-2.jpg",
+                        location: "LIBRARY",
                         genres: ["rock"],
                         userGenres: null,
                         artist: {

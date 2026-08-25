@@ -540,7 +540,21 @@ describe("playlists route runtime", () => {
                         where: {
                             OR: [
                                 { trackId: null },
-                                { track: { removedAt: null } },
+                                {
+                                    track: {
+                                        removedAt: null,
+                                        album: {
+                                            location: {
+                                                in: [
+                                                    "LIBRARY",
+                                                    "DISCOVER",
+                                                    "REMOTE",
+                                                    "FEDERATED",
+                                                ],
+                                            },
+                                        },
+                                    },
+                                },
                             ],
                         },
                         select: {
