@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subsonic apps load artist lists much faster on large libraries, and genre shuffle pages now load consistently fast.
 - TIDAL and YouTube Music downloads now use identical filename and collision handling, and loudness backfills now measure tracks with multiple workers.
 - Federation catalog syncs now batch database writes and refresh only affected artist counts instead of recounting every artist.
+- CI now blocks on typechecks, backend tests, and coverage while a split enforcement gate provides faster merge feedback.
 - Backend Jest tests now use transpile-only TypeScript transforms, six workers, and smaller runtime suites for faster test runs.
 - Database indexes now match frequent embedding, library, radio, playlist, and notification queries, while unused single-column audio-feature indexes no longer add write overhead.
 - Removed the unused frontend charting dependency and moved backend Listen Together and federation metrics contracts into cycle-free type modules.

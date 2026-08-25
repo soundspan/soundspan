@@ -15,6 +15,7 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Deliberately kept non-blocking. After blocking gitleaks is stable for about
     # a week, the OWNER should remove continue-on-error and add fail-on-severity:
     # high under with:; Trivy in security-scanning.yml follows.

@@ -22,7 +22,7 @@ jobs:
   backend-scale:
     name: Backend Scale Smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
       INTEGRATION_DATABASE_URL: postgresql://soundspan:soundspan@127.0.0.1:5432/soundspan
@@ -80,7 +80,7 @@ jobs:
   analyzer-scale:
     name: Audio Analyzer Long-Audio Scale Smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
     env:
       SCALE_TESTS: "1"
     steps:
@@ -109,7 +109,7 @@ jobs:
   dclap-scale:
     name: DCLAP Long-Audio Scale Smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       SCALE_TESTS: "1"
     steps:

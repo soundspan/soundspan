@@ -11,6 +11,7 @@ jobs:
     validate-release-tag:
         name: Validate release tag
         runs-on: ubuntu-latest
+        timeout-minutes: 10
         outputs:
             release_tag: ${{ steps.release-meta.outputs.release_tag }}
         steps:
@@ -43,6 +44,7 @@ jobs:
     build-images:
         name: ${{ matrix.job_name }}
         runs-on: ${{ matrix.runs_on }}
+        timeout-minutes: 60
         needs: [validate-release-tag]
         strategy:
             fail-fast: false

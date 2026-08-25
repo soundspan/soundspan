@@ -18,7 +18,7 @@ jobs:
   backend-tests-coverage:
     name: Backend Tests + Coverage
     runs-on: ubuntu-latest
-    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    timeout-minutes: 30
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
@@ -44,17 +44,17 @@ jobs:
       - name: Run backend tests with coverage
         working-directory: backend
         env:
-          BACKEND_COVERAGE_MAX_WORKERS: ${{ vars.BACKEND_COVERAGE_MAX_WORKERS || '2' }}
+          BACKEND_COVERAGE_MAX_WORKERS: ${{ vars.BACKEND_COVERAGE_MAX_WORKERS || '6' }}
         run: npm run test:coverage -- --maxWorkers=${BACKEND_COVERAGE_MAX_WORKERS}
 
       - name: Build backend coverage summary
         run: node scripts/ci/backend-coverage-summary.mjs
         env:
-          ENFORCE_COVERAGE_GATE: ${{ vars.CI_ENFORCE_TEST_GATE || 'false' }}
-          COVERAGE_LINE_MIN: ${{ vars.COVERAGE_LINE_MIN || '0' }}
-          COVERAGE_BRANCH_MIN: ${{ vars.COVERAGE_BRANCH_MIN || '0' }}
-          COVERAGE_FUNCTION_MIN: ${{ vars.COVERAGE_FUNCTION_MIN || '0' }}
-          COVERAGE_STATEMENT_MIN: ${{ vars.COVERAGE_STATEMENT_MIN || '0' }}
+          ENFORCE_COVERAGE_GATE: ${{ vars.CI_ENFORCE_TEST_GATE || 'true' }}
+          COVERAGE_LINE_MIN: ${{ vars.COVERAGE_LINE_MIN || '94' }}
+          COVERAGE_BRANCH_MIN: ${{ vars.COVERAGE_BRANCH_MIN || '83' }}
+          COVERAGE_FUNCTION_MIN: ${{ vars.COVERAGE_FUNCTION_MIN || '93' }}
+          COVERAGE_STATEMENT_MIN: ${{ vars.COVERAGE_STATEMENT_MIN || '93' }}
 
       - name: Publish backend summary to workflow view
         if: always()
@@ -79,6 +79,7 @@ jobs:
   backend-postgres-integration:
     name: Backend PostgreSQL Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
@@ -141,6 +142,7 @@ jobs:
   frontend-quality-visibility:
     name: Frontend Quality Visibility
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
@@ -217,6 +219,7 @@ jobs:
   python-sidecar-tests:
     name: Python Sidecar Tests (${{ matrix.service }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     strategy:
       fail-fast: false
@@ -253,6 +256,7 @@ jobs:
   python-quality:
     name: Python Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -299,6 +303,7 @@ jobs:
   enforcement-gates:
     name: Enforcement Gates
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
@@ -327,6 +332,12 @@ jobs:
       - name: Test source file-size gate
         run: npm run check:file-size:test
 
+      - name: Check deprecated source-scraping tests
+        run: node scripts/ci/check-source-scrape.mjs
+
+      - name: Test source-scrape gate
+        run: npm run check:source-scrape:test
+
       - name: Check routes README index
         run: node scripts/ci/check-routes-readme.mjs
 
@@ -347,6 +358,26 @@ jobs:
 
       - name: Check frontend hardcoded hex baseline
         run: npm --prefix frontend run lint:hex
+
+  enforcement-gates-build:
+    name: Enforcement Gates Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            packages/media-metadata-contract/package-lock.json
 
       - name: Install and build media metadata contract
         working-directory: packages/media-metadata-contract
@@ -376,7 +407,7 @@ jobs:
   backend-typecheck:
     name: Backend Typecheck
     runs-on: ubuntu-latest
-    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    timeout-minutes: 20
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
@@ -412,7 +443,7 @@ jobs:
   frontend-typecheck:
     name: Frontend Typecheck
     runs-on: ubuntu-latest
-    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    timeout-minutes: 20
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
@@ -441,6 +472,7 @@ jobs:
   helm-chart-visibility:
     name: Helm Chart Visibility
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     steps:
       - name: Checkout code

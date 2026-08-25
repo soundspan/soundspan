@@ -30,6 +30,7 @@ jobs:
   trivy-fs:
     name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Deliberate deferred ratchet: gitleaks was flipped to blocking first.
     # After it has been blocking and stable for about a week, the OWNER should
     # make dependency-review block with fail-on-severity: high, then make Trivy
@@ -92,6 +93,7 @@ jobs:
   gitleaks:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # BLOCKING: any leaked-secret finding fails the job and the PR.
     permissions:
       contents: read
