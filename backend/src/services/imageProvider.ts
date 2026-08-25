@@ -1,31 +1,33 @@
 /**
  * Image Provider Service
  *
- * Tries multiple sources for high-quality artist/album artwork:
- * 1. Deezer (most reliable, high quality)
- * 2. Fanart.tv (excellent quality, requires API key)
- * 3. MusicBrainz Cover Art Archive (good quality)
- * 4. Last.fm (fallback, often missing)
+ * Preserves the legacy image-provider API. Artist images delegate to the
+ * metadata facade; album covers retain their existing provider ladder.
  */
 
 import { logger } from "../utils/logger";
 import axios from "axios";
 import { rateLimiter } from "./rateLimiter";
-import {
-    normalizeFullwidth,
-    normalizeQuotes,
-} from "../utils/stringNormalization";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
+import { resolveArtistImage } from "./metadata/artistImageResolver";
 
+/** Legacy image search controls retained for caller compatibility. */
 export interface ImageSearchOptions {
     preferredSize?: "small" | "medium" | "large" | "extralarge" | "mega";
     timeout?: number;
 }
 
+/** Image URL and provider provenance returned to legacy callers. */
 export interface ImageResult {
     url: string;
-    source: "deezer" | "fanart" | "musicbrainz" | "lastfm" | "spotify";
+    source:
+        | "wikidata"
+        | "deezer"
+        | "fanart"
+        | "musicbrainz"
+        | "lastfm"
+        | "spotify";
     size?: string;
 }
 
@@ -34,13 +36,8 @@ export interface ImageResult {
  */
 export class ImageProviderService {
     private readonly FANART_API_KEY = config.fanart.apiKey;
-    private readonly DEEZER_API_URL = "https://api.deezer.com";
     private readonly FANART_API_URL = "https://webservice.fanart.tv/v3";
     private fanartSettingsWarningShown = false;
-
-    private normalizeLookupValue(value: string): string {
-        return normalizeFullwidth(normalizeQuotes(value));
-    }
 
     private async resolveFanartApiKey(): Promise<string | undefined> {
         if (!config.secretsDbOnly) {
@@ -68,77 +65,14 @@ export class ImageProviderService {
     }
 
     /**
-     * Get artist image from multiple sources with fallback chain
+     * Get an artist image through the canonical metadata facade.
      */
     async getArtistImage(
         artistName: string,
         mbid?: string,
-        options: ImageSearchOptions = {},
+        _options: ImageSearchOptions = {},
     ): Promise<ImageResult | null> {
-        const { timeout = 5000 } = options;
-
-        logger.debug(`[IMAGE] Searching for artist image: ${artistName}`);
-
-        // Try Deezer first (most reliable)
-        try {
-            const deezerImage = await this.getArtistImageFromDeezer(
-                artistName,
-                timeout,
-            );
-            if (deezerImage) {
-                logger.debug(`  Found image from Deezer`);
-                return deezerImage;
-            }
-        } catch (error) {
-            logger.debug(
-                `    Deezer failed: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                }`,
-            );
-        }
-
-        // Try Fanart.tv if we have API key and MBID
-        if ((await this.resolveFanartApiKey()) && mbid) {
-            try {
-                const fanartImage = await this.getArtistImageFromFanart(
-                    mbid,
-                    timeout,
-                );
-                if (fanartImage) {
-                    logger.debug(`  Found image from Fanart.tv`);
-                    return fanartImage;
-                }
-            } catch (error) {
-                logger.debug(
-                    `Fanart.tv failed: ${
-                        error instanceof Error ? error.message : "Unknown error"
-                    }`,
-                );
-            }
-        }
-
-        // Try MusicBrainz/Cover Art Archive if we have MBID
-        if (mbid) {
-            try {
-                const mbImage = await this.getArtistImageFromMusicBrainz(
-                    mbid,
-                    timeout,
-                );
-                if (mbImage) {
-                    logger.debug(`  Found image from MusicBrainz`);
-                    return mbImage;
-                }
-            } catch (error) {
-                logger.debug(
-                    `MusicBrainz failed: ${
-                        error instanceof Error ? error.message : "Unknown error"
-                    }`,
-                );
-            }
-        }
-
-        logger.debug(` No artist image found from any source`);
-        return null;
+        return resolveArtistImage({ artistName, mbid });
     }
 
     /**
@@ -220,38 +154,6 @@ export class ImageProviderService {
     }
 
     /**
-     * Search Deezer for artist image
-     */
-    private async getArtistImageFromDeezer(
-        artistName: string,
-        timeout: number,
-    ): Promise<ImageResult | null> {
-        const normalizedName = this.normalizeLookupValue(artistName);
-        const response = await rateLimiter.execute("deezer", () =>
-            axios.get(`${this.DEEZER_API_URL}/search/artist`, {
-                params: { q: normalizedName, limit: 1 },
-                timeout,
-            }),
-        );
-
-        if (response.data.data && response.data.data.length > 0) {
-            const artist = response.data.data[0];
-            // Deezer provides: picture, picture_small, picture_medium, picture_big, picture_xl
-            const imageUrl =
-                artist.picture_xl || artist.picture_big || artist.picture;
-            if (imageUrl) {
-                return {
-                    url: imageUrl,
-                    source: "deezer",
-                    size: "xl",
-                };
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Search Deezer for album cover
      */
     private async getAlbumCoverFromDeezer(
@@ -270,40 +172,6 @@ export class ImageProviderService {
         if (coverUrl) {
             return { url: coverUrl, source: "deezer", size: "xl" };
         }
-        return null;
-    }
-
-    /**
-     * Get artist image from Fanart.tv
-     */
-    private async getArtistImageFromFanart(
-        mbid: string,
-        timeout: number,
-    ): Promise<ImageResult | null> {
-        const fanartApiKey = await this.resolveFanartApiKey();
-        if (!fanartApiKey) {
-            return null;
-        }
-
-        const response = await rateLimiter.execute("fanart", () =>
-            axios.get(`${this.FANART_API_URL}/music/${mbid}`, {
-                params: { api_key: fanartApiKey },
-                timeout,
-            }),
-        );
-
-        // Fanart.tv provides multiple image types, prefer artistthumb
-        const images =
-            response.data.artistthumb ||
-            response.data.musicbanner ||
-            response.data.hdmusiclogo;
-        if (images && images.length > 0) {
-            return {
-                url: images[0].url,
-                source: "fanart",
-            };
-        }
-
         return null;
     }
 
@@ -338,18 +206,6 @@ export class ImageProviderService {
             };
         }
 
-        return null;
-    }
-
-    /**
-     * Get artist image from MusicBrainz (via relationships)
-     */
-    private async getArtistImageFromMusicBrainz(
-        mbid: string,
-        timeout: number,
-    ): Promise<ImageResult | null> {
-        // MusicBrainz doesn't have direct artist images, but we can check for image relationships
-        // This is a placeholder - in practice, we'd need to parse relationships
         return null;
     }
 
@@ -389,48 +245,6 @@ export class ImageProviderService {
                 return null;
             }
             throw error;
-        }
-
-        return null;
-    }
-
-    /**
-     * Get artist image from Last.fm (fallback only - often unreliable)
-     */
-    async getArtistImageFromLastFm(
-        artistName: string,
-        mbid?: string,
-    ): Promise<ImageResult | null> {
-        try {
-            const { lastFmService } = await import("./lastfm");
-            const artistInfo = await lastFmService.getArtistInfo(
-                artistName,
-                mbid,
-            );
-
-            if (artistInfo?.image) {
-                const megaImage = artistInfo.image.find(
-                    (img: any) => img.size === "mega",
-                );
-                const largeImage = artistInfo.image.find(
-                    (img: any) => img.size === "extralarge",
-                );
-                const image = megaImage || largeImage;
-
-                if (image?.["#text"]) {
-                    return {
-                        url: image["#text"],
-                        source: "lastfm",
-                        size: image.size,
-                    };
-                }
-            }
-        } catch (error) {
-            logger.debug(
-                `Last.fm failed: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                }`,
-            );
         }
 
         return null;

@@ -210,7 +210,7 @@ function createMockArtist(name = "AC/DC") {
     return {
         id: "artist-1",
         name,
-        mbid: "mbid-artist-1",
+        mbid: "11111111-1111-4111-8111-111111111111",
         heroUrl: null,
         userHeroUrl: null,
         albums: [],
@@ -455,7 +455,7 @@ describe("library artist lookup compatibility", () => {
                                 artist: {
                                     id: "artist-1",
                                     name: "AC/DC",
-                                    mbid: "mbid-artist-1",
+                                    mbid: "11111111-1111-4111-8111-111111111111",
                                 },
                             },
                         },
@@ -494,7 +494,7 @@ describe("library artist lookup compatibility", () => {
                 artist: {
                     id: "artist-1",
                     name: "AC/DC",
-                    mbid: "mbid-artist-1",
+                    mbid: "11111111-1111-4111-8111-111111111111",
                 },
             }),
         ]);
@@ -658,7 +658,7 @@ describe("library artist lookup compatibility", () => {
 
         expect(res.statusCode).toBe(200);
         expect(mockLastFmGetArtistTopTracks).toHaveBeenCalledWith(
-            "mbid-artist-1",
+            "11111111-1111-4111-8111-111111111111",
             "AC/DC",
             10,
         );

@@ -259,7 +259,6 @@ jest.mock("../../services/fanart", () => ({
 jest.mock("../../services/deezer", () => ({
     deezerService: {
         getAlbumCover: jest.fn(),
-        getArtistImage: jest.fn(),
     },
 }));
 
@@ -279,6 +278,19 @@ jest.mock("../../services/musicbrainz", () => ({
         searchArtist: jest.fn(),
         getReleaseGroups: jest.fn(),
     },
+}));
+
+jest.mock("../../utils/musicIds", () => ({
+    isRealArtistMbid: (value: unknown) =>
+        typeof value === "string" && !value.startsWith("temp-"),
+    rgMbidKind: (value: string) =>
+        value.startsWith("federation:")
+            ? "federation"
+            : value.startsWith("remote:")
+              ? "remote"
+              : value.startsWith("temp-")
+                ? "temp"
+                : "musicbrainz",
 }));
 
 jest.mock("../../services/coverArt", () => ({
@@ -305,6 +317,11 @@ jest.mock("../../services/dataCache", () => ({
         getArtistImagesBatch: jest.fn(),
         getArtistImage: jest.fn(),
     },
+}));
+
+const mockResolveArtistImage = jest.fn();
+jest.mock("../../services/metadata/artistImageResolver", () => ({
+    resolveArtistImage: mockResolveArtistImage,
 }));
 
 jest.mock("../../services/artistCountsService", () => ({
@@ -524,7 +541,6 @@ const mockLastFmGetArtistTopTracks =
     lastFmService.getArtistTopTracks as jest.Mock;
 const mockLastFmGetSimilarArtists =
     lastFmService.getSimilarArtists as jest.Mock;
-const mockDeezerGetArtistImage = deezerService.getArtistImage as jest.Mock;
 const mockImageProviderGetAlbumCover =
     imageProviderService.getAlbumCover as jest.Mock;
 const mockMusicBrainzSearchArtist =
@@ -2271,7 +2287,7 @@ describe("library catalog list runtime coverage", () => {
         mockGetArtistImage.mockResolvedValue(null);
         mockLastFmGetArtistTopTracks.mockResolvedValue([]);
         mockLastFmGetSimilarArtists.mockResolvedValue([]);
-        mockDeezerGetArtistImage.mockResolvedValue(null);
+        mockResolveArtistImage.mockResolvedValue(null);
         mockImageProviderGetAlbumCover.mockResolvedValue(null);
         mockMusicBrainzSearchArtist.mockResolvedValue([]);
         mockMusicBrainzGetReleaseGroups.mockResolvedValue([]);
@@ -2853,7 +2869,10 @@ describe("library catalog list runtime coverage", () => {
                 _count: { albums: 3 },
             },
         ]);
-        mockDeezerGetArtistImage.mockResolvedValueOnce("similar-two.jpg");
+        mockResolveArtistImage.mockResolvedValueOnce({
+            url: "similar-two.jpg",
+            source: "deezer",
+        });
         mockGetArtistImage.mockResolvedValueOnce("hero-fetched.jpg");
         mockRedisGet.mockImplementation(async (key: string) => {
             if (key === "discography:artist-real-mbid") {
@@ -2898,6 +2917,10 @@ describe("library catalog list runtime coverage", () => {
             24 * 60 * 60,
             expect.any(String),
         );
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Similar Two",
+            mbid: null,
+        });
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "top-tracks:artist-1",
             24 * 60 * 60,
@@ -3226,9 +3249,10 @@ describe("library catalog list runtime coverage", () => {
                 match: 0.91,
             },
         ]);
-        mockDeezerGetArtistImage.mockResolvedValueOnce(
-            "https://images.example/similar-cacheless.jpg",
-        );
+        mockResolveArtistImage.mockResolvedValueOnce({
+            url: "https://images.example/similar-cacheless.jpg",
+            source: "deezer",
+        });
 
         const req = {
             params: { id: "artist-cacheless" },
@@ -3240,6 +3264,10 @@ describe("library catalog list runtime coverage", () => {
         await artistByIdHandler(req, res);
 
         expect(mockMusicBrainzGetReleaseGroups).not.toHaveBeenCalled();
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Similar Cacheless",
+            mbid: "sim-cacheless",
+        });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual(
             expect.objectContaining({

@@ -34,7 +34,6 @@ jest.mock("../../services/youtubeMusic", () => ({
 
 const deezerService = {
     getTrackPreview: jest.fn(),
-    getArtistImage: jest.fn(),
     getAlbumCover: jest.fn(),
 };
 
@@ -57,7 +56,6 @@ jest.mock("../../services/musicbrainz", () => ({
 const lastFmService = {
     getArtistInfo: jest.fn(),
     getArtistTopTracks: jest.fn(),
-    getBestImage: jest.fn(),
     getAlbumInfo: jest.fn(),
 };
 
@@ -65,12 +63,9 @@ jest.mock("../../services/lastfm", () => ({
     lastFmService,
 }));
 
-const fanartService = {
-    getArtistImage: jest.fn(),
-};
-
-jest.mock("../../services/fanart", () => ({
-    fanartService,
+const mockResolveArtistImage = jest.fn();
+jest.mock("../../services/metadata/artistImageResolver", () => ({
+    resolveArtistImage: mockResolveArtistImage,
 }));
 
 const redisClient = {
@@ -91,7 +86,6 @@ const mockLoggerError = logger.error as jest.Mock;
 
 const mockYtSearch = ytMusicService.search as jest.Mock;
 const mockGetTrackPreview = deezerService.getTrackPreview as jest.Mock;
-const mockGetArtistImage = deezerService.getArtistImage as jest.Mock;
 const mockGetAlbumCover = deezerService.getAlbumCover as jest.Mock;
 
 const mockSearchArtist = musicBrainzService.searchArtist as jest.Mock;
@@ -102,10 +96,7 @@ const mockGetRelease = musicBrainzService.getRelease as jest.Mock;
 
 const mockGetArtistInfo = lastFmService.getArtistInfo as jest.Mock;
 const mockGetArtistTopTracks = lastFmService.getArtistTopTracks as jest.Mock;
-const mockGetBestImage = lastFmService.getBestImage as jest.Mock;
 const mockGetAlbumInfo = lastFmService.getAlbumInfo as jest.Mock;
-
-const mockFanartArtistImage = fanartService.getArtistImage as jest.Mock;
 
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
@@ -161,7 +152,6 @@ describe("artists routes runtime", () => {
         mockGetSystemSettings.mockResolvedValue({ ytMusicEnabled: true });
         mockYtSearch.mockResolvedValue({ results: [], total: 0 });
         mockGetTrackPreview.mockResolvedValue(null);
-        mockGetArtistImage.mockResolvedValue(null);
         mockGetAlbumCover.mockResolvedValue(null);
 
         mockSearchArtist.mockResolvedValue([]);
@@ -178,10 +168,8 @@ describe("artists routes runtime", () => {
             similar: { artist: [] },
         });
         mockGetArtistTopTracks.mockResolvedValue([]);
-        mockGetBestImage.mockReturnValue(null);
         mockGetAlbumInfo.mockResolvedValue(null);
-
-        mockFanartArtistImage.mockResolvedValue(null);
+        mockResolveArtistImage.mockResolvedValue(null);
 
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
@@ -607,10 +595,6 @@ describe("artists routes runtime", () => {
             url: "https://last.fm/resolved-artist",
         });
 
-        mockGetBestImage.mockReturnValueOnce(
-            "https://last.fm/images/resolved-artist.jpg",
-        );
-
         mockGetArtistTopTracks.mockResolvedValueOnce([
             {
                 name: "Hit Song",
@@ -622,13 +606,22 @@ describe("artists routes runtime", () => {
             },
         ]);
 
-        mockFanartArtistImage.mockImplementation(async (_mbid: string) => null);
-
-        mockGetArtistImage.mockImplementation(async (artistName: string) => {
-            if (artistName === "Similar Two") {
-                return "https://deezer/images/sim-2.jpg";
-            }
-            return null;
+        mockResolveArtistImage.mockImplementation(async ({ artistName }) => {
+            const images: Record<string, { url: string; source: string }> = {
+                "Resolved Artist": {
+                    url: "https://last.fm/images/resolved-artist.jpg",
+                    source: "lastfm",
+                },
+                "Similar One": {
+                    url: "https://last.fm/images/sim-1.jpg",
+                    source: "lastfm",
+                },
+                "Similar Two": {
+                    url: "https://deezer/images/sim-2.jpg",
+                    source: "deezer",
+                },
+            };
+            return images[artistName] ?? null;
         });
 
         mockGetReleaseGroups.mockResolvedValueOnce([
@@ -682,6 +675,18 @@ describe("artists routes runtime", () => {
             10,
         );
         expect(mockGetReleaseGroups).toHaveBeenCalledWith("artist-mbid-1");
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Resolved Artist",
+            mbid: "artist-mbid-1",
+        });
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Similar One",
+            mbid: "sim-1",
+        });
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Similar Two",
+            mbid: null,
+        });
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual(

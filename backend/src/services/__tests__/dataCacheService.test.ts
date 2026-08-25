@@ -31,22 +31,8 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
-jest.mock("../fanart", () => ({
-    fanartService: {
-        getArtistImage: jest.fn(),
-    },
-}));
-
-jest.mock("../deezer", () => ({
-    deezerService: {
-        getArtistImage: jest.fn(),
-    },
-}));
-
-jest.mock("../lastfm", () => ({
-    lastFmService: {
-        getArtistInfo: jest.fn(),
-    },
+jest.mock("../metadata/artistImageResolver", () => ({
+    resolveArtistImage: jest.fn(),
 }));
 
 jest.mock("../coverArt", () => ({
@@ -62,9 +48,7 @@ jest.mock("../imageStorage", () => ({
 import { dataCacheService } from "../dataCache";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
-import { fanartService } from "../fanart";
-import { deezerService } from "../deezer";
-import { lastFmService } from "../lastfm";
+import { resolveArtistImage } from "../metadata/artistImageResolver";
 import { coverArtService } from "../coverArt";
 import { downloadAndStoreImage } from "../imageStorage";
 import { logger } from "../../utils/logger";
@@ -81,9 +65,7 @@ const mockRedisSetEx = redisClient.setEx as jest.Mock;
 const mockRedisMGet = redisClient.mGet as jest.Mock;
 const mockRedisMulti = redisClient.multi as jest.Mock;
 
-const mockFanartGetArtistImage = fanartService.getArtistImage as jest.Mock;
-const mockDeezerGetArtistImage = deezerService.getArtistImage as jest.Mock;
-const mockLastfmGetArtistInfo = lastFmService.getArtistInfo as jest.Mock;
+const mockResolveArtistImage = resolveArtistImage as jest.Mock;
 const mockCoverArtGet = coverArtService.getCoverArt as jest.Mock;
 const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
 
@@ -116,9 +98,7 @@ describe("dataCacheService", () => {
         mockRedisMGet.mockResolvedValue([]);
         mockRedisMulti.mockImplementation(() => createRedisMulti());
 
-        mockFanartGetArtistImage.mockResolvedValue(null);
-        mockDeezerGetArtistImage.mockResolvedValue(null);
-        mockLastfmGetArtistInfo.mockResolvedValue(null);
+        mockResolveArtistImage.mockResolvedValue(null);
         mockCoverArtGet.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(null);
     });
@@ -142,7 +122,7 @@ describe("dataCacheService", () => {
             "native:artists/custom.jpg",
         );
         expect(mockRedisGet).not.toHaveBeenCalled();
-        expect(mockFanartGetArtistImage).not.toHaveBeenCalled();
+        expect(mockResolveArtistImage).not.toHaveBeenCalled();
     });
 
     it("uses Redis artist cache and syncs back to DB when DB misses", async () => {
@@ -158,7 +138,7 @@ describe("dataCacheService", () => {
             where: { id: "artist-2" },
             data: { heroUrl: "native:artists/from-redis.jpg" },
         });
-        expect(mockFanartGetArtistImage).not.toHaveBeenCalled();
+        expect(mockResolveArtistImage).not.toHaveBeenCalled();
     });
 
     it("returns null on negative Redis artist cache hit", async () => {
@@ -170,13 +150,14 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBeNull();
-        expect(mockFanartGetArtistImage).not.toHaveBeenCalled();
-        expect(mockDeezerGetArtistImage).not.toHaveBeenCalled();
-        expect(mockLastfmGetArtistInfo).not.toHaveBeenCalled();
+        expect(mockResolveArtistImage).not.toHaveBeenCalled();
     });
 
-    it("fetches artist image from Fanart, stores local path, and persists", async () => {
-        mockFanartGetArtistImage.mockResolvedValue("https://fanart/image.jpg");
+    it("resolves an artist image through the facade, stores it locally, and persists it", async () => {
+        mockResolveArtistImage.mockResolvedValue({
+            url: "https://fanart/image.jpg",
+            source: "fanart",
+        });
         mockDownloadAndStoreImage.mockResolvedValue("native:artists/a1.jpg");
 
         const result = await dataCacheService.getArtistImage(
@@ -186,6 +167,10 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBe("native:artists/a1.jpg");
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Artist Four",
+            mbid: "mbid-4",
+        });
         expect(mockArtistUpdate).toHaveBeenCalledWith({
             where: { id: "artist-4" },
             data: { heroUrl: "native:artists/a1.jpg" },
@@ -197,8 +182,11 @@ describe("dataCacheService", () => {
         );
     });
 
-    it("skips Fanart for temp MBID, uses Deezer, and falls back to external URL when local download fails", async () => {
-        mockDeezerGetArtistImage.mockResolvedValue("https://deezer/image.jpg");
+    it("passes a synthetic MBID to the facade and falls back to the external URL when local download fails", async () => {
+        mockResolveArtistImage.mockResolvedValue({
+            url: "https://deezer/image.jpg",
+            source: "deezer",
+        });
         mockDownloadAndStoreImage.mockResolvedValue(null);
 
         const result = await dataCacheService.getArtistImage(
@@ -208,24 +196,17 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBe("https://deezer/image.jpg");
-        expect(mockFanartGetArtistImage).not.toHaveBeenCalled();
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Artist Five",
+            mbid: "temp-artist-5",
+        });
         expect(mockArtistUpdate).toHaveBeenCalledWith({
             where: { id: "artist-5" },
             data: { heroUrl: "https://deezer/image.jpg" },
         });
     });
 
-    it("ignores Last.fm placeholder image and stores a negative cache entry", async () => {
-        mockLastfmGetArtistInfo.mockResolvedValue({
-            image: [
-                {
-                    size: "extralarge",
-                    "#text":
-                        "https://lastfm/2a96cbd8b46e442fc41c2b86b821562f.png",
-                },
-            ],
-        });
-
+    it("stores its existing negative cache entry when the facade misses", async () => {
         const result = await dataCacheService.getArtistImage(
             "artist-6",
             "Artist Six",
@@ -233,6 +214,10 @@ describe("dataCacheService", () => {
         );
 
         expect(result).toBeNull();
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Artist Six",
+            mbid: "mbid-6",
+        });
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "hero:artist-6",
             NEGATIVE_CACHE_SECONDS,

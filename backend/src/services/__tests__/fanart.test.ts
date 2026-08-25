@@ -166,6 +166,42 @@ describe("fanart service", () => {
         );
     });
 
+    it("uses thumb, banner, then logo order for square artist images", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            fanartEnabled: true,
+            fanartApiKey: "db-key",
+        });
+        mockAxiosGet
+            .mockResolvedValueOnce({
+                data: {
+                    artistbackground: [{ url: "https://cdn/background.jpg" }],
+                    artistthumb: [{ url: "https://cdn/thumb.jpg" }],
+                    musicbanner: [{ url: "https://cdn/banner.jpg" }],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    artistbackground: [{ url: "https://cdn/background.jpg" }],
+                    artistthumb: [],
+                    musicbanner: [{ url: "banner-file.jpg" }],
+                    hdmusiclogo: [{ url: "https://cdn/logo.png" }],
+                },
+            });
+
+        await expect(
+            fanartService.getArtistImage("mbid-square-thumb", {
+                preference: "square",
+            }),
+        ).resolves.toBe("https://cdn/thumb.jpg");
+        await expect(
+            fanartService.getArtistImage("mbid-square-banner", {
+                preference: "square",
+            }),
+        ).resolves.toBe(
+            "https://assets.fanart.tv/fanart/music/mbid-square-banner/musicbanner/banner-file.jpg",
+        );
+    });
+
     it("returns null for 404 and logs non-404 artist-image errors", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             fanartEnabled: true,

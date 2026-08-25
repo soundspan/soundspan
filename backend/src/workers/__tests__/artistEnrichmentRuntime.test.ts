@@ -30,11 +30,8 @@ describe("artistEnrichment runtime", () => {
             getArtistInfo: jest.fn().mockResolvedValue(null),
             getSimilarArtists: jest.fn().mockResolvedValue([]),
         };
-        const fanartService = {
-            getArtistImage: jest.fn().mockResolvedValue(null),
-        };
-        const deezerService = {
-            getArtistImage: jest.fn().mockResolvedValue(null),
+        const artistImageResolver = {
+            resolveArtistImage: jest.fn().mockResolvedValue(null),
         };
         const musicBrainzService = {
             searchArtist: jest.fn().mockResolvedValue([]),
@@ -54,8 +51,22 @@ describe("artistEnrichment runtime", () => {
         jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../../services/wikidata", () => ({ wikidataService }));
         jest.doMock("../../services/lastfm", () => ({ lastFmService }));
-        jest.doMock("../../services/fanart", () => ({ fanartService }));
-        jest.doMock("../../services/deezer", () => ({ deezerService }));
+        jest.doMock(
+            "../../services/metadata/artistImageResolver",
+            () => artistImageResolver,
+        );
+        jest.doMock("../../utils/musicIds", () => ({
+            isRealArtistMbid: (value: unknown) =>
+                typeof value === "string" && !value.startsWith("temp-"),
+            rgMbidKind: (value: string) =>
+                value.startsWith("federation:")
+                    ? "federation"
+                    : value.startsWith("remote:")
+                      ? "remote"
+                      : value.startsWith("temp-")
+                        ? "temp"
+                        : "musicbrainz",
+        }));
         jest.doMock("../../services/musicbrainz", () => ({
             musicBrainzService,
         }));
@@ -73,8 +84,7 @@ describe("artistEnrichment runtime", () => {
             logger,
             wikidataService,
             lastFmService,
-            fanartService,
-            deezerService,
+            artistImageResolver,
             musicBrainzService,
             coverArtService,
             redisClient,
@@ -107,6 +117,10 @@ describe("artistEnrichment runtime", () => {
         runtime.wikidataService.getArtistInfo.mockResolvedValueOnce({
             summary: "Wiki summary",
             heroUrl: "https://wiki/images/artist.jpg",
+        });
+        runtime.artistImageResolver.resolveArtistImage.mockResolvedValueOnce({
+            url: "https://wiki/images/artist.jpg",
+            source: "wikidata",
         });
         runtime.lastFmService.getArtistInfo.mockResolvedValueOnce({
             tags: {
@@ -191,6 +205,12 @@ describe("artistEnrichment runtime", () => {
             7 * 24 * 60 * 60,
             "/images/artists/a1.jpg",
         );
+        expect(
+            runtime.artistImageResolver.resolveArtistImage,
+        ).toHaveBeenCalledWith({
+            artistName: "Artist One",
+            mbid: "real-mbid-1",
+        });
     });
 
     it("uses a native hero path without attempting local download", async () => {
@@ -199,6 +219,10 @@ describe("artistEnrichment runtime", () => {
         runtime.wikidataService.getArtistInfo.mockResolvedValueOnce({
             summary: "Native hero from wikidata",
             heroUrl: "/assets/artist/native-cover.jpg",
+        });
+        runtime.artistImageResolver.resolveArtistImage.mockResolvedValueOnce({
+            url: "/assets/artist/native-cover.jpg",
+            source: "wikidata",
         });
         runtime.lastFmService.getArtistInfo.mockResolvedValueOnce({
             tags: { tag: [{ name: "ambient" }] },
@@ -330,10 +354,10 @@ describe("artistEnrichment runtime", () => {
                 },
             ],
         });
-        runtime.fanartService.getArtistImage.mockResolvedValueOnce(null);
-        runtime.deezerService.getArtistImage.mockResolvedValueOnce(
-            "https://deezer/images/artist.jpg",
-        );
+        runtime.artistImageResolver.resolveArtistImage.mockResolvedValueOnce({
+            url: "https://deezer/images/artist.jpg",
+            source: "deezer",
+        });
         runtime.imageStorage.isNativePath.mockReturnValue(false);
         runtime.imageStorage.downloadAndStoreImage.mockResolvedValueOnce(null);
 
@@ -344,12 +368,12 @@ describe("artistEnrichment runtime", () => {
         } as any;
         await runtime.enrichSimilarArtist(artist);
 
-        expect(runtime.fanartService.getArtistImage).toHaveBeenCalledWith(
-            "real-artist-mbid",
-        );
-        expect(runtime.deezerService.getArtistImage).toHaveBeenCalledWith(
-            "Artist Three",
-        );
+        expect(
+            runtime.artistImageResolver.resolveArtistImage,
+        ).toHaveBeenCalledWith({
+            artistName: "Artist Three",
+            mbid: "real-artist-mbid",
+        });
         expect(runtime.imageStorage.downloadAndStoreImage).toHaveBeenCalledWith(
             "https://deezer/images/artist.jpg",
             "a3",
@@ -520,6 +544,10 @@ describe("artistEnrichment runtime", () => {
         runtime.wikidataService.getArtistInfo.mockResolvedValueOnce({
             summary: "Cache resilient summary",
             heroUrl: "https://images.example.com/artist-hero.jpg",
+        });
+        runtime.artistImageResolver.resolveArtistImage.mockResolvedValueOnce({
+            url: "https://images.example.com/artist-hero.jpg",
+            source: "wikidata",
         });
         runtime.lastFmService.getArtistInfo.mockResolvedValueOnce(null);
         runtime.imageStorage.isNativePath.mockReturnValue(false);

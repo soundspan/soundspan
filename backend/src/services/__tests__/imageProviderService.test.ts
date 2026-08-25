@@ -3,9 +3,7 @@ const logger = {
     warn: jest.fn(),
     error: jest.fn(),
 };
-jest.mock("../../utils/logger", () => ({
-    logger,
-}));
+jest.mock("../../utils/logger", () => ({ logger }));
 
 const mockConfig = {
     secretsDbOnly: false,
@@ -22,44 +20,29 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
 }));
 
-const mockNormalizeQuotes = jest.fn((value: string) => value);
-const mockNormalizeFullwidth = jest.fn((value: string) => value);
-jest.mock("../../utils/stringNormalization", () => ({
-    normalizeQuotes: (value: string) => mockNormalizeQuotes(value),
-    normalizeFullwidth: (value: string) => mockNormalizeFullwidth(value),
-}));
-
-const rateLimiter = {
-    execute: jest.fn(),
-};
-jest.mock("../rateLimiter", () => ({
-    rateLimiter,
-}));
+const rateLimiter = { execute: jest.fn() };
+jest.mock("../rateLimiter", () => ({ rateLimiter }));
 
 const mockAxiosGet = jest.fn();
 const mockAxiosIsAxiosError = jest.fn();
 jest.mock("axios", () => ({
     __esModule: true,
     default: {
-        get: (...args: any[]) => mockAxiosGet(...args),
-        isAxiosError: (...args: any[]) => mockAxiosIsAxiosError(...args),
+        get: (...args: unknown[]) => mockAxiosGet(...args),
+        isAxiosError: (...args: unknown[]) => mockAxiosIsAxiosError(...args),
     },
-    get: (...args: any[]) => mockAxiosGet(...args),
-    isAxiosError: (...args: any[]) => mockAxiosIsAxiosError(...args),
-}));
-
-const lastFmService = {
-    getArtistInfo: jest.fn(),
-};
-jest.mock("../lastfm", () => ({
-    lastFmService,
 }));
 
 const mockDeezerGetAlbumCover = jest.fn();
 jest.mock("../deezer", () => ({
     deezerService: {
-        getAlbumCover: (...args: any[]) => mockDeezerGetAlbumCover(...args),
+        getAlbumCover: (...args: unknown[]) => mockDeezerGetAlbumCover(...args),
     },
+}));
+
+const mockResolveArtistImage = jest.fn();
+jest.mock("../metadata/artistImageResolver", () => ({
+    resolveArtistImage: (...args: unknown[]) => mockResolveArtistImage(...args),
 }));
 
 import { ImageProviderService } from "../imageProvider";
@@ -70,192 +53,44 @@ describe("image provider service behavior", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         process.env.FANART_API_KEY = originalFanartApiKey;
-
-        rateLimiter.execute.mockImplementation(
-            async (_bucket: string, fn: () => Promise<unknown>) => fn(),
-        );
-
-        mockAxiosGet.mockResolvedValue({ data: {} });
-        mockAxiosIsAxiosError.mockReturnValue(false);
-        lastFmService.getArtistInfo.mockResolvedValue(null);
         mockConfig.secretsDbOnly = false;
         mockGetSystemSettings.mockResolvedValue(null);
-
-        mockNormalizeQuotes.mockImplementation((value: string) => value);
-        mockNormalizeFullwidth.mockImplementation((value: string) => value);
+        mockResolveArtistImage.mockResolvedValue(null);
+        mockDeezerGetAlbumCover.mockResolvedValue(null);
+        mockAxiosGet.mockResolvedValue({ data: {} });
+        mockAxiosIsAxiosError.mockReturnValue(false);
+        rateLimiter.execute.mockImplementation(
+            async (_bucket: string, run: () => Promise<unknown>) => run(),
+        );
     });
 
     afterAll(() => {
         process.env.FANART_API_KEY = originalFanartApiKey;
     });
 
-    it("returns Deezer artist image first and short-circuits fallback chain", async () => {
-        process.env.FANART_API_KEY = "fanart-key";
+    it("delegates artist image resolution to the metadata facade", async () => {
         const service = new ImageProviderService();
-
-        const deezerSpy = jest
-            .spyOn(service as any, "getArtistImageFromDeezer")
-            .mockResolvedValueOnce({
-                url: "https://deezer/artist-xl.jpg",
-                source: "deezer",
-                size: "xl",
-            });
-        const fanartSpy = jest.spyOn(
-            service as any,
-            "getArtistImageFromFanart",
-        );
-        const mbSpy = jest.spyOn(
-            service as any,
-            "getArtistImageFromMusicBrainz",
-        );
+        mockResolveArtistImage.mockResolvedValueOnce({
+            url: "https://wikidata/artist.jpg",
+            source: "wikidata",
+        });
 
         await expect(
             service.getArtistImage("Artist Name", "artist-mbid"),
         ).resolves.toEqual({
-            url: "https://deezer/artist-xl.jpg",
-            source: "deezer",
-            size: "xl",
+            url: "https://wikidata/artist.jpg",
+            source: "wikidata",
         });
-
-        expect(deezerSpy).toHaveBeenCalledWith("Artist Name", 5000);
-        expect(fanartSpy).not.toHaveBeenCalled();
-        expect(mbSpy).not.toHaveBeenCalled();
+        expect(mockResolveArtistImage).toHaveBeenCalledWith({
+            artistName: "Artist Name",
+            mbid: "artist-mbid",
+        });
     });
 
-    it("falls back artist image Deezer -> Fanart -> MusicBrainz and then null", async () => {
+    it("preserves the album-cover Deezer, MusicBrainz, Fanart order", async () => {
         process.env.FANART_API_KEY = "fanart-key";
         const service = new ImageProviderService();
-
-        jest.spyOn(service as any, "getArtistImageFromDeezer")
-            .mockRejectedValueOnce(new Error("deezer down"))
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null);
-        jest.spyOn(service as any, "getArtistImageFromFanart")
-            .mockResolvedValueOnce({
-                url: "https://fanart/artist.jpg",
-                source: "fanart",
-            })
-            .mockResolvedValueOnce(null);
-        jest.spyOn(service as any, "getArtistImageFromMusicBrainz")
-            .mockResolvedValueOnce({
-                url: "https://coverart/artist.jpg",
-                source: "musicbrainz",
-            })
-            .mockResolvedValueOnce(null);
-
-        await expect(
-            service.getArtistImage("Artist One", "mbid-1"),
-        ).resolves.toEqual({
-            url: "https://fanart/artist.jpg",
-            source: "fanart",
-        });
-
-        await expect(
-            service.getArtistImage("Artist Two", "mbid-2"),
-        ).resolves.toEqual({
-            url: "https://coverart/artist.jpg",
-            source: "musicbrainz",
-        });
-
-        await expect(
-            service.getArtistImage("Artist Three", "mbid-3"),
-        ).resolves.toBeNull();
-    });
-
-    it("skips fanart without API key and returns null when no artist sources resolve", async () => {
-        delete process.env.FANART_API_KEY;
-        const service = new ImageProviderService();
-
-        const fanartSpy = jest.spyOn(
-            service as any,
-            "getArtistImageFromFanart",
-        );
-        jest.spyOn(
-            service as any,
-            "getArtistImageFromDeezer",
-        ).mockResolvedValue(null);
-        jest.spyOn(
-            service as any,
-            "getArtistImageFromMusicBrainz",
-        ).mockResolvedValue(null);
-
-        await expect(
-            service.getArtistImage("No Key Artist", "mbid"),
-        ).resolves.toBeNull();
-        expect(fanartSpy).not.toHaveBeenCalled();
-    });
-
-    it("uses the env Fanart key when DB-only mode is off", async () => {
-        process.env.FANART_API_KEY = "env-key-456";
-        const service = new ImageProviderService();
-        jest.spyOn(
-            service as any,
-            "getArtistImageFromDeezer",
-        ).mockResolvedValue(null);
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                artistthumb: [{ url: "https://fanart/env-artist.jpg" }],
-            },
-        });
-
-        await expect(
-            service.getArtistImage("Env Artist", "env-mbid"),
-        ).resolves.toEqual({
-            url: "https://fanart/env-artist.jpg",
-            source: "fanart",
-        });
-        expect(mockGetSystemSettings).not.toHaveBeenCalled();
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            "https://webservice.fanart.tv/v3/music/env-mbid",
-            expect.objectContaining({
-                params: { api_key: "env-key-456" },
-            }),
-        );
-    });
-
-    it("resolves the stored Fanart key in DB-only mode", async () => {
-        process.env.FANART_API_KEY = "env-key-456";
-        mockConfig.secretsDbOnly = true;
-        mockGetSystemSettings.mockResolvedValue({
-            fanartEnabled: true,
-            fanartApiKey: "db-key-123",
-        });
-        const service = new ImageProviderService();
-        jest.spyOn(
-            service as any,
-            "getArtistImageFromDeezer",
-        ).mockResolvedValue(null);
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                artistthumb: [{ url: "https://fanart/db-artist.jpg" }],
-            },
-        });
-
-        await expect(
-            service.getArtistImage("DB Artist", "db-mbid"),
-        ).resolves.toEqual({
-            url: "https://fanart/db-artist.jpg",
-            source: "fanart",
-        });
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            "https://webservice.fanart.tv/v3/music/db-mbid",
-            expect.objectContaining({
-                params: { api_key: "db-key-123" },
-            }),
-        );
-    });
-
-    it("resolves album covers with Deezer-first ordering and fallbacks", async () => {
-        process.env.FANART_API_KEY = "fanart-key";
-        const service = new ImageProviderService();
-
-        const deezerSpy = jest
-            .spyOn(service as any, "getAlbumCoverFromDeezer")
-            .mockResolvedValueOnce({
-                url: "https://deezer/cover-xl.jpg",
-                source: "deezer",
-                size: "xl",
-            })
+        jest.spyOn(service as any, "getAlbumCoverFromDeezer")
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(null);
         jest.spyOn(service as any, "getAlbumCoverFromMusicBrainz")
@@ -264,83 +99,38 @@ describe("image provider service behavior", () => {
                 source: "musicbrainz",
             })
             .mockResolvedValueOnce(null);
-        jest.spyOn(service as any, "getAlbumCoverFromFanart")
-            .mockResolvedValueOnce({
-                url: "https://fanart/cover.jpg",
-                source: "fanart",
-            })
-            .mockResolvedValueOnce(null);
-
-        await expect(
-            service.getAlbumCover("Artist A", "Album A", "rg-1"),
-        ).resolves.toEqual({
-            url: "https://deezer/cover-xl.jpg",
-            source: "deezer",
-            size: "xl",
-        });
-
-        await expect(
-            service.getAlbumCover("Artist B", "Album B", "rg-2"),
-        ).resolves.toEqual({
-            url: "https://coverart/front.jpg",
-            source: "musicbrainz",
-        });
-
-        await expect(
-            service.getAlbumCover("Artist C", "Album C", "rg-3"),
-        ).resolves.toEqual({
+        jest.spyOn(
+            service as any,
+            "getAlbumCoverFromFanart",
+        ).mockResolvedValueOnce({
             url: "https://fanart/cover.jpg",
             source: "fanart",
         });
 
-        expect(deezerSpy).toHaveBeenCalledTimes(3);
+        await expect(
+            service.getAlbumCover("Artist A", "Album A", "rg-1"),
+        ).resolves.toEqual({
+            url: "https://coverart/front.jpg",
+            source: "musicbrainz",
+        });
+        await expect(
+            service.getAlbumCover("Artist B", "Album B", "rg-2"),
+        ).resolves.toEqual({
+            url: "https://fanart/cover.jpg",
+            source: "fanart",
+        });
     });
 
-    it("normalizes lookup values and maps Deezer artist/album responses", async () => {
+    it("delegates Deezer album matching to the Deezer service", async () => {
         const service = new ImageProviderService();
-        mockNormalizeQuotes.mockImplementation((value: string) =>
-            value.replace(/[“”]/g, '"'),
-        );
-        mockNormalizeFullwidth.mockImplementation((value: string) =>
-            value.replace("Ａ", "A"),
-        );
-
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                data: [
-                    {
-                        picture: "https://deezer/artist.jpg",
-                        picture_big: "https://deezer/artist-big.jpg",
-                        picture_xl: "https://deezer/artist-xl.jpg",
-                    },
-                ],
-            },
-        });
-
-        await expect(
-            (service as any).getArtistImageFromDeezer("Ａrtist “Name”", 2500),
-        ).resolves.toEqual({
-            url: "https://deezer/artist-xl.jpg",
-            source: "deezer",
-            size: "xl",
-        });
-
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            "https://api.deezer.com/search/artist",
-            {
-                params: { q: 'Artist "Name"', limit: 1 },
-                timeout: 2500,
-            },
-        );
-
-        // getAlbumCoverFromDeezer now delegates to deezerService.getAlbumCover()
         mockDeezerGetAlbumCover.mockResolvedValueOnce(
             "https://deezer/album-xl.jpg",
         );
+
         await expect(
             (service as any).getAlbumCoverFromDeezer(
-                "Ａrtist A",
-                "Album “One”",
+                "Artist A",
+                "Album One",
                 3000,
             ),
         ).resolves.toEqual({
@@ -349,45 +139,14 @@ describe("image provider service behavior", () => {
             size: "xl",
         });
         expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith(
-            "Ａrtist A",
-            "Album “One”",
+            "Artist A",
+            "Album One",
         );
-
-        mockDeezerGetAlbumCover.mockResolvedValueOnce(null);
-        await expect(
-            (service as any).getAlbumCoverFromDeezer(
-                "No Match",
-                "No Match",
-                3000,
-            ),
-        ).resolves.toBeNull();
     });
 
-    it("maps fanart artist/album responses and handles missing API key", async () => {
-        delete process.env.FANART_API_KEY;
-        const noKeyService = new ImageProviderService();
-        await expect(
-            (noKeyService as any).getArtistImageFromFanart("mbid", 1000),
-        ).resolves.toBeNull();
-        await expect(
-            (noKeyService as any).getAlbumCoverFromFanart("rg-mbid", 1000),
-        ).resolves.toBeNull();
-
+    it("uses the configured Fanart key for album covers", async () => {
         process.env.FANART_API_KEY = "fanart-key";
         const service = new ImageProviderService();
-
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                artistthumb: [{ url: "https://fanart/artist-thumb.jpg" }],
-            },
-        });
-        await expect(
-            (service as any).getArtistImageFromFanart("artist-mbid", 2000),
-        ).resolves.toEqual({
-            url: "https://fanart/artist-thumb.jpg",
-            source: "fanart",
-        });
-
         mockAxiosGet.mockResolvedValueOnce({
             data: {
                 albums: {
@@ -397,23 +156,46 @@ describe("image provider service behavior", () => {
                 },
             },
         });
+
         await expect(
             (service as any).getAlbumCoverFromFanart("rg-mbid", 2000),
         ).resolves.toEqual({
             url: "https://fanart/album-cover.jpg",
             source: "fanart",
         });
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "https://webservice.fanart.tv/v3/music/albums/rg-mbid",
+            {
+                params: { api_key: "fanart-key" },
+                timeout: 2000,
+            },
+        );
     });
 
-    it("handles cover art archive lookup including 404 and unknown failures", async () => {
+    it("resolves the stored Fanart key in DB-only mode", async () => {
+        process.env.FANART_API_KEY = "env-key";
+        mockConfig.secretsDbOnly = true;
+        mockGetSystemSettings.mockResolvedValue({
+            fanartEnabled: true,
+            fanartApiKey: "db-key",
+        });
         const service = new ImageProviderService();
+        mockAxiosGet.mockResolvedValueOnce({ data: {} });
 
+        await expect(
+            (service as any).getAlbumCoverFromFanart("rg-mbid", 2000),
+        ).resolves.toBeNull();
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "https://webservice.fanart.tv/v3/music/albums/rg-mbid",
+            expect.objectContaining({ params: { api_key: "db-key" } }),
+        );
+    });
+
+    it("handles Cover Art Archive success, 404, and unknown failures", async () => {
+        const service = new ImageProviderService();
         mockAxiosGet.mockResolvedValueOnce({
             data: {
-                images: [
-                    { image: "https://coverart/front.jpg", front: true },
-                    { image: "https://coverart/other.jpg", front: false },
-                ],
+                images: [{ image: "https://coverart/front.jpg", front: true }],
             },
         });
         await expect(
@@ -430,53 +212,9 @@ describe("image provider service behavior", () => {
             (service as any).getAlbumCoverFromMusicBrainz("rg-2", 1000),
         ).resolves.toBeNull();
 
-        const unknownError = new Error("coverart timeout");
-        rateLimiter.execute.mockRejectedValueOnce(unknownError);
-        mockAxiosIsAxiosError.mockReturnValueOnce(false);
+        rateLimiter.execute.mockRejectedValueOnce(new Error("timeout"));
         await expect(
             (service as any).getAlbumCoverFromMusicBrainz("rg-3", 1000),
-        ).rejects.toThrow("coverart timeout");
-    });
-
-    it("returns null for placeholder MusicBrainz artist image lookup", async () => {
-        const service = new ImageProviderService();
-        await expect(
-            (service as any).getArtistImageFromMusicBrainz("artist-mbid", 1000),
-        ).resolves.toBeNull();
-    });
-
-    it("maps Last.fm artist images and handles Last.fm failures", async () => {
-        const service = new ImageProviderService();
-
-        lastFmService.getArtistInfo.mockResolvedValueOnce({
-            image: [
-                { size: "small", "#text": "https://lastfm/small.jpg" },
-                { size: "mega", "#text": "https://lastfm/mega.jpg" },
-            ],
-        });
-        await expect(
-            service.getArtistImageFromLastFm("Artist", "mbid-1"),
-        ).resolves.toEqual({
-            url: "https://lastfm/mega.jpg",
-            source: "lastfm",
-            size: "mega",
-        });
-
-        lastFmService.getArtistInfo.mockResolvedValueOnce({
-            image: [{ size: "extralarge", "#text": "" }],
-        });
-        await expect(
-            service.getArtistImageFromLastFm("Artist"),
-        ).resolves.toBeNull();
-
-        lastFmService.getArtistInfo.mockRejectedValueOnce(
-            new Error("lastfm down"),
-        );
-        await expect(
-            service.getArtistImageFromLastFm("Artist"),
-        ).resolves.toBeNull();
-        expect(logger.debug).toHaveBeenCalledWith(
-            expect.stringContaining("Last.fm failed:"),
-        );
+        ).rejects.toThrow("timeout");
     });
 });

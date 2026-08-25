@@ -2,8 +2,8 @@ import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { lastFmService } from "../services/lastfm";
 import { musicBrainzService } from "../services/musicbrainz";
-import { fanartService } from "../services/fanart";
 import { deezerService } from "../services/deezer";
+import { resolveArtistImage } from "../services/metadata/artistImageResolver";
 import { ytMusicService } from "../services/youtubeMusic";
 import { redisClient } from "../utils/redis";
 import { normalizeToArray } from "../utils/normalize";
@@ -456,53 +456,11 @@ router.get<{ nameOrMbid: string }>(
                 }
             }
 
-            // Get artist image
-            let image = null;
-
-            // Try Fanart.tv first (if we have MBID)
-            if (mbid) {
-                try {
-                    image = await fanartService.getArtistImage(mbid);
-                    logger.debug(`Fanart.tv image for ${artistName}`);
-                } catch (error) {
-                    logger.debug(
-                        `✗ Failed to get Fanart.tv image for ${artistName}`,
-                    );
-                }
-            }
-
-            // Fallback to Deezer
-            if (!image) {
-                try {
-                    image = await deezerService.getArtistImage(artistName);
-                    if (image) {
-                        logger.debug(`Deezer image for ${artistName}`);
-                    }
-                } catch (error) {
-                    logger.debug(
-                        ` Failed to get Deezer image for ${artistName}`,
-                    );
-                }
-            }
-
-            // Fallback to Last.fm (but filter placeholders)
-            // NORMALIZATION: lastFmInfo.image could be a single object or array
-            if (!image && lastFmInfo?.image) {
-                const images = normalizeToArray(lastFmInfo.image);
-                const lastFmImage = lastFmService.getBestImage(images);
-                // Filter out Last.fm placeholder
-                if (
-                    lastFmImage &&
-                    !lastFmImage.includes("2a96cbd8b46e442fc41c2b86b821562f")
-                ) {
-                    image = lastFmImage;
-                    logger.debug(`Last.fm image for ${artistName}`);
-                } else {
-                    logger.debug(
-                        ` Last.fm returned placeholder for ${artistName}`,
-                    );
-                }
-            }
+            const artistImage = await resolveArtistImage({
+                artistName,
+                mbid,
+            });
+            const image = artistImage?.url ?? null;
 
             // Get discography from MusicBrainz
             let albums: any[] = [];
@@ -616,57 +574,17 @@ router.get<{ nameOrMbid: string }>(
                 );
                 similarArtists = await Promise.all(
                     similarArtistsRaw.slice(0, 10).map(async (artist: any) => {
-                        // NORMALIZATION: artist.image could be a single object or array
-                        const images = normalizeToArray(artist.image);
-                        const similarImage = images.find(
-                            (img: any) => img.size === "large",
-                        )?.[" #text"];
-
-                        let image = null;
-
-                        // Try Fanart.tv first (if we have MBID)
-                        if (artist.mbid) {
-                            try {
-                                image = await fanartService.getArtistImage(
-                                    artist.mbid,
-                                );
-                            } catch (error) {
-                                // Silently fail
-                            }
-                        }
-
-                        // Fallback to Deezer
-                        if (!image) {
-                            try {
-                                const deezerImage =
-                                    await deezerService.getArtistImage(
-                                        artist.name,
-                                    );
-                                if (deezerImage) {
-                                    image = deezerImage;
-                                }
-                            } catch (error) {
-                                // Silently fail
-                            }
-                        }
-
-                        // Last fallback to Last.fm (but filter placeholders)
-                        if (
-                            !image &&
-                            similarImage &&
-                            !similarImage.includes(
-                                "2a96cbd8b46e442fc41c2b86b821562f",
-                            )
-                        ) {
-                            image = similarImage;
-                        }
+                        const resolvedImage = await resolveArtistImage({
+                            artistName: artist.name,
+                            mbid: artist.mbid || null,
+                        });
 
                         return {
                             id: artist.mbid || artist.name,
                             name: artist.name,
                             mbid: artist.mbid || null,
                             url: artist.url,
-                            image,
+                            image: resolvedImage?.url ?? null,
                         };
                     }),
                 );

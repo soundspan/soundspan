@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Artist images now resolve through one provider ladder with unified caching, instead of five surface-specific implementations.
 - Search now matches songs by artist and album name, tolerates typos, and ranks fallback results by similarity instead of alphabetically.
 - Download job metadata updates now flow through guarded helpers instead of ad-hoc merges scattered across the backend.
 - TIDAL and YouTube Music library downloads now run through one shared processor with per-source steps, so fixes apply to both sources at once.

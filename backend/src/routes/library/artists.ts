@@ -53,6 +53,8 @@ import {
     filterDistinctDiscographyAlbums,
     findArtistTrackByTitle,
 } from "./artistPageMatching";
+import { resolveArtistImage } from "../../services/metadata/artistImageResolver";
+import { isRealArtistMbid } from "../../utils/musicIds";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -529,10 +531,7 @@ export async function handleGetArtist(
 
     // If artist has temp MBID, try to find real MBID by searching MusicBrainz
     let effectiveMbid = artist.mbid;
-    if (
-        shouldResolveMbid &&
-        (!effectiveMbid || effectiveMbid.startsWith("temp-"))
-    ) {
+    if (shouldResolveMbid && !isRealArtistMbid(effectiveMbid)) {
         logger.debug(
             ` Artist has temp/no MBID, searching MusicBrainz for ${artist.name}...`,
         );
@@ -621,8 +620,7 @@ export async function handleGetArtist(
         albumsWithOwnership = dbAlbums;
     } else {
         // Always fetch discography if we have a valid MBID - users need to see what's available
-        const shouldFetchDiscography =
-            effectiveMbid && !effectiveMbid.startsWith("temp-");
+        const shouldFetchDiscography = isRealArtistMbid(effectiveMbid);
 
         if (shouldFetchDiscography) {
             const discoCacheKey = `discography:${effectiveMbid}`;
@@ -854,10 +852,9 @@ export async function handleGetArtist(
                 );
             } else {
                 // Cache miss - fetch from Last.fm
-                const validMbid =
-                    effectiveMbid && !effectiveMbid.startsWith("temp-")
-                        ? effectiveMbid
-                        : "";
+                const validMbid = isRealArtistMbid(effectiveMbid)
+                    ? effectiveMbid
+                    : "";
                 lastfmTopTracks = await lastFmService.getArtistTopTracks(
                     validMbid,
                     artist.name,
@@ -1059,7 +1056,7 @@ export async function handleGetArtist(
                 libraryMatches.filter((a) => a.mbid).map((a) => [a.mbid!, a]),
             );
 
-            // Fetch images in parallel from Deezer (cached in Redis)
+            // Fetch missing images in parallel through the canonical facade.
             const similarWithImages = await Promise.all(
                 enrichedSimilar.slice(0, 10).map(async (s) => {
                     // Check if this artist is in our library
@@ -1069,28 +1066,16 @@ export async function handleGetArtist(
 
                     let image = libraryArtist?.heroUrl || null;
 
-                    // If no library image, try Deezer
+                    // Persisted library images remain the first choice.
                     if (!image) {
                         try {
-                            // Check Redis cache first
-                            const cacheKey = `deezer-artist-image:${s.name}`;
-                            const cached = await redisClient.get(cacheKey);
-                            if (cached && cached !== "NOT_FOUND") {
-                                image = cached;
-                            } else {
-                                image = await deezerService.getArtistImage(
-                                    s.name,
-                                );
-                                if (image) {
-                                    await redisClient.setEx(
-                                        cacheKey,
-                                        24 * 60 * 60,
-                                        image,
-                                    );
-                                }
-                            }
+                            const resolved = await resolveArtistImage({
+                                artistName: s.name,
+                                mbid: s.mbid,
+                            });
+                            image = resolved?.url ?? null;
                         } catch (err) {
-                            // Deezer failed, leave null
+                            // Image resolution failed, leave null.
                         }
                     }
 
@@ -1118,10 +1103,9 @@ export async function handleGetArtist(
             logger.debug(`[Artist] Fetching similar artists from Last.fm...`);
 
             try {
-                const validMbid =
-                    effectiveMbid && !effectiveMbid.startsWith("temp-")
-                        ? effectiveMbid
-                        : "";
+                const validMbid = isRealArtistMbid(effectiveMbid)
+                    ? effectiveMbid
+                    : "";
                 const lastfmSimilar = await lastFmService.getSimilarArtists(
                     validMbid,
                     artist.name,
@@ -1176,7 +1160,7 @@ export async function handleGetArtist(
                         .map((a) => [a.mbid!, a]),
                 );
 
-                // Fetch images in parallel (Deezer only - fastest source)
+                // Fetch missing images in parallel through the canonical facade.
                 const similarWithImages = await Promise.all(
                     lastfmSimilar.map(async (s: any) => {
                         const libraryArtist =
@@ -1187,11 +1171,13 @@ export async function handleGetArtist(
 
                         if (!image) {
                             try {
-                                image = await deezerService.getArtistImage(
-                                    s.name,
-                                );
+                                const resolved = await resolveArtistImage({
+                                    artistName: s.name,
+                                    mbid: s.mbid || null,
+                                });
+                                image = resolved?.url ?? null;
                             } catch (err) {
-                                // Deezer failed, leave null
+                                // Image resolution failed, leave null.
                             }
                         }
 
@@ -1474,7 +1460,7 @@ export async function handleDeleteArtist(
         // Delete from Lidarr if connected and artist has MBID
         let lidarrDeleted = false;
         let lidarrError: string | null = null;
-        if (artist.mbid && !artist.mbid.startsWith("temp-")) {
+        if (isRealArtistMbid(artist.mbid)) {
             try {
                 const { lidarrService } = await import("../../services/lidarr");
                 const lidarrResult = await lidarrService.deleteArtist(

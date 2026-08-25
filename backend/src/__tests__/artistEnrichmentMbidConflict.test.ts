@@ -40,16 +40,14 @@ jest.mock("../services/lastfm", () => ({
     },
 }));
 
-jest.mock("../services/fanart", () => ({
-    fanartService: {
-        getArtistImage: jest.fn().mockResolvedValue(null),
-    },
+jest.mock("../services/metadata/artistImageResolver", () => ({
+    resolveArtistImage: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock("../services/deezer", () => ({
-    deezerService: {
-        getArtistImage: jest.fn().mockResolvedValue(null),
-    },
+jest.mock("../utils/musicIds", () => ({
+    isRealArtistMbid: (value: unknown) =>
+        typeof value === "string" && !value.startsWith("temp-"),
+    rgMbidKind: () => "musicbrainz",
 }));
 
 jest.mock("../services/musicbrainz", () => ({

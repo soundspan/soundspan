@@ -7,16 +7,11 @@ import {
     normalizeQuotes,
 } from "../utils/stringNormalization";
 import { BRAND_USER_AGENT } from "../config/brand";
+import { isValidMbid } from "../utils/musicIds";
 
-const MBID_PATTERN =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export { isValidMbid } from "../utils/musicIds";
 
 type MbidEntity = "artist" | "release group" | "release";
-
-/** Returns whether a value has the UUID shape required for MusicBrainz IDs. */
-export function isValidMbid(value: unknown): value is string {
-    return typeof value === "string" && MBID_PATTERN.test(value);
-}
 
 function validateMbid(value: unknown, entity: MbidEntity): string {
     if (!isValidMbid(value)) {

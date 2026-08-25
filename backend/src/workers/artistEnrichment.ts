@@ -3,13 +3,13 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { wikidataService } from "../services/wikidata";
 import { lastFmService } from "../services/lastfm";
-import { fanartService } from "../services/fanart";
-import { deezerService } from "../services/deezer";
 import { musicBrainzService } from "../services/musicbrainz";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { coverArtService } from "../services/coverArt";
 import { redisClient } from "../utils/redis";
 import { downloadAndStoreImage, isNativePath } from "../services/imageStorage";
+import { resolveArtistImage } from "../services/metadata/artistImageResolver";
+import { isRealArtistMbid } from "../utils/musicIds";
 
 function isMbidUniqueConstraintError(error: unknown): boolean {
     if (!error || typeof error !== "object") return false;
@@ -46,7 +46,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
 
     try {
         // If artist has a temp MBID, try to get the real one from MusicBrainz
-        if (artist.mbid.startsWith("temp-")) {
+        if (!isRealArtistMbid(artist.mbid)) {
             logger.debug(
                 `${logPrefix} Temp MBID detected, searching MusicBrainz...`,
             );
@@ -55,7 +55,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                     artist.name,
                     1,
                 );
-                if (mbResults.length > 0 && mbResults[0].id) {
+                if (mbResults.length > 0 && isRealArtistMbid(mbResults[0].id)) {
                     const realMbid = mbResults[0].id;
                     logger.debug(
                         `${logPrefix} MusicBrainz: Found real MBID: ${realMbid}`,
@@ -109,7 +109,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         let heroUrl = null;
         let genres: string[] = [];
 
-        if (!artist.mbid.startsWith("temp-")) {
+        if (isRealArtistMbid(artist.mbid)) {
             logger.debug(
                 `${logPrefix} Wikidata: Fetching for MBID ${artist.mbid}...`,
             );
@@ -120,13 +120,9 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                 );
                 if (wikidataInfo) {
                     summary = wikidataInfo.summary;
-                    heroUrl = wikidataInfo.heroUrl;
                     if (summary) summarySource = "wikidata";
-                    if (heroUrl) imageSource = "wikidata";
                     logger.debug(
-                        `${logPrefix} Wikidata: SUCCESS (image: ${
-                            heroUrl ? "yes" : "no"
-                        }, summary: ${summary ? "yes" : "no"})`,
+                        `${logPrefix} Wikidata: SUCCESS (summary: ${summary ? "yes" : "no"})`,
                     );
                 } else {
                     logger.debug(`${logPrefix} Wikidata: No data returned`);
@@ -140,15 +136,15 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             logger.debug(`${logPrefix} Wikidata: Skipped (temp MBID)`);
         }
 
-        // Fetch from Last.fm if we need summary/heroUrl or always try for genres
-        if (!summary || !heroUrl || genres.length === 0) {
+        // Fetch from Last.fm if we need summary or genres.
+        if (!summary || genres.length === 0) {
             logger.debug(
-                `${logPrefix} Last.fm: Fetching (need summary: ${!summary}, need image: ${!heroUrl})...`,
+                `${logPrefix} Last.fm: Fetching (need summary: ${!summary})...`,
             );
             try {
-                const validMbid = artist.mbid.startsWith("temp-")
-                    ? undefined
-                    : artist.mbid;
+                const validMbid = isRealArtistMbid(artist.mbid)
+                    ? artist.mbid
+                    : undefined;
                 const lastfmInfo = await lastFmService.getArtistInfo(
                     artist.name,
                     validMbid,
@@ -179,102 +175,6 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                             );
                         }
                     }
-
-                    // Try Fanart.tv for image (only with real MBID)
-                    if (!heroUrl && !artist.mbid.startsWith("temp-")) {
-                        logger.debug(
-                            `${logPrefix} Fanart.tv: Fetching for MBID ${artist.mbid}...`,
-                        );
-                        try {
-                            heroUrl = await fanartService.getArtistImage(
-                                artist.mbid,
-                            );
-                            if (heroUrl) {
-                                imageSource = "fanart.tv";
-                                logger.debug(
-                                    `${logPrefix} Fanart.tv: SUCCESS - ${heroUrl.substring(
-                                        0,
-                                        60,
-                                    )}...`,
-                                );
-                            } else {
-                                logger.debug(
-                                    `${logPrefix} Fanart.tv: No image found`,
-                                );
-                            }
-                        } catch (error: any) {
-                            logger.debug(
-                                `${logPrefix} Fanart.tv: FAILED - ${
-                                    error?.message || error
-                                }`,
-                            );
-                        }
-                    }
-
-                    // Fallback to Deezer
-                    if (!heroUrl) {
-                        logger.debug(
-                            `${logPrefix} Deezer: Fetching for "${artist.name}"...`,
-                        );
-                        try {
-                            heroUrl = await deezerService.getArtistImage(
-                                artist.name,
-                            );
-                            if (heroUrl) {
-                                imageSource = "deezer";
-                                logger.debug(
-                                    `${logPrefix} Deezer: SUCCESS - ${heroUrl.substring(
-                                        0,
-                                        60,
-                                    )}...`,
-                                );
-                            } else {
-                                logger.debug(
-                                    `${logPrefix} Deezer: No image found`,
-                                );
-                            }
-                        } catch (error: any) {
-                            logger.debug(
-                                `${logPrefix} Deezer: FAILED - ${
-                                    error?.message || error
-                                }`,
-                            );
-                        }
-                    }
-
-                    // Last fallback to Last.fm's own image
-                    if (!heroUrl && lastfmInfo.image) {
-                        const imageArray = lastfmInfo.image as any[];
-                        if (Array.isArray(imageArray)) {
-                            const bestImage =
-                                imageArray.find(
-                                    (img) => img.size === "extralarge",
-                                )?.["#text"] ||
-                                imageArray.find(
-                                    (img) => img.size === "large",
-                                )?.["#text"] ||
-                                imageArray.find(
-                                    (img) => img.size === "medium",
-                                )?.["#text"];
-                            // Filter out Last.fm's placeholder images
-                            if (
-                                bestImage &&
-                                !bestImage.includes(
-                                    "2a96cbd8b46e442fc41c2b86b821562f",
-                                )
-                            ) {
-                                heroUrl = bestImage;
-                                imageSource = "lastfm";
-                                logger.debug(
-                                    `${logPrefix} Last.fm image: SUCCESS`,
-                                );
-                            } else {
-                                logger.debug(
-                                    `${logPrefix} Last.fm image: Placeholder/none`,
-                                );
-                            }
-                        }
-                    }
                 } else {
                     logger.debug(`${logPrefix} Last.fm: No data returned`);
                 }
@@ -285,6 +185,17 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             }
         }
 
+        try {
+            const image = await resolveArtistImage({
+                artistName: artist.name,
+                mbid: artist.mbid,
+            });
+            heroUrl = image?.url ?? null;
+            imageSource = image?.source ?? "none";
+        } catch (error) {
+            logger.debug(`${logPrefix} Artist image resolution failed`, error);
+        }
+
         // Get similar artists from Last.fm
         let similarArtists: Array<{
             name: string;
@@ -293,9 +204,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         }> = [];
         try {
             // Filter out temp MBIDs
-            const validMbid = artist.mbid.startsWith("temp-")
-                ? ""
-                : artist.mbid;
+            const validMbid = isRealArtistMbid(artist.mbid) ? artist.mbid : "";
             similarArtists = await lastFmService.getSimilarArtists(
                 validMbid,
                 artist.name,

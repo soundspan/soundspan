@@ -14,11 +14,9 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { buildFederatedCoverProxyPath } from "../utils/federationCover";
-import { fanartService } from "./fanart";
-import { deezerService } from "./deezer";
-import { lastFmService } from "./lastfm";
 import { coverArtService } from "./coverArt";
 import { downloadAndStoreImage } from "./imageStorage";
+import { resolveArtistImage } from "./metadata/artistImageResolver";
 
 // Cache TTLs
 const ARTIST_IMAGE_TTL = 365 * 24 * 60 * 60; // 1 year
@@ -241,7 +239,6 @@ class DataCacheService {
 
     /**
      * Fetch artist image from external APIs and store locally
-     * Order: Fanart.tv (if MBID) -> Deezer -> Last.fm
      * Returns native path (e.g., "native:artists/{id}.jpg") or null
      */
     private async fetchArtistImage(
@@ -249,80 +246,17 @@ class DataCacheService {
         artistName: string,
         mbid?: string | null,
     ): Promise<string | null> {
-        let externalUrl: string | null = null;
-        let source = "";
-
-        // Try Fanart.tv first if we have a valid MBID
-        if (mbid && !mbid.startsWith("temp-")) {
-            try {
-                externalUrl = await fanartService.getArtistImage(mbid);
-                if (externalUrl) {
-                    source = "Fanart.tv";
-                }
-            } catch (err) {
-                // Fanart.tv failed, continue
-            }
-        }
-
-        // Try Deezer
-        if (!externalUrl) {
-            try {
-                externalUrl = await deezerService.getArtistImage(artistName);
-                if (externalUrl) {
-                    source = "Deezer";
-                }
-            } catch (err) {
-                // Deezer failed, continue
-            }
-        }
-
-        // Try Last.fm
-        if (!externalUrl) {
-            try {
-                const validMbid =
-                    mbid && !mbid.startsWith("temp-") ? mbid : undefined;
-                const lastfmInfo = await lastFmService.getArtistInfo(
-                    artistName,
-                    validMbid,
-                );
-
-                if (lastfmInfo?.image && Array.isArray(lastfmInfo.image)) {
-                    const largestImage =
-                        lastfmInfo.image.find(
-                            (img: any) =>
-                                img.size === "extralarge" ||
-                                img.size === "mega",
-                        ) || lastfmInfo.image[lastfmInfo.image.length - 1];
-
-                    if (largestImage && largestImage["#text"]) {
-                        const imageUrl = largestImage["#text"];
-                        // Filter out Last.fm placeholder images
-                        if (
-                            !imageUrl.includes(
-                                "2a96cbd8b46e442fc41c2b86b821562f",
-                            )
-                        ) {
-                            externalUrl = imageUrl;
-                            source = "Last.fm";
-                        }
-                    }
-                }
-            } catch (err) {
-                // Last.fm failed
-            }
-        }
-
-        if (!externalUrl) {
+        const resolved = await resolveArtistImage({ artistName, mbid });
+        if (!resolved) {
             logger.debug(`[DataCache] No image found for ${artistName}`);
             return null;
         }
 
-        // Download and store locally
         logger.debug(
-            `[DataCache] Got image from ${source} for ${artistName}, downloading...`,
+            `[DataCache] Got image from ${resolved.source} for ${artistName}, downloading...`,
         );
         const localPath = await downloadAndStoreImage(
-            externalUrl,
+            resolved.url,
             artistId,
             "artist",
         );
@@ -338,7 +272,7 @@ class DataCacheService {
         logger.debug(
             `[DataCache] Download failed, using external URL for ${artistName}`,
         );
-        return externalUrl;
+        return resolved.url;
     }
 
     /**

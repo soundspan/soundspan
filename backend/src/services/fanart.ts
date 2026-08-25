@@ -5,6 +5,53 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { BRAND_USER_AGENT } from "../config/brand";
 import { config } from "../config";
 
+type ArtistImagePreference = "background" | "square";
+
+/** Options for selecting an artist image from Fanart.tv image sets. */
+export interface FanartArtistImageOptions {
+    preference?: ArtistImagePreference;
+}
+
+type FanartArtistImageKind =
+    | "artistbackground"
+    | "artistthumb"
+    | "musicbanner"
+    | "hdmusiclogo";
+
+const BACKGROUND_FIRST: readonly FanartArtistImageKind[] = [
+    "artistbackground",
+    "artistthumb",
+    "hdmusiclogo",
+];
+const SQUARE_FIRST: readonly FanartArtistImageKind[] = [
+    "artistthumb",
+    "musicbanner",
+    "hdmusiclogo",
+];
+
+function selectArtistImage(
+    data: Record<string, unknown>,
+    preference: ArtistImagePreference,
+): { kind: FanartArtistImageKind; url: string } | null {
+    const order = preference === "square" ? SQUARE_FIRST : BACKGROUND_FIRST;
+    for (let index = 0; index < order.length; index += 1) {
+        const kind = order[index];
+        const images = data[kind];
+        if (!Array.isArray(images) || images.length === 0) continue;
+        const url = (images[0] as { url?: unknown })?.url;
+        if (typeof url === "string" && url.length > 0) return { kind, url };
+    }
+    return null;
+}
+
+function expandArtistImageUrl(
+    mbid: string,
+    image: { kind: FanartArtistImageKind; url: string },
+): string {
+    if (image.url.startsWith("http")) return image.url;
+    return `https://assets.fanart.tv/fanart/music/${mbid}/${image.kind}/${image.url}`;
+}
+
 /**
  * Fanart.tv API Service
  *
@@ -80,7 +127,10 @@ class FanartService {
      * Get artist images (background, thumbnail, logo)
      * Returns the highest quality artist image available
      */
-    async getArtistImage(mbid: string): Promise<string | null> {
+    async getArtistImage(
+        mbid: string,
+        options: FanartArtistImageOptions = {},
+    ): Promise<string | null> {
         await this.ensureInitialized();
 
         // Early exit if no API key - don't log every time (reduces log spam)
@@ -89,7 +139,11 @@ class FanartService {
         }
 
         // Check cache first
-        const cacheKey = `fanart:artist:${mbid}`;
+        const preference = options.preference ?? "background";
+        const cacheKey =
+            preference === "square"
+                ? `fanart:artist:square:${mbid}`
+                : `fanart:artist:${mbid}`;
         try {
             if (redisClient.isOpen) {
                 const cached = await redisClient.get(cacheKey);
@@ -108,51 +162,10 @@ class FanartService {
                 params: { api_key: this.apiKey },
             });
 
-            const data = response.data;
-
-            // Priority: artistbackground > artistthumb > hdmusiclogo
-            let imageUrl: string | null = null;
-
-            if (data.artistbackground && data.artistbackground.length > 0) {
-                let rawUrl = data.artistbackground[0].url;
-
-                // If it's just a filename, construct the full URL
-                if (rawUrl && !rawUrl.startsWith("http")) {
-                    rawUrl = `https://assets.fanart.tv/fanart/music/${mbid}/artistbackground/${rawUrl}`;
-                    logger.debug(
-                        `  Fanart.tv: Constructed full URL from filename`,
-                    );
-                }
-
-                imageUrl = rawUrl;
-                logger.debug(`  Fanart.tv: Found artist background`);
-            } else if (data.artistthumb && data.artistthumb.length > 0) {
-                let rawUrl = data.artistthumb[0].url;
-
-                // If it's just a filename, construct the full URL
-                if (rawUrl && !rawUrl.startsWith("http")) {
-                    rawUrl = `https://assets.fanart.tv/fanart/music/${mbid}/artistthumb/${rawUrl}`;
-                    logger.debug(
-                        `  Fanart.tv: Constructed full URL from filename`,
-                    );
-                }
-
-                imageUrl = rawUrl;
-                logger.debug(`  Fanart.tv: Found artist thumbnail`);
-            } else if (data.hdmusiclogo && data.hdmusiclogo.length > 0) {
-                let rawUrl = data.hdmusiclogo[0].url;
-
-                // If it's just a filename, construct the full URL
-                if (rawUrl && !rawUrl.startsWith("http")) {
-                    rawUrl = `https://assets.fanart.tv/fanart/music/${mbid}/hdmusiclogo/${rawUrl}`;
-                    logger.debug(
-                        `  Fanart.tv: Constructed full URL from filename`,
-                    );
-                }
-
-                imageUrl = rawUrl;
-                logger.debug(`  Fanart.tv: Found HD logo`);
-            }
+            const selected = selectArtistImage(response.data, preference);
+            const imageUrl = selected
+                ? expandArtistImageUrl(mbid, selected)
+                : null;
 
             // Cache for 7 days
             if (imageUrl && redisClient.isOpen) {
