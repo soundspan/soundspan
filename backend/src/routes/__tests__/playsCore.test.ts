@@ -115,7 +115,15 @@ describe("plays routes integration", () => {
             source: "LIBRARY",
         });
         expect(mockTrackFindUnique).toHaveBeenCalledWith({
-            where: { id: "track-1", removedAt: null },
+            where: {
+                id: "track-1",
+                removedAt: null,
+                album: {
+                    location: {
+                        in: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
+                    },
+                },
+            },
         });
         expect(mockPlayCreate).toHaveBeenCalledWith({
             data: {
