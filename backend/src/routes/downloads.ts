@@ -7,18 +7,20 @@ import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
 import { musicBrainzService } from "../services/musicbrainz";
-import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { mapInteractiveRelease } from "../services/releaseContracts";
 import { createAlbumDownloadJob } from "../services/albumDownloadJobs";
-import { enqueueAlbumDownloadInBackground } from "../services/albumDownloadQueueService";
+import {
+    enqueueAlbumDownloadInBackground,
+    enqueueArtistDownloadExpansionInBackground,
+} from "../services/albumDownloadQueueService";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "../services/albumDownloadQueueOwnership";
+import { createArtistDownloadExpansionJob } from "../services/artistDownloadExpansionJobs";
 import {
     sendRouteFailure,
     sendInternalRouteError,
     sendRouteError,
 } from "./routeErrorResponse";
-import crypto from "crypto";
 import { probeDownloadSourceAvailability } from "../services/downloadSourcePolicy";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,
@@ -74,7 +76,7 @@ router.get("/availability", async (req, res) => {
  * /api/downloads:
  *   post:
  *     summary: Create a new download job for an artist or album
- *     description: Creates a persisted download job and queues album work for serialized background processing.
+ *     description: Creates a persisted download job and queues artist expansion or album work for background processing.
  *     tags: [Downloads]
  *     security:
  *       - apiKeyAuth: []
@@ -105,7 +107,7 @@ router.get("/availability", async (req, res) => {
  *                 default: library
  *     responses:
  *       200:
- *         description: Album jobs are created and queued for background processing, or an active duplicate is returned
+ *         description: Artist expansion or album work is queued for background processing, or an active duplicate is returned
  *       400:
  *         description: Missing required fields or no download service configured
  *       401:
@@ -121,6 +123,7 @@ router.post("/", requireAdmin, async (req, res) => {
             mbid,
             subject,
             artistName,
+            artistMbid,
             albumTitle,
             downloadType = "library",
         } = req.body;
@@ -167,23 +170,40 @@ router.post("/", requireAdmin, async (req, res) => {
                 : baseMusicPath;
 
         if (type === "artist") {
-            // For artist downloads, fetch albums and create individual jobs
-            const jobs = await processArtistDownload(
+            const jobResult = await createArtistDownloadExpansionJob({
                 userId,
-                mbid,
-                subject,
-                rootFolderPath,
+                artistMbid: mbid,
+                artistName: subject,
                 downloadType,
-            );
+                rootFolderPath,
+            });
+
+            if (jobResult.duplicate) {
+                return res.json({
+                    id: jobResult.job.id,
+                    status: jobResult.job.status,
+                    downloadType,
+                    rootFolderPath,
+                    message: "Download already in progress",
+                    duplicate: true,
+                });
+            }
+
+            enqueueArtistDownloadExpansionInBackground({
+                jobId: jobResult.job.id,
+                artistMbid: mbid,
+                artistName: subject,
+                downloadType,
+                rootFolderPath,
+                userId,
+            });
 
             return res.json({
-                id: jobs[0]?.id || null,
-                status: "processing",
+                id: jobResult.job.id,
+                status: "pending",
                 downloadType,
                 rootFolderPath,
-                message: `Creating download jobs for ${jobs.length} album(s)...`,
-                albumCount: jobs.length,
-                jobs: jobs.map((j) => ({ id: j.id, subject: j.subject })),
+                message: "Enumerating discography in the background",
             });
         }
 
@@ -192,6 +212,7 @@ router.post("/", requireAdmin, async (req, res) => {
             mbid,
             subject,
             artistName,
+            artistMbid,
             albumTitle,
             downloadType,
             rootFolderPath,
@@ -229,6 +250,7 @@ router.post("/", requireAdmin, async (req, res) => {
             mbid,
             subject,
             artistName: jobResult.verifiedArtistName,
+            artistMbid,
             albumTitle,
         });
 
@@ -244,223 +266,6 @@ router.post("/", requireAdmin, async (req, res) => {
         sendInternalRouteError(res, "Failed to create download job");
     }
 });
-
-/**
- * Process artist download by creating individual album jobs
- */
-async function processArtistDownload(
-    userId: string,
-    artistMbid: string,
-    artistName: string,
-    rootFolderPath: string,
-    downloadType: string,
-): Promise<{ id: string; subject: string }[]> {
-    logger.debug(`\n Processing artist download: ${artistName}`);
-    logger.debug(`   Artist MBID: ${artistMbid}`);
-
-    // Generate a batch ID to group all album downloads
-    const batchId = crypto.randomUUID();
-    logger.debug(`   Batch ID: ${batchId}`);
-
-    // CRITICAL FIX: Resolve canonical artist name from MusicBrainz
-    // Last.fm may return aliases (e.g., "blink" for "blink-182")
-    // Lidarr needs the official name to find the correct artist
-    let canonicalArtistName = artistName;
-    try {
-        logger.debug(`   Resolving canonical artist name from MusicBrainz...`);
-        const mbArtist = await musicBrainzService.getArtist(artistMbid);
-        if (mbArtist && mbArtist.name) {
-            canonicalArtistName = mbArtist.name;
-            if (canonicalArtistName !== artistName) {
-                logger.debug(
-                    `   ✓ Canonical name resolved: "${artistName}" → "${canonicalArtistName}"`,
-                );
-            } else {
-                logger.debug(
-                    `   ✓ Name matches canonical: "${canonicalArtistName}"`,
-                );
-            }
-        }
-    } catch (mbError: any) {
-        logger.warn(`   ⚠ MusicBrainz lookup failed: ${mbError.message}`);
-        // Fallback to LastFM correction
-        try {
-            const correction =
-                await lastFmService.getArtistCorrection(artistName);
-            if (correction?.canonicalName) {
-                canonicalArtistName = correction.canonicalName;
-                logger.debug(
-                    `   ✓ Name resolved via LastFM: "${artistName}" → "${canonicalArtistName}"`,
-                );
-            }
-        } catch (lfmError) {
-            logger.warn(
-                `   ⚠ LastFM correction also failed, using original name`,
-            );
-        }
-    }
-
-    try {
-        // First, add the artist to Lidarr (this monitors all albums)
-        const lidarrArtist = await lidarrService.addArtist(
-            artistMbid,
-            canonicalArtistName,
-            rootFolderPath,
-        );
-
-        if (!lidarrArtist) {
-            logger.debug(`   Failed to add artist to Lidarr`);
-            throw new Error("Failed to add artist to Lidarr");
-        }
-
-        logger.debug(`   Artist added to Lidarr (ID: ${lidarrArtist.id})`);
-
-        // Fetch albums from MusicBrainz
-        const releaseGroups = await musicBrainzService.getReleaseGroups(
-            artistMbid,
-            ["album", "ep"],
-            100,
-        );
-
-        logger.debug(
-            `   Found ${releaseGroups.length} albums/EPs from MusicBrainz`,
-        );
-
-        if (releaseGroups.length === 0) {
-            logger.debug(`   No albums found for artist`);
-            return [];
-        }
-
-        // Create individual album jobs
-        const jobs: { id: string; subject: string }[] = [];
-
-        for (const rg of releaseGroups) {
-            const albumMbid = rg.id;
-            const albumTitle = rg.title;
-            const albumSubject = `${artistName} - ${albumTitle}`;
-
-            // Check if we already have this album downloaded
-            const existingAlbum = await prisma.album.findFirst({
-                where: { rgMbid: albumMbid },
-            });
-
-            if (existingAlbum) {
-                logger.debug(
-                    `   Skipping "${albumTitle}" - already in library`,
-                );
-                continue;
-            }
-
-            // Use transaction with row-level locking to prevent race conditions
-            const jobResult = await prisma.$transaction(async (tx) => {
-                // Check for existing active job with FOR UPDATE SKIP LOCKED
-                // This prevents TOCTOU race conditions like in the single download case
-                const existingJobs = await tx.$queryRaw<
-                    Array<{
-                        id: string;
-                        status: string;
-                        subject: string;
-                        createdAt: Date;
-                    }>
-                >`
-                    SELECT id, status, subject, "createdAt"
-                    FROM "DownloadJob"
-                    WHERE "targetMbid" = ${albumMbid}
-                    AND status IN ('pending', 'processing')
-                    FOR UPDATE SKIP LOCKED
-                `;
-
-                if (existingJobs.length > 0) {
-                    return {
-                        skipped: true,
-                        job: existingJobs[0],
-                        reason: "already_queued",
-                    };
-                }
-
-                // Also check for recently failed job (within last 30 seconds) to prevent spam retries
-                const recentFailed = await tx.$queryRaw<
-                    Array<{
-                        id: string;
-                        status: string;
-                        completedAt: Date;
-                    }>
-                >`
-                    SELECT id, status, "completedAt"
-                    FROM "DownloadJob"
-                    WHERE "targetMbid" = ${albumMbid}
-                    AND status = 'failed'
-                    AND "completedAt" >= ${new Date(Date.now() - 30000)}
-                    FOR UPDATE SKIP LOCKED
-                `;
-
-                if (recentFailed.length > 0) {
-                    return {
-                        skipped: true,
-                        job: recentFailed[0],
-                        reason: "recently_failed",
-                    };
-                }
-
-                // Create new job inside transaction
-                const now = new Date();
-                const job = await tx.downloadJob.create({
-                    data: {
-                        userId,
-                        subject: albumSubject,
-                        type: "album",
-                        targetMbid: albumMbid,
-                        status: "pending",
-                        metadata: {
-                            queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER,
-                            downloadType,
-                            rootFolderPath,
-                            artistName,
-                            artistMbid,
-                            albumTitle,
-                            batchId, // Link all albums in this artist download
-                            statusText: "Queued",
-                            batchArtist: artistName,
-                            createdAt: now.toISOString(), // Track when job was created for timeout
-                        },
-                    },
-                });
-
-                return { skipped: false, job };
-            });
-
-            if (jobResult.skipped) {
-                logger.debug(
-                    `   Skipping "${albumTitle}" - ${
-                        jobResult.reason === "recently_failed"
-                            ? "recently failed"
-                            : "already in download queue"
-                    }`,
-                );
-                continue;
-            }
-
-            const job = jobResult.job;
-            jobs.push({ id: job.id, subject: albumSubject });
-            logger.debug(`   [JOB] Created job for: ${albumSubject}`);
-
-            enqueueAlbumDownloadInBackground({
-                jobId: job.id,
-                type: "album",
-                mbid: albumMbid,
-                subject: albumSubject,
-                artistName,
-                albumTitle,
-            });
-        }
-
-        logger.debug(`   Created ${jobs.length} album download jobs`);
-        return jobs;
-    } catch (error: any) {
-        logger.error(`   Failed to process artist download:`, error.message);
-        throw error;
-    }
-}
 
 /**
  * @openapi

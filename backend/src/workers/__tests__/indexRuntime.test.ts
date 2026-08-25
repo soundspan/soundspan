@@ -85,10 +85,12 @@ describe("workers runtime behavior", () => {
             async () => undefined,
         );
         const processAlbumDownload = jest.fn(async () => undefined);
+        const processArtistDownloadExpansion = jest.fn(async () => undefined);
         const finalizeAlbumDownloadQueueFailure = jest.fn(
             async () => undefined,
         );
         const recoverUnqueuedAlbumDownloads = jest.fn(async () => 0);
+        const recoverUnqueuedArtistDownloadExpansions = jest.fn(async () => 0);
         const recordAlbumDownloadOutcome = jest.fn();
         const registerRecoveryJobs = jest.fn(async () => undefined);
         const registerFederationProcessors = jest.fn();
@@ -236,8 +238,13 @@ describe("workers runtime behavior", () => {
             processAlbumDownload,
             finalizeAlbumDownloadQueueFailure,
         }));
+        jest.doMock("../processors/artistDownloadExpansionProcessor", () => ({
+            processArtistDownloadExpansion,
+        }));
         jest.doMock("../../services/albumDownloadQueueService", () => ({
+            ARTIST_DOWNLOAD_EXPANSION_JOB_NAME: "artist-download-expand",
             recoverUnqueuedAlbumDownloads,
+            recoverUnqueuedArtistDownloadExpansions,
         }));
         jest.doMock("../../metrics", () => ({
             recordAlbumDownloadOutcome,
@@ -358,8 +365,10 @@ describe("workers runtime behavior", () => {
             processRequestFulfillmentBatch,
             finalizeGenericImportQueueFailure,
             processAlbumDownload,
+            processArtistDownloadExpansion,
             finalizeAlbumDownloadQueueFailure,
             recoverUnqueuedAlbumDownloads,
+            recoverUnqueuedArtistDownloadExpansions,
             recordAlbumDownloadOutcome,
             registerRecoveryJobs,
             registerFederationProcessors,
@@ -427,6 +436,11 @@ describe("workers runtime behavior", () => {
             "album-download",
             1,
             mocks.processAlbumDownload,
+        );
+        expect(mocks.albumDownloadQueue.process).toHaveBeenCalledWith(
+            "artist-download-expand",
+            1,
+            mocks.processArtistDownloadExpansion,
         );
         expect(mocks.registerRecoveryJobs).toHaveBeenCalledTimes(1);
         expect(mocks.registerFederationProcessors).not.toHaveBeenCalled();
@@ -1225,6 +1239,7 @@ describe("workers runtime behavior", () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
         mocks.recoverUnqueuedAlbumDownloads.mockResolvedValueOnce(3);
+        mocks.recoverUnqueuedArtistDownloadExpansions.mockResolvedValueOnce(2);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         require("../index");
@@ -1247,8 +1262,14 @@ describe("workers runtime behavior", () => {
             "NX",
         );
         expect(mocks.recoverUnqueuedAlbumDownloads).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.recoverUnqueuedArtistDownloadExpansions,
+        ).toHaveBeenCalledTimes(1);
         expect(mocks.logger.info).toHaveBeenCalledWith(
             "Recovered 3 unqueued album downloads",
+        );
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            "Recovered 2 unqueued artist expansions",
         );
     });
 

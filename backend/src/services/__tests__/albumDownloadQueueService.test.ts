@@ -1,6 +1,7 @@
 const mockQueueAdd = jest.fn();
 const mockQueueGetJob = jest.fn();
 const mockDownloadJobFindMany = jest.fn();
+const mockDownloadJobFindUnique = jest.fn();
 const mockDownloadJobUpdate = jest.fn();
 const mockDownloadJobUpdateMany = jest.fn();
 const mockLoggerDebug = jest.fn();
@@ -17,6 +18,8 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         downloadJob: {
             findMany: (...args: unknown[]) => mockDownloadJobFindMany(...args),
+            findUnique: (...args: unknown[]) =>
+                mockDownloadJobFindUnique(...args),
             update: (...args: unknown[]) => mockDownloadJobUpdate(...args),
             updateMany: (...args: unknown[]) =>
                 mockDownloadJobUpdateMany(...args),
@@ -36,10 +39,13 @@ jest.mock("../../utils/logger", () => ({
 import {
     enqueueAlbumDownload,
     enqueueAlbumDownloadInBackground,
+    enqueueArtistDownloadExpansion,
+    recoverUnqueuedArtistDownloadExpansions,
     recoverUnqueuedAlbumDownloads,
 } from "../albumDownloadQueueService";
 import {
     ALBUM_DOWNLOAD_QUEUE_OWNER,
+    ARTIST_DOWNLOAD_EXPANSION_OWNER,
     isAlbumDownloadQueueOwned,
 } from "../albumDownloadQueueOwnership";
 
@@ -58,6 +64,9 @@ describe("album download queue service", () => {
         mockQueueAdd.mockResolvedValue({ id: "albumdl:download-job-1" });
         mockQueueGetJob.mockResolvedValue(null);
         mockDownloadJobFindMany.mockResolvedValue([]);
+        mockDownloadJobFindUnique.mockResolvedValue({
+            metadata: { preserved: true },
+        });
         mockDownloadJobUpdate.mockResolvedValue({});
         mockDownloadJobUpdateMany.mockResolvedValue({ count: 1 });
     });
@@ -84,7 +93,7 @@ describe("album download queue service", () => {
         });
     });
 
-    it("marks the persisted job failed with a static error and rethrows enqueue failure", async () => {
+    it("leaves the job pending with retry metadata and rethrows enqueue failure", async () => {
         const enqueueError = new Error("redis unavailable");
         mockQueueAdd.mockRejectedValueOnce(enqueueError);
 
@@ -93,9 +102,55 @@ describe("album download queue service", () => {
         expect(mockDownloadJobUpdate).toHaveBeenCalledWith({
             where: { id: payload.jobId },
             data: {
-                status: "failed",
-                error: "Download queue unavailable",
-                completedAt: expect.any(Date),
+                metadata: {
+                    preserved: true,
+                    statusText: "Queue admission failed — retrying",
+                },
+            },
+        });
+    });
+
+    it("enqueues artist expansion with its named job and stable id", async () => {
+        const artistPayload = {
+            jobId: "artist-job-1",
+            artistMbid: "artist-mbid-1",
+            artistName: "Artist",
+            downloadType: "library" as const,
+            rootFolderPath: "/music",
+            userId: "user-1",
+        };
+
+        await enqueueArtistDownloadExpansion(artistPayload);
+
+        expect(mockQueueAdd).toHaveBeenCalledWith(
+            "artist-download-expand",
+            artistPayload,
+            { jobId: "artistdl:artist-job-1" },
+        );
+    });
+
+    it("keeps artist expansion pending when queue admission fails", async () => {
+        const enqueueError = new Error("redis unavailable");
+        mockQueueAdd.mockRejectedValueOnce(enqueueError);
+
+        await expect(
+            enqueueArtistDownloadExpansion({
+                jobId: "artist-job-1",
+                artistMbid: "artist-mbid-1",
+                artistName: "Artist",
+                downloadType: "library",
+                rootFolderPath: "/music",
+                userId: "user-1",
+            }),
+        ).rejects.toBe(enqueueError);
+
+        expect(mockDownloadJobUpdate).toHaveBeenCalledWith({
+            where: { id: "artist-job-1" },
+            data: {
+                metadata: {
+                    preserved: true,
+                    statusText: "Queue admission failed — retrying",
+                },
             },
         });
     });
@@ -266,6 +321,55 @@ describe("album download queue service", () => {
                 },
                 take: 20,
             }),
+        );
+    });
+
+    it("recovers stale pending artist expansion rows", async () => {
+        const now = new Date("2026-08-24T18:00:00.000Z");
+        mockDownloadJobFindMany.mockResolvedValueOnce([
+            {
+                id: "artist-job-1",
+                userId: "user-1",
+                targetMbid: "artist-mbid-1",
+                subject: "Artist",
+                metadata: {
+                    queuedVia: ARTIST_DOWNLOAD_EXPANSION_OWNER,
+                    artistName: "Artist",
+                    downloadType: "discovery",
+                    rootFolderPath: "/music/discovery",
+                },
+            },
+        ]);
+
+        await expect(
+            recoverUnqueuedArtistDownloadExpansions(now),
+        ).resolves.toBe(1);
+
+        expect(mockDownloadJobFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    type: "artist",
+                    status: "pending",
+                    cleared: false,
+                    metadata: {
+                        path: ["queuedVia"],
+                        equals: ARTIST_DOWNLOAD_EXPANSION_OWNER,
+                    },
+                }),
+                take: 20,
+            }),
+        );
+        expect(mockQueueAdd).toHaveBeenCalledWith(
+            "artist-download-expand",
+            {
+                jobId: "artist-job-1",
+                artistMbid: "artist-mbid-1",
+                artistName: "Artist",
+                downloadType: "discovery",
+                rootFolderPath: "/music/discovery",
+                userId: "user-1",
+            },
+            { jobId: "artistdl:artist-job-1" },
         );
     });
 

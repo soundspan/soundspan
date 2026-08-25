@@ -199,6 +199,23 @@ describe("dispatchAlbumDownload", () => {
         );
     });
 
+    it("passes a supplied artist MBID to the manager-backed source", async () => {
+        await dispatchAlbumDownload({
+            ...baseParams,
+            artistMbid: "artist-mbid-1",
+        });
+
+        expect(mockStartDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "rg-1",
+            "user-1",
+            false,
+            "artist-mbid-1",
+        );
+    });
+
     it("uses the subject for both names when no delimiter or metadata exists", async () => {
         await dispatchAlbumDownload({
             ...baseParams,

@@ -51,6 +51,7 @@ const payload = {
     subject: "Artist - Album",
     artistName: "Artist",
     albumTitle: "Album",
+    artistMbid: "artist-mbid-1",
 } as const;
 
 describe("album download queue processor", () => {
@@ -316,6 +317,34 @@ describe("album download queue processor", () => {
         expect(mockDownloadJobUpdateMany).toHaveBeenCalledWith({
             where: {
                 id: payload.jobId,
+                status: { in: ["pending", "processing"] },
+            },
+            data: {
+                status: "failed",
+                error: "Download failed",
+                completedAt: expect.any(Date),
+            },
+        });
+    });
+
+    it("marks an artist expansion row failed after Bull exhausts retries", async () => {
+        const job = {
+            data: {
+                jobId: "artist-job-1",
+                artistMbid: "artist-mbid-1",
+                artistName: "Artist",
+                downloadType: "library",
+                rootFolderPath: "/music",
+                userId: "user-1",
+            },
+            getState: jest.fn().mockResolvedValue("failed"),
+        } as any;
+
+        await finalizeAlbumDownloadQueueFailure(job, new Error("raw failure"));
+
+        expect(mockDownloadJobUpdateMany).toHaveBeenCalledWith({
+            where: {
+                id: "artist-job-1",
                 status: { in: ["pending", "processing"] },
             },
             data: {

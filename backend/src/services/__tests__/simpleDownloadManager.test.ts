@@ -244,6 +244,9 @@ describe("simpleDownloadManager", () => {
 
         expect(result.success).toBe(true);
         expect(result.correlationId).toBeDefined();
+        expect(mockMusicBrainzService.getReleaseGroup).toHaveBeenCalledWith(
+            "album-mbid-1",
+        );
         expect(mockLidarrService.addAlbum).toHaveBeenCalledWith(
             "album-mbid-1",
             "Artist",
@@ -266,6 +269,29 @@ describe("simpleDownloadManager", () => {
                     }),
                 }),
             }),
+        );
+    });
+
+    it("uses a supplied artist MBID without querying the release group", async () => {
+        const result = await simpleDownloadManager.startDownload(
+            "job-known-artist",
+            "Artist",
+            "Album",
+            "album-mbid-1",
+            "user-1",
+            false,
+            "artist-mbid-known",
+        );
+
+        expect(result.success).toBe(true);
+        expect(mockMusicBrainzService.getReleaseGroup).not.toHaveBeenCalled();
+        expect(mockLidarrService.addAlbum).toHaveBeenCalledWith(
+            "album-mbid-1",
+            "Artist",
+            "Album",
+            "/music",
+            "artist-mbid-known",
+            false,
         );
     });
 

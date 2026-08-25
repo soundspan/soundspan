@@ -356,6 +356,7 @@ describe("musicRequestService", () => {
                 mbid: input.rgMbid,
                 subject: `${input.artistName} - ${input.albumTitle}`,
                 artistName: input.artistName,
+                artistMbid: input.artistMbid,
                 albumTitle: input.albumTitle,
                 downloadType: "library",
                 rootFolderPath: "/library",

@@ -58,9 +58,12 @@ jest.mock("../../services/youtubeDownload", () => ({
 }));
 
 const mockEnqueueAlbumDownloadInBackground = jest.fn();
+const mockEnqueueArtistDownloadExpansionInBackground = jest.fn();
 jest.mock("../../services/albumDownloadQueueService", () => ({
     enqueueAlbumDownloadInBackground: (...args: unknown[]) =>
         mockEnqueueAlbumDownloadInBackground(...args),
+    enqueueArtistDownloadExpansionInBackground: (...args: unknown[]) =>
+        mockEnqueueArtistDownloadExpansionInBackground(...args),
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
@@ -254,6 +257,9 @@ describe("downloads routes runtime", () => {
         mockTidalAvailable.mockResolvedValue(false);
         mockYoutubeAvailable.mockResolvedValue(false);
         mockEnqueueAlbumDownloadInBackground.mockReturnValue(undefined);
+        mockEnqueueArtistDownloadExpansionInBackground.mockReturnValue(
+            undefined,
+        );
 
         mockGetArtist.mockResolvedValue(null);
         mockGetReleaseGroups.mockResolvedValue([]);
@@ -562,6 +568,7 @@ describe("downloads routes runtime", () => {
                 mbid: "rg-1",
                 subject: "Typo Artist - Album",
                 artistName: "Typo Artist",
+                artistMbid: "artist-mbid-1",
                 albumTitle: "Album",
             },
             user: { id: "user-1" },
@@ -585,6 +592,7 @@ describe("downloads routes runtime", () => {
             mbid: "rg-1",
             subject: "Typo Artist - Album",
             artistName: "Correct Artist",
+            artistMbid: "artist-mbid-1",
             albumTitle: "Album",
         });
         expect(createAlbumJob).toHaveBeenCalledWith(
@@ -592,6 +600,7 @@ describe("downloads routes runtime", () => {
                 data: expect.objectContaining({
                     metadata: expect.objectContaining({
                         queuedVia: "album-download-queue",
+                        artistMbid: "artist-mbid-1",
                     }),
                 }),
             }),
@@ -626,9 +635,17 @@ describe("downloads routes runtime", () => {
         });
     });
 
-    it("creates artist batch response with discovery root folder", async () => {
-        mockGetArtist.mockResolvedValueOnce({ name: "Artist Canonical" });
-        mockGetReleaseGroups.mockResolvedValueOnce([]);
+    it("queues artist expansion without calling Lidarr or MusicBrainz", async () => {
+        const createArtistJob = jest.fn().mockResolvedValue({
+            id: "artist-job-1",
+            status: "pending",
+        });
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                $queryRaw: jest.fn().mockResolvedValue([]),
+                downloadJob: { create: createArtistJob },
+            }),
+        );
 
         const req = {
             body: {
@@ -643,25 +660,62 @@ describe("downloads routes runtime", () => {
 
         await createJobHandler(req, res);
 
-        expect(mockLidarrAddArtist).toHaveBeenCalledWith(
-            "artist-mbid-1",
-            "Artist Canonical",
-            "/music/discovery",
-        );
+        expect(mockLidarrAddArtist).not.toHaveBeenCalled();
+        expect(mockGetArtist).not.toHaveBeenCalled();
+        expect(mockGetReleaseGroups).not.toHaveBeenCalled();
+        expect(createArtistJob).toHaveBeenCalledWith({
+            data: {
+                userId: "user-1",
+                type: "artist",
+                targetMbid: "artist-mbid-1",
+                subject: "Alias Artist",
+                status: "pending",
+                metadata: {
+                    queuedVia: "artist-download-expansion",
+                    downloadType: "discovery",
+                    rootFolderPath: "/music/discovery",
+                    artistName: "Alias Artist",
+                    batchId: expect.any(String),
+                    statusText: "Queued",
+                },
+            },
+        });
+        expect(
+            mockEnqueueArtistDownloadExpansionInBackground,
+        ).toHaveBeenCalledWith({
+            jobId: "artist-job-1",
+            artistMbid: "artist-mbid-1",
+            artistName: "Alias Artist",
+            downloadType: "discovery",
+            rootFolderPath: "/music/discovery",
+            userId: "user-1",
+        });
         expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(
-            expect.objectContaining({
-                status: "processing",
-                downloadType: "discovery",
-                rootFolderPath: "/music/discovery",
-                albumCount: 0,
-                jobs: [],
-            }),
-        );
+        expect(res.body).toEqual({
+            id: "artist-job-1",
+            status: "pending",
+            downloadType: "discovery",
+            rootFolderPath: "/music/discovery",
+            message: "Enumerating discography in the background",
+        });
     });
 
-    it("returns 500 when artist processing fails", async () => {
-        mockLidarrAddArtist.mockResolvedValueOnce(null);
+    it("returns an active duplicate instead of queueing artist expansion", async () => {
+        const createArtistJob = jest.fn();
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                $queryRaw: jest.fn().mockResolvedValue([
+                    {
+                        id: "artist-job-existing",
+                        status: "processing",
+                        subject: "Artist Name",
+                        targetMbid: "artist-mbid-2",
+                        type: "artist",
+                    },
+                ]),
+                downloadJob: { create: createArtistJob },
+            }),
+        );
 
         const req = {
             body: {
@@ -675,8 +729,21 @@ describe("downloads routes runtime", () => {
 
         await createJobHandler(req, res);
 
-        expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to create download job" });
+        expect(createArtistJob).not.toHaveBeenCalled();
+        expect(
+            mockEnqueueArtistDownloadExpansionInBackground,
+        ).not.toHaveBeenCalled();
+        expect(mockLidarrAddArtist).not.toHaveBeenCalled();
+        expect(mockGetReleaseGroups).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            id: "artist-job-existing",
+            status: "processing",
+            downloadType: "library",
+            rootFolderPath: "/music",
+            message: "Download already in progress",
+            duplicate: true,
+        });
     });
 
     it("clears jobs for the current user with optional status filter", async () => {
@@ -1301,132 +1368,6 @@ describe("downloads routes runtime", () => {
         });
     });
 
-    it("creates artist batch jobs while skipping existing and queued albums", async () => {
-        mockGetArtist.mockResolvedValueOnce({ name: "Artist Name" });
-        mockGetReleaseGroups.mockResolvedValueOnce([
-            { id: "rg-existing", title: "Existing Album" },
-            { id: "rg-queued", title: "Queued Album" },
-            { id: "rg-new", title: "New Album" },
-        ]);
-        mockAlbumFindFirst
-            .mockResolvedValueOnce({ id: "existing-album" })
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null);
-        const createArtistAlbumJob = jest.fn().mockResolvedValue({
-            id: "job-new",
-            status: "pending",
-        });
-        mockTransaction
-            .mockImplementationOnce(async (callback: any) =>
-                callback({
-                    $queryRaw: jest.fn().mockResolvedValue([
-                        {
-                            id: "queued-job",
-                            status: "pending",
-                            subject: "Artist Name - Queued Album",
-                            createdAt: new Date(),
-                        },
-                    ]),
-                    downloadJob: {
-                        create: jest.fn(),
-                    },
-                }),
-            )
-            .mockImplementationOnce(async (callback: any) =>
-                callback({
-                    $queryRaw: jest
-                        .fn()
-                        .mockResolvedValueOnce([])
-                        .mockResolvedValueOnce([]),
-                    downloadJob: {
-                        create: createArtistAlbumJob,
-                    },
-                }),
-            );
-        const req = {
-            body: {
-                type: "artist",
-                mbid: "artist-mbid-3",
-                subject: "Artist Name",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(
-            expect.objectContaining({
-                albumCount: 1,
-                jobs: [{ id: "job-new", subject: "Artist Name - New Album" }],
-            }),
-        );
-        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
-            jobId: "job-new",
-            type: "album",
-            mbid: "rg-new",
-            subject: "Artist Name - New Album",
-            artistName: "Artist Name",
-            albumTitle: "New Album",
-        });
-        expect(createArtistAlbumJob).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({
-                    metadata: expect.objectContaining({
-                        queuedVia: "album-download-queue",
-                    }),
-                }),
-            }),
-        );
-    });
-
-    it("skips recently failed artist albums without creating new jobs", async () => {
-        mockGetReleaseGroups.mockResolvedValueOnce([
-            { id: "rg-recent-fail", title: "Recently Failed" },
-        ]);
-        mockAlbumFindFirst.mockResolvedValueOnce(null);
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest
-                    .fn()
-                    .mockResolvedValueOnce([])
-                    .mockResolvedValueOnce([
-                        {
-                            id: "failed-job",
-                            status: "failed",
-                            completedAt: new Date(),
-                        },
-                    ]),
-                downloadJob: {
-                    create: jest.fn(),
-                },
-            }),
-        );
-
-        const req = {
-            body: {
-                type: "artist",
-                mbid: "artist-mbid-4",
-                subject: "Artist Name",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-
-        expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(
-            expect.objectContaining({
-                albumCount: 0,
-                jobs: [],
-            }),
-        );
-        expect(mockEnqueueAlbumDownloadInBackground).not.toHaveBeenCalled();
-    });
-
     it("returns 500 when listing failed albums throws", async () => {
         mockUnavailableFindMany.mockRejectedValueOnce(
             new Error("db unavailable"),
@@ -1495,101 +1436,6 @@ describe("downloads routes runtime", () => {
             subject: "Artist - Album",
             artistName: "Artist",
             albumTitle: "Album",
-        });
-    });
-
-    it("uses LastFM artist correction for artist downloads when MusicBrainz lookup fails", async () => {
-        mockGetArtist.mockRejectedValueOnce(new Error("mb down"));
-        mockGetArtistCorrection.mockResolvedValueOnce({
-            canonicalName: "Artist Canonical",
-        });
-        mockGetReleaseGroups.mockResolvedValueOnce([]);
-
-        const req = {
-            body: {
-                type: "artist",
-                mbid: "artist-fallback-1",
-                subject: "Alias Artist",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-
-        expect(mockLidarrAddArtist).toHaveBeenCalledWith(
-            "artist-fallback-1",
-            "Artist Canonical",
-            "/music",
-        );
-    });
-
-    it("keeps original artist name when MusicBrainz and LastFM corrections both fail", async () => {
-        mockGetArtist.mockRejectedValueOnce(new Error("mb down"));
-        mockGetArtistCorrection.mockRejectedValueOnce(new Error("lfm down"));
-        mockGetReleaseGroups.mockResolvedValueOnce([]);
-
-        const req = {
-            body: {
-                type: "artist",
-                mbid: "artist-fallback-2",
-                subject: "Alias Artist",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-
-        expect(mockLidarrAddArtist).toHaveBeenCalledWith(
-            "artist-fallback-2",
-            "Alias Artist",
-            "/music",
-        );
-    });
-
-    it("logs per-album background failures during artist batch processing", async () => {
-        mockGetReleaseGroups.mockResolvedValueOnce([
-            { id: "rg-batch-1", title: "Batch Album" },
-        ]);
-        mockAlbumFindFirst.mockResolvedValueOnce(null);
-        mockTransaction.mockImplementationOnce(async (callback: any) =>
-            callback({
-                $queryRaw: jest
-                    .fn()
-                    .mockResolvedValueOnce([])
-                    .mockResolvedValueOnce([]),
-                downloadJob: {
-                    create: jest.fn().mockResolvedValue({
-                        id: "job-batch-1",
-                        status: "pending",
-                    }),
-                },
-            }),
-        );
-        mockEnqueueAlbumDownloadInBackground.mockReturnValueOnce(undefined);
-
-        const req = {
-            body: {
-                type: "artist",
-                mbid: "artist-batch-fail",
-                subject: "Batch Artist",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await createJobHandler(req, res);
-        await flushAsyncWork();
-
-        expect(res.statusCode).toBe(200);
-        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith({
-            jobId: "job-batch-1",
-            type: "album",
-            mbid: "rg-batch-1",
-            subject: "Batch Artist - Batch Album",
-            artistName: "Batch Artist",
-            albumTitle: "Batch Album",
         });
     });
 

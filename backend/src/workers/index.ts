@@ -30,8 +30,13 @@ import {
     finalizeAlbumDownloadQueueFailure,
     processAlbumDownload,
 } from "./processors/albumDownloadProcessor";
+import { processArtistDownloadExpansion } from "./processors/artistDownloadExpansionProcessor";
 import { recordAlbumDownloadOutcome } from "../metrics";
-import { recoverUnqueuedAlbumDownloads } from "../services/albumDownloadQueueService";
+import {
+    ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
+    recoverUnqueuedAlbumDownloads,
+    recoverUnqueuedArtistDownloadExpansions,
+} from "../services/albumDownloadQueueService";
 import {
     startUnifiedEnrichmentWorker,
     stopUnifiedEnrichmentWorker,
@@ -313,6 +318,13 @@ async function processAlbumDownloadRecoveryJob(): Promise<void> {
             const recovered = await recoverUnqueuedAlbumDownloads();
             if (recovered > 0) {
                 log.info(`Recovered ${recovered} unqueued album downloads`);
+            }
+            const recoveredArtists =
+                await recoverUnqueuedArtistDownloadExpansions();
+            if (recoveredArtists > 0) {
+                log.info(
+                    `Recovered ${recoveredArtists} unqueued artist expansions`,
+                );
             }
         },
     );
@@ -641,6 +653,11 @@ albumDownloadQueue.process(
     ALBUM_DOWNLOAD_JOB_NAME,
     ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
     processAlbumDownload,
+);
+albumDownloadQueue.process(
+    ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
+    ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
+    processArtistDownloadExpansion,
 );
 if (config.features.federation) {
     registerFederationProcessors();

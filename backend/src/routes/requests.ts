@@ -127,6 +127,7 @@ function dispatchApprovedDownload(dispatch: DownloadDispatch): void {
         mbid: dispatch.mbid,
         subject: dispatch.subject,
         artistName: dispatch.artistName,
+        artistMbid: dispatch.artistMbid,
         albumTitle: dispatch.albumTitle,
     });
 }

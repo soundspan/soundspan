@@ -336,6 +336,7 @@ describe("notifications route runtime", () => {
             mbid: "album-mbid",
             subject: "Artist - Album",
             artistName: "Artist",
+            artistMbid: "artist-mbid",
             albumTitle: "Album",
         });
         expect(prisma.downloadJob.create).toHaveBeenCalledWith(
@@ -1119,6 +1120,7 @@ describe("notifications route runtime", () => {
             mbid: "mbid-dashed-album",
             subject: "Artist - Album - Deluxe Edition",
             artistName: "Artist",
+            artistMbid: "artist-mbid",
             albumTitle: "Album - Deluxe Edition",
         });
     });

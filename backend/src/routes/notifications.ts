@@ -907,6 +907,11 @@ router.post(
                     mbid: failedJob.targetMbid,
                     subject: failedJob.subject,
                     artistName,
+                    artistMbid:
+                        failedJob.artistMbid ??
+                        (typeof metadata?.artistMbid === "string"
+                            ? metadata.artistMbid
+                            : undefined),
                     albumTitle,
                 }).catch((error) => {
                     logger.error(`[Retry] Album enqueue error:`, error);

@@ -17,6 +17,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/albumDownloadJobs.ts` | Shared locked album download-job creation and active-job deduplication |
 | `backend/src/services/albumDownloadQueueOwnership.ts` | Persisted album-download queue ownership marker and metadata predicate |
 | `backend/src/services/albumDownloadQueueService.ts` | Durable album download queue admission and observed background enqueue failures |
+| `backend/src/services/artistDownloadExpansionJobs.ts` | Locked creation and active-job deduplication for durable artist discography expansion |
 | `backend/src/services/albumTitleGuards.ts` | Shared remote-album placeholder-title classification |
 | `backend/src/services/albumLoudness.ts` | Transactional active-track loudness rollups and per-album serialization |
 | `backend/src/services/artistCountsService.ts` | Core |
@@ -54,6 +55,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/discovery/index.ts` | Discovery |
 | `backend/src/services/discoveryLogger.ts` | Core |
 | `backend/src/services/downloadDispatcher.ts` | Configured-source album download dispatch (policy resolution and provider routing) |
+| `backend/src/services/downloadArtistMbid.ts` | Artist-MBID reuse and MusicBrainz fallback for manager-backed album downloads |
 | `backend/src/services/downloadJobStatus.ts` | Shared download-job status transitions and guarded metadata patch writes |
 | `backend/src/services/downloadQueue.ts` | Core |
 | `backend/src/services/embeddingSpaceLifecycle.ts` | Blue/green embedding-space cutover and retirement cleanup |

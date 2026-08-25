@@ -17,7 +17,7 @@ import {
     ReconciliationSnapshot,
 } from "./lidarr";
 import { yieldToEventLoop } from "../utils/async";
-import { musicBrainzService } from "./musicbrainz";
+import { resolveDownloadArtistMbid } from "./downloadArtistMbid";
 import { getSystemSettings } from "../utils/systemSettings";
 import { notificationService } from "./notificationService";
 import { notificationPolicyService } from "./notificationPolicyService";
@@ -187,6 +187,7 @@ class SimpleDownloadManager {
         albumMbid: string,
         userId: string,
         isDiscovery: boolean = false,
+        providedArtistMbid?: string,
     ): Promise<{
         success: boolean;
         correlationId?: string;
@@ -210,27 +211,10 @@ class SimpleDownloadManager {
             const settings = await getSystemSettings();
             const musicPath = settings?.musicPath || config.music.musicPath;
 
-            // Fetch artist MBID from MusicBrainz using the album MBID
-            let artistMbid: string | undefined;
-            try {
-                logger.debug(`   Fetching artist MBID from MusicBrainz...`);
-                const releaseGroup =
-                    await musicBrainzService.getReleaseGroup(albumMbid);
-
-                if (releaseGroup?.["artist-credit"]?.[0]?.artist?.id) {
-                    artistMbid = releaseGroup["artist-credit"][0].artist.id;
-                    logger.debug(`   Found artist MBID: ${artistMbid}`);
-                } else {
-                    logger.warn(
-                        `   Could not extract artist MBID from release group`,
-                    );
-                }
-            } catch (mbError) {
-                logger.error(
-                    `   Failed to fetch artist MBID from MusicBrainz:`,
-                    mbError,
-                );
-            }
+            const artistMbid = await resolveDownloadArtistMbid(
+                albumMbid,
+                providedArtistMbid,
+            );
 
             // Add album to Lidarr (with discovery tag if this is a discovery download)
             const result = await lidarrService.addAlbum(

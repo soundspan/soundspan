@@ -18,6 +18,7 @@ export interface CreateAlbumDownloadJobParams {
     mbid: string;
     subject: string;
     artistName?: string;
+    artistMbid?: string;
     albumTitle?: string;
     downloadType: "library" | "discovery";
     rootFolderPath: string;
@@ -100,6 +101,7 @@ async function createWithDatabase(
                 downloadType: params.downloadType,
                 rootFolderPath: params.rootFolderPath,
                 artistName: verifiedArtistName,
+                artistMbid: params.artistMbid,
                 albumTitle: params.albumTitle,
                 statusText: "Queued",
             },

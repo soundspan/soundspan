@@ -16,6 +16,7 @@ const payloadSchema = z
         mbid: z.string(),
         subject: z.string(),
         artistName: z.string().optional(),
+        artistMbid: z.string().optional(),
         albumTitle: z.string().optional(),
     })
     .strict();

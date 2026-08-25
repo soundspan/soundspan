@@ -116,6 +116,10 @@ async function handOffToManager<TMatch, TResult>(
             ? context.metadata.albumMbid
             : "",
         context.userId,
+        false,
+        typeof context.metadata.artistMbid === "string"
+            ? context.metadata.artistMbid
+            : undefined,
     );
     if (result.success) return;
     const prefix = config.prefixManagerFailureLog

@@ -9,7 +9,8 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
  * Executes useDownloadActions.
  */
 export function useDownloadActions() {
-    const { addPendingDownload, isPendingByMbid } = useDownloadContext();
+    const { addPendingDownload, removePendingByMbid, isPendingByMbid } =
+        useDownloadContext();
 
     const downloadArtist = useCallback(
         async (artist: Artist | null) => {
@@ -25,7 +26,9 @@ export function useDownloadActions() {
 
             // Check if already downloading
             if (isPendingByMbid(artist.mbid)) {
-                toast.info(`${artist.name} is already being downloaded`);
+                toast.info(
+                    `Missing albums for ${artist.name} are already being queued`,
+                );
                 return;
             }
 
@@ -34,19 +37,23 @@ export function useDownloadActions() {
                 addPendingDownload("artist", artist.name, artist.mbid);
 
                 // Show immediate feedback
-                toast.loading(`Preparing download: "${artist.name}"...`, {
+                toast.loading(`Checking discography for "${artist.name}"...`, {
                     id: `download-${artist.mbid}`,
                 });
 
-                // Trigger download
+                // Trigger background enumeration of missing albums
                 await api.downloadArtist(artist.name, artist.mbid);
 
                 // Update the loading toast to success
-                toast.success(`Downloading ${artist.name}`, {
+                toast.success(`Queueing missing albums for ${artist.name}`, {
                     id: `download-${artist.mbid}`,
                 });
             } catch (error: unknown) {
                 sharedFrontendLogger.error("Failed to download artist:", error);
+                // The request never became a job, so clear the local pending
+                // entry — otherwise the button stays disabled until the stale
+                // sweep runs.
+                removePendingByMbid(artist.mbid);
                 toast.error(
                     error instanceof Error
                         ? error.message
@@ -57,7 +64,7 @@ export function useDownloadActions() {
                 );
             }
         },
-        [addPendingDownload, isPendingByMbid],
+        [addPendingDownload, removePendingByMbid, isPendingByMbid],
     );
 
     const downloadAlbum = useCallback(
@@ -101,6 +108,10 @@ export function useDownloadActions() {
                 });
             } catch (error: unknown) {
                 sharedFrontendLogger.error("Failed to download album:", error);
+                // The request never became a job, so clear the local pending
+                // entry — otherwise the button stays disabled until the stale
+                // sweep runs.
+                removePendingByMbid(mbid);
                 toast.error(
                     error instanceof Error
                         ? error.message
@@ -111,7 +122,7 @@ export function useDownloadActions() {
                 );
             }
         },
-        [addPendingDownload, isPendingByMbid],
+        [addPendingDownload, removePendingByMbid, isPendingByMbid],
     );
 
     return {

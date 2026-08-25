@@ -196,8 +196,8 @@ export function ArtistActionBar({
                         )}
                         title={
                             isPendingDownload
-                                ? "Downloading all tracks"
-                                : "Download all tracks"
+                                ? "Queueing missing albums"
+                                : "Download all missing albums"
                         }
                     >
                         {isPendingDownload ? (

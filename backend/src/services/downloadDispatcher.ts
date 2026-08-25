@@ -22,6 +22,7 @@ export interface AlbumDownloadDispatchParams {
     mbid: string;
     subject: string;
     artistName?: string;
+    artistMbid?: string;
     albumTitle?: string;
 }
 
@@ -99,13 +100,20 @@ async function dispatchResolvedSource(
     // Lidarr-backed — there is no per-source dispatch below this point, so a
     // "soulseek" selection is executed by the Lidarr manager (pre-existing
     // pipeline limitation).
-    const result = await simpleDownloadManager.startDownload(
+    const managerParams = [
         params.jobId,
         names.artist,
         names.album,
         params.mbid,
         userId,
-    );
+    ] as const;
+    const result = params.artistMbid
+        ? await simpleDownloadManager.startDownload(
+              ...managerParams,
+              false,
+              params.artistMbid,
+          )
+        : await simpleDownloadManager.startDownload(...managerParams);
     if (!result.success) {
         logger.error(`Failed to start download: ${result.error}`);
     }

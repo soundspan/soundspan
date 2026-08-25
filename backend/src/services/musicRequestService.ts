@@ -81,6 +81,7 @@ export interface DownloadDispatch {
     mbid: string;
     subject: string;
     artistName?: string;
+    artistMbid?: string;
     albumTitle?: string;
 }
 
@@ -399,6 +400,7 @@ function approvalJobParams(
         mbid: request.rgMbid,
         subject: `${request.artistName} - ${request.albumTitle}`,
         artistName: request.artistName,
+        artistMbid: request.artistMbid ?? undefined,
         albumTitle: request.albumTitle,
         downloadType: "library",
         rootFolderPath,
@@ -417,6 +419,7 @@ function approvalDispatch(
         mbid: request.rgMbid,
         subject: `${request.artistName} - ${request.albumTitle}`,
         artistName: jobResult.verifiedArtistName,
+        artistMbid: request.artistMbid ?? undefined,
         albumTitle: request.albumTitle,
     };
 }

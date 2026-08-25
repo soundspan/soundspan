@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Artist-page popular tracks now show artist identity and use correct Last.fm durations for unowned tracks (#757).
 - Tracks you do not own on the artist page keep their row menu, so Go to artist and Go to album stay available (#757).
+- Artist-wide downloads now expand through the background album-download pipeline and no longer require Lidarr, allowing TIDAL- and YouTube-only deployments to queue the full discography.
+- Artist-wide download jobs now expose durable enumeration progress through the artist MBID instead of leaving the Download All button waiting on per-album rows.
+- Album and artist jobs rejected during Redis queue admission now remain pending for automatic recovery instead of becoming stranded failures.
 - Retrying a download no longer cuts off album titles that contain a dash.
 - The DCLAP vibe provider now refuses requests when its internal secret is missing or left at the default, instead of silently allowing them.
 - Finishing a batch of album downloads now triggers one combined library scan instead of one scan per album, which could crash the background worker.

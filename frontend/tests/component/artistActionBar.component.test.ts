@@ -95,8 +95,22 @@ test("ArtistActionBar renders canonical button set for library artist", async ()
     assert.match(html, /title="Add all to queue"/);
     assert.match(html, /title="Add all to playlist"/);
     assert.match(html, /title="Like all tracks"/);
-    assert.match(html, /title="Download all tracks"/);
+    assert.match(html, /title="Download all missing albums"/);
     assert.match(html, /title="Start artist radio"/);
+});
+
+test("ArtistActionBar shows queueing state on the download button while pending", async () => {
+    const { ArtistActionBar } =
+        await import("../../features/artist/components/ArtistActionBar");
+    const html = renderToStaticMarkup(
+        React.createElement(ArtistActionBar, {
+            ...baseProps,
+            isPendingDownload: true,
+        }),
+    );
+
+    assert.match(html, /title="Queueing missing albums"/);
+    assert.doesNotMatch(html, /title="Download all missing albums"/);
 });
 
 test("ArtistActionBar hides Add to Queue when callback is not provided", async () => {
@@ -191,7 +205,7 @@ test("ArtistActionBar hides download button when downloadsEnabled is false", asy
         }),
     );
 
-    assert.doesNotMatch(html, /title="Download all tracks"/);
+    assert.doesNotMatch(html, /title="Download all missing albums"/);
 });
 
 test("ArtistActionBar shows Listen Together locked state", async () => {
