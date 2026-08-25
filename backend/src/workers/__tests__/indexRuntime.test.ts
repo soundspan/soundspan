@@ -43,6 +43,7 @@ describe("workers runtime behavior", () => {
         const genericImportQueue = createQueueMock();
         const federationQueue = createQueueMock();
         const albumDownloadQueue = createQueueMock();
+        const artistExpansionQueue = createQueueMock();
 
         const logger = {
             debug: jest.fn(),
@@ -210,6 +211,7 @@ describe("workers runtime behavior", () => {
             genericImportQueue,
             federationQueue,
             albumDownloadQueue,
+            artistExpansionQueue,
         }));
         jest.doMock("../federationJobs", () => ({
             registerFederationProcessors,
@@ -369,6 +371,7 @@ describe("workers runtime behavior", () => {
             genericImportQueue,
             federationQueue,
             albumDownloadQueue,
+            artistExpansionQueue,
             logger,
             startUnifiedEnrichmentWorker,
             stopUnifiedEnrichmentWorker,
@@ -485,6 +488,10 @@ describe("workers runtime behavior", () => {
         expect(mocks.albumDownloadQueue.process).toHaveBeenCalledWith(
             "artist-download-expand",
             1,
+            mocks.processArtistDownloadExpansion,
+        );
+        expect(mocks.artistExpansionQueue.process).toHaveBeenCalledWith(
+            "artist-download-expand",
             mocks.processArtistDownloadExpansion,
         );
         expect(mocks.registerRecoveryJobs).toHaveBeenCalledTimes(1);
@@ -1126,6 +1133,7 @@ describe("workers runtime behavior", () => {
         );
         expect(workers.genericImportQueue).toBe(mocks.genericImportQueue);
         expect(workers.albumDownloadQueue).toBe(mocks.albumDownloadQueue);
+        expect(workers.artistExpansionQueue).toBe(mocks.artistExpansionQueue);
     });
 
     it("shuts down workers and queue resources cleanly", async () => {
@@ -1159,10 +1167,14 @@ describe("workers runtime behavior", () => {
         expect(
             mocks.albumDownloadQueue.removeAllListeners,
         ).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.artistExpansionQueue.removeAllListeners,
+        ).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerMaintenanceQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.genericImportQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.albumDownloadQueue.close).toHaveBeenCalledTimes(1);
+        expect(mocks.artistExpansionQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.scanQueue.close.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.scanQueue.removeAllListeners.mock.invocationCallOrder[0],
         );

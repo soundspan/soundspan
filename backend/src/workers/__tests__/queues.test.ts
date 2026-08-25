@@ -50,7 +50,7 @@ describe("workers/queues", () => {
             "rediss://user:pass@cache.example:6381/2",
         );
 
-        expect(bullCtor).toHaveBeenCalledTimes(10);
+        expect(bullCtor).toHaveBeenCalledTimes(11);
         const firstCallArgs = bullCtor.mock.calls[0];
         const firstQueueOptions = firstCallArgs[1];
 
@@ -65,7 +65,7 @@ describe("workers/queues", () => {
                 tls: {},
             }),
         );
-        expect(queuesModule.queues).toHaveLength(10);
+        expect(queuesModule.queues).toHaveLength(11);
         expect(bullCtor.mock.calls.map((call) => call[0])).toEqual([
             "library-scan",
             "discover-weekly",
@@ -77,6 +77,7 @@ describe("workers/queues", () => {
             "generic-import",
             "federation-sync",
             "album-download",
+            "worker-artist-expansion",
         ]);
         expect(logger.debug).toHaveBeenCalledWith(
             expect.stringContaining("Redis config resolved"),
@@ -141,8 +142,12 @@ describe("workers/queues", () => {
         const albumDownloadCall = bullCtor.mock.calls.find(
             (call: any[]) => call[0] === "album-download",
         );
+        const artistExpansionCall = bullCtor.mock.calls.find(
+            (call: any[]) => call[0] === "worker-artist-expansion",
+        );
 
         expect(albumDownloadCall).toBeDefined();
+        expect(artistExpansionCall).toBeDefined();
         expect(albumDownloadCall![1].settings).toEqual(
             expect.objectContaining({
                 stalledInterval: 30_000,
@@ -156,6 +161,7 @@ describe("workers/queues", () => {
             removeOnComplete: 100,
             removeOnFail: 200,
         });
+        expect(artistExpansionCall![1]).toEqual(albumDownloadCall![1]);
     });
 
     it("wires queue error and stalled handlers for observability", () => {

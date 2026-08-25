@@ -1,4 +1,5 @@
 const mockQueueAdd = jest.fn();
+const mockArtistExpansionQueueAdd = jest.fn();
 const mockQueueGetJob = jest.fn();
 const mockDownloadJobFindMany = jest.fn();
 const mockDownloadJobFindUnique = jest.fn();
@@ -11,6 +12,9 @@ jest.mock("../../workers/queues", () => ({
     albumDownloadQueue: {
         add: (...args: unknown[]) => mockQueueAdd(...args),
         getJob: (...args: unknown[]) => mockQueueGetJob(...args),
+    },
+    artistExpansionQueue: {
+        add: (...args: unknown[]) => mockArtistExpansionQueueAdd(...args),
     },
 }));
 
@@ -62,6 +66,9 @@ describe("album download queue service", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockQueueAdd.mockResolvedValue({ id: "albumdl:download-job-1" });
+        mockArtistExpansionQueueAdd.mockResolvedValue({
+            id: "artistdl:artist-job-1",
+        });
         mockQueueGetJob.mockResolvedValue(null);
         mockDownloadJobFindMany.mockResolvedValue([]);
         mockDownloadJobFindUnique.mockResolvedValue({
@@ -122,16 +129,17 @@ describe("album download queue service", () => {
 
         await enqueueArtistDownloadExpansion(artistPayload);
 
-        expect(mockQueueAdd).toHaveBeenCalledWith(
+        expect(mockArtistExpansionQueueAdd).toHaveBeenCalledWith(
             "artist-download-expand",
             artistPayload,
             { jobId: "artistdl:artist-job-1" },
         );
+        expect(mockQueueAdd).not.toHaveBeenCalled();
     });
 
     it("keeps artist expansion pending when queue admission fails", async () => {
         const enqueueError = new Error("redis unavailable");
-        mockQueueAdd.mockRejectedValueOnce(enqueueError);
+        mockArtistExpansionQueueAdd.mockRejectedValueOnce(enqueueError);
 
         await expect(
             enqueueArtistDownloadExpansion({
@@ -359,7 +367,7 @@ describe("album download queue service", () => {
                 take: 20,
             }),
         );
-        expect(mockQueueAdd).toHaveBeenCalledWith(
+        expect(mockArtistExpansionQueueAdd).toHaveBeenCalledWith(
             "artist-download-expand",
             {
                 jobId: "artist-job-1",
@@ -371,6 +379,7 @@ describe("album download queue service", () => {
             },
             { jobId: "artistdl:artist-job-1" },
         );
+        expect(mockQueueAdd).not.toHaveBeenCalled();
     });
 
     it.each<[string, "skip" | "finalize-and-remove" | "remove-and-re-enqueue"]>(

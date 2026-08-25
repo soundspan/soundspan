@@ -267,6 +267,7 @@ describe("api entrypoint runtime behavior", () => {
             genericImportQueue: { name: "generic-import" },
             federationQueue: { name: "federation" },
             albumDownloadQueue: { name: "album-download" },
+            artistExpansionQueue: { name: "worker-artist-expansion" },
         };
         const queueRegistry = Object.values(workersQueues);
         const registerQueueMetrics = jest.fn();
@@ -516,6 +517,9 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.queueRegistry).toContainEqual({
             name: "scheduler-maintenance",
         });
+        expect(mocks.queueRegistry).toContainEqual({
+            name: "worker-artist-expansion",
+        });
         expect(mocks.server.listen).toHaveBeenCalledWith(
             3006,
             "0.0.0.0",
@@ -550,7 +554,7 @@ describe("api entrypoint runtime behavior", () => {
         expect(socket.setKeepAlive).toHaveBeenCalledWith(true, 30_000);
         expect(mocks.startPersistLoop).toHaveBeenCalledTimes(1);
         expect(mocks.createBullBoard).toHaveBeenCalledTimes(1);
-        expect(mocks.BullAdapter).toHaveBeenCalledTimes(10);
+        expect(mocks.BullAdapter).toHaveBeenCalledTimes(11);
         expect(mocks.app.get).toHaveBeenCalledWith(
             "/api/docs.json",
             expect.any(Function),

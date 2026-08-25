@@ -164,6 +164,18 @@ export const albumDownloadQueue = new Bull("album-download", {
     settings: defaultQueueSettings,
 });
 
+/** Durable queue for artist discography expansion ahead of album admission. */
+export const artistExpansionQueue = new Bull("worker-artist-expansion", {
+    redis: redisConfig,
+    defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 60000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    },
+    settings: defaultQueueSettings,
+});
+
 // Export all queues for monitoring
 export const queues = [
     scanQueue,
@@ -176,6 +188,7 @@ export const queues = [
     genericImportQueue,
     federationQueue,
     albumDownloadQueue,
+    artistExpansionQueue,
 ];
 
 // Add error handlers to all queues to prevent unhandled exceptions

@@ -1,5 +1,5 @@
 import type { AlbumDownloadDispatchParams } from "./downloadDispatcher";
-import { albumDownloadQueue } from "../workers/queues";
+import { albumDownloadQueue, artistExpansionQueue } from "../workers/queues";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import {
@@ -83,13 +83,13 @@ export async function enqueueAlbumDownload(
     }
 }
 
-/** Add one artist discography expansion to the album-download queue. */
+/** Add one artist discography expansion to its durable worker queue. */
 export async function enqueueArtistDownloadExpansion(
     params: ArtistDownloadExpansionParams,
 ): Promise<void> {
     const queueJobId = artistDownloadQueueJobId(params.jobId);
     try {
-        await albumDownloadQueue.add(
+        await artistExpansionQueue.add(
             ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
             params,
             { jobId: queueJobId },

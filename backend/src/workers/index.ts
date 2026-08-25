@@ -13,6 +13,7 @@ import {
     genericImportQueue,
     federationQueue,
     albumDownloadQueue,
+    artistExpansionQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import {
@@ -890,6 +891,11 @@ albumDownloadQueue.process(
     ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
     processAlbumDownload,
 );
+artistExpansionQueue.process(
+    ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
+    processArtistDownloadExpansion,
+);
+// Legacy drain: process expansion jobs admitted to album-download before upgrade.
 albumDownloadQueue.process(
     ARTIST_DOWNLOAD_EXPANSION_JOB_NAME,
     ALBUM_DOWNLOAD_WORKER_CONCURRENCY,
@@ -1250,6 +1256,10 @@ registerQueueProcessorEvents(albumDownloadQueue, "album-download", {
     },
 });
 
+registerQueueProcessorEvents(artistExpansionQueue, "worker-artist-expansion", {
+    record: recordQueueProcessorEvent,
+});
+
 albumDownloadQueue.on("stalled", () => {
     recordAlbumDownloadOutcome("retried");
 });
@@ -1379,6 +1389,9 @@ export async function shutdownWorkers(): Promise<void> {
     // Shutdown download queue manager
     downloadQueueManager.shutdown();
 
+    // Drain expansion first because it can still admit new album jobs.
+    await artistExpansionQueue.close();
+
     // Drain the album processor while its finalizer listener is still active.
     await albumDownloadQueue.close();
 
@@ -1401,6 +1414,7 @@ export async function shutdownWorkers(): Promise<void> {
     genericImportQueue.removeAllListeners();
     federationQueue.removeAllListeners();
     albumDownloadQueue.removeAllListeners();
+    artistExpansionQueue.removeAllListeners();
 
     // Close all queues gracefully
     await Promise.all([
@@ -1454,4 +1468,5 @@ export {
     genericImportQueue,
     federationQueue,
     albumDownloadQueue,
+    artistExpansionQueue,
 };
