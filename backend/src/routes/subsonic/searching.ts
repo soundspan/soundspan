@@ -1,5 +1,6 @@
 import { type Request, type Response } from "express";
 import { prisma } from "../../utils/db";
+import { searchLibraryMusic } from "../../services/librarySearchReads";
 import {
     sendSubsonicError,
     sendSubsonicSuccess,
@@ -79,175 +80,18 @@ export async function handleSearch3(
     const songOffset = parseOffsetParam(req.query.songOffset);
 
     try {
-        const [artists, albums, tracks] = await Promise.all([
-            prisma.artist.findMany({
-                where: {
-                    albums: {
-                        some: LIBRARY_ALBUM_WHERE,
-                    },
-                    ...(query
-                        ? {
-                              name: {
-                                  contains: query,
-                                  mode: "insensitive" as const,
-                              },
-                          }
-                        : {}),
-                },
-                select: {
-                    id: true,
-                    name: true,
-                    heroUrl: true,
-                    _count: {
-                        select: {
-                            albums: { where: LIBRARY_ALBUM_WHERE },
-                        },
-                    },
-                },
-                orderBy: {
-                    name: "asc",
-                },
-                take: artistCount,
-                skip: artistOffset,
-            }),
-            prisma.album.findMany({
-                where: {
-                    ...LIBRARY_ALBUM_WHERE,
-                    ...(query
-                        ? {
-                              OR: [
-                                  {
-                                      title: {
-                                          contains: query,
-                                          mode: "insensitive" as const,
-                                      },
-                                  },
-                                  {
-                                      artist: {
-                                          name: {
-                                              contains: query,
-                                              mode: "insensitive" as const,
-                                          },
-                                      },
-                                  },
-                              ],
-                          }
-                        : {}),
-                },
-                select: {
-                    id: true,
-                    title: true,
-                    year: true,
-                    lastSynced: true,
-                    coverUrl: true,
-                    location: true,
-                    genres: true,
-                    userGenres: true,
-                    artist: {
-                        select: {
-                            id: true,
-                            name: true,
-                        },
-                    },
-                    tracks: {
-                        where: LIBRARY_TRACK_WHERE,
-                        select: {
-                            id: true,
-                            duration: true,
-                        },
-                    },
-                    _count: {
-                        select: {
-                            tracks: {
-                                where: LIBRARY_TRACK_WHERE,
-                            },
-                        },
-                    },
-                },
-                orderBy: {
-                    title: "asc",
-                },
-                take: albumCount,
-                skip: albumOffset,
-            }),
-            prisma.track.findMany({
-                where: {
-                    ...LIBRARY_TRACK_WHERE,
-                    album: {
-                        location: SUBSONIC_ALBUM_LOCATION_WHERE,
-                    },
-                    ...(query
-                        ? {
-                              OR: [
-                                  {
-                                      title: {
-                                          contains: query,
-                                          mode: "insensitive" as const,
-                                      },
-                                  },
-                                  {
-                                      album: {
-                                          title: {
-                                              contains: query,
-                                              mode: "insensitive" as const,
-                                          },
-                                      },
-                                  },
-                                  {
-                                      album: {
-                                          artist: {
-                                              name: {
-                                                  contains: query,
-                                                  mode: "insensitive" as const,
-                                              },
-                                          },
-                                      },
-                                  },
-                              ],
-                          }
-                        : {}),
-                },
-                select: {
-                    id: true,
-                    title: true,
-                    trackNo: true,
-                    discNo: true,
-                    duration: true,
-                    fileSize: true,
-                    mime: true,
-                    filePath: true,
-                    ...SONG_LOUDNESS_TRACK_SELECT,
-                    album: {
-                        select: {
-                            id: true,
-                            title: true,
-                            year: true,
-                            coverUrl: true,
-                            location: true,
-                            genres: true,
-                            userGenres: true,
-                            ...SONG_LOUDNESS_ALBUM_SELECT,
-                            artist: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                },
-                            },
-                        },
-                    },
-                },
-                orderBy: [{ title: "asc" }, { id: "asc" }],
-                take: songCount,
-                skip: songOffset,
-            }),
-        ]);
+        const { artists, albums, tracks } = await searchLibraryMusic({
+            query,
+            albumLocations: ["LIBRARY", "FEDERATED"],
+            artists: { limit: artistCount, offset: artistOffset },
+            albums: { limit: albumCount, offset: albumOffset },
+            tracks: { limit: songCount, offset: songOffset },
+        });
         const playedAtByTrackId = await loadSongEnrichmentByTrackId(
             req.user!.id,
             [
                 ...tracks.map((track) => track.id),
-                ...albums.flatMap((album) =>
-                    album.tracks.map((track) => track.id),
-                ),
+                ...albums.flatMap((album) => album.trackIds),
             ],
         );
 
@@ -259,7 +103,7 @@ export async function handleSearch3(
                         formatArtistForSubsonic({
                             id: artist.id,
                             name: artist.name,
-                            albumCount: artist._count.albums,
+                            albumCount: artist.albumCount,
                             heroUrl: artist.heroUrl,
                         }),
                     ),
@@ -275,14 +119,11 @@ export async function handleSearch3(
                                 genres: album.genres,
                                 userGenres: album.userGenres,
                                 artist: album.artist,
-                                songCount: album._count.tracks,
-                                duration: album.tracks.reduce(
-                                    (sum, track) => sum + (track.duration ?? 0),
-                                    0,
-                                ),
+                                songCount: album.songCount,
+                                duration: album.duration,
                             },
                             combineSongEnrichmentForAlbum(
-                                album.tracks.map((track) => track.id),
+                                album.trackIds,
                                 playedAtByTrackId,
                             ),
                         ),

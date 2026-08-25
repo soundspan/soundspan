@@ -36,6 +36,7 @@ import {
 import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
+    LIBRARY_SURFACE_ALBUM_LOCATIONS,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
     isLibrarySurfaceAlbumLocation,
@@ -52,6 +53,7 @@ import { findRouteNameMatch } from "../artistRouteName";
 import { deleteArtistCatalogEntry } from "../../services/artistCatalogDeletion";
 import { withFederatedTrackPlayback } from "../../services/federatedTrackPayload";
 import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
+import { readLibraryArtist } from "../../services/libraryArtistReads";
 import {
     buildArtistTrackTitleIndex,
     filterDistinctDiscographyAlbums,
@@ -462,71 +464,13 @@ export async function handleGetArtist(
     );
     const shouldResolveMbid =
         includeDiscography || includeTopTracks || includeSimilarArtists;
-    const browseTrackWhere = {
-        ...TRACK_VISIBLE_WHERE,
-        ...trackBrowseWhere("all"),
-    };
-
-    const artistInclude = {
-        albums: {
-            where: { tracks: { some: browseTrackWhere } },
-            orderBy: { year: Prisma.SortOrder.desc },
-            include: {
-                federationPeer: {
-                    select: { id: true, name: true, outboundStatus: true },
-                },
-                tracks: {
-                    where: browseTrackWhere,
-                    orderBy: [
-                        { discNo: Prisma.SortOrder.asc },
-                        { trackNo: Prisma.SortOrder.asc },
-                    ],
-                    take: 10, // Top tracks
-                    include: {
-                        federationPeer: {
-                            select: {
-                                id: true,
-                                name: true,
-                                outboundStatus: true,
-                            },
-                        },
-                        album: {
-                            select: {
-                                id: true,
-                                title: true,
-                                coverUrl: true,
-                                albumLoudnessLufs: true,
-                                albumTruePeakDb: true,
-                                artist: {
-                                    select: {
-                                        id: true,
-                                        name: true,
-                                        mbid: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-        ownedAlbums: true,
-        federationPeer: {
-            select: { id: true, name: true, outboundStatus: true },
-        },
-        // similarFrom is retired; similarArtistsJson is fetched by default.
-    };
-
     const artist = await findRouteNameMatch(idParam, (name) =>
-        prisma.artist.findFirst({
-            where: {
-                OR: [
-                    { id: idParam },
-                    { name: { equals: name, mode: "insensitive" } },
-                    { mbid: idParam },
-                ],
-            },
-            include: artistInclude,
+        readLibraryArtist({
+            lookup: { id: idParam, name, mbid: idParam },
+            albumLocations: LIBRARY_SURFACE_ALBUM_LOCATIONS,
+            requireVisibleAlbum: false,
+            albumOrder: "year",
+            maxTracksPerAlbum: 10,
         }),
     );
 

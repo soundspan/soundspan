@@ -2,6 +2,7 @@ import { type Request, type Response } from "express";
 import { prisma } from "../../utils/db";
 import { buildArtistIndexes } from "../../utils/subsonicIndexes";
 import { loadSubsonicArtistIndexSnapshot } from "../../services/subsonicArtistIndexCache";
+import { readLibraryArtist } from "../../services/libraryArtistReads";
 import {
     parseSubsonicId,
     toSubsonicId,
@@ -210,46 +211,11 @@ export async function handleGetArtist(
     }
 
     try {
-        const artist = await prisma.artist.findFirst({
-            where: {
-                id: artistId,
-                albums: {
-                    some: LIBRARY_ALBUM_WHERE,
-                },
-            },
-            select: {
-                id: true,
-                name: true,
-                heroUrl: true,
-                albums: {
-                    where: LIBRARY_ALBUM_WHERE,
-                    select: {
-                        id: true,
-                        title: true,
-                        year: true,
-                        lastSynced: true,
-                        coverUrl: true,
-                        location: true,
-                        genres: true,
-                        userGenres: true,
-                        tracks: {
-                            where: LIBRARY_TRACK_WHERE,
-                            select: {
-                                id: true,
-                                duration: true,
-                            },
-                        },
-                        _count: {
-                            select: {
-                                tracks: {
-                                    where: LIBRARY_TRACK_WHERE,
-                                },
-                            },
-                        },
-                    },
-                    orderBy: [{ year: "desc" }, { title: "asc" }],
-                },
-            },
+        const artist = await readLibraryArtist({
+            lookup: { id: artistId },
+            albumLocations: ["LIBRARY", "FEDERATED"],
+            requireVisibleAlbum: true,
+            albumOrder: "year-title",
         });
 
         if (!artist) {
@@ -284,7 +250,7 @@ export async function handleGetArtist(
                         id: artist.id,
                         name: artist.name,
                     },
-                    songCount: album._count.tracks,
+                    songCount: album.tracks.length,
                     duration: album.tracks.reduce(
                         (sum, track) => sum + (track.duration ?? 0),
                         0,
