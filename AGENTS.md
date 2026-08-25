@@ -35,7 +35,7 @@ Repository contract for soundspan.
 - **Smallest safe change.** Make the minimum change that solves the problem. Preserve existing style and conventions. Do not refactor adjacent code, add unsolicited features, or "improve" what wasn't asked for.
 - **TDD for executable changes.** For code, schema, or behavior changes, write or update a failing test first, then implement until it passes. Deviations require explicit user approval. Non-executable work (docs, config review, planning, workflow governance) is exempt.
 - **No invented requirements.** Do not invent product requirements, compatibility guarantees, or migration behavior when the repo does not define them. Surface the decision and wait for direction.
-- **Targeted testing only.** Do not run the full test suite — it maxes out available RAM. Run only the test files and suites relevant to the current changes.
+- **Target tests while iterating.** Run only the files and suites relevant to the current change during development, then run the full backend `test:coverage` gate once before opening a PR.
 - **Prefer small, reviewable changes** over broad cleanup.
 
 ## Repository-Specific Rules
@@ -114,7 +114,7 @@ Notes:
 
 - **The frontend has two type-check gates.** `next build` checks the Next build graph (`app/`, `lib/`, `components/`, `hooks/`, `features/`), while `npm run typecheck` checks the complete frontend TypeScript project, including standalone `tests/**` files, without reusing incremental state. `npm run lint` and the `node --test`/`tsx` runners transpile without type-checking.
 - **Frontend component tests:** run `npm --prefix frontend run test:component` or `npm --prefix frontend run test:component:coverage`. Both commands require Node.js 24 from `.nvmrc` and fail fast with upgrade guidance on an older runtime.
-- **RAM:** per the targeted-testing rule above, iterate with `npm --prefix backend test -- <file>`; run the full `test:coverage` once before opening the PR.
+- **RAM:** iterate with `npm --prefix backend test -- <file>`; the backend Jest configuration uses the measured six-worker ceiling for the required full `test:coverage` run before opening a PR.
 - **No Node ≥ 24 handy?** Type-checking still requires the repository's supported Node/npm toolchain and installed frontend dependencies; use `npm --prefix frontend run typecheck` for the standalone gate.
 
 ## Verification Evidence Protocol
