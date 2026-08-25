@@ -50,6 +50,7 @@ export function TrackRow({
         <div
             data-tv-card
             data-tv-card-index={index}
+            data-track-id={item.id}
             onClick={onPlay}
             role="button"
             aria-disabled={item.isPlayable === false ? true : undefined}

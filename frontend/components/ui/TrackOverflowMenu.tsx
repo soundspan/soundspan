@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     EllipsisVertical,
+    Link as LinkIcon,
     ListEnd,
     ListPlus,
     Map as MapIcon,
@@ -105,6 +106,14 @@ export function TrackOverflowMenu({
     // Album href
     const albumHref = track.album?.id ? `/album/${track.album.id}` : null;
 
+    // Song deep link — the album page consumes ?track= by scrolling to the
+    // row and starting playback. Only local tracks with album identity have
+    // a stable URL to hand out.
+    const trackLinkPath =
+        !isRemote && track.album?.id
+            ? `/album/${track.album.id}?track=${encodeURIComponent(track.id)}`
+            : null;
+
     // Outside click and escape handlers
     useEffect(() => {
         if (!isOpen) return;
@@ -182,6 +191,20 @@ export function TrackOverflowMenu({
             toast.success(`Added "${track.title}" to playlist`);
         },
         [track],
+    );
+
+    const handleCopyTrackLink = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            closeMenu();
+            if (!trackLinkPath) return;
+            const url = `${window.location.origin}${trackLinkPath}`;
+            void navigator.clipboard.writeText(url).then(
+                () => toast.success("Song link copied"),
+                () => toast.error("Could not copy the song link"),
+            );
+        },
+        [trackLinkPath, closeMenu],
     );
 
     const handleGoToArtist = useCallback(
@@ -349,6 +372,14 @@ export function TrackOverflowMenu({
                                 onClick={handleShare}
                                 icon={<Share2 className="h-4 w-4" />}
                                 label="Share"
+                            />
+                        )}
+
+                        {trackLinkPath && (
+                            <MenuButton
+                                onClick={handleCopyTrackLink}
+                                icon={<LinkIcon className="h-4 w-4" />}
+                                label="Copy link to song"
                             />
                         )}
 

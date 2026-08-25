@@ -30,6 +30,8 @@ interface TrackListProps {
     previewPlaying: boolean;
     onPreview: (track: Track, e: React.MouseEvent) => void;
     isProviderMatching?: boolean;
+    /** Track id to visually highlight (e.g. from a ?track= deep link). */
+    highlightTrackId?: string | null;
 }
 
 export const TrackList = memo(function TrackList({
@@ -43,6 +45,7 @@ export const TrackList = memo(function TrackList({
     previewPlaying,
     onPreview,
     isProviderMatching = false,
+    highlightTrackId = null,
 }: TrackListProps) {
     const isOwned = source === "library";
 
@@ -243,6 +246,8 @@ export const TrackList = memo(function TrackList({
                     state.isPlaying && "bg-surface-hover border-l-2",
                     isPreviewOnly && "opacity-70 hover:opacity-90",
                     isFederated && !track.peer?.online && "opacity-50",
+                    highlightTrackId === track.id &&
+                        "bg-brand/[0.12] ring-1 ring-inset ring-brand/50",
                 ),
             };
         },
@@ -253,6 +258,7 @@ export const TrackList = memo(function TrackList({
             previewTrack,
             previewPlaying,
             onPreview,
+            highlightTrackId,
         ],
     );
 

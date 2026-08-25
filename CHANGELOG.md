@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Songs now have shareable links: "Copy link to song" in a track's menu copies a link that opens the album with that song highlighted and starts playing it (browsers may require a tap first on brand-new devices) (#756).
+
 - Popular tracks on the artist page now show the album name as a clickable link, including for tracks that are not in your library (#757).
 
 ### Changed

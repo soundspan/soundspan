@@ -22,6 +22,7 @@ import {
     useAlbumLikedState,
 } from "@/features/album/hooks/useAlbumActions";
 import { useAlbumRequest } from "@/features/album/hooks/useAlbumRequest";
+import { useTrackDeepLink } from "@/features/album/hooks/useTrackDeepLink";
 import { useYtMusicGapFill } from "@/features/album/hooks/useYtMusicGapFill";
 import { useTidalGapFill } from "@/features/album/hooks/useTidalGapFill";
 import { useTrackPreview } from "@/hooks/useTrackPreview";
@@ -128,6 +129,11 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         isYtMatching;
     const hasTracks = Boolean(album?.tracks && album.tracks.length > 0);
     const showTrackPlaceholder = detailsLoading && !hasTracks;
+    const { highlightTrackId } = useTrackDeepLink(
+        album,
+        (track) => playTrackNow(track, album!),
+        hasTracks,
+    );
 
     // Get cover URL for display and color extraction
     // Proxy through API to handle native: URLs and CORS
@@ -309,6 +315,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                                 )
                             }
                             isProviderMatching={isProviderMatching}
+                            highlightTrackId={highlightTrackId}
                         />
                     )}
                     {showTrackPlaceholder && <AlbumTracksSkeleton />}
