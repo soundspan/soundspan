@@ -97,14 +97,34 @@ export async function removeReplacementCacheFiles(
 
 /** Deletes cached stream rows and files without resetting analysis state. */
 export async function clearTrackTranscodeCache(trackId: string): Promise<void> {
-    const cachedFiles = await prisma.transcodedFile.findMany({
-        where: { trackId },
+    await clearTrackTranscodeCaches([trackId]);
+}
+
+/** Deletes cached stream rows and files for one bounded track page. */
+export async function clearTrackTranscodeCaches(
+    trackIds: readonly string[],
+): Promise<void> {
+    if (trackIds.length === 0) return;
+    const cachePaths = await prisma.$transaction((transaction) =>
+        clearTrackTranscodeCacheRows(transaction, trackIds),
+    );
+    await removeReplacementCacheFiles(cachePaths);
+}
+
+/** Deletes page cache rows inside a caller-owned transaction. */
+export async function clearTrackTranscodeCacheRows(
+    transaction: ReplacementTransaction,
+    trackIds: readonly string[],
+): Promise<string[]> {
+    if (trackIds.length === 0) return [];
+    const cachedFiles = await transaction.transcodedFile.findMany({
+        where: { trackId: { in: [...trackIds] } },
         select: { cachePath: true },
     });
-    await prisma.transcodedFile.deleteMany({ where: { trackId } });
-    await removeReplacementCacheFiles(
-        cachedFiles.map((file) => file.cachePath),
-    );
+    await transaction.transcodedFile.deleteMany({
+        where: { trackId: { in: [...trackIds] } },
+    });
+    return cachedFiles.map((file) => file.cachePath);
 }
 
 /** Applies replacement semantics to a same-path track update. */

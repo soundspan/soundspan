@@ -8,6 +8,7 @@ describe("trackRemovalPurgeProcessor", () => {
     function loadProcessor(
         candidates: Array<{
             id: string;
+            artistId?: string;
             origin?: "LOCAL" | "FEDERATED";
             removedAt?: Date | null;
         }>,
@@ -28,8 +29,8 @@ describe("trackRemovalPurgeProcessor", () => {
         let prisma: any;
         prisma = {
             track: {
-                findMany: jest.fn(async (args: any) =>
-                    candidates.filter((track) => {
+                findMany: jest.fn(async (args: any) => {
+                    const rows = candidates.filter((track) => {
                         if (removedIds.has(track.id)) return false;
                         const isLocal = track.origin !== "FEDERATED";
                         const isBeforeCutoff =
@@ -39,8 +40,16 @@ describe("trackRemovalPurgeProcessor", () => {
                         const isAfterCursor =
                             !args.where.id?.gt || track.id > args.where.id.gt;
                         return isLocal && isBeforeCutoff && isAfterCursor;
-                    }),
-                ),
+                    });
+                    return args.select?.album
+                        ? rows.map((track) => ({
+                              ...track,
+                              album: {
+                                  artistId: track.artistId ?? "artist-default",
+                              },
+                          }))
+                        : rows;
+                }),
                 deleteMany: jest.fn(async (args: any) => {
                     for (const id of args.where.id.in) removedIds.add(id);
                     return {
@@ -116,13 +125,16 @@ describe("trackRemovalPurgeProcessor", () => {
             cleanupOrphanedLibraryEntities,
         }));
         jest.doMock("../../../services/artistCountsService", () => ({
-            backfillAllArtistCounts,
+            updateArtistCountsInBatches: backfillAllArtistCounts,
+            updateArtistCountsInTransaction: backfillAllArtistCounts,
         }));
-        const collectProviderTracks = jest.fn(async () => ({
-            selected: { tidal: 0, youtube: 0 },
-            deleted: { tidal: 0, youtube: 0 },
-            orphanedParents: { albums: 0, artists: 0 },
-        }));
+        const collectProviderTracks = jest.fn(
+            async (_options?: Record<string, unknown>) => ({
+                selected: { tidal: 0, youtube: 0 },
+                deleted: { tidal: 0, youtube: 0 },
+                orphanedParents: { albums: 0, artists: 0 },
+            }),
+        );
         jest.doMock("../../../services/providerTrackGc", () => ({
             collectProviderTracks,
         }));
@@ -253,7 +265,7 @@ describe("trackRemovalPurgeProcessor", () => {
             },
             orderBy: { id: "asc" },
             take: 101,
-            select: { id: true },
+            select: { id: true, album: { select: { artistId: true } } },
         });
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: {
@@ -391,7 +403,7 @@ describe("trackRemovalPurgeProcessor", () => {
 
         await module.processTrackRemovalPurge(buildJob());
 
-        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
         expect(prisma.federationTombstone.createMany).not.toHaveBeenCalled();
         expect(prisma.federationTombstone.deleteMany).not.toHaveBeenCalled();
     });
@@ -463,7 +475,9 @@ describe("trackRemovalPurgeProcessor", () => {
             },
         );
         expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
-        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+        expect(backfillAllArtistCounts).toHaveBeenCalledWith(prisma, [
+            "artist-default",
+        ]);
         expect(collectProviderTracks).not.toHaveBeenCalled();
     });
 
@@ -509,7 +523,7 @@ describe("trackRemovalPurgeProcessor", () => {
             },
             orderBy: { id: "asc" },
             take: 101,
-            select: { id: true },
+            select: { id: true, album: { select: { artistId: true } } },
         });
     });
 
@@ -662,28 +676,38 @@ describe("trackRemovalPurgeProcessor", () => {
 
         await module.processTrackRemovalPurge(buildJob());
         expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
-        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+        expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
 
         const secondPage = Array.from({ length: 101 }, (_, index) => ({
             id: `track-${(index + 100).toString().padStart(3, "0")}`,
         }));
-        prisma.track.findMany.mockResolvedValueOnce(secondPage);
+        prisma.track.findMany.mockResolvedValueOnce(
+            secondPage.map((track) => ({
+                ...track,
+                album: { artistId: "artist-default" },
+            })),
+        );
         prisma.track.deleteMany.mockResolvedValueOnce({ count: 50 });
         const continuationCalls = schedulerQueue.add.mock
             .calls as unknown as Array<[string, Record<string, unknown>]>;
         const firstContinuation = continuationCalls[0]?.[1];
         await module.processTrackRemovalPurge(buildJob(firstContinuation));
         expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
-        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+        expect(backfillAllArtistCounts).toHaveBeenCalledTimes(2);
 
-        prisma.track.findMany.mockResolvedValueOnce([{ id: "track-200" }]);
+        prisma.track.findMany.mockResolvedValueOnce([
+            {
+                id: "track-200",
+                album: { artistId: "artist-default" },
+            },
+        ]);
         prisma.track.deleteMany.mockResolvedValueOnce({ count: 0 });
         prisma.track.count.mockResolvedValueOnce(0);
         const secondContinuation = continuationCalls[1]?.[1];
         await module.processTrackRemovalPurge(buildJob(secondContinuation));
 
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
-        expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
+        expect(backfillAllArtistCounts).toHaveBeenCalledTimes(2);
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("Post-purge cleanup for 150 tracks"),
         );

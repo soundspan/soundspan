@@ -4,6 +4,7 @@ import { recordProviderTrackGcPass } from "../metrics";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { cleanupOrphanedLibraryEntities } from "./libraryOrphanCleanup";
+import { updateArtistCountsInTransaction } from "./artistCountsService";
 import {
     providerTrackCollectableWhere,
     providerTrackRetentionCutoff,
@@ -17,8 +18,8 @@ const PROVIDER_BACKLOG_GAUGE_CAP = 50_000;
 const EMPTY_COUNTS = { tidal: 0, youtube: 0 } as const;
 
 interface ProviderTrackCandidates {
-    tidal: Array<{ id: string }>;
-    youtube: Array<{ id: string }>;
+    tidal: Array<{ id: string; artistId: string | null }>;
+    youtube: Array<{ id: string; artistId: string | null }>;
 }
 
 type ProviderTrackCounts = { tidal: number; youtube: number };
@@ -46,6 +47,17 @@ export interface ProviderTrackGcOptions {
     retentionDays?: number;
 }
 
+function affectedArtistIds(candidates: ProviderTrackCandidates): string[] {
+    return [
+        ...new Set(
+            [
+                ...candidates.tidal.map((track) => track.artistId),
+                ...candidates.youtube.map((track) => track.artistId),
+            ].filter((artistId): artistId is string => artistId !== null),
+        ),
+    ].sort();
+}
+
 async function loadCandidates(cutoff: Date): Promise<ProviderTrackCandidates> {
     const where = providerTrackCollectableWhere(cutoff);
     const [tidal, youtube] = await Promise.all([
@@ -53,13 +65,13 @@ async function loadCandidates(cutoff: Date): Promise<ProviderTrackCandidates> {
             where,
             orderBy: { id: "asc" },
             take: PROVIDER_BATCH_SIZE,
-            select: { id: true },
+            select: { id: true, artistId: true },
         }),
         prisma.trackYtMusic.findMany({
             where,
             orderBy: { id: "asc" },
             take: PROVIDER_BATCH_SIZE,
-            select: { id: true },
+            select: { id: true, artistId: true },
         }),
     ]);
     return { tidal, youtube };
@@ -113,6 +125,12 @@ async function deleteCandidates(
                 ...where,
             },
         });
+        if (tidal.count + youtube.count > 0) {
+            await updateArtistCountsInTransaction(
+                transaction,
+                affectedArtistIds(candidates),
+            );
+        }
         return { tidal: tidal.count, youtube: youtube.count };
     });
 }

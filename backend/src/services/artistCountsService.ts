@@ -11,6 +11,7 @@
  * - remoteTrackCount: TrackTidal + TrackYtMusic linked to this artist
  */
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import {
@@ -18,8 +19,6 @@ import {
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 
-const BATCH_SIZE = 100;
-const BATCH_DELAY_MS = 50;
 const MAX_SCOPED_ARTISTS = 2_000_000;
 
 interface ArtistCounts {
@@ -28,6 +27,8 @@ interface ArtistCounts {
     totalTrackCount: number;
     remoteTrackCount: number;
 }
+
+type ArtistCountWriteClient = Pick<Prisma.TransactionClient, "$executeRaw">;
 
 /**
  * Calculate counts for a single artist
@@ -112,43 +113,102 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
 export async function updateMultipleArtistCounts(
     artistIds: readonly string[],
 ): Promise<{ updated: number; errors: number }> {
-    if (artistIds.length > MAX_SCOPED_ARTISTS) {
-        throw new Error("Scoped artist count update exceeded the item bound");
-    }
-    let updated = 0;
-    let errors = 0;
-
-    for (let index = 0; index < MAX_SCOPED_ARTISTS; index += 1) {
-        const artistId = artistIds[index];
-        if (!artistId) break;
-        try {
-            await updateArtistCounts(artistId);
-            updated++;
-        } catch (error) {
-            errors++;
-        }
-    }
-
-    return { updated, errors };
+    const updated = await updateArtistCountSet(prisma, artistIds);
+    return { updated, errors: 0 };
 }
 
-/** Recomputes only the supplied artists through fixed-size sequential batches. */
+/** Recomputes only the supplied artists in one set-based statement. */
 export async function updateArtistCountsInBatches(
     artistIds: readonly string[],
 ): Promise<{ updated: number; failed: number }> {
-    if (artistIds.length > MAX_SCOPED_ARTISTS) {
+    const { updated, errors: failed } =
+        await updateMultipleArtistCounts(artistIds);
+    return { updated, failed };
+}
+
+/** Recomputes supplied artists through an existing transaction boundary. */
+export async function updateArtistCountsInTransaction(
+    transaction: ArtistCountWriteClient,
+    artistIds: readonly string[],
+): Promise<number> {
+    return updateArtistCountSet(transaction, artistIds);
+}
+
+function artistScopeSql(artistIds?: readonly string[]): Prisma.Sql {
+    if (artistIds === undefined) {
+        return Prisma.sql`SELECT id FROM "Artist"`;
+    }
+    return Prisma.sql`
+        SELECT DISTINCT id
+        FROM unnest(${[...artistIds]}::text[]) AS scoped(id)
+    `;
+}
+
+async function updateArtistCountSet(
+    client: ArtistCountWriteClient,
+    artistIds?: readonly string[],
+): Promise<number> {
+    if (artistIds && artistIds.length > MAX_SCOPED_ARTISTS) {
         throw new Error("Scoped artist count update exceeded the item bound");
     }
-    const totals = { updated: 0, failed: 0 };
-    for (let offset = 0; offset < MAX_SCOPED_ARTISTS; offset += BATCH_SIZE) {
-        if (offset >= artistIds.length) break;
-        const { updated, errors: failed } = await updateMultipleArtistCounts(
-            artistIds.slice(offset, offset + BATCH_SIZE),
-        );
-        totals.updated += updated;
-        totals.failed += failed;
-    }
-    return totals;
+    if (artistIds?.length === 0) return 0;
+    const scope = artistScopeSql(artistIds);
+    const countsLastUpdated = new Date();
+    return client.$executeRaw(Prisma.sql`
+        WITH scope AS (${scope}),
+        visible_local_albums AS (
+            SELECT DISTINCT track."albumId"
+            FROM "Track" AS track
+            JOIN "Album" AS album ON album.id = track."albumId"
+            JOIN scope ON scope.id = album."artistId"
+            WHERE track.origin = 'LOCAL'
+              AND track."removedAt" IS NULL
+              AND album.location IN ('LIBRARY', 'DISCOVER', 'REMOTE', 'FEDERATED')
+        ),
+        album_counts AS (
+            SELECT album."artistId",
+                   COUNT(*) FILTER (WHERE album.location = 'LIBRARY')::integer
+                       AS library_count,
+                   COUNT(*) FILTER (WHERE album.location = 'DISCOVER')::integer
+                       AS discovery_count
+            FROM "Album" AS album
+            JOIN scope ON scope.id = album."artistId"
+            JOIN visible_local_albums ON visible_local_albums."albumId" = album.id
+            GROUP BY album."artistId"
+        ),
+        track_counts AS (
+            SELECT album."artistId", COUNT(*)::integer AS track_count
+            FROM "Track" AS track
+            JOIN "Album" AS album ON album.id = track."albumId"
+            JOIN scope ON scope.id = album."artistId"
+            WHERE track.origin = 'LOCAL'
+              AND track."removedAt" IS NULL
+              AND album.location IN ('LIBRARY', 'DISCOVER', 'REMOTE', 'FEDERATED')
+            GROUP BY album."artistId"
+        ),
+        remote_counts AS (
+            SELECT remote."artistId", COUNT(*)::integer AS remote_count
+            FROM (
+                SELECT tidal."artistId" FROM "TrackTidal" AS tidal
+                JOIN scope ON scope.id = tidal."artistId"
+                UNION ALL
+                SELECT youtube."artistId" FROM "TrackYtMusic" AS youtube
+                JOIN scope ON scope.id = youtube."artistId"
+            ) AS remote
+            GROUP BY remote."artistId"
+        )
+        UPDATE "Artist" AS artist
+        SET "libraryAlbumCount" = COALESCE(album_counts.library_count, 0),
+            "discoveryAlbumCount" = COALESCE(album_counts.discovery_count, 0),
+            "totalTrackCount" = COALESCE(track_counts.track_count, 0),
+            "remoteTrackCount" = COALESCE(remote_counts.remote_count, 0),
+            "countsLastUpdated" = ${countsLastUpdated}
+        FROM scope
+        LEFT JOIN album_counts ON album_counts."artistId" = scope.id
+        LEFT JOIN track_counts ON track_counts."artistId" = scope.id
+        LEFT JOIN remote_counts ON remote_counts."artistId" = scope.id
+        WHERE artist.id = scope.id
+    `);
 }
 
 /**
@@ -199,8 +259,7 @@ export function isBackfillInProgress(): boolean {
 }
 
 /**
- * Backfill counts for all artists in batches
- * Safe to run on live systems - processes in small batches with delays
+ * Backfill counts for all artists with one set-based update.
  */
 export async function backfillAllArtistCounts(
     onProgress?: (processed: number, total: number) => void,
@@ -216,52 +275,10 @@ export async function backfillAllArtistCounts(
     try {
         const total = await prisma.artist.count();
         backfillProgress.total = total;
-        let cursor: string | undefined;
-
         logger.info(`[ArtistCounts] Starting backfill for ${total} artists`);
-
-        while (true) {
-            // Fetch batch of artists using cursor pagination
-            const artists = await prisma.artist.findMany({
-                take: BATCH_SIZE,
-                skip: cursor ? 1 : 0,
-                cursor: cursor ? { id: cursor } : undefined,
-                orderBy: { id: "asc" },
-                select: { id: true, name: true },
-            });
-
-            if (artists.length === 0) break;
-
-            // Process batch
-            for (const artist of artists) {
-                try {
-                    await updateArtistCounts(artist.id);
-                    backfillProgress.processed++;
-                } catch (error) {
-                    logger.error(
-                        `[ArtistCounts] Failed to update ${artist.name} (${artist.id}):`,
-                        error,
-                    );
-                    backfillProgress.errors++;
-                }
-            }
-
-            cursor = artists[artists.length - 1].id;
-
-            if (onProgress) {
-                onProgress(backfillProgress.processed, total);
-            }
-
-            // Log progress every 500 artists
-            if (backfillProgress.processed % 500 === 0) {
-                logger.info(
-                    `[ArtistCounts] Progress: ${backfillProgress.processed}/${total} (${Math.round((backfillProgress.processed / total) * 100)}%)`,
-                );
-            }
-
-            // Small delay to avoid overwhelming the database
-            await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
-        }
+        backfillProgress.processed =
+            total === 0 ? 0 : await updateArtistCountSet(prisma);
+        onProgress?.(backfillProgress.processed, total);
 
         logger.info(
             `[ArtistCounts] Backfill complete: ${backfillProgress.processed} processed, ${backfillProgress.errors} errors`,

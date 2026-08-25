@@ -3,6 +3,7 @@ describe("artistCountsService", () => {
         jest.resetModules();
 
         const prisma = {
+            $executeRaw: jest.fn(),
             album: {
                 count: jest.fn(),
                 findUnique: jest.fn(),
@@ -139,36 +140,35 @@ describe("artistCountsService", () => {
         );
     });
 
-    it("updates multiple artists and reports successes versus errors", async () => {
+    it("updates multiple artists with one set-based statement", async () => {
         const { mod, prisma } = loadModule();
-        prisma.album.count.mockResolvedValue(0);
-        prisma.track.count.mockResolvedValue(0);
-        prisma.artist.update
-            .mockResolvedValueOnce({})
-            .mockRejectedValueOnce(new Error("second update failed"));
+        prisma.$executeRaw.mockResolvedValue(2);
 
         await expect(
             mod.updateMultipleArtistCounts(["artist-a", "artist-b"]),
         ).resolves.toEqual({
-            updated: 1,
-            errors: 1,
+            updated: 2,
+            errors: 0,
         });
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.album.count).not.toHaveBeenCalled();
+        expect(prisma.track.count).not.toHaveBeenCalled();
+        expect(prisma.artist.update).not.toHaveBeenCalled();
     });
 
-    it("updates a scoped artist set across bounded batches", async () => {
+    it("updates a large scoped artist set without per-artist statements", async () => {
         const { mod, prisma } = loadModule();
         const artistIds = Array.from(
             { length: 205 },
             (_, index) => `artist-${index}`,
         );
-        prisma.album.count.mockResolvedValue(0);
-        prisma.track.count.mockResolvedValue(0);
-        prisma.artist.update.mockResolvedValue({});
+        prisma.$executeRaw.mockResolvedValue(205);
 
         await expect(
             mod.updateArtistCountsInBatches(artistIds),
         ).resolves.toEqual({ updated: 205, failed: 0 });
-        expect(prisma.artist.update).toHaveBeenCalledTimes(205);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.artist.update).not.toHaveBeenCalled();
     });
 
     it("updates by album id and track id when related artist exists", async () => {
@@ -234,77 +234,25 @@ describe("artistCountsService", () => {
         expect(mod.isBackfillInProgress()).toBe(false);
     });
 
-    it("backfills artists in batches and reports progress/errors", async () => {
-        jest.useFakeTimers();
+    it("backfills every artist with one set-based statement", async () => {
         const { mod, prisma, logger } = loadModule();
         const onProgress = jest.fn();
 
         prisma.artist.count.mockResolvedValueOnce(2);
-        prisma.artist.findMany
-            .mockResolvedValueOnce([
-                { id: "artist-1", name: "Artist One" },
-                { id: "artist-2", name: "Artist Two" },
-            ])
-            .mockResolvedValueOnce([]);
+        prisma.$executeRaw.mockResolvedValueOnce(2);
 
-        prisma.album.count.mockResolvedValue(1);
-        prisma.track.count.mockResolvedValue(8);
-        prisma.artist.update
-            .mockResolvedValueOnce({})
-            .mockRejectedValueOnce(new Error("artist update failed"));
-
-        const run = mod.backfillAllArtistCounts(onProgress);
-        await jest.advanceTimersByTimeAsync(50);
-
-        await expect(run).resolves.toEqual({
-            processed: 1,
-            errors: 1,
+        await expect(mod.backfillAllArtistCounts(onProgress)).resolves.toEqual({
+            processed: 2,
+            errors: 0,
         });
-        expect(onProgress).toHaveBeenCalledWith(1, 2);
-        expect(logger.error).toHaveBeenCalledWith(
-            "[ArtistCounts] Failed to update Artist Two (artist-2):",
-            expect.any(Error),
-        );
+        expect(onProgress).toHaveBeenCalledWith(2, 2);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.artist.findMany).not.toHaveBeenCalled();
         expect(logger.info).toHaveBeenCalledWith(
             "[ArtistCounts] Starting backfill for 2 artists",
         );
         expect(logger.info).toHaveBeenCalledWith(
-            "[ArtistCounts] Backfill complete: 1 processed, 1 errors",
-        );
-    });
-
-    it("logs periodic progress every 500 processed artists", async () => {
-        jest.useFakeTimers();
-        const { mod, prisma, logger } = loadModule();
-
-        const makeArtists = (start: number, end: number) =>
-            Array.from({ length: end - start + 1 }, (_, idx) => {
-                const idNum = start + idx;
-                return { id: `artist-${idNum}`, name: `Artist ${idNum}` };
-            });
-
-        prisma.artist.count.mockResolvedValueOnce(500);
-        prisma.artist.findMany
-            .mockResolvedValueOnce(makeArtists(1, 100))
-            .mockResolvedValueOnce(makeArtists(101, 200))
-            .mockResolvedValueOnce(makeArtists(201, 300))
-            .mockResolvedValueOnce(makeArtists(301, 400))
-            .mockResolvedValueOnce(makeArtists(401, 500))
-            .mockResolvedValueOnce([]);
-
-        prisma.album.count.mockResolvedValue(1);
-        prisma.track.count.mockResolvedValue(2);
-        prisma.artist.update.mockResolvedValue({});
-
-        const run = mod.backfillAllArtistCounts();
-        await jest.advanceTimersByTimeAsync(250);
-
-        await expect(run).resolves.toEqual({
-            processed: 500,
-            errors: 0,
-        });
-        expect(logger.info).toHaveBeenCalledWith(
-            "[ArtistCounts] Progress: 500/500 (100%)",
+            "[ArtistCounts] Backfill complete: 2 processed, 0 errors",
         );
     });
 
@@ -334,7 +282,6 @@ describe("artistCountsService", () => {
 
         prisma.artist.updateMany.mockResolvedValue({});
         prisma.artist.count.mockResolvedValueOnce(0);
-        prisma.artist.findMany.mockResolvedValueOnce([]);
 
         await mod.forceRecalculateAllCounts();
 

@@ -285,6 +285,56 @@ function startObservedLike(rgMbid: string) {
     return { response, promise, isCompleted: () => completed };
 }
 
+async function installCountRefreshFailure(database: Client): Promise<void> {
+    await database.query(`
+        CREATE FUNCTION fail_provider_count_refresh()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            IF NEW.id = 'count-refresh-retry-artist' THEN
+                RAISE EXCEPTION 'forced count refresh failure';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+    `);
+    await database.query(`
+        CREATE TRIGGER fail_provider_count_refresh
+        BEFORE UPDATE ON "Artist"
+        FOR EACH ROW
+        EXECUTE FUNCTION fail_provider_count_refresh()
+    `);
+}
+
+async function removeCountRefreshFailure(database: Client): Promise<void> {
+    await database.query(
+        'DROP TRIGGER IF EXISTS fail_provider_count_refresh ON "Artist"',
+    );
+    await database.query(
+        "DROP FUNCTION IF EXISTS fail_provider_count_refresh()",
+    );
+}
+
+async function expectProviderCountState(
+    trackId: string,
+    artistId: string,
+    expectedTrack: "present" | "deleted",
+    remoteTrackCount: number,
+): Promise<void> {
+    const trackExpectation = expect(
+        prisma.trackTidal.findUnique({ where: { id: trackId } }),
+    ).resolves;
+    if (expectedTrack === "present") await trackExpectation.not.toBeNull();
+    else await trackExpectation.toBeNull();
+    await expect(
+        prisma.artist.findUnique({
+            where: { id: artistId },
+            select: { remoteTrackCount: true },
+        }),
+    ).resolves.toEqual({ remoteTrackCount });
+}
+
 describeWithPostgres(
     "provider track garbage collection PostgreSQL behavior",
     () => {
@@ -447,6 +497,41 @@ describeWithPostgres(
                     where: { id: "parent-retention-artist" },
                 }),
             ).resolves.toBeNull();
+        });
+
+        it("rolls back provider deletes when count refresh fails and converges on retry", async () => {
+            const trackId = await createTidalTrack(
+                "count-refresh-retry",
+                649099,
+                old,
+            );
+            const artistId = "count-refresh-retry-artist";
+            await prisma.artist.update({
+                where: { id: artistId },
+                data: { hasUserOverrides: true, remoteTrackCount: 1 },
+            });
+            await installCountRefreshFailure(database);
+
+            try {
+                await expect(
+                    collectProviderTracks({
+                        now: firstNow,
+                        retentionDays: 30,
+                    }),
+                ).rejects.toThrow("forced count refresh failure");
+                await expectProviderCountState(trackId, artistId, "present", 1);
+            } finally {
+                await removeCountRefreshFailure(database);
+            }
+
+            await expect(
+                collectProviderTracks({ now: firstNow, retentionDays: 30 }),
+            ).resolves.toEqual(
+                expect.objectContaining({
+                    deleted: expect.objectContaining({ tidal: 1 }),
+                }),
+            );
+            await expectProviderCountState(trackId, artistId, "deleted", 0);
         });
 
         it("deletes an explicitly administered album and its liked ownership row", async () => {

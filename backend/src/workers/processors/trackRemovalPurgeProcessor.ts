@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { config } from "../../config";
-import { backfillAllArtistCounts } from "../../services/artistCountsService";
+import { updateArtistCountsInTransaction } from "../../services/artistCountsService";
 import { cleanupOrphanedLibraryEntities } from "../../services/libraryOrphanCleanup";
 import { collectProviderTracks } from "../../services/providerTrackGc";
 import {
@@ -140,7 +140,7 @@ function parsePurgeCursor(data: unknown): PurgeCursor {
 
 async function loadPurgePage(
     cursor: PurgeCursor,
-): Promise<Array<{ id: string }>> {
+): Promise<Array<{ id: string; album: { artistId: string } }>> {
     return prisma.track.findMany({
         where: {
             origin: "LOCAL",
@@ -149,37 +149,42 @@ async function loadPurgePage(
         },
         orderBy: { id: "asc" },
         take: QUERY_SIZE,
-        select: { id: true },
+        select: { id: true, album: { select: { artistId: true } } },
     });
 }
 
 async function deletePurgeBatch(
-    batch: readonly { id: string }[],
+    batch: readonly { id: string; album: { artistId: string } }[],
     cutoff: Date,
 ): Promise<number> {
     if (batch.length === 0) return 0;
-    if (!config.features.federation) {
-        return deleteTrackRows(prisma, batch, cutoff);
-    }
     return prisma.$transaction(async (transaction) => {
         const deleted = await deleteTrackRows(transaction, batch, cutoff);
-        const deletedIds = await resolveDeletedTrackIds(
-            transaction,
-            batch,
-            deleted,
-        );
-        if (deletedIds.length !== deleted) {
-            throw new Error(
-                "Track deletion count changed during tombstone write",
+        if (config.features.federation) {
+            const deletedIds = await resolveDeletedTrackIds(
+                transaction,
+                batch,
+                deleted,
             );
+            if (deletedIds.length !== deleted) {
+                throw new Error(
+                    "Track deletion count changed during tombstone write",
+                );
+            }
+            if (deletedIds.length > 0) {
+                await transaction.federationTombstone.createMany({
+                    data: deletedIds.map((entityId) => ({
+                        entityType: "track",
+                        entityId,
+                    })),
+                });
+            }
         }
-        if (deletedIds.length > 0) {
-            await transaction.federationTombstone.createMany({
-                data: deletedIds.map((entityId) => ({
-                    entityType: "track",
-                    entityId,
-                })),
-            });
+        if (deleted > 0) {
+            await updateArtistCountsInTransaction(
+                transaction,
+                [...new Set(batch.map((track) => track.album.artistId))].sort(),
+            );
         }
         return deleted;
     });
@@ -348,9 +353,8 @@ async function finishPurge(
 
 async function refreshCatalogAfterPurge(deleted: number): Promise<void> {
     const orphans = await cleanupOrphanedLibraryEntities();
-    const { processed, errors: failedCount } = await backfillAllArtistCounts();
     log.info(
-        `Post-purge cleanup for ${deleted} tracks deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists; refreshed ${processed} artist counts with ${failedCount} errors`,
+        `Post-purge cleanup for ${deleted} tracks deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists`,
     );
 }
 

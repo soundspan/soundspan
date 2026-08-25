@@ -31,9 +31,12 @@ const client = {
 const createFederationClient = jest.fn(() => client);
 const createMapping = jest.fn();
 const upsertTrackEmbedding = jest.fn();
+const upsertTrackEmbeddingPage = jest.fn();
 const backfillAllArtistCounts = jest.fn();
 const updateArtistCountsInBatches = jest.fn();
 const clearTrackTranscodeCache = jest.fn();
+const clearTrackTranscodeCaches = jest.fn();
+const removeReplacementCacheFiles = jest.fn();
 const getActiveSpace = jest.fn();
 const recordFederationEmbeddingPageOutcome = jest.fn();
 const recordFederationPresenceFetch = jest.fn();
@@ -49,6 +52,10 @@ const mockLog = {
 mockLog.child.mockReturnValue(mockLog);
 
 const prisma = {
+    $executeRaw: jest.fn(async (_query: unknown, payload?: unknown[]) =>
+        Array.isArray(payload) ? payload.length : 0,
+    ),
+    $transaction: jest.fn(),
     federationPeer: {
         findUnique: jest.fn(),
         update: jest.fn(),
@@ -87,6 +94,10 @@ const prisma = {
         deleteMany: jest.fn(),
     },
 };
+prisma.$transaction.mockImplementation(
+    async (callback: (transaction: typeof prisma) => unknown) =>
+        callback(prisma),
+);
 
 jest.mock("../../../utils/db", () => ({ prisma }));
 jest.mock("../../../utils/logger", () => {
@@ -110,6 +121,12 @@ jest.mock("../../../services/trackMappingService", () => ({
 }));
 jest.mock("../../../services/trackEmbeddings", () => ({
     upsertTrackEmbedding,
+    upsertTrackEmbeddingPage,
+    upsertTrackEmbeddingPageInTransaction: (
+        _transaction: unknown,
+        rows: ReadonlyArray<unknown>,
+        spaceId: string,
+    ) => upsertTrackEmbeddingPage(rows, spaceId),
 }));
 jest.mock("../../../services/embeddingSpaces", () => ({
     getActiveSpace,
@@ -132,6 +149,12 @@ jest.mock("../../../services/artistCountsService", () => ({
 }));
 jest.mock("../../../services/trackReplacement", () => ({
     clearTrackTranscodeCache,
+    clearTrackTranscodeCaches,
+    clearTrackTranscodeCacheRows: (
+        _transaction: unknown,
+        trackIds: readonly string[],
+    ) => clearTrackTranscodeCaches(trackIds),
+    removeReplacementCacheFiles,
 }));
 
 import { processFederationSync } from "../federationSyncProcessor";
@@ -270,6 +293,19 @@ const audiobook = {
 
 function job() {
     return { data: { peerId: "peer-1" } } as never;
+}
+
+function rawUpsertRows(): Array<Record<string, unknown>> {
+    return prisma.$executeRaw.mock.calls.flatMap((call) => {
+        const payload = call[1];
+        return Array.isArray(payload)
+            ? payload.map((value) => JSON.parse(String(value)))
+            : [];
+    });
+}
+
+function rawUpsertRowsFor(remoteId: string): Array<Record<string, unknown>> {
+    return rawUpsertRows().filter((row) => row.remoteId === remoteId);
 }
 
 function catalogPageFor(type: string) {
@@ -415,7 +451,7 @@ describe("federation sync processor", () => {
             mbid: "artist-mbid-1",
         });
         prisma.artist.findMany.mockImplementation(async ({ where }) =>
-            where?.OR
+            where?.OR || where?.remoteId
                 ? [
                       {
                           id: "artist-local-row",
@@ -439,7 +475,7 @@ describe("federation sync processor", () => {
             artistId: "artist-local-row",
         });
         prisma.album.findMany.mockImplementation(async ({ where }) =>
-            where?.OR
+            where?.OR || where?.remoteId
                 ? [
                       {
                           id: "album-local-row",
@@ -484,12 +520,24 @@ describe("federation sync processor", () => {
         prisma.audiobook.deleteMany.mockResolvedValue({ count: 0 });
         createMapping.mockResolvedValue({ id: "mapping-1" });
         upsertTrackEmbedding.mockResolvedValue(undefined);
+        upsertTrackEmbeddingPage.mockImplementation(async (rows, spaceId) => {
+            for (const row of rows) {
+                await upsertTrackEmbedding(row.trackId, row.embedding, spaceId);
+            }
+        });
         backfillAllArtistCounts.mockResolvedValue({ processed: 1, errors: 0 });
         updateArtistCountsInBatches.mockResolvedValue({
             updated: 1,
             errors: 0,
         });
         clearTrackTranscodeCache.mockResolvedValue(undefined);
+        clearTrackTranscodeCaches.mockImplementation(async (trackIds) => {
+            for (const trackId of trackIds) {
+                await clearTrackTranscodeCache(trackId);
+            }
+            return [];
+        });
+        removeReplacementCacheFiles.mockResolvedValue(undefined);
         getActiveSpace.mockResolvedValue(activeSpace);
         redisSet.mockResolvedValue("OK");
     });
@@ -500,34 +548,21 @@ describe("federation sync processor", () => {
         expect(
             client.getCatalogItems.mock.calls.map((call) => call[0]),
         ).toEqual(["artist", "album", "track", "podcast", "audiobook"]);
-        expect(prisma.artist.upsert.mock.invocationCallOrder[0]).toBeLessThan(
-            prisma.album.upsert.mock.invocationCallOrder[0],
-        );
-        expect(prisma.album.upsert.mock.invocationCallOrder[0]).toBeLessThan(
-            prisma.track.upsert.mock.invocationCallOrder[0],
-        );
-        expect(prisma.track.upsert).toHaveBeenCalledWith(
+        expect(rawUpsertRows().map((row) => row.remoteId)).toEqual([
+            "remote-artist-1",
+            "remote-album-1",
+            "remote-track-1",
+        ]);
+        expect(rawUpsertRowsFor("remote-track-1")[0]).toEqual(
             expect.objectContaining({
-                create: expect.objectContaining({
-                    bpm: 122.5,
-                    beatsCount: 367,
-                    energy: 0.71,
-                    loudnessLufs: -16.9,
-                    truePeakDb: -0.8,
-                    moodTags: ["focused"],
-                    essentiaGenres: ["electronic"],
-                    lastfmTags: ["synthwave"],
-                }),
-                update: expect.objectContaining({
-                    bpm: 122.5,
-                    beatsCount: 367,
-                    energy: 0.71,
-                    loudnessLufs: -16.9,
-                    truePeakDb: -0.8,
-                    moodTags: ["focused"],
-                    essentiaGenres: ["electronic"],
-                    lastfmTags: ["synthwave"],
-                }),
+                bpm: 122.5,
+                beatsCount: 367,
+                energy: 0.71,
+                loudnessLufs: -16.9,
+                truePeakDb: -0.8,
+                moodTags: ["focused"],
+                essentiaGenres: ["electronic"],
+                lastfmTags: ["synthwave"],
             }),
         );
         expect(prisma.federationPodcastListing.upsert).toHaveBeenCalledWith({
@@ -570,26 +605,15 @@ describe("federation sync processor", () => {
                 }),
             }),
         );
-        expect(prisma.album.upsert).toHaveBeenCalledWith(
-            expect.objectContaining({
-                create: expect.objectContaining({
-                    artistId: "artist-local-row",
-                }),
-            }),
+        expect(rawUpsertRowsFor("remote-album-1")[0]).toEqual(
+            expect.objectContaining({ artistId: "artist-local-row" }),
         );
-        expect(prisma.track.upsert).toHaveBeenCalledWith(
+        expect(rawUpsertRowsFor("remote-track-1")[0]).toEqual(
             expect.objectContaining({
-                create: expect.objectContaining({
-                    albumId: "album-local-row",
-                    origin: "FEDERATED",
-                    filePath: null,
-                    removedAt: null,
-                }),
-                update: expect.objectContaining({
-                    origin: "FEDERATED",
-                    filePath: null,
-                    removedAt: null,
-                }),
+                albumId: "album-local-row",
+                origin: "FEDERATED",
+                filePath: null,
+                removedAt: null,
             }),
         );
         expect(prisma.federationPeer.update).toHaveBeenLastCalledWith({
@@ -761,6 +785,9 @@ describe("federation sync processor", () => {
             "artist",
             "remote-artist-1",
         );
+        expect(client.getCatalogItem.mock.invocationCallOrder[0]).toBeLessThan(
+            prisma.$transaction.mock.invocationCallOrder[0],
+        );
         expect(prisma.artist.upsert).toHaveBeenCalled();
         expect(mockLog.warn).toHaveBeenCalledWith(
             expect.stringContaining("missing parent"),
@@ -789,8 +816,11 @@ describe("federation sync processor", () => {
             "album",
             "remote-album-1",
         );
+        expect(client.getCatalogItem.mock.invocationCallOrder[0]).toBeLessThan(
+            prisma.$transaction.mock.invocationCallOrder[0],
+        );
         expect(prisma.album.upsert).toHaveBeenCalled();
-        expect(prisma.track.upsert).toHaveBeenCalled();
+        expect(rawUpsertRowsFor("remote-track-1")).toHaveLength(1);
     });
 
     it("retains a full-sync hierarchy recovered from a track parent", async () => {
@@ -929,23 +959,7 @@ describe("federation sync processor", () => {
         await processFederationSync(job());
         await processFederationSync(job());
 
-        const trackKeys = prisma.track.upsert.mock.calls.map(
-            (call) => call[0].where,
-        );
-        expect(trackKeys).toEqual([
-            {
-                peerId_remoteId: {
-                    peerId: "peer-1",
-                    remoteId: "remote-track-1",
-                },
-            },
-            {
-                peerId_remoteId: {
-                    peerId: "peer-1",
-                    remoteId: "remote-track-1",
-                },
-            },
-        ]);
+        expect(rawUpsertRowsFor("remote-track-1")).toHaveLength(2);
     });
 
     it("rebinds a stable federated identity when the remote track id changes", async () => {
@@ -974,15 +988,8 @@ describe("federation sync processor", () => {
             where: { id: "prior-fed-row" },
             data: { remoteId: "remote-track-1" },
         });
-        expect(prisma.track.upsert).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: {
-                    peerId_remoteId: {
-                        peerId: "peer-1",
-                        remoteId: "remote-track-1",
-                    },
-                },
-            }),
+        expect(rawUpsertRowsFor("remote-track-1")[0]).toEqual(
+            expect.objectContaining({ id: "prior-fed-row" }),
         );
     });
 
@@ -1414,9 +1421,12 @@ describe("federation sync processor", () => {
             ([args]) => args.where?.origin === "LOCAL" && args.where?.OR,
         );
         expect(positionQueries).toHaveLength(0);
-        expect(prisma.track.upsert).toHaveBeenCalledTimes(1);
+        expect(rawUpsertRowsFor("remote-track-unmatched")).toHaveLength(1);
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
-            where: { id: "fed:remote-track-unmatched", dedupPinned: false },
+            where: {
+                id: { in: [expect.stringMatching(/^fed:/)] },
+                dedupPinned: false,
+            },
             data: { dedupOfTrackId: null },
         });
     });
@@ -1532,7 +1542,7 @@ describe("federation sync processor", () => {
             await processFederationSync(job());
 
             expect(prisma.track.updateMany).toHaveBeenCalledWith({
-                where: { id: "fed-track-row", dedupPinned: false },
+                where: { id: { in: ["fed-track-row"] }, dedupPinned: false },
                 data: { dedupOfTrackId: "local-track-1" },
             });
             expect(createMapping).toHaveBeenCalledWith({
@@ -1544,24 +1554,18 @@ describe("federation sync processor", () => {
     );
 
     it("preserves a pinned arbitration decision through a full resync", async () => {
-        prisma.track.upsert.mockResolvedValueOnce({
-            id: "fed-track-row",
-        });
         prisma.track.updateMany.mockResolvedValueOnce({ count: 0 });
 
         await processFederationSync(job());
 
-        expect(prisma.track.upsert).toHaveBeenCalledWith(
+        expect(rawUpsertRowsFor("remote-track-1")[0]).not.toEqual(
             expect.objectContaining({
-                update: expect.not.objectContaining({
-                    dedupPinned: expect.anything(),
-                    dedupOfTrackId: expect.anything(),
-                }),
-                select: { id: true },
+                dedupPinned: expect.anything(),
+                dedupOfTrackId: expect.anything(),
             }),
         );
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
-            where: { id: "fed-track-row", dedupPinned: false },
+            where: { id: { in: ["fed-track-row"] }, dedupPinned: false },
             data: { dedupOfTrackId: null },
         });
         expect(createMapping).not.toHaveBeenCalled();
@@ -1635,11 +1639,12 @@ describe("federation sync processor", () => {
                 ([args]) => args.where.origin === "FEDERATED",
             ),
         ).toHaveLength(1);
-        expect(
-            prisma.track.updateMany.mock.calls.filter(
-                ([args]) => args.data.dedupOfTrackId === "local-a",
-            ),
-        ).toHaveLength(2);
+        const dedupUpdates = prisma.track.updateMany.mock.calls.filter(
+            ([args]) => args.data.dedupOfTrackId === "local-a",
+        );
+        expect(dedupUpdates).toHaveLength(1);
+        expect(dedupUpdates[0][0].where.id.in).toHaveLength(2);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(3);
     });
 
     it("rejects a page that exceeds the shared federation item bound", async () => {
@@ -1683,6 +1688,15 @@ describe("federation sync processor", () => {
             skippedInvalid: 0,
         });
 
+        await processFederationSync(job());
+
+        expect(updateArtistCountsInBatches).toHaveBeenCalledWith([
+            "artist-local-row",
+        ]);
+        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+    });
+
+    it("recomputes only artists touched by a full sync", async () => {
         await processFederationSync(job());
 
         expect(updateArtistCountsInBatches).toHaveBeenCalledWith([
@@ -2003,7 +2017,7 @@ describe("federation sync processor", () => {
 
         await processFederationSync(job());
 
-        expect(prisma.track.upsert).toHaveBeenCalled();
+        expect(rawUpsertRowsFor("remote-track-1")).toHaveLength(1);
         expect(upsertTrackEmbedding).not.toHaveBeenCalled();
         expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
             "skipped_mismatch",
@@ -2039,7 +2053,8 @@ describe("federation sync processor", () => {
             tracks: 2,
         });
 
-        expect(prisma.track.upsert).toHaveBeenCalledTimes(2);
+        expect(rawUpsertRowsFor("remote-track-1")).toHaveLength(1);
+        expect(rawUpsertRowsFor("remote-track-2")).toHaveLength(1);
         expect(upsertTrackEmbedding).not.toHaveBeenCalled();
         expect(mockLog.warn).toHaveBeenCalledTimes(1);
         expect(mockLog.warn).toHaveBeenCalledWith(
@@ -2131,7 +2146,7 @@ describe("federation sync processor", () => {
             tracks: 1,
         });
 
-        expect(prisma.track.upsert).toHaveBeenCalled();
+        expect(rawUpsertRowsFor("remote-track-1")).toHaveLength(1);
         expect(upsertTrackEmbedding).not.toHaveBeenCalled();
         expect(mockLog.warn).toHaveBeenCalledTimes(1);
         expect(mockLog.warn).toHaveBeenCalledWith(

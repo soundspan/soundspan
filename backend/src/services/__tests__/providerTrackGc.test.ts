@@ -33,10 +33,12 @@ describe("provider track garbage collection", () => {
             const size = sizes?.shift() ?? 1;
             return Array.from({ length: size }, (_, index) => ({
                 id: `${provider}-${index + 1}`,
+                artistId: `${provider}-artist`,
             }));
         };
         let prisma: any;
         prisma = {
+            $executeRaw: jest.fn(async () => 2),
             trackTidal: {
                 findMany: options.failSelection
                     ? jest.fn(async () => {

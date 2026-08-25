@@ -1,4 +1,5 @@
 import type { Job } from "bull";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -9,17 +10,17 @@ import {
     type FederationEnvelope,
     type FederationManifest,
 } from "../../services/federationClient";
-import {
-    backfillAllArtistCounts,
-    updateArtistCountsInBatches,
-} from "../../services/artistCountsService";
+import { updateArtistCountsInBatches } from "../../services/artistCountsService";
 import { trackMappingService } from "../../services/trackMappingService";
 import { outboundClientOptions } from "../../services/federationPeers";
 import { decodeFederationIdentity } from "../../utils/federationDedup";
-import { upsertTrackEmbedding } from "../../services/trackEmbeddings";
+import { upsertTrackEmbeddingPageInTransaction } from "../../services/trackEmbeddings";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { clearTrackTranscodeCache } from "../../services/trackReplacement";
+import {
+    clearTrackTranscodeCacheRows,
+    removeReplacementCacheFiles,
+} from "../../services/trackReplacement";
 import {
     getActiveSpace,
     NoActiveEmbeddingSpaceError,
@@ -29,7 +30,6 @@ import { type ParsedFederationEmbeddingSpaceIdentity } from "../../services/fede
 import {
     createFederationPageState,
     groupFederationPage,
-    syncedFederationTrackValues,
     type AlbumEnvelope,
     type ArtistEnvelope,
     type AudiobookEnvelope,
@@ -55,6 +55,12 @@ import {
     loadDedupIndex,
     type DedupMatch,
 } from "./federationSyncDedup";
+import {
+    upsertFederationAlbumPage,
+    upsertFederationArtistPage,
+    upsertFederationTrackPage,
+} from "./federationSyncPersistence";
+import { recoverFederationMissingParents } from "./federationSyncParentRecovery";
 
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
@@ -183,6 +189,7 @@ function isMissingExportedParent(error: unknown): boolean {
     return error instanceof FederationHttpError && error.status === 404;
 }
 async function hasArtistCollision(
+    client: Pick<Prisma.TransactionClient, "artist"> | typeof prisma,
     context: SyncContext,
     state: PageState,
     item: ArtistEnvelope,
@@ -190,7 +197,7 @@ async function hasArtistCollision(
     if (state.loadedArtistMbids.has(item.attributes.mbid)) {
         return state.artistCollisionRemoteIds.has(item.id);
     }
-    const collision = await prisma.artist.findFirst({
+    const collision = await client.artist.findFirst({
         where: {
             mbid: item.attributes.mbid,
             NOT: { peerId: context.peerId, remoteId: item.id },
@@ -205,7 +212,7 @@ async function upsertArtist(
     item: ArtistEnvelope,
 ): Promise<RemoteArtistRow> {
     const existing = state.artists.get(item.id);
-    const collision = await hasArtistCollision(context, state, item);
+    const collision = await hasArtistCollision(prisma, context, state, item);
     const mbid =
         existing?.mbid ??
         (collision
@@ -265,6 +272,7 @@ async function ensureRemoteArtistId(
     return imported.id;
 }
 async function resolveAlbumRgMbid(
+    client: Pick<Prisma.TransactionClient, "album"> | typeof prisma,
     context: SyncContext,
     state: PageState,
     item: AlbumEnvelope,
@@ -276,7 +284,7 @@ async function resolveAlbumRgMbid(
             ? placeholderIdentity(context.peerId, item.attributes.rgMbid)
             : item.attributes.rgMbid;
     }
-    const collision = await prisma.album.findFirst({
+    const collision = await client.album.findFirst({
         where: {
             rgMbid: item.attributes.rgMbid,
             NOT: { peerId: context.peerId, remoteId: item.id },
@@ -306,7 +314,7 @@ async function upsertAlbum(
         context.unavailableParents.album.add(item.id);
         return false;
     }
-    const rgMbid = await resolveAlbumRgMbid(context, state, item);
+    const rgMbid = await resolveAlbumRgMbid(prisma, context, state, item);
     const row = await prisma.album.upsert({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
@@ -388,23 +396,34 @@ function uniqueValues(values: Array<string | null>): string[] {
     ];
 }
 
-async function applyTrackDedup(
-    trackId: string,
-    match: DedupMatch | null,
-): Promise<void> {
-    const updated = await prisma.track.updateMany({
-        where: { id: trackId, dedupPinned: false },
-        data: { dedupOfTrackId: match?.id ?? null },
-    });
-    if (!match || updated.count !== 1) return;
-    await trackMappingService.createMapping({
-        trackId: match.id,
-        confidence: match.confidence,
-        source: "federation",
-    });
+async function applyTrackDedupPage(
+    transaction: Pick<Prisma.TransactionClient, "track">,
+    rows: readonly { trackId: string; match: DedupMatch | null }[],
+): Promise<DedupMatch[]> {
+    const groups = new Map<
+        string,
+        { match: DedupMatch | null; ids: string[] }
+    >();
+    for (const row of rows) {
+        const key = row.match?.id ?? "";
+        const group = groups.get(key) ?? { match: row.match, ids: [] };
+        group.ids.push(row.trackId);
+        groups.set(key, group);
+    }
+    const mappings: DedupMatch[] = [];
+    for (const group of groups.values()) {
+        const updated = await transaction.track.updateMany({
+            where: { id: { in: group.ids }, dedupPinned: false },
+            data: { dedupOfTrackId: group.match?.id ?? null },
+        });
+        if (!group.match || updated.count === 0) continue;
+        mappings.push(group.match);
+    }
+    return mappings;
 }
 
 async function rebindFederatedTrack(
+    transaction: Pick<Prisma.TransactionClient, "track">,
     state: PageState,
     item: TrackEnvelope,
 ): Promise<RemoteTrackRow | null> {
@@ -412,7 +431,7 @@ async function rebindFederatedTrack(
     if (current) return current;
     const prior = state.rebindTracks.get(item.id);
     if (!prior) return null;
-    await prisma.track.update({
+    await transaction.track.update({
         where: { id: prior.id },
         data: { remoteId: item.id },
     });
@@ -423,40 +442,6 @@ async function rebindFederatedTrack(
     };
     state.tracks.set(item.id, rebound);
     return rebound;
-}
-
-async function upsertTrack(
-    context: SyncContext,
-    item: TrackEnvelope,
-    album: RemoteAlbumRow,
-    existing: RemoteTrackRow | null,
-    match: DedupMatch | null,
-    storeEmbedding: boolean,
-): Promise<void> {
-    const attributes = item.attributes;
-    const hashChanged =
-        attributes.audioHash !== undefined &&
-        existing !== null &&
-        existing.audioHash !== attributes.audioHash;
-    const values = syncedFederationTrackValues(item, album.id);
-    const row = await prisma.track.upsert({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
-        },
-        create: {
-            peerId: context.peerId,
-            remoteId: item.id,
-            ...values,
-        },
-        update: values,
-        select: { id: true },
-    });
-    if (hashChanged) await clearTrackTranscodeCache(row.id);
-    await applyTrackDedup(row.id, match);
-    const space = context.localEmbeddingSpace;
-    if (attributes.embedding && storeEmbedding && space)
-        await upsertTrackEmbedding(row.id, attributes.embedding, space.id);
-    context.touchedArtistIds.add(album.artistId);
 }
 
 async function loadArtistPageState(
@@ -608,6 +593,7 @@ function matchesRebindCandidate(
 }
 
 async function loadTrackRebindPageState(
+    transaction: Pick<Prisma.TransactionClient, "track">,
     context: SyncContext,
     state: PageState,
     items: readonly TrackEnvelope[],
@@ -615,7 +601,7 @@ async function loadTrackRebindPageState(
 ): Promise<void> {
     const missing = items.filter((item) => !state.tracks.has(item.id));
     if (missing.length === 0) return;
-    const rows = await prisma.track.findMany({
+    const rows = await transaction.track.findMany({
         where: {
             peerId: context.peerId,
             origin: "FEDERATED",
@@ -673,9 +659,42 @@ async function applyArtists(
     state: PageState,
     items: readonly ArtistEnvelope[],
     remember: boolean,
+    transaction: Prisma.TransactionClient,
 ): Promise<void> {
+    const rows: Array<{
+        item: ArtistEnvelope;
+        mbid: string;
+        existingId?: string;
+    }> = [];
     for (const item of items) {
-        await upsertArtist(context, state, item);
+        const existing = state.artists.get(item.id);
+        const collision = await hasArtistCollision(
+            transaction,
+            context,
+            state,
+            item,
+        );
+        rows.push({
+            item,
+            mbid:
+                existing?.mbid ??
+                (collision
+                    ? placeholderIdentity(context.peerId, item.attributes.mbid)
+                    : item.attributes.mbid),
+            existingId: existing?.id,
+        });
+    }
+    const persisted = await upsertFederationArtistPage(
+        transaction,
+        context.peerId,
+        rows,
+    );
+    for (const row of persisted) {
+        if (!row.remoteId) continue;
+        state.artists.set(row.remoteId, { ...row, remoteId: row.remoteId });
+        context.touchedArtistIds.add(row.id);
+    }
+    for (const item of items) {
         recordApplied(context, item, remember);
     }
 }
@@ -683,37 +702,62 @@ async function applyArtists(
 async function applyAlbums(
     context: SyncContext,
     state: PageState,
-    client: ReturnType<typeof createFederationClient>,
     items: readonly AlbumEnvelope[],
     remember: boolean,
+    transaction: Prisma.TransactionClient,
 ): Promise<void> {
+    const rows: Array<{
+        item: AlbumEnvelope;
+        artistId: string;
+        rgMbid: string;
+        existingId?: string;
+    }> = [];
     for (const item of items) {
-        if (!(await upsertAlbum(context, state, item, client, remember))) {
+        const artistId = state.artists.get(item.parentRef)?.id;
+        if (!artistId) {
+            context.unavailableParents.album.add(item.id);
             context.skippedInvalid += 1;
             continue;
         }
+        rows.push({
+            item,
+            artistId,
+            rgMbid: await resolveAlbumRgMbid(transaction, context, state, item),
+            existingId: state.albums.get(item.id)?.id,
+        });
+    }
+    const persisted = await upsertFederationAlbumPage(
+        transaction,
+        context.peerId,
+        rows,
+    );
+    for (const row of persisted) {
+        if (!row.remoteId) continue;
+        state.albums.set(row.remoteId, { ...row, remoteId: row.remoteId });
+        context.touchedArtistIds.add(row.artistId);
+    }
+    for (const { item } of rows) {
+        context.albumRgMbids.set(item.id, item.attributes.rgMbid);
         recordApplied(context, item, remember);
     }
 }
 
-async function resolveTrackAlbums(
+function resolveTrackAlbums(
     context: SyncContext,
     state: PageState,
-    client: ReturnType<typeof createFederationClient>,
     items: readonly TrackEnvelope[],
-    remember: boolean,
-): Promise<Map<string, RemoteAlbumRow>> {
+): Map<string, RemoteAlbumRow> {
     const resolved = new Map<string, RemoteAlbumRow>();
     for (const item of items) {
-        const album = await ensureRemoteAlbum(
-            context,
-            state,
-            client,
-            item.parentRef,
-            remember,
-        );
-        if (album) resolved.set(item.id, album);
-        else context.skippedInvalid += 1;
+        const album = state.albums.get(item.parentRef);
+        if (album) {
+            resolved.set(item.id, {
+                ...album,
+                rgMbid:
+                    context.albumRgMbids.get(item.parentRef) ??
+                    decodeFederationIdentity(album.rgMbid),
+            });
+        } else context.skippedInvalid += 1;
     }
     return resolved;
 }
@@ -725,28 +769,79 @@ async function applyTracks(
     resolvedAlbums: ReadonlyMap<string, RemoteAlbumRow>,
     remember: boolean,
     storeEmbeddings: boolean,
-): Promise<void> {
-    await loadTrackRebindPageState(context, state, items, resolvedAlbums);
+    transaction: Prisma.TransactionClient,
+): Promise<{
+    changedHashIds: string[];
+    dedupRows: Array<{ trackId: string; match: DedupMatch | null }>;
+    embeddingRows: Array<{ trackId: string; embedding: readonly number[] }>;
+}> {
+    await loadTrackRebindPageState(
+        transaction,
+        context,
+        state,
+        items,
+        resolvedAlbums,
+    );
     const albums = new Map(state.albums);
     for (const item of items) {
         const album = resolvedAlbums.get(item.id);
         if (album) albums.set(item.parentRef, album);
     }
     const dedup = await loadDedupIndex(items, albums);
+    const rows: Array<{
+        item: TrackEnvelope;
+        album: RemoteAlbumRow;
+        existing: RemoteTrackRow | null;
+        match: DedupMatch | null;
+    }> = [];
     for (const item of items) {
         const album = resolvedAlbums.get(item.id);
         if (!album) continue;
-        const existing = await rebindFederatedTrack(state, item);
-        await upsertTrack(
-            context,
+        const existing = await rebindFederatedTrack(transaction, state, item);
+        rows.push({
             item,
             album,
             existing,
-            findDedupMatch(dedup, item, album.rgMbid),
-            storeEmbeddings,
-        );
+            match: findDedupMatch(dedup, item, album.rgMbid),
+        });
+    }
+    const persisted = await upsertFederationTrackPage(
+        transaction,
+        context.peerId,
+        rows,
+    );
+    for (const row of persisted) {
+        if (row.remoteId) {
+            state.tracks.set(row.remoteId, { ...row, remoteId: row.remoteId });
+        }
+    }
+    const changedHashIds: string[] = [];
+    const dedupRows: Array<{ trackId: string; match: DedupMatch | null }> = [];
+    const embeddingRows: Array<{
+        trackId: string;
+        embedding: readonly number[];
+    }> = [];
+    for (const { item, album, existing, match } of rows) {
+        const persistedTrack = state.tracks.get(item.id);
+        if (!persistedTrack)
+            throw new Error("Federation track page upsert lost a row");
+        const hashChanged =
+            item.attributes.audioHash !== undefined &&
+            existing !== null &&
+            existing.audioHash !== item.attributes.audioHash;
+        if (hashChanged) changedHashIds.push(persistedTrack.id);
+        dedupRows.push({ trackId: persistedTrack.id, match });
+        const space = context.localEmbeddingSpace;
+        if (item.attributes.embedding && storeEmbeddings && space) {
+            embeddingRows.push({
+                trackId: persistedTrack.id,
+                embedding: item.attributes.embedding,
+            });
+        }
+        context.touchedArtistIds.add(album.artistId);
         recordApplied(context, item, remember);
     }
+    return { changedHashIds, dedupRows, embeddingRows };
 }
 
 async function applyPodcasts(
@@ -840,29 +935,76 @@ async function applyChanges(
         (message, details) => log.warn(message, details),
     );
     const state = await loadPageState(context, grouped);
-    await applyArtists(context, state, grouped.artists, remember);
-    await applyAlbums(context, state, client, grouped.albums, remember);
-    const resolvedAlbums = await resolveTrackAlbums(
-        context,
+    await recoverFederationMissingParents(
+        grouped,
         state,
-        client,
-        grouped.tracks,
-        remember,
+        (remoteId) =>
+            ensureRemoteArtistId(context, state, client, remoteId, remember),
+        (remoteId) =>
+            ensureRemoteAlbum(context, state, client, remoteId, remember),
+        (remoteId) => context.unavailableParents.album.add(remoteId),
     );
-    const validTracks = grouped.tracks.filter((item) =>
-        resolvedAlbums.has(item.id),
-    );
-    await applyTracks(
-        context,
-        state,
-        validTracks,
-        resolvedAlbums,
-        remember,
-        embeddingOutcome === "stored",
-    );
+    const page = await prisma.$transaction(async (transaction) => {
+        await applyArtists(
+            context,
+            state,
+            grouped.artists,
+            remember,
+            transaction,
+        );
+        await applyAlbums(
+            context,
+            state,
+            grouped.albums,
+            remember,
+            transaction,
+        );
+        const resolvedAlbums = resolveTrackAlbums(
+            context,
+            state,
+            grouped.tracks,
+        );
+        const validTracks = grouped.tracks.filter((item) =>
+            resolvedAlbums.has(item.id),
+        );
+        const effects = await applyTracks(
+            context,
+            state,
+            validTracks,
+            resolvedAlbums,
+            remember,
+            embeddingOutcome === "stored",
+            transaction,
+        );
+        const cachePaths = await clearTrackTranscodeCacheRows(
+            transaction,
+            effects.changedHashIds,
+        );
+        const mappings = await applyTrackDedupPage(
+            transaction,
+            effects.dedupRows,
+        );
+        const space = context.localEmbeddingSpace;
+        if (embeddingOutcome === "stored" && space) {
+            await upsertTrackEmbeddingPageInTransaction(
+                transaction,
+                effects.embeddingRows,
+                space.id,
+            );
+        }
+        return { validTracks, cachePaths, mappings };
+    });
+    await removeReplacementCacheFiles(page.cachePaths);
+    for (const match of page.mappings) {
+        await trackMappingService.createMapping({
+            trackId: match.id,
+            confidence: match.confidence,
+            source: "federation",
+        });
+    }
     await applyPodcasts(context, grouped.podcasts, remember);
     await applyAudiobooks(context, grouped.audiobooks, remember);
-    recordAppliedFederationEmbeddingOutcome(embeddingOutcome, validTracks);
+    recordAppliedFederationEmbeddingOutcome(embeddingOutcome, page.validTracks);
     context.lastEmbeddingOutcome = mergeFederationEmbeddingOutcome(
         context.lastEmbeddingOutcome,
         embeddingOutcome,
@@ -1124,8 +1266,7 @@ async function finishSync(
         context.counts.podcasts +
         context.counts.audiobooks +
         context.counts.tombstones;
-    if (changed > 0 && mode === "full") await backfillAllArtistCounts();
-    if (changed > 0 && mode === "incremental") {
+    if (changed > 0) {
         await updateArtistCountsInBatches([...context.touchedArtistIds].sort());
     }
     await prisma.federationPeer.update({

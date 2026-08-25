@@ -251,6 +251,52 @@ export async function upsertTrackEmbedding(
     });
 }
 
+/** Upserts a bounded page of validated peer vectors in one transaction. */
+export async function upsertTrackEmbeddingPage(
+    rows: readonly { trackId: string; embedding: readonly number[] }[],
+    spaceId: string,
+): Promise<void> {
+    if (rows.length === 0) return;
+    await prisma.$transaction((transaction) =>
+        upsertTrackEmbeddingPageInTransaction(transaction, rows, spaceId),
+    );
+}
+
+/** Writes a peer-vector page inside a caller-owned transaction. */
+export async function upsertTrackEmbeddingPageInTransaction(
+    transaction: Prisma.TransactionClient,
+    rows: readonly { trackId: string; embedding: readonly number[] }[],
+    spaceId: string,
+): Promise<void> {
+    if (rows.length === 0) return;
+    const vectors = rows.map(({ embedding }) => {
+        validateEmbeddingValues(embedding);
+        return `[${embedding.join(",")}]`;
+    });
+    const expectedDim = await lockWritableEmbeddingSpace(transaction, spaceId);
+    if (rows.some(({ embedding }) => embedding.length !== expectedDim)) {
+        throw new Error(
+            `Track embedding must contain ${expectedDim} finite values`,
+        );
+    }
+    const written = await transaction.$executeRaw`
+        INSERT INTO track_embeddings
+            (track_id, embedding, space_id, analyzed_at)
+        SELECT input.track_id, input.vector::vector, ${spaceId}, NOW()
+        FROM unnest(
+            ${rows.map(({ trackId }) => trackId)}::text[],
+            ${vectors}::text[]
+        ) AS input(track_id, vector)
+        ON CONFLICT (track_id, space_id) DO UPDATE SET
+            embedding = EXCLUDED.embedding,
+            analyzed_at = EXCLUDED.analyzed_at
+    `;
+    if (written !== rows.length) {
+        throw new Error("Track embedding page upsert was incomplete");
+    }
+    await markEmbeddingSpacePopulated(transaction, spaceId);
+}
+
 /**
  * Fetch the CLAP embeddings for `trackIds` (parsed to number arrays), in no
  * guaranteed order. Ids without an embedding row are simply absent from the
