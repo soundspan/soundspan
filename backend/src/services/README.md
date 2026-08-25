@@ -83,6 +83,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/importJobStore.ts` | Core |
 | `backend/src/services/itunes.ts` | Core |
 | `backend/src/services/lastfm.ts` | Core |
+| `backend/src/services/libraryDownloadProcessor.ts` | Shared provider-backed library album download orchestration and fallback handoff |
 | `backend/src/services/libraryRadioBuilder.ts` | Core |
 | `backend/src/services/libraryRadioStationSelection.ts` | Shared Quick Start, genre, and decade radio selection |
 | `backend/src/services/libraryRadioTrackResponse.ts` | Library-radio playback response mapping |

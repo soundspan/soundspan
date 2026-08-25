@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- TIDAL and YouTube Music library downloads now run through one shared processor with per-source steps, so fixes apply to both sources at once.
 - Consolidated repeated backend error handling, download-job state transitions, availability probes, queue event wiring, and value parsing behind shared internal helpers.
 - The Python sidecars now share one hardened implementation of their path-safety and runtime helpers instead of maintaining copies.
 - The TIDAL playlist and mix explore pages now share one implementation, settings connection tests share one status hook, and dates and durations render through shared formatters. Album pages now show total length compactly (for example "2h 30m").

@@ -1,18 +1,15 @@
 /** YouTube Music album search, sidecar job orchestration, and library scanning. */
 
-import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { getSystemSettings } from "../utils/systemSettings";
-import { simpleDownloadManager } from "./simpleDownloadManager";
-import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
+import {
+    type LibraryDownloadProcessorConfig,
+    runLibraryAlbumDownload,
+} from "./libraryDownloadProcessor";
 import {
     type YtAlbumDownloadJobStatus,
     watchYouTubeDownloadJobUntilTerminal,
     youtubeDownloadService,
 } from "./youtubeDownload";
-import { asPlainObject } from "../utils/plainObject";
-
-type DownloadMetadata = Record<string, unknown>;
 
 interface AlbumSearchCandidate {
     browseId: string;
@@ -23,15 +20,6 @@ interface AlbumSearchCandidate {
 /** Controls hand-off behavior when this processor is itself a fallback. */
 export interface YoutubeLibraryDownloadOptions {
     isFallback?: boolean;
-}
-
-function asMetadata(value: unknown): DownloadMetadata {
-    return asPlainObject(value);
-}
-
-function withoutFailedAt(metadata: DownloadMetadata): DownloadMetadata {
-    const { failedAt: _failedAt, ...retainedMetadata } = metadata;
-    return retainedMetadata;
 }
 
 function asAlbumSearchCandidate(value: unknown): AlbumSearchCandidate | null {
@@ -98,75 +86,11 @@ export async function findAlbumBrowseId(
     return selectAlbumBrowseId(candidates, artistName, albumTitle);
 }
 
-async function markSearching(
-    jobId: string,
-    metadata: DownloadMetadata,
-): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            status: "processing",
-            error: null,
-            metadata: {
-                ...metadata,
-                currentSource: "youtube",
-                statusText: "Searching YouTube Music...",
-            },
-        },
-    });
-}
-
-async function handOffSearchMiss(
-    jobId: string,
-    artistName: string,
-    albumTitle: string,
-    userId: string,
-    metadata: DownloadMetadata,
-    isFallback: boolean,
-): Promise<boolean> {
-    const settings = await getSystemSettings();
-    const fallback = settings?.primaryFailureFallback;
-    const isManagerFallback = fallback === "lidarr" || fallback === "soulseek";
-    if (!isManagerFallback && (fallback !== "tidal" || isFallback)) {
-        return false;
-    }
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            metadata: {
-                ...metadata,
-                currentSource: fallback,
-                statusText: `YouTube Music not found → ${fallback}`,
-            },
-        },
-    });
-    if (fallback === "tidal") {
-        const { processTidalDownload } = await import("./tidalLibraryDownload");
-        await processTidalDownload(jobId, artistName, albumTitle, userId, {
-            isFallback: true,
-        });
-        return true;
-    }
-    const result = await simpleDownloadManager.startDownload(
-        jobId,
-        artistName,
-        albumTitle,
-        typeof metadata.albumMbid === "string" ? metadata.albumMbid : "",
-        userId,
-    );
-    if (!result.success) {
-        logger.error(
-            `[YouTube Music] Fallback ${fallback} failed: ${result.error}`,
-        );
-    }
-    return true;
-}
-
 async function updateProgress(
     jobId: string,
     sidecarJobId: string,
     progressPct: number,
-    metadata: DownloadMetadata,
+    metadata: Record<string, unknown>,
 ): Promise<void> {
     await prisma.downloadJob.update({
         where: { id: jobId },
@@ -184,7 +108,7 @@ async function updateProgress(
 async function startAndWatchAlbum(
     jobId: string,
     browseId: string,
-    metadata: DownloadMetadata,
+    metadata: Record<string, unknown>,
 ): Promise<YtAlbumDownloadJobStatus> {
     const started = await youtubeDownloadService.startAlbumDownload(browseId);
     await prisma.downloadJob.update({
@@ -221,65 +145,52 @@ async function startAndWatchAlbum(
     return youtubeDownloadService.getAlbumDownloadJobStatus(started.jobId);
 }
 
-async function completeYoutubeJob(
-    jobId: string,
-    result: YtAlbumDownloadJobStatus,
-    metadata: DownloadMetadata,
-): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            status: "completed",
-            completedAt: new Date(),
-            error: null,
-            metadata: {
-                ...withoutFailedAt(metadata),
-                currentSource: "youtube",
-                statusText: `YouTube Music ✓ ${result.downloaded}/${result.totalTracks} tracks`,
-                youtubeAlbumJobId: result.jobId,
-                youtubeResult: {
-                    downloaded: result.downloaded,
-                    failed: result.failed,
-                    totalTracks: result.totalTracks,
-                },
+const youtubeLibraryDownloadConfig = {
+    sourceKey: "youtube",
+    sourceLabel: "YouTube Music",
+    searchingStatusText: "Searching YouTube Music...",
+    failedError: "YouTube download failed",
+    failedStatusText: "YouTube Music failed",
+    findMatch: findAlbumBrowseId,
+    download: async (browseId, { jobId, metadata }) => {
+        const result = await startAndWatchAlbum(jobId, browseId, metadata);
+        if (result.downloaded === 0) {
+            throw new Error(
+                `All ${result.totalTracks} tracks failed to download`,
+            );
+        }
+        return result;
+    },
+    resultSummary: (_browseId, result) => ({
+        statusText: `YouTube Music ✓ ${result.downloaded}/${result.totalTracks} tracks`,
+        metadata: {
+            youtubeAlbumJobId: result.jobId,
+            youtubeResult: {
+                downloaded: result.downloaded,
+                failed: result.failed,
+                totalTracks: result.totalTracks,
             },
         },
-    });
-}
-
-async function failYoutubeJob(
-    jobId: string,
-    metadata: DownloadMetadata,
-): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            status: "failed",
-            error: "YouTube download failed",
-            completedAt: new Date(),
-            metadata: {
-                ...metadata,
-                currentSource: "youtube",
-                statusText: "YouTube Music failed",
-                failedAt: new Date().toISOString(),
-            },
+    }),
+    fallbackPeer: {
+        sourceKey: "tidal",
+        run: async (jobId, artistName, albumTitle, userId, options) => {
+            const { processTidalDownload } =
+                await import("./tidalLibraryDownload");
+            await processTidalDownload(
+                jobId,
+                artistName,
+                albumTitle,
+                userId,
+                options,
+            );
         },
-    });
-}
-
-async function queueLibraryScanSafely(
-    jobId: string,
-    userId: string,
-): Promise<void> {
-    try {
-        await requestCoalescedLibraryScan(userId, "youtube-download");
-    } catch (error) {
-        logger.warn(
-            "YouTube Music library scan enqueue failed; download remains completed",
-            { jobId, error },
-        );
-    }
-}
+    },
+    fallbackOrder: "peer-first",
+    logFallbackSelection: false,
+    prefixManagerFailureLog: true,
+    scanSource: "youtube-download",
+} satisfies LibraryDownloadProcessorConfig<string, YtAlbumDownloadJobStatus>;
 
 /** Process a library album through public YouTube Music search and download. */
 export async function processYoutubeDownload(
@@ -289,44 +200,12 @@ export async function processYoutubeDownload(
     userId: string,
     options: YoutubeLibraryDownloadOptions = {},
 ): Promise<void> {
-    const existingJob = await prisma.downloadJob.findUnique({
-        where: { id: jobId },
-        select: { metadata: true },
-    });
-    const metadata = asMetadata(existingJob?.metadata);
-    try {
-        await markSearching(jobId, metadata);
-        const browseId = await findAlbumBrowseId(artistName, albumTitle);
-        if (!browseId) {
-            if (
-                await handOffSearchMiss(
-                    jobId,
-                    artistName,
-                    albumTitle,
-                    userId,
-                    metadata,
-                    options.isFallback === true,
-                )
-            )
-                return;
-            throw new Error(
-                `Album not found on YouTube Music: ${artistName} - ${albumTitle}`,
-            );
-        }
-        const result = await startAndWatchAlbum(jobId, browseId, metadata);
-        if (result.downloaded === 0) {
-            throw new Error(
-                `All ${result.totalTracks} tracks failed to download`,
-            );
-        }
-        await completeYoutubeJob(jobId, result, metadata);
-    } catch (error: unknown) {
-        logger.error(
-            `[YouTube Music] Download failed for job ${jobId}:`,
-            error instanceof Error ? error.message : error,
-        );
-        await failYoutubeJob(jobId, metadata);
-        return;
-    }
-    await queueLibraryScanSafely(jobId, userId);
+    await runLibraryAlbumDownload(
+        youtubeLibraryDownloadConfig,
+        jobId,
+        artistName,
+        albumTitle,
+        userId,
+        options,
+    );
 }
