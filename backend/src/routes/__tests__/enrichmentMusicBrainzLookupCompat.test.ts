@@ -25,6 +25,15 @@ jest.mock("../../services/enrichment", () => ({
     },
 }));
 
+jest.mock("../../services/metadata/artistEnrichmentFields", () => ({
+    enrichArtistFields: jest.fn(),
+    applyArtistEnrichmentFields: jest.fn(),
+}));
+jest.mock("../../services/metadata/albumEnrichmentFields", () => ({
+    enrichAlbumFields: jest.fn(),
+    applyAlbumEnrichmentFields: jest.fn(),
+}));
+
 jest.mock("../../workers/unifiedEnrichment", () => ({
     getEnrichmentProgress: jest.fn(),
     runFullEnrichment: jest.fn(),

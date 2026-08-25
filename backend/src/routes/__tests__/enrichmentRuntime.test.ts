@@ -24,11 +24,17 @@ jest.mock("../../services/enrichment", () => ({
     enrichmentService: {
         getSettings: jest.fn(),
         updateSettings: jest.fn(),
-        enrichArtist: jest.fn(),
-        applyArtistEnrichment: jest.fn(),
-        enrichAlbum: jest.fn(),
-        applyAlbumEnrichment: jest.fn(),
     },
+}));
+
+jest.mock("../../services/metadata/artistEnrichmentFields", () => ({
+    enrichArtistFields: jest.fn(),
+    applyArtistEnrichmentFields: jest.fn(),
+}));
+
+jest.mock("../../services/metadata/albumEnrichmentFields", () => ({
+    enrichAlbumFields: jest.fn(),
+    applyAlbumEnrichmentFields: jest.fn(),
 }));
 
 jest.mock("../../workers/unifiedEnrichment", () => ({
@@ -144,6 +150,14 @@ jest.mock("../../utils/db", () => ({
 import router from "../enrichment";
 import { enrichmentService } from "../../services/enrichment";
 import {
+    applyArtistEnrichmentFields,
+    enrichArtistFields,
+} from "../../services/metadata/artistEnrichmentFields";
+import {
+    applyAlbumEnrichmentFields,
+    enrichAlbumFields,
+} from "../../services/metadata/albumEnrichmentFields";
+import {
     getEnrichmentProgress,
     runFullEnrichment,
     reRunArtistsOnly,
@@ -183,12 +197,10 @@ const mockMusicBrainzSearchReleaseGroups =
 
 const mockGetSettings = enrichmentService.getSettings as jest.Mock;
 const mockUpdateSettings = enrichmentService.updateSettings as jest.Mock;
-const mockEnrichArtist = enrichmentService.enrichArtist as jest.Mock;
-const mockApplyArtistEnrichment =
-    enrichmentService.applyArtistEnrichment as jest.Mock;
-const mockEnrichAlbum = enrichmentService.enrichAlbum as jest.Mock;
-const mockApplyAlbumEnrichment =
-    enrichmentService.applyAlbumEnrichment as jest.Mock;
+const mockEnrichArtist = enrichArtistFields as jest.Mock;
+const mockApplyArtistEnrichment = applyArtistEnrichmentFields as jest.Mock;
+const mockEnrichAlbum = enrichAlbumFields as jest.Mock;
+const mockApplyAlbumEnrichment = applyAlbumEnrichmentFields as jest.Mock;
 
 const mockGetFailures = enrichmentFailureService.getFailures as jest.Mock;
 const mockGetFailureCounts =
@@ -849,7 +861,7 @@ describe("enrichment route runtime behavior", () => {
         expect(res.body).toEqual({ error: "Failed to update settings" });
     });
 
-    it("gates artist enrichment by settings and confidence", async () => {
+    it("gates artist enrichment by settings and preserves low-confidence response payloads", async () => {
         mockGetSettings.mockResolvedValueOnce({ enabled: false });
         const disabledRes = createRes();
         await enrichArtistHandler(
@@ -878,7 +890,10 @@ describe("enrichment route runtime behavior", () => {
             { user: { id: "user-1" }, params: { id: "artist-low" } } as any,
             lowConfidenceRes,
         );
-        expect(mockApplyArtistEnrichment).not.toHaveBeenCalled();
+        expect(mockApplyArtistEnrichment).toHaveBeenCalledWith("artist-low", {
+            confidence: 0.2,
+            foo: "bar",
+        });
         expect(lowConfidenceRes.statusCode).toBe(200);
         expect(lowConfidenceRes.body).toEqual({
             success: true,
@@ -931,7 +946,7 @@ describe("enrichment route runtime behavior", () => {
         );
     });
 
-    it("applies album enrichment only above confidence threshold", async () => {
+    it("applies album enrichment through the shared field module without changing payloads", async () => {
         mockGetSettings.mockResolvedValueOnce({ enabled: true });
         mockEnrichAlbum.mockResolvedValueOnce({ confidence: 0.9, score: 9 });
 
@@ -953,6 +968,10 @@ describe("enrichment route runtime behavior", () => {
             { user: { id: "user-1" }, params: { id: "album-2" } } as any,
             lowConfidenceRes,
         );
+        expect(mockApplyAlbumEnrichment).toHaveBeenCalledWith("album-2", {
+            confidence: 0.1,
+            score: 1,
+        });
         expect(lowConfidenceRes.statusCode).toBe(200);
         expect(lowConfidenceRes.body).toEqual({
             success: true,

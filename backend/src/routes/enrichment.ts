@@ -36,6 +36,14 @@ import { parseBoundedInt } from "../utils/queryParams";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
 import { updateAlbumMetadataWithOwnership } from "../services/albumMetadataPersistence";
+import {
+    applyArtistEnrichmentFields,
+    enrichArtistFields,
+} from "../services/metadata/artistEnrichmentFields";
+import {
+    applyAlbumEnrichmentFields,
+    enrichAlbumFields,
+} from "../services/metadata/albumEnrichmentFields";
 
 const router = Router();
 
@@ -663,21 +671,13 @@ router.post<{ id: string }>("/artist/:id", requireAdmin, async (req, res) => {
             return res.status(400).json({ error: "Enrichment is not enabled" });
         }
 
-        const enrichmentData = await enrichmentService.enrichArtist(
-            req.params.id,
-            settings,
-        );
+        const enrichmentData = await enrichArtistFields(req.params.id);
 
         if (!enrichmentData) {
             return res.status(404).json({ error: "No enrichment data found" });
         }
 
-        if (enrichmentData.confidence > 0.3) {
-            await enrichmentService.applyArtistEnrichment(
-                req.params.id,
-                enrichmentData,
-            );
-        }
+        await applyArtistEnrichmentFields(req.params.id, enrichmentData);
 
         res.json({
             success: true,
@@ -733,21 +733,13 @@ router.post<{ id: string }>("/album/:id", requireAdmin, async (req, res) => {
             return res.status(400).json({ error: "Enrichment is not enabled" });
         }
 
-        const enrichmentData = await enrichmentService.enrichAlbum(
-            req.params.id,
-            settings,
-        );
+        const enrichmentData = await enrichAlbumFields(req.params.id);
 
         if (!enrichmentData) {
             return res.status(404).json({ error: "No enrichment data found" });
         }
 
-        if (enrichmentData.confidence > 0.3) {
-            await enrichmentService.applyAlbumEnrichment(
-                req.params.id,
-                enrichmentData,
-            );
-        }
+        await applyAlbumEnrichmentFields(req.params.id, enrichmentData);
 
         res.json({
             success: true,

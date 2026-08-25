@@ -60,7 +60,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/downloadQueue.ts` | Core |
 | `backend/src/services/embeddingSpaceLifecycle.ts` | Blue/green embedding-space cutover and retirement cleanup |
 | `backend/src/services/embeddingSpaces.ts` | Provider-space registry resolution, active cache, and worker target |
-| `backend/src/services/enrichment.ts` | Core |
+| `backend/src/services/enrichment.ts` | Enrichment settings and compatibility facade over shared metadata field rules |
 | `backend/src/services/enrichmentFailureService.ts` | Core |
 | `backend/src/services/enrichmentState.ts` | Core |
 | `backend/src/services/fanart.ts` | Core |
@@ -138,6 +138,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/lyrics.ts` | Core |
 | `backend/src/services/m3uParser.ts` | Core |
 | `backend/src/services/metadata/albumCoverResolver.ts` | Canonical bounded album-cover provider ladder, cache, and in-flight deduplication |
+| `backend/src/services/metadata/albumEnrichmentFields.ts` | Shared MusicBrainz, Last.fm, cover, and album-column enrichment rules |
+| `backend/src/services/metadata/artistEnrichmentFields.ts` | Shared Wikidata-first bio, Last.fm genre, image, and artist-column enrichment rules |
 | `backend/src/services/metadata/artistImageResolver.ts` | Canonical bounded artist-image provider ladder, cache, and in-flight deduplication |
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |

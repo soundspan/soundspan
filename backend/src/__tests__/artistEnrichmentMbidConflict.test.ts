@@ -28,6 +28,10 @@ jest.mock("../utils/logger", () => ({
     logger: {
         debug: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 

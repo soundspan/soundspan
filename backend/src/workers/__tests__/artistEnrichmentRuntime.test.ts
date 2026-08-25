@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 describe("artistEnrichment runtime", () => {
     function setupRuntime() {
         jest.resetModules();
@@ -21,7 +23,9 @@ describe("artistEnrichment runtime", () => {
         const logger = {
             debug: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         const wikidataService = {
             getArtistInfo: jest.fn().mockResolvedValue(null),
@@ -29,6 +33,7 @@ describe("artistEnrichment runtime", () => {
         const lastFmService = {
             getArtistInfo: jest.fn().mockResolvedValue(null),
             getSimilarArtists: jest.fn().mockResolvedValue([]),
+            getAlbumInfo: jest.fn().mockResolvedValue(null),
         };
         const artistImageResolver = {
             resolveArtistImage: jest.fn().mockResolvedValue(null),
@@ -38,6 +43,9 @@ describe("artistEnrichment runtime", () => {
         };
         const musicBrainzService = {
             searchArtist: jest.fn().mockResolvedValue([]),
+            getReleaseGroups: jest.fn().mockResolvedValue([]),
+            getReleaseGroup: jest.fn().mockResolvedValue(null),
+            getRelease: jest.fn().mockResolvedValue(null),
         };
         const redisClient = {
             setEx: jest.fn().mockResolvedValue(undefined),
@@ -146,19 +154,34 @@ describe("artistEnrichment runtime", () => {
                 id: "album-1",
                 rgMbid: "rg-1",
                 title: "Album One",
+                coverUrl: null,
+                genres: [],
+                label: "Existing Label",
+                year: 2000,
+                originalYear: 2000,
                 artist: { name: "Artist One" },
             },
             {
                 id: "album-2",
                 rgMbid: null,
                 title: "Album Two",
+                coverUrl: null,
+                genres: [],
+                label: "Existing Label",
+                year: 2000,
+                originalYear: 2000,
                 artist: { name: "Artist One" },
             },
         ]);
-        runtime.albumCoverResolver.resolveAlbumCover.mockResolvedValueOnce({
-            url: "https://covers/rg-1.jpg",
-            source: "coverartarchive",
-        });
+        runtime.albumCoverResolver.resolveAlbumCover.mockImplementation(
+            async ({ albumTitle }: { albumTitle: string }) =>
+                albumTitle === "Album One"
+                    ? {
+                          url: "https://covers/rg-1.jpg",
+                          source: "coverartarchive",
+                      }
+                    : null,
+        );
 
         const artist = {
             id: "a1",
@@ -483,7 +506,7 @@ describe("artistEnrichment runtime", () => {
             .find((call) => call?.data?.enrichmentStatus === "completed");
         expect(completed).toBeDefined();
         expect(completed.data.summary).toBe("Artist bio summary");
-        expect(completed.data.similarArtistsJson).toBeNull();
+        expect(completed.data.similarArtistsJson).toEqual(Prisma.DbNull);
         expect(runtime.prisma.similarArtist.deleteMany).not.toHaveBeenCalled();
         expect(runtime.prisma.similarArtist.upsert).not.toHaveBeenCalled();
     });
@@ -533,6 +556,141 @@ describe("artistEnrichment runtime", () => {
         expect(completed.data.genres).toEqual(["rock"]);
     });
 
+    it("persists album genres, label, and release years during the scheduled album pass", async () => {
+        const runtime = setupRuntime();
+
+        runtime.prisma.album.findMany.mockResolvedValueOnce([
+            {
+                id: "album-fields-1",
+                rgMbid: null,
+                title: "Album Fields",
+                coverUrl: null,
+                genres: null,
+                label: null,
+                year: null,
+                originalYear: null,
+                artist: {
+                    name: "Album Fields Artist",
+                    mbid: "11111111-1111-4111-8111-111111111111",
+                },
+            },
+        ]);
+        runtime.musicBrainzService.getReleaseGroups.mockResolvedValueOnce([
+            {
+                id: "22222222-2222-4222-8222-222222222222",
+                title: "Album Fields",
+                "primary-type": "Album",
+                "first-release-date": "2004-03-02",
+            },
+        ]);
+        runtime.musicBrainzService.getReleaseGroup.mockResolvedValueOnce({
+            releases: [{ id: "33333333-3333-4333-8333-333333333333" }],
+        });
+        runtime.musicBrainzService.getRelease.mockResolvedValueOnce({
+            "label-info": [{ label: { name: "Scheduled Label" } }],
+        });
+        runtime.lastFmService.getAlbumInfo.mockResolvedValueOnce({
+            tags: {
+                tag: [
+                    { name: "one" },
+                    { name: "two" },
+                    { name: "three" },
+                    { name: "four" },
+                    { name: "five" },
+                    { name: "six" },
+                ],
+            },
+        });
+
+        const artist = {
+            id: "artist-fields-1",
+            name: "Album Fields Artist",
+            mbid: "11111111-1111-4111-8111-111111111111",
+        } as any;
+        await runtime.enrichSimilarArtist(artist);
+
+        expect(runtime.prisma.album.update).toHaveBeenCalledWith({
+            where: { id: "album-fields-1" },
+            data: expect.objectContaining({
+                rgMbid: "22222222-2222-4222-8222-222222222222",
+                genres: ["one", "two", "three", "four", "five"],
+                label: "Scheduled Label",
+                year: 2004,
+                originalYear: 2004,
+            }),
+        });
+    });
+
+    it("keeps scheduled album provider work within three-item batches", async () => {
+        const runtime = setupRuntime();
+        runtime.prisma.album.findMany.mockResolvedValueOnce(
+            ["one", "two", "three", "four"].map((suffix) => ({
+                id: `album-${suffix}`,
+                rgMbid: `remote:${suffix}`,
+                title: `Album ${suffix}`,
+                coverUrl: null,
+                genres: null,
+                label: null,
+                year: null,
+                originalYear: null,
+                artist: {
+                    name: "Batch Artist",
+                    mbid: "11111111-1111-4111-8111-111111111111",
+                },
+            })),
+        );
+
+        let signalFirstBatch: (() => void) | undefined;
+        let signalSecondBatch: (() => void) | undefined;
+        const firstBatchStarted = new Promise<void>((resolve) => {
+            signalFirstBatch = resolve;
+        });
+        const secondBatchStarted = new Promise<void>((resolve) => {
+            signalSecondBatch = resolve;
+        });
+        const releases: Array<() => void> = [];
+        let active = 0;
+        let maximumActive = 0;
+        runtime.lastFmService.getAlbumInfo.mockImplementation(
+            () =>
+                new Promise<null>((resolve) => {
+                    active += 1;
+                    maximumActive = Math.max(maximumActive, active);
+                    releases.push(() => {
+                        active -= 1;
+                        resolve(null);
+                    });
+                    if (releases.length === 3) signalFirstBatch?.();
+                    if (releases.length === 4) signalSecondBatch?.();
+                }),
+        );
+
+        const artist = {
+            id: "batch-artist",
+            name: "Batch Artist",
+            mbid: "11111111-1111-4111-8111-111111111111",
+        } as any;
+        const enrichment = runtime.enrichSimilarArtist(artist);
+
+        await firstBatchStarted;
+        expect(runtime.lastFmService.getAlbumInfo).toHaveBeenCalledTimes(3);
+        expect(maximumActive).toBe(3);
+        releases.slice(0, 3).forEach((release) => release());
+
+        await secondBatchStarted;
+        expect(runtime.lastFmService.getAlbumInfo).toHaveBeenCalledTimes(4);
+        expect(maximumActive).toBe(3);
+        releases[3]();
+        await enrichment;
+        expect(
+            runtime.musicBrainzService.getReleaseGroups,
+        ).not.toHaveBeenCalled();
+        expect(
+            runtime.musicBrainzService.getReleaseGroup,
+        ).not.toHaveBeenCalled();
+        expect(runtime.musicBrainzService.getRelease).not.toHaveBeenCalled();
+    });
+
     it("skips federation release-group placeholders during cover enrichment", async () => {
         const runtime = setupRuntime();
 
@@ -552,21 +710,24 @@ describe("artistEnrichment runtime", () => {
         } as any;
         await runtime.enrichSimilarArtist(artist);
 
-        expect(runtime.prisma.album.findMany).toHaveBeenCalledWith({
-            where: {
-                artistId: "federated-artist",
-                OR: [{ coverUrl: null }, { coverUrl: "" }],
-                location: { not: "FEDERATED" },
-            },
-            select: {
-                id: true,
-                rgMbid: true,
-                title: true,
-                artist: { select: { name: true } },
-            },
-        });
+        expect(runtime.prisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    artistId: "federated-artist",
+                    location: { not: "FEDERATED" },
+                }),
+                select: expect.objectContaining({
+                    id: true,
+                    rgMbid: true,
+                    title: true,
+                }),
+            }),
+        );
         expect(
             runtime.albumCoverResolver.resolveAlbumCover,
+        ).not.toHaveBeenCalled();
+        expect(
+            runtime.musicBrainzService.getReleaseGroup,
         ).not.toHaveBeenCalled();
         expect(runtime.prisma.album.update).not.toHaveBeenCalled();
     });
@@ -634,8 +795,8 @@ describe("artistEnrichment runtime", () => {
             data: { enrichmentStatus: "failed" },
         });
         expect(runtime.logger.error).toHaveBeenCalledWith(
-            "[ENRICH Artist Four] ENRICHMENT FAILED:",
-            "final write failed",
+            "Artist enrichment failed for Artist Four",
+            expect.objectContaining({ message: "final write failed" }),
         );
     });
 });
