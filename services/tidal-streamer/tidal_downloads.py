@@ -405,6 +405,20 @@ def _fetch_download_cover(album: Any, track_id: int) -> tuple[bool, bytes | None
         return False, None
 
 
+def _resolve_album_artist(album: Any, track: Any) -> str:
+    """Album-level artist for the ALBUMARTIST tag; every track in one album must get the same value."""
+    artist_name = getattr(getattr(album, "artist", None), "name", "")
+    if isinstance(artist_name, str) and artist_name:
+        return artist_name
+    album_artists = getattr(album, "artists", None) or []
+    artist_name = getattr(album_artists[0], "name", "") if album_artists else ""
+    if isinstance(artist_name, str) and artist_name:
+        return artist_name
+    track_artists = getattr(track, "artists", None) or []
+    artist_name = getattr(track_artists[0], "name", "") if track_artists else ""
+    return artist_name if isinstance(artist_name, str) else ""
+
+
 def _embed_download_metadata(
     path: Path,
     track: Any,
@@ -417,7 +431,7 @@ def _embed_download_metadata(
         add_track_metadata(
             path=path,
             track=track,
-            album_artist=track.artists[0].name if track.artists else "",
+            album_artist=_resolve_album_artist(album, track),
             date=str(album.releaseDate.date()) if album.releaseDate else "",
             cover_data=cover_data,
             comment=f"tidal:{track_id}",
