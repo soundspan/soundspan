@@ -71,7 +71,6 @@ import {
     ListenTogetherMembershipOrdering,
     ListenTogetherResyncOwnership,
     resolveListenTogetherMembershipPendingState,
-    resolveListenTogetherReadyReportRecoveryAction,
     scheduleGenerationScopedListenTogetherResync,
     toLocalTrack,
 } from "@/lib/listenTogetherContextState";
@@ -81,6 +80,17 @@ export {
     type ListenTogetherMembershipPendingOperation,
     type ListenTogetherReadyReportRecoveryAction,
 } from "@/lib/listenTogetherContextState";
+import {
+    ListenTogetherReadyReportRunner,
+    LT_READY_REPORT_MAX_WAIT_MS,
+    type ReadyReportTarget,
+} from "@/lib/listenTogetherReadyReportRunner";
+import {
+    LT_DISCONNECT_GRACE_MS,
+    resolveConnectionEvent,
+    type ListenTogetherConnectionDirective,
+} from "@/lib/listenTogetherConnectionState";
+import { useLatestRef } from "@/hooks/useLatestRef";
 import {
     isPlaybackAutoRestartSuppressed,
     markRemoteTrackChange as markTrackChange,
@@ -92,10 +102,6 @@ import {
 } from "@/lib/audio-engine/listenTogetherPlaybackResume";
 const playbackEngine = createRuntimeAudioEngine();
 const log = sharedFrontendLogger.child("ListenTogetherContext");
-const LT_READY_REPORT_POLL_INTERVAL_MS = 100;
-const LT_READY_REPORT_DELAY_MS = 150;
-const LT_READY_REPORT_RETRY_DELAY_MS = 180;
-const LT_READY_REPORT_MAX_WAIT_MS = 7_500;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -214,14 +220,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const hostMustAdoptGroupPositionRef = useRef(false);
     const hasEverConnectedRef = useRef(false);
     const awaitingInitialStateRef = useRef(true);
-    const readyReportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    const readyReportRunnerRef = useRef<ListenTogetherReadyReportRunner | null>(
         null,
     );
-    const readyReportLoadListenerRef = useRef<(() => void) | null>(null);
-    const readyReportTargetRef = useRef<{
-        currentIndex: number;
-        trackId: string | null;
-    } | null>(null);
+    const scheduleGroupResyncRef = useRef<(groupId?: string) => void>(() => {});
     const availabilitySwapLoadListenerRef = useRef<(() => void) | null>(null);
     const routeRecheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
@@ -234,38 +236,72 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const disconnectGraceTimerRef = useRef<ReturnType<
         typeof setTimeout
     > | null>(null);
-    const controlsRef = useRef(controls);
-    const audioStateRef = useRef(audioState);
+    // Latest-value refs: the 588-line socket-handler closure reads these so
+    // it never needs controls/audioState in its dependency array (which
+    // would re-register every socket handler on each audio tick).
+    const controlsRef = useLatestRef(controls);
+    const audioStateRef = useLatestRef(audioState);
     const trackAvailabilityRef = useRef<Map<number, AvailabilityItem>>(
         new Map(),
     );
     const trackAvailabilityStateVersionRef = useRef<number | null>(null);
     const lastLoadedTrackIdRef = useRef<string | null>(null);
 
-    const clearReadyReportLoadListener = useCallback(() => {
-        const listener = readyReportLoadListenerRef.current;
-        if (listener) {
-            playbackEngine.off("load", listener);
-            readyReportLoadListenerRef.current = null;
-        }
-        readyReportTargetRef.current = null;
-    }, []);
+    const readReadyReportSnapshot = useCallback(
+        (target: ReadyReportTarget, elapsedMs: number) => {
+            const state = audioStateRef.current;
+            const currentPlayback = activeGroupRef.current?.playback;
+            const availabilityMatchesState =
+                trackAvailabilityStateVersionRef.current !== null &&
+                currentPlayback?.stateVersion ===
+                    trackAvailabilityStateVersionRef.current &&
+                currentPlayback?.currentIndex === target.currentIndex;
+            const availabilityExpected = availabilityMatchesState
+                ? trackAvailabilityRef.current.get(target.currentIndex)
+                : undefined;
+            return {
+                expectedTrackId: target.trackId,
+                serverQueuedTrackId:
+                    currentPlayback?.queue?.[target.currentIndex]?.id ?? null,
+                expectedLocalTrackId:
+                    availabilityExpected?.localTrackId ?? null,
+                activeTrackId: state.currentTrack?.id ?? null,
+                queuedTrackId:
+                    state.queue[target.currentIndex]?.id ??
+                    state.queue[state.currentIndex]?.id ??
+                    null,
+                loadedTrackId: lastLoadedTrackIdRef.current,
+                engineDurationSec: playbackEngine.getDuration(),
+                engineCurrentTimeSec: playbackEngine.getCurrentTime(),
+                elapsedMs,
+                maxWaitMs: LT_READY_REPORT_MAX_WAIT_MS,
+            };
+        },
+        [audioStateRef],
+    );
+
+    const getReadyReportRunner = useCallback(() => {
+        readyReportRunnerRef.current ??= new ListenTogetherReadyReportRunner({
+            engineOn: (listener) => playbackEngine.on("load", listener),
+            engineOff: (listener) => playbackEngine.off("load", listener),
+            readSnapshot: readReadyReportSnapshot,
+            reportReady: () => listenTogetherSocket.reportReady(),
+            recover: (reason, details) => {
+                sharedFrontendLogger.warn(reason, details);
+                scheduleGroupResyncRef.current(activeGroupRef.current?.id);
+            },
+        });
+        return readyReportRunnerRef.current;
+    }, [readReadyReportSnapshot]);
 
     const clearObsoleteReadyReportLoadListener = useCallback(
         (nextTrackIndex: number, nextTrackId: string | null) => {
-            const target = readyReportTargetRef.current;
-            const trackChanged = Boolean(
-                target &&
-                (target.currentIndex !== nextTrackIndex ||
-                    (target.trackId &&
-                        nextTrackId &&
-                        target.trackId !== nextTrackId)),
+            getReadyReportRunner().detachLoadListenerIfObsolete(
+                nextTrackIndex,
+                nextTrackId,
             );
-            if (trackChanged) {
-                clearReadyReportLoadListener();
-            }
         },
-        [clearReadyReportLoadListener],
+        [getReadyReportRunner],
     );
 
     const clearAvailabilitySwapLoadListener = useCallback(() => {
@@ -276,17 +312,15 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const clearActiveSessionTimers = useCallback(() => {
-        clearReadyReportLoadListener();
+        const runner = getReadyReportRunner();
+        runner.detachLoadListener();
+        runner.clearTimer();
         clearAvailabilitySwapLoadListener();
-        if (readyReportTimerRef.current) {
-            clearTimeout(readyReportTimerRef.current);
-            readyReportTimerRef.current = null;
-        }
         if (disconnectGraceTimerRef.current) {
             clearTimeout(disconnectGraceTimerRef.current);
             disconnectGraceTimerRef.current = null;
         }
-    }, [clearAvailabilitySwapLoadListener, clearReadyReportLoadListener]);
+    }, [clearAvailabilitySwapLoadListener, getReadyReportRunner]);
 
     const advanceMembershipSessionGeneration = useCallback(() => {
         resyncOwnershipRef.current.advance();
@@ -361,12 +395,6 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         activeGroupRef.current = activeGroup;
     }, [activeGroup]);
     useEffect(() => {
-        controlsRef.current = controls;
-    }, [controls]);
-    useEffect(() => {
-        audioStateRef.current = audioState;
-    }, [audioState]);
-    useEffect(() => {
         trackAvailabilityRef.current = trackAvailability;
     }, [trackAvailability]);
     useEffect(() => {
@@ -379,7 +407,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         return () => {
             playbackEngine.off("load", onLoad);
         };
-    }, []);
+    }, [audioStateRef]);
     useEffect(() => {
         return () => {
             clearActiveSessionTimers();
@@ -428,6 +456,68 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         },
         [validateSocketRoute],
     );
+
+    /**
+     * Applies one connection-event directive from the pure reducer in
+     * listenTogetherConnectionState. Grace-timer expiry feeds back through
+     * the same reducer so every visual-disconnect transition shares one
+     * decision table.
+     */
+    const applyConnectionDirective = useCallback(
+        function applyDirective(
+            directive: ListenTogetherConnectionDirective,
+        ): void {
+            if (directive.clearGraceTimer && disconnectGraceTimerRef.current) {
+                clearTimeout(disconnectGraceTimerRef.current);
+                disconnectGraceTimerRef.current = null;
+            }
+            if (directive.armGraceTimer && !disconnectGraceTimerRef.current) {
+                const cause = directive.armGraceTimer;
+                disconnectGraceTimerRef.current = setTimeout(() => {
+                    disconnectGraceTimerRef.current = null;
+                    applyDirective(
+                        resolveConnectionEvent({
+                            type: "grace-expired",
+                            cause,
+                        }),
+                    );
+                }, LT_DISCONNECT_GRACE_MS);
+            }
+            if (directive.setIsConnected !== undefined) {
+                setIsConnected(directive.setIsConnected);
+            }
+            if (directive.setHasConnectedOnce) {
+                hasEverConnectedRef.current = true;
+                setHasConnectedOnce(true);
+            }
+            if (directive.setReconnectAttempt !== undefined) {
+                setReconnectAttempt(directive.setReconnectAttempt);
+            }
+            if (directive.setSocketRouteStatus) {
+                setSocketRouteStatus(directive.setSocketRouteStatus);
+            }
+            if (directive.clearSocketRouteError) {
+                setSocketRouteError(null);
+            }
+            if (directive.setError) {
+                setError(directive.setError);
+            }
+            if (directive.markAwaitingInitialState) {
+                awaitingInitialStateRef.current = true;
+            }
+            if (directive.markPendingAudioRecovery) {
+                pendingReconnectAudioRecoveryRef.current = true;
+            }
+            if (directive.validateRoute) {
+                void validateSocketRoute(true);
+            }
+        },
+        [validateSocketRoute],
+    );
+
+    useEffect(() => {
+        scheduleGroupResyncRef.current = scheduleGroupResync;
+    }, [scheduleGroupResync]);
 
     const canCurrentUserControlHostPlayback = useCallback(
         (group: GroupSnapshot | null): boolean => {
@@ -546,8 +636,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             });
         },
         [
+            audioStateRef,
             canCurrentUserControlHostPlayback,
             clearObsoleteReadyReportLoadListener,
+            controlsRef,
         ],
     );
 
@@ -648,8 +740,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             });
         },
         [
+            audioStateRef,
             canCurrentUserControlHostPlayback,
             clearObsoleteReadyReportLoadListener,
+            controlsRef,
         ],
     );
 
@@ -729,7 +823,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             }, 10_000);
             playbackEngine.reload();
         },
-        [canCurrentUserControlHostPlayback],
+        [canCurrentUserControlHostPlayback, controlsRef],
     );
 
     // -----------------------------------------------------------------------
@@ -893,7 +987,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 isApplyingRemoteRef.current = false;
             }, 100);
         },
-        [clearObsoleteReadyReportLoadListener],
+        [audioStateRef, clearObsoleteReadyReportLoadListener],
     );
 
     // -----------------------------------------------------------------------
@@ -1003,11 +1097,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     });
                 },
                 onWaiting: (data: WaitingEvent) => {
-                    clearReadyReportLoadListener();
-                    if (readyReportTimerRef.current) {
-                        clearTimeout(readyReportTimerRef.current);
-                        readyReportTimerRef.current = null;
-                    }
+                    const runner = getReadyReportRunner();
+                    runner.detachLoadListener();
+                    runner.clearTimer();
 
                     const trackAvailabilityForIndex =
                         trackAvailabilityRef.current.get(data.currentIndex);
@@ -1031,196 +1123,12 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     }
 
                     // The server says "buffer this track and report ready".
-                    // Report on the matching engine load event, while retaining
-                    // bounded polling as a fallback when no load event arrives.
-                    const startedAt = Date.now();
-                    let terminalRetryAttempted = false;
-                    let recoveryTriggered = false;
-
-                    const triggerReadyReportRecovery = (
-                        reason: string,
-                        details: Record<string, unknown>,
-                    ) => {
-                        if (recoveryTriggered) return;
-                        recoveryTriggered = true;
-                        sharedFrontendLogger.warn(reason, details);
-                        scheduleGroupResync(activeGroupRef.current?.id);
-                    };
-
-                    const tryReportReady = () => {
-                        const state = audioStateRef.current;
-                        const queuedTrackId =
-                            state.queue[data.currentIndex]?.id ??
-                            state.queue[state.currentIndex]?.id ??
-                            null;
-                        const activeTrackId = state.currentTrack?.id ?? null;
-                        const expectedTrackId = data.trackId ?? null;
-                        const serverQueuedTrackId =
-                            activeGroupRef.current?.playback?.queue?.[
-                                data.currentIndex
-                            ]?.id ?? null;
-                        const currentPlayback =
-                            activeGroupRef.current?.playback;
-                        const availabilityMatchesState =
-                            trackAvailabilityStateVersionRef.current !== null &&
-                            currentPlayback?.stateVersion ===
-                                trackAvailabilityStateVersionRef.current &&
-                            currentPlayback?.currentIndex === data.currentIndex;
-                        const availabilityExpected = availabilityMatchesState
-                            ? trackAvailabilityRef.current.get(
-                                  data.currentIndex,
-                              )
-                            : undefined;
-                        const expectedLocalTrackId =
-                            availabilityExpected?.localTrackId ?? null;
-                        const expectedCandidates = Array.from(
-                            new Set(
-                                [
-                                    expectedTrackId,
-                                    serverQueuedTrackId,
-                                    expectedLocalTrackId,
-                                ].filter(
-                                    (candidate): candidate is string =>
-                                        typeof candidate === "string" &&
-                                        candidate.length > 0,
-                                ),
-                            ),
-                        );
-                        const localCandidates = Array.from(
-                            new Set(
-                                [activeTrackId, queuedTrackId].filter(
-                                    (candidate): candidate is string =>
-                                        typeof candidate === "string" &&
-                                        candidate.length > 0,
-                                ),
-                            ),
-                        );
-                        const hasTrackMatch =
-                            expectedCandidates.length === 0 ||
-                            localCandidates.some((candidate) =>
-                                expectedCandidates.includes(candidate),
-                            );
-                        const loadedTrackId = lastLoadedTrackIdRef.current;
-                        const readinessTrackId =
-                            localCandidates.find(
-                                (candidate) =>
-                                    expectedCandidates.length === 0 ||
-                                    expectedCandidates.includes(candidate),
-                            ) ?? null;
-                        const hasLoadedExpectedTrack =
-                            Boolean(readinessTrackId) &&
-                            loadedTrackId === readinessTrackId;
-                        const durationSec = playbackEngine.getDuration();
-                        const currentTimeSec = playbackEngine.getCurrentTime();
-                        const hasEngineMediaData =
-                            (Number.isFinite(durationSec) && durationSec > 0) ||
-                            (Number.isFinite(currentTimeSec) &&
-                                currentTimeSec > 0);
-                        const mediaReady =
-                            hasLoadedExpectedTrack && hasEngineMediaData;
-                        const timedOut =
-                            Date.now() - startedAt >=
-                            LT_READY_REPORT_MAX_WAIT_MS;
-
-                        if (hasTrackMatch && (mediaReady || timedOut)) {
-                            readyReportTimerRef.current = setTimeout(() => {
-                                readyReportTimerRef.current = null;
-                                clearReadyReportLoadListener();
-                                listenTogetherSocket
-                                    .reportReady()
-                                    .catch((error) => {
-                                        const elapsedMs =
-                                            Date.now() - startedAt;
-                                        const recoveryAction =
-                                            resolveListenTogetherReadyReportRecoveryAction(
-                                                {
-                                                    elapsedMs,
-                                                    maxWaitMs:
-                                                        LT_READY_REPORT_MAX_WAIT_MS,
-                                                    terminalRetryAttempted,
-                                                },
-                                            );
-                                        if (recoveryAction === "retry") {
-                                            readyReportTimerRef.current =
-                                                setTimeout(
-                                                    tryReportReady,
-                                                    LT_READY_REPORT_RETRY_DELAY_MS,
-                                                );
-                                            return;
-                                        }
-                                        if (
-                                            recoveryAction === "terminal-retry"
-                                        ) {
-                                            terminalRetryAttempted = true;
-                                            readyReportTimerRef.current =
-                                                setTimeout(
-                                                    tryReportReady,
-                                                    LT_READY_REPORT_RETRY_DELAY_MS,
-                                                );
-                                            return;
-                                        }
-
-                                        triggerReadyReportRecovery(
-                                            "[ListenTogether] reportReady failed after terminal retry window",
-                                            {
-                                                error:
-                                                    error instanceof Error
-                                                        ? error.message
-                                                        : String(error),
-                                                elapsedMs,
-                                                expectedTrackId,
-                                                queuedTrackId,
-                                                activeTrackId,
-                                                terminalRetryAttempted,
-                                            },
-                                        );
-                                    });
-                            }, LT_READY_REPORT_DELAY_MS);
-                            return;
-                        }
-
-                        if (timedOut) {
-                            readyReportTimerRef.current = null;
-                            clearReadyReportLoadListener();
-                            triggerReadyReportRecovery(
-                                "[ListenTogether] ready report timed out before local media was ready",
-                                {
-                                    expectedTrackId,
-                                    queuedTrackId,
-                                    activeTrackId,
-                                    loadedTrackId,
-                                    mediaReady,
-                                },
-                            );
-                            return;
-                        }
-
-                        readyReportTimerRef.current = setTimeout(
-                            tryReportReady,
-                            LT_READY_REPORT_POLL_INTERVAL_MS,
-                        );
-                    };
-
-                    const onTargetTrackLoaded = () => {
-                        clearReadyReportLoadListener();
-                        if (readyReportTimerRef.current) {
-                            clearTimeout(readyReportTimerRef.current);
-                            readyReportTimerRef.current = null;
-                        }
-                        void listenTogetherSocket.reportReady().catch(() => {
-                            readyReportTimerRef.current = setTimeout(
-                                tryReportReady,
-                                LT_READY_REPORT_RETRY_DELAY_MS,
-                            );
-                        });
-                    };
-                    readyReportTargetRef.current = {
+                    // The runner reports on the matching engine load event,
+                    // with bounded polling as a fallback.
+                    runner.begin({
                         currentIndex: data.currentIndex,
-                        trackId: data.trackId,
-                    };
-                    readyReportLoadListenerRef.current = onTargetTrackLoaded;
-                    playbackEngine.on("load", onTargetTrackLoaded);
-                    tryReportReady();
+                        trackId: data.trackId ?? null,
+                    });
                 },
                 onPlayAt: (data: PlayAtEvent) => {
                     // Synchronized start: the server says "play at positionMs at serverTime"
@@ -1384,41 +1292,22 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     toast.info("Listen Together session ended");
                 },
                 onConnect: () => {
-                    if (disconnectGraceTimerRef.current) {
-                        clearTimeout(disconnectGraceTimerRef.current);
-                        disconnectGraceTimerRef.current = null;
-                    }
-                    setIsConnected(true);
-                    hasEverConnectedRef.current = true;
-                    setHasConnectedOnce(true);
-                    setReconnectAttempt(0);
-                    setSocketRouteStatus("ok");
-                    setSocketRouteError(null);
-                    awaitingInitialStateRef.current = true;
+                    applyConnectionDirective(
+                        resolveConnectionEvent({ type: "connect" }),
+                    );
                 },
                 onReconnect: (_attempt) => {
-                    if (disconnectGraceTimerRef.current) {
-                        clearTimeout(disconnectGraceTimerRef.current);
-                        disconnectGraceTimerRef.current = null;
-                    }
-                    setIsConnected(true);
-                    setReconnectAttempt(0);
-                    setSocketRouteStatus("ok");
-                    setSocketRouteError(null);
-                    pendingReconnectAudioRecoveryRef.current = true;
+                    applyConnectionDirective(
+                        resolveConnectionEvent({ type: "reconnect" }),
+                    );
                 },
                 onReconnectAttempt: (attempt) => {
-                    setReconnectAttempt(attempt);
-                    pendingReconnectAudioRecoveryRef.current = true;
-                    // Defer the visual disconnect so brief reconnects don't flash grey.
-                    // Only schedule the grace timer once; later attempts just bump the counter.
-                    if (!disconnectGraceTimerRef.current) {
-                        disconnectGraceTimerRef.current = setTimeout(() => {
-                            disconnectGraceTimerRef.current = null;
-                            setIsConnected(false);
-                            setSocketRouteStatus("checking");
-                        }, 2000);
-                    }
+                    applyConnectionDirective(
+                        resolveConnectionEvent({
+                            type: "reconnect-attempt",
+                            attempt,
+                        }),
+                    );
                 },
                 onReconnectError: (err) => {
                     sharedFrontendLogger.error(
@@ -1427,29 +1316,17 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     );
                 },
                 onReconnectFailed: () => {
-                    // Reconnection exhausted — show disconnected immediately.
-                    if (disconnectGraceTimerRef.current) {
-                        clearTimeout(disconnectGraceTimerRef.current);
-                        disconnectGraceTimerRef.current = null;
-                    }
-                    setIsConnected(false);
-                    setError(
-                        "Listen Together reconnect failed. Check route/proxy health and try rejoining.",
+                    applyConnectionDirective(
+                        resolveConnectionEvent({ type: "reconnect-failed" }),
                     );
-                    void validateSocketRoute(true);
                 },
                 onRejoinFailed: () => {
                     scheduleGroupResync(activeGroupRef.current?.id);
                 },
                 onDisconnect: (_reason) => {
-                    // Defer the visual disconnect; if Socket.IO reconnects within
-                    // the grace window the indicator stays green.
-                    if (!disconnectGraceTimerRef.current) {
-                        disconnectGraceTimerRef.current = setTimeout(() => {
-                            disconnectGraceTimerRef.current = null;
-                            setIsConnected(false);
-                        }, 2000);
-                    }
+                    applyConnectionDirective(
+                        resolveConnectionEvent({ type: "disconnect" }),
+                    );
                 },
                 onError: (err) => {
                     sharedFrontendLogger.error(
@@ -1474,19 +1351,21 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             });
         },
         [
+            applyConnectionDirective,
             applyGroupState,
             applyPlaybackDelta,
             applyQueueDelta,
+            audioStateRef,
+            getReadyReportRunner,
             canCurrentUserControlHostPlayback,
-            clearAvailabilitySwapLoadListener,
             clearActiveMembership,
-            clearReadyReportLoadListener,
+            clearAvailabilitySwapLoadListener,
+            controlsRef,
             handleMembershipRevoked,
             recoverAudioAfterReconnect,
             scheduleGroupResync,
             scheduleRouteRecheck,
             user?.id,
-            validateSocketRoute,
         ],
     );
 
@@ -1687,7 +1566,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             }
             return true;
         },
-        [clearObsoleteReadyReportLoadListener],
+        [audioStateRef, clearObsoleteReadyReportLoadListener, controlsRef],
     );
 
     const resolveAdjacentHostTrackIndex = useCallback(
@@ -1703,7 +1582,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 ),
             });
         },
-        [],
+        [audioStateRef],
     );
 
     // -----------------------------------------------------------------------
@@ -1892,18 +1771,21 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         writeOrigin("manual", audioStateRef.current.currentTrack?.id ?? null);
         controlsRef.current.resume({ suppressListenTogetherBroadcast: true });
         listenTogetherSocket.play().catch(() => {});
-    }, []);
+    }, [audioStateRef, controlsRef]);
     const syncPause = useCallback(() => {
         controlsRef.current.pause({ suppressListenTogetherBroadcast: true });
         listenTogetherSocket.pause().catch(() => {});
-    }, []);
-    const syncSeek = useCallback((positionMs: number) => {
-        controlsRef.current.seek(positionMs / 1000, {
-            allowListenTogetherFollower: true,
-            suppressListenTogetherBroadcast: true,
-        });
-        listenTogetherSocket.seek(positionMs).catch(() => {});
-    }, []);
+    }, [controlsRef]);
+    const syncSeek = useCallback(
+        (positionMs: number) => {
+            controlsRef.current.seek(positionMs / 1000, {
+                allowListenTogetherFollower: true,
+                suppressListenTogetherBroadcast: true,
+            });
+            listenTogetherSocket.seek(positionMs).catch(() => {});
+        },
+        [controlsRef],
+    );
     const syncNext = useCallback(() => {
         const group = activeGroupRef.current;
         if (!canCurrentUserControlHostPlayback(group)) {
@@ -1958,7 +1840,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             });
             applyOptimisticHostTrackSelection(safeIndex);
         },
-        [applyOptimisticHostTrackSelection, canCurrentUserControlHostPlayback],
+        [
+            applyOptimisticHostTrackSelection,
+            audioStateRef,
+            canCurrentUserControlHostPlayback,
+        ],
     );
     const syncAddToQueue = useCallback((tracks: QueueTrackInput[]) => {
         listenTogetherSocket.addToQueue(tracks).catch((err) => {

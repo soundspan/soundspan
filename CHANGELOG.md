@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The full-screen player's swipe gestures (track skip, swipe-down to close, drawer handle) now run through one tested gesture module, in preparation for further player decomposition.
 - The full-screen player's Up Next list now renders only the rows in view, so very large queues open and scroll smoothly, and the Queue, Lyrics, and Related panels fetch their data independently so an open player does less background work.
+- Listen Together's connection handling and "ready to play" reporting now run through small tested modules, making group playback behavior easier to verify without changing how sessions work.
 - Subsonic search and artist views now share the main library's data layer.
 - Internal route handling now shares validation, pagination, and ownership middleware, and enrichment and YouTube Music administrator errors use the documented response format.
 - App screens now share one catalog of data-cache keys, so library, playlist, download, and notification views refresh reliably after changes instead of occasionally showing stale lists.
