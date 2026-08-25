@@ -479,6 +479,13 @@ export async function handleGetArtist(
                                 coverUrl: true,
                                 albumLoudnessLufs: true,
                                 albumTruePeakDb: true,
+                                artist: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        mbid: true,
+                                    },
+                                },
                             },
                         },
                     },
@@ -807,7 +814,10 @@ export async function handleGetArtist(
                 withFederatedTrackPlayback(track, federationPeer),
             ),
         );
-        topTracks = allTracks.slice(0, 10);
+        topTracks = allTracks.slice(0, 10).map((track) => ({
+            ...track,
+            artist: track.album.artist,
+        }));
 
         // Get user play counts for all tracks
         const userId = req.user!.id;
@@ -888,6 +898,7 @@ export async function handleGetArtist(
                     // Track exists in library - include user play count
                     combinedTracks.push({
                         ...matchedTrack,
+                        artist: matchedTrack.album.artist,
                         playCount: lfmTrack.playcount
                             ? parseInt(lfmTrack.playcount)
                             : 0,
@@ -917,9 +928,10 @@ export async function handleGetArtist(
                             ? parseInt(lfmTrack.listeners)
                             : 0,
                         duration: lfmTrack.duration
-                            ? Math.floor(parseInt(lfmTrack.duration) / 1000)
+                            ? Math.floor(parseInt(lfmTrack.duration))
                             : 0,
                         url: lfmTrack.url,
+                        artist: { name: artist.name },
                         album: {
                             title: albumTitle,
                             coverArt: null,
@@ -963,6 +975,7 @@ export async function handleGetArtist(
             // If Last.fm fails, add user play counts to library tracks
             topTracks = topTracks.map((t) => ({
                 ...t,
+                artist: t.album.artist,
                 userPlayCount: userPlayCounts.get(t.id) || 0,
                 album: {
                     ...t.album,

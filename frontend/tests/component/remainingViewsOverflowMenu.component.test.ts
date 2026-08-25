@@ -233,7 +233,7 @@ test("PopularTracks overflow menu renders for playable track", async () => {
     assert.match(html, /Track actions/, "Should render overflow menu");
 });
 
-test("PopularTracks hides overflow menu for unplayable tracks", async () => {
+test("PopularTracks keeps a navigation-only overflow menu for unplayable tracks", async () => {
     const { PopularTracks } =
         await import("../../features/artist/components/PopularTracks");
 
@@ -258,11 +258,12 @@ test("PopularTracks hides overflow menu for unplayable tracks", async () => {
         }),
     );
 
-    // Unmatched track should NOT have overflow menu
-    assert.doesNotMatch(
+    // Unmatched tracks keep the overflow menu so Go to artist/album stay
+    // reachable; playback-dependent entries are gated off inside the menu.
+    assert.match(
         html,
         /Track actions/,
-        "Should not render overflow menu for unplayable track",
+        "Should render overflow menu for unplayable track",
     );
     // Should be dimmed
     assert.match(html, /opacity-50/, "Unplayable track row should be dimmed");

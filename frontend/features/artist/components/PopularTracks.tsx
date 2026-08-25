@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Play, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -15,6 +15,7 @@ import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { resolvePreferenceTrackId } from "@/lib/trackRef";
+import { useTrackAlbumResolutions } from "../hooks/useTrackAlbumResolutions";
 
 /** Default number of popular tracks shown in collapsed state. */
 export const POPULAR_COLLAPSED_COUNT = 5;
@@ -60,9 +61,14 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
 }) => {
     const [expanded, setExpanded] = useState(false);
     const canExpand = tracks.length > POPULAR_COLLAPSED_COUNT;
-    const visibleTracks = expanded
-        ? tracks
-        : tracks.slice(0, POPULAR_COLLAPSED_COUNT);
+    const visibleTracks = useMemo(
+        () => (expanded ? tracks : tracks.slice(0, POPULAR_COLLAPSED_COUNT)),
+        [tracks, expanded],
+    );
+    const albumResolutions = useTrackAlbumResolutions(
+        visibleTracks,
+        artist.name,
+    );
 
     const handlePlay = useCallback(
         (track: Track) => {
@@ -115,6 +121,17 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                 hasLocalFile,
             });
 
+            const resolution = track.album?.id
+                ? undefined
+                : albumResolutions.get(track.id);
+            const albumId = track.album?.id || resolution?.rgMbid;
+            const localAlbumTitle =
+                track.album?.title && track.album.title !== "Unknown Album"
+                    ? track.album.title
+                    : undefined;
+            const albumTitle = localAlbumTitle ?? resolution?.albumTitle;
+            const albumHref = albumId ? `/album/${albumId}` : null;
+
             return {
                 titleBadges: (
                     <>
@@ -130,10 +147,25 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                     </>
                 ),
                 middleColumns: (
-                    <div className="hidden md:flex items-center text-sm text-gray-400">
+                    <div className="hidden md:flex items-center gap-3 min-w-0 text-sm text-gray-400">
+                        {albumTitle &&
+                            (albumHref ? (
+                                <Link
+                                    href={albumHref}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="truncate hover:text-white hover:underline"
+                                    title={albumTitle}
+                                >
+                                    {albumTitle}
+                                </Link>
+                            ) : (
+                                <span className="truncate" title={albumTitle}>
+                                    {albumTitle}
+                                </span>
+                            ))}
                         {track.playCount !== undefined &&
                             track.playCount > 0 && (
-                                <span className="flex items-center gap-1">
+                                <span className="flex shrink-0 items-center gap-1">
                                     <Play className="w-3 h-3" />
                                     {formatNumber(track.playCount)}
                                 </span>
@@ -160,33 +192,34 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                 id: preferenceTrackId,
                             })}
                         />
-                        {isPlayable && (
-                            <TrackOverflowMenu
-                                track={{
-                                    id: track.id,
-                                    title: track.displayTitle ?? track.title,
-                                    artist: {
-                                        name: track.artist?.name ?? artist.name,
-                                        id: track.artist?.id ?? artist.id,
-                                    },
-                                    album: track.album
-                                        ? {
-                                              title: track.album.title ?? "",
-                                              id: track.album.id,
-                                              coverArt: track.album.coverArt,
-                                          }
-                                        : { title: "" },
-                                    duration: track.duration,
-                                    streamSource:
-                                        track.streamSource === "tidal" ||
-                                        track.streamSource === "youtube"
-                                            ? track.streamSource
-                                            : undefined,
-                                    source: track.source,
-                                    peer: track.peer,
-                                }}
-                            />
-                        )}
+                        <TrackOverflowMenu
+                            track={{
+                                id: track.id,
+                                title: track.displayTitle ?? track.title,
+                                artist: {
+                                    name: track.artist?.name ?? artist.name,
+                                    id: track.artist?.id ?? artist.id,
+                                },
+                                album: {
+                                    title: albumTitle ?? "",
+                                    id: albumId || undefined,
+                                    coverArt: track.album?.coverArt,
+                                },
+                                duration: track.duration,
+                                streamSource:
+                                    track.streamSource === "tidal" ||
+                                    track.streamSource === "youtube"
+                                        ? track.streamSource
+                                        : undefined,
+                                source: track.source,
+                                peer: track.peer,
+                            }}
+                            showPlayNext={isPlayable}
+                            showAddToQueue={isPlayable}
+                            showAddToPlaylist={isPlayable}
+                            showMatchVibe={isPlayable}
+                            showVibeMap={isPlayable}
+                        />
                     </div>
                 ),
                 rowClassName:
@@ -195,7 +228,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                         : undefined,
             };
         },
-        [artist, isProviderMatching],
+        [artist, isProviderMatching, albumResolutions],
     );
 
     return (

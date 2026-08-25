@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Popular tracks on the artist page now show the album name as a clickable link, including for tracks that are not in your library (#757).
+
 ### Changed
 
 - Download job metadata updates now flow through guarded helpers instead of ad-hoc merges scattered across the backend.
@@ -22,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Artist-page popular tracks now show artist identity and use correct Last.fm durations for unowned tracks (#757).
+- Tracks you do not own on the artist page keep their row menu, so Go to artist and Go to album stay available (#757).
 - Retrying a download no longer cuts off album titles that contain a dash.
 - The DCLAP vibe provider now refuses requests when its internal secret is missing or left at the default, instead of silently allowing them.
 - Finishing a batch of album downloads now triggers one combined library scan instead of one scan per album, which could crash the background worker.

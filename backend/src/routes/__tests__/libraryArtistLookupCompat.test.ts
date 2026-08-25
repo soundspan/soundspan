@@ -427,6 +427,73 @@ describe("library artist lookup compatibility", () => {
         );
     });
 
+    it("exposes the album artist on matched Last.fm top tracks", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce({
+            ...createMockArtist(),
+            albums: [
+                {
+                    id: "album-1",
+                    title: "Owned Album",
+                    rgMbid: "rg-owned",
+                    coverUrl: "owned-cover.jpg",
+                    tracks: [
+                        {
+                            id: "track-1",
+                            title: "Owned Track",
+                            album: {
+                                id: "album-1",
+                                title: "Owned Album",
+                                coverUrl: "owned-cover.jpg",
+                                albumLoudnessLufs: null,
+                                albumTruePeakDb: null,
+                                artist: {
+                                    id: "artist-1",
+                                    name: "AC/DC",
+                                    mbid: "mbid-artist-1",
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        });
+        mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
+            {
+                name: "Owned Track",
+                playcount: "12",
+                listeners: "34",
+                duration: "245",
+                url: "https://last.fm/track/owned",
+                album: { "#text": "Owned Album" },
+            },
+        ]);
+
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "true",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.topTracks).toEqual([
+            expect.objectContaining({
+                id: "track-1",
+                artist: {
+                    id: "artist-1",
+                    name: "AC/DC",
+                    mbid: "mbid-artist-1",
+                },
+            }),
+        ]);
+    });
+
     it("hydrates unmatched Last.fm top tracks and skips Deezer lookup for unknown albums", async () => {
         mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
         mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
@@ -434,7 +501,7 @@ describe("library artist lookup compatibility", () => {
                 name: "Unmatched With Cover",
                 playcount: "12",
                 listeners: "34",
-                duration: "250000",
+                duration: "245",
                 url: "https://last.fm/track/1",
                 album: { "#text": "Rare EP" },
             },
@@ -442,7 +509,7 @@ describe("library artist lookup compatibility", () => {
                 name: "Unmatched Unknown Album",
                 playcount: "7",
                 listeners: "11",
-                duration: "210000",
+                duration: "210",
                 url: "https://last.fm/track/2",
                 album: {},
             },
@@ -475,6 +542,16 @@ describe("library artist lookup compatibility", () => {
             "AC/DC",
             "Rare EP",
         );
+        const unownedTrack = res.body.topTracks.find(
+            (track: any) => track.title === "Unmatched With Cover",
+        );
+        expect(unownedTrack).toEqual(
+            expect.objectContaining({
+                artist: { name: "AC/DC" },
+                duration: 245,
+            }),
+        );
+        expect(unownedTrack.album).not.toHaveProperty("id");
         expect(res.body.topTracks).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
@@ -502,7 +579,7 @@ describe("library artist lookup compatibility", () => {
                 name: "Rejected Cover Lookup",
                 playcount: "5",
                 listeners: "9",
-                duration: "180000",
+                duration: "180",
                 url: "https://last.fm/track/rejected",
                 album: { "#text": "Broken Cover Album" },
             },
@@ -543,7 +620,7 @@ describe("library artist lookup compatibility", () => {
                 name: "Unknown Album Track",
                 playcount: "3",
                 listeners: "6",
-                duration: "160000",
+                duration: "160",
                 url: "https://last.fm/track/unknown",
                 album: {},
             },
