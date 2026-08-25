@@ -1,6 +1,7 @@
 /** YouTube Music album search, sidecar job orchestration, and library scanning. */
 
 import {
+    type LibraryAlbumDownloadOptions,
     type LibraryDownloadProcessorConfig,
     runLibraryAlbumDownload,
 } from "./libraryDownloadProcessor";
@@ -19,9 +20,7 @@ interface AlbumSearchCandidate {
 }
 
 /** Controls hand-off behavior when this processor is itself a fallback. */
-export interface YoutubeLibraryDownloadOptions {
-    isFallback?: boolean;
-}
+export type YoutubeLibraryDownloadOptions = LibraryAlbumDownloadOptions;
 
 function asAlbumSearchCandidate(value: unknown): AlbumSearchCandidate | null {
     if (!value || typeof value !== "object") return null;
@@ -165,7 +164,6 @@ const youtubeLibraryDownloadConfig = {
             );
         },
     },
-    fallbackOrder: "peer-first",
     logFallbackSelection: false,
     prefixManagerFailureLog: true,
     scanSource: "youtube-download",

@@ -3,13 +3,12 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { asPlainObject } from "../utils/plainObject";
-import { getSystemSettings } from "../utils/systemSettings";
 import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
+import type { DownloadSource } from "./downloadSourcePolicy";
 import { patchDownloadJobMetadata } from "./downloadJobStatus";
 import { simpleDownloadManager } from "./simpleDownloadManager";
 
 type DownloadMetadata = Record<string, unknown>;
-type ManagerFallback = "lidarr" | "soulseek";
 type PeerFallbackOptions = LibraryAlbumDownloadOptions & {
     isFallback: true;
 };
@@ -24,6 +23,7 @@ interface ProcessorContext extends DownloadContext {
     albumTitle: string;
     userId: string;
     isFallback: boolean;
+    fallbackSource?: DownloadSource;
 }
 
 interface ResultSummary {
@@ -34,6 +34,7 @@ interface ResultSummary {
 /** Controls hand-off behavior when a processor is itself a fallback. */
 export interface LibraryAlbumDownloadOptions {
     isFallback?: boolean;
+    fallbackSource?: DownloadSource;
 }
 
 /** Defines provider-specific steps and text for the shared processor. */
@@ -59,7 +60,6 @@ export interface LibraryDownloadProcessorConfig<TMatch, TResult> {
             options: PeerFallbackOptions,
         ) => Promise<void>;
     };
-    fallbackOrder: "manager-first" | "peer-first";
     logFallbackSelection: boolean;
     prefixManagerFailureLog: boolean;
     scanSource: string;
@@ -69,10 +69,6 @@ export interface LibraryDownloadProcessorConfig<TMatch, TResult> {
 function withoutFailedAt(metadata: DownloadMetadata): DownloadMetadata {
     const { failedAt: _failedAt, ...retainedMetadata } = metadata;
     return retainedMetadata;
-}
-
-function isManagerFallback(value: unknown): value is ManagerFallback {
-    return value === "lidarr" || value === "soulseek";
 }
 
 async function markSearching<TMatch, TResult>(
@@ -105,7 +101,6 @@ async function markSearchMissHandOff<TMatch, TResult>(
 
 async function handOffToManager<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
-    fallback: ManagerFallback,
     context: ProcessorContext,
 ): Promise<void> {
     const result = await simpleDownloadManager.startDownload(
@@ -125,7 +120,7 @@ async function handOffToManager<TMatch, TResult>(
     const prefix = config.prefixManagerFailureLog
         ? `[${config.sourceLabel}] `
         : "";
-    logger.error(`${prefix}Fallback ${fallback} failed: ${result.error}`);
+    logger.error(`${prefix}Fallback lidarr failed: ${result.error}`);
 }
 
 async function handOffToPeer<TMatch, TResult>(
@@ -144,24 +139,26 @@ async function handOffToPeer<TMatch, TResult>(
 
 async function dispatchHandOff<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
-    fallback: string,
+    fallback: DownloadSource,
     context: ProcessorContext,
 ): Promise<void> {
-    const managerFallback = isManagerFallback(fallback);
-    if (config.fallbackOrder === "manager-first") {
-        if (managerFallback) {
-            await handOffToManager(config, fallback, context);
-            return;
-        }
-        await handOffToPeer(config, context);
-        return;
-    }
     if (fallback === config.fallbackPeer.sourceKey) {
         await handOffToPeer(config, context);
         return;
     }
-    if (managerFallback) {
-        await handOffToManager(config, fallback, context);
+    if (fallback === "soulseek") {
+        const { processSoulseekDownload } =
+            await import("./soulseekLibraryDownload");
+        await processSoulseekDownload(
+            context.jobId,
+            context.artistName,
+            context.albumTitle,
+            context.userId,
+        );
+        return;
+    }
+    if (fallback === "lidarr") {
+        await handOffToManager(config, context);
     }
 }
 
@@ -169,18 +166,8 @@ async function handOffSearchMiss<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
     context: ProcessorContext,
 ): Promise<boolean> {
-    const settings = await getSystemSettings();
-    const fallback: unknown = settings?.primaryFailureFallback;
-    const managerFallback = isManagerFallback(fallback);
-    if (
-        !managerFallback &&
-        (fallback !== config.fallbackPeer.sourceKey || context.isFallback)
-    ) {
-        return false;
-    }
-    const selectedFallback = managerFallback
-        ? fallback
-        : config.fallbackPeer.sourceKey;
+    const selectedFallback = context.fallbackSource;
+    if (!selectedFallback || context.isFallback) return false;
     if (config.logFallbackSelection) {
         logger.debug(
             `[${config.sourceLabel}] Album not found, falling back to ${selectedFallback}`,
@@ -296,6 +283,7 @@ export async function runLibraryAlbumDownload<TMatch, TResult>(
             userId,
             metadata,
             isFallback: options.isFallback === true,
+            fallbackSource: options.fallbackSource,
         });
     } catch (error: unknown) {
         logger.error(

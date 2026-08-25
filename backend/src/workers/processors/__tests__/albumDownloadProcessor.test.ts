@@ -10,6 +10,7 @@ const mockLoggerWarn = jest.fn();
 const mockLoggerError = jest.fn();
 const mockProcessTidalDownload = jest.fn();
 const mockProcessYoutubeDownload = jest.fn();
+const mockProcessSoulseekDownload = jest.fn();
 const mockStartDownload = jest.fn();
 
 jest.mock("../../../services/downloadDispatcher", () => ({
@@ -67,6 +68,11 @@ jest.mock("../../../services/youtubeLibraryDownload", () => ({
         mockProcessYoutubeDownload(...args),
 }));
 
+jest.mock("../../../services/soulseekLibraryDownload", () => ({
+    processSoulseekDownload: (...args: unknown[]) =>
+        mockProcessSoulseekDownload(...args),
+}));
+
 jest.mock("../../../services/simpleDownloadManager", () => ({
     simpleDownloadManager: {
         startDownload: (...args: unknown[]) => mockStartDownload(...args),
@@ -102,7 +108,7 @@ const routingJob = {
     metadata: { preserved: true },
 };
 
-function dispatchRouting(source: "tidal" | "youtube" | "lidarr") {
+function dispatchRouting(source: "tidal" | "youtube" | "lidarr" | "soulseek") {
     return {
         kind: "dispatch" as const,
         source,
@@ -126,6 +132,7 @@ describe("album download queue processor", () => {
         mockExtendSchedulerClaim.mockResolvedValue(true);
         mockProcessTidalDownload.mockResolvedValue(undefined);
         mockProcessYoutubeDownload.mockResolvedValue(undefined);
+        mockProcessSoulseekDownload.mockResolvedValue(undefined);
         mockStartDownload.mockResolvedValue({ success: true });
         mockRunWithSchedulerClaim.mockImplementation(
             async (
@@ -246,6 +253,73 @@ describe("album download queue processor", () => {
             false,
             payload.artistMbid,
         );
+    });
+
+    it("acquires the renewable claim before dispatching a Soulseek-routed album", async () => {
+        const ordering: string[] = [];
+        mockResolveAlbumDownloadRouting.mockResolvedValueOnce(
+            dispatchRouting("soulseek"),
+        );
+        mockProcessSoulseekDownload.mockImplementationOnce(async () => {
+            ordering.push("dispatch");
+        });
+        mockRunWithSchedulerClaim.mockImplementationOnce(
+            async (
+                _claimKey: string,
+                _ttlMs: number,
+                _operationName: string,
+                operation: (claimToken: string) => Promise<void>,
+            ) => {
+                ordering.push("acquired");
+                return {
+                    acquired: true,
+                    value: await operation("claim-token"),
+                };
+            },
+        );
+        const job = {
+            data: payload,
+            progress: jest.fn().mockResolvedValue(undefined),
+        } as any;
+
+        await processAlbumDownload(job);
+
+        expect(mockRunWithSchedulerClaim).toHaveBeenCalledWith(
+            "scheduler-claim:album-download",
+            15 * 60_000,
+            "album download",
+            expect.any(Function),
+        );
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledWith(
+            payload.jobId,
+            "Artist",
+            "Album",
+            "user-1",
+        );
+        expect(mockStartDownload).not.toHaveBeenCalled();
+        expect(ordering).toEqual(["acquired", "dispatch"]);
+    });
+
+    it("surfaces a persisted Soulseek failure without redispatching", async () => {
+        mockResolveAlbumDownloadRouting.mockResolvedValueOnce(
+            dispatchRouting("soulseek"),
+        );
+        mockDownloadJobFindUnique
+            .mockResolvedValueOnce({ status: "pending" })
+            .mockResolvedValueOnce({ status: "processing" })
+            .mockResolvedValueOnce({ status: "failed" });
+        const job = {
+            data: payload,
+            progress: jest.fn().mockResolvedValue(undefined),
+        } as any;
+
+        await expect(processAlbumDownload(job)).rejects.toBeInstanceOf(
+            AlbumDownloadFailedError,
+        );
+
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledTimes(1);
+        expect(mockStartDownload).not.toHaveBeenCalled();
+        expect(job.progress).toHaveBeenCalledTimes(1);
     });
 
     it("persists a failed resolution without a claim", async () => {

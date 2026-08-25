@@ -83,8 +83,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/subsonic/mediaRetrieval.ts": 1,
     // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.
     "backend/src/routes/youtube.ts": 4,
-    // acquisitionService.ts remaining 4: { success:false, error } acquisition result objects (~L482, ~L678, ~L767) consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E scope guard; plus a result.error passthrough in a { success:false, error } result object (~L748); frozen under the slice-J scope guard.
-    "backend/src/services/acquisitionService.ts": 4,
+    // acquisitionService.ts remaining 3: { success:false, error } acquisition result objects consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E/slice-J scope guards. The Soulseek album processor moved to soulseekLibraryDownload.ts and no longer contributes raw-detail matches here.
+    "backend/src/services/acquisitionService.ts": 3,
     // artistCountsService.ts +2: numeric backfill error counters returned in result/progress objects (~L237 and ~L277); no error text; frozen under the ratchet-widening (slice-B2) scope guard.
     "backend/src/services/artistCountsService.ts": 2,
     // audioStreaming.ts remaining 3: internal ffmpeg-error classification (~L285) plus transcode-failure AppError messages (~L303, ~L347); frozen under the slice-E scope guard — AppError messages are echoed by errorHandler, flagged for follow-up sanitization.

@@ -12,6 +12,7 @@ import {
 import { simpleDownloadManager } from "./simpleDownloadManager";
 import { processTidalDownload } from "./tidalLibraryDownload";
 import { processYoutubeDownload } from "./youtubeLibraryDownload";
+import { processSoulseekDownload } from "./soulseekLibraryDownload";
 import { parseArtistAlbumSubject } from "../utils/downloadSubject";
 import { patchDownloadJobMetadataFrom } from "./downloadJobStatus";
 
@@ -33,6 +34,14 @@ interface AlbumNames {
     album: string;
 }
 
+type ProviderDownloadProcessor = (
+    jobId: string,
+    artistName: string,
+    albumTitle: string,
+    userId: string,
+    options?: { fallbackSource?: DownloadSource },
+) => Promise<void>;
+
 type FailedDownloadSourceResolution = Extract<
     DownloadSourceResolution,
     { kind: "fail" }
@@ -48,6 +57,7 @@ export type AlbumDownloadRouting =
     | {
           kind: "dispatch";
           source: DownloadSource;
+          fallbackSource?: DownloadSource;
           availability: DownloadSourceAvailability;
           job: DownloadJob;
           names: AlbumNames;
@@ -93,24 +103,51 @@ async function failJobWithoutDispatch(
     );
 }
 
-async function dispatchResolvedSource(
-    source: DownloadSource,
-    availability: DownloadSourceAvailability,
+async function dispatchProviderSource(
+    processor: ProviderDownloadProcessor,
+    fallbackSource: DownloadSource | undefined,
     params: AlbumDownloadDispatchParams,
     names: AlbumNames,
     userId: string,
 ): Promise<void> {
-    if (source === "tidal" && availability.tidal) {
-        await processTidalDownload(
-            params.jobId,
-            names.artist,
-            names.album,
+    if (fallbackSource) {
+        await processor(params.jobId, names.artist, names.album, userId, {
+            fallbackSource,
+        });
+        return;
+    }
+    await processor(params.jobId, names.artist, names.album, userId);
+}
+
+async function dispatchResolvedSource(
+    source: DownloadSource,
+    fallbackSource: DownloadSource | undefined,
+    params: AlbumDownloadDispatchParams,
+    names: AlbumNames,
+    userId: string,
+): Promise<void> {
+    if (source === "tidal") {
+        await dispatchProviderSource(
+            processTidalDownload,
+            fallbackSource,
+            params,
+            names,
             userId,
         );
         return;
     }
-    if (source === "youtube" && availability.youtube) {
-        await processYoutubeDownload(
+    if (source === "youtube") {
+        await dispatchProviderSource(
+            processYoutubeDownload,
+            fallbackSource,
+            params,
+            names,
+            userId,
+        );
+        return;
+    }
+    if (source === "soulseek") {
+        await processSoulseekDownload(
             params.jobId,
             names.artist,
             names.album,
@@ -119,10 +156,6 @@ async function dispatchResolvedSource(
         return;
     }
 
-    // Non-TIDAL dispatch goes through simpleDownloadManager, which is
-    // Lidarr-backed — there is no per-source dispatch below this point, so a
-    // "soulseek" selection is executed by the Lidarr manager (pre-existing
-    // pipeline limitation).
     const managerParams = [
         params.jobId,
         names.artist,
@@ -140,6 +173,24 @@ async function dispatchResolvedSource(
     if (!result.success) {
         logger.error(`Failed to start download: ${result.error}`);
     }
+}
+
+function resolveRuntimeFallback(
+    configuredSource: DownloadSource,
+    dispatchedSource: DownloadSource,
+    fallback: string | null | undefined,
+    availability: DownloadSourceAvailability,
+): DownloadSource | undefined {
+    if (configuredSource !== dispatchedSource) return undefined;
+    const resolution = resolveDownloadSource({
+        configuredSource,
+        fallback,
+        availability: { ...availability, [configuredSource]: false },
+    });
+    if (resolution.kind === "fail" || resolution.source === dispatchedSource) {
+        return undefined;
+    }
+    return resolution.source;
 }
 
 /** Resolve one album download against a single settings and availability snapshot. */
@@ -181,6 +232,12 @@ export async function resolveAlbumDownloadRouting(
     return {
         kind: "dispatch",
         source: resolution.source,
+        fallbackSource: resolveRuntimeFallback(
+            configuredSource,
+            resolution.source,
+            settings?.primaryFailureFallback,
+            availability,
+        ),
         availability,
         job,
         names,
@@ -210,7 +267,7 @@ export async function dispatchResolvedAlbumDownload(
 
     await dispatchResolvedSource(
         routing.source,
-        routing.availability,
+        routing.fallbackSource,
         params,
         routing.names,
         routing.userId,

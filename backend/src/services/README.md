@@ -185,6 +185,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/rssParser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
 | `backend/src/services/simpleDownloadManager.ts` | Core |
+| `backend/src/services/soulseekLibraryDownload.ts` | Soulseek album track-list resolution, batch download, and download-job persistence |
 | `backend/src/services/socialPresenceEvents.ts` | Core |
 | `backend/src/services/soulseek.ts` | Core |
 | `backend/src/services/spotify.ts` | Core |

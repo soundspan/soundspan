@@ -37,6 +37,10 @@ jest.mock("../youtubeLibraryDownload", () => ({
     processYoutubeDownload: jest.fn(),
 }));
 
+jest.mock("../soulseekLibraryDownload", () => ({
+    processSoulseekDownload: jest.fn(),
+}));
+
 jest.mock("../coalescedLibraryScan", () => ({
     requestCoalescedLibraryScan: jest.fn(),
 }));
@@ -46,6 +50,7 @@ import { getSystemSettings } from "../../utils/systemSettings";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { tidalService } from "../tidal";
 import { processYoutubeDownload } from "../youtubeLibraryDownload";
+import { processSoulseekDownload } from "../soulseekLibraryDownload";
 import { processTidalDownload } from "../tidalLibraryDownload";
 import { requestCoalescedLibraryScan } from "../coalescedLibraryScan";
 
@@ -56,6 +61,7 @@ const mockFindAlbum = tidalService.findAlbum as jest.Mock;
 const mockDownloadAlbum = tidalService.downloadAlbum as jest.Mock;
 const mockFallback = simpleDownloadManager.startDownload as jest.Mock;
 const mockProcessYoutubeDownload = processYoutubeDownload as jest.Mock;
+const mockProcessSoulseekDownload = processSoulseekDownload as jest.Mock;
 const mockScan = requestCoalescedLibraryScan as jest.Mock;
 
 describe("tidalLibraryDownload", () => {
@@ -151,11 +157,9 @@ describe("tidalLibraryDownload", () => {
 
     it("hands a search miss to a configured youtube fallback", async () => {
         mockFindAlbum.mockResolvedValueOnce(null);
-        mockSettings.mockResolvedValueOnce({
-            primaryFailureFallback: "youtube",
+        await processTidalDownload("job-1", "Artist", "Album", "user-1", {
+            fallbackSource: "youtube",
         });
-
-        await processTidalDownload("job-1", "Artist", "Album", "user-1");
 
         expect(mockProcessYoutubeDownload).toHaveBeenCalledWith(
             "job-1",
@@ -178,27 +182,24 @@ describe("tidalLibraryDownload", () => {
         expect(mockDownloadAlbum).not.toHaveBeenCalled();
     });
 
-    it("hands a search miss to a manager fallback and records the hand-off", async () => {
+    it("hands a search miss to Soulseek instead of the Lidarr manager", async () => {
         mockFindAlbum.mockResolvedValueOnce(null);
-        mockSettings.mockResolvedValueOnce({
-            primaryFailureFallback: "soulseek",
-        });
-        mockFallback.mockResolvedValueOnce({
-            success: false,
-            error: "fallback failed",
+        mockProcessSoulseekDownload.mockResolvedValueOnce({
+            success: true,
+            source: "soulseek",
         });
 
-        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+        await processTidalDownload("job-1", "Artist", "Album", "user-1", {
+            fallbackSource: "soulseek",
+        });
 
-        expect(mockFallback).toHaveBeenCalledWith(
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledWith(
             "job-1",
             "Artist",
             "Album",
-            "rg-1",
             "user-1",
-            false,
-            undefined,
         );
+        expect(mockFallback).not.toHaveBeenCalled();
         expect(mockUpdate).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: { id: "job-1" },
@@ -288,6 +289,7 @@ describe("tidalLibraryDownload", () => {
 
         await processTidalDownload("job-1", "Artist", "Album", "user-1", {
             isFallback: true,
+            fallbackSource: "youtube",
         });
 
         expect(mockProcessYoutubeDownload).not.toHaveBeenCalled();

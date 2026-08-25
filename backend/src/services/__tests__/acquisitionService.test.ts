@@ -4,6 +4,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -21,6 +27,31 @@ jest.mock("../../utils/db", () => ({
 const getSystemSettings = jest.fn();
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings,
+}));
+
+const probeDownloadSourceAvailability = jest.fn();
+jest.mock("../downloadSourcePolicy", () => ({
+    ...jest.requireActual("../downloadSourcePolicy"),
+    probeDownloadSourceAvailability: (...args: unknown[]) =>
+        probeDownloadSourceAvailability(...args),
+}));
+
+jest.mock("../lidarr", () => ({
+    lidarrService: { isEnabled: jest.fn() },
+}));
+
+jest.mock("../tidal", () => ({
+    tidalService: { isAvailable: jest.fn() },
+}));
+
+jest.mock("../youtubeDownload", () => ({
+    youtubeDownloadService: { isAvailable: jest.fn() },
+}));
+
+const processSoulseekDownload = jest.fn();
+jest.mock("../soulseekLibraryDownload", () => ({
+    processSoulseekDownload: (...args: unknown[]) =>
+        processSoulseekDownload(...args),
 }));
 
 const soulseekService = {
@@ -104,6 +135,17 @@ describe("acquisitionService", () => {
             successful: 2,
             errors: [],
         });
+        probeDownloadSourceAvailability.mockResolvedValue({
+            tidal: false,
+            lidarr: false,
+            soulseek: true,
+            youtube: false,
+        });
+        processSoulseekDownload.mockResolvedValue({
+            success: true,
+            source: "soulseek",
+            downloadJobId: 101,
+        });
 
         musicBrainzService.getAlbumTracks.mockResolvedValue([
             { title: "Track A", position: 1 },
@@ -126,81 +168,24 @@ describe("acquisitionService", () => {
         });
     });
 
-    it("computes behavior matrix for no sources, single-source, and dual-source cases", async () => {
-        getSystemSettings.mockResolvedValueOnce({
-            downloadSource: "soulseek",
-            primaryFailureFallback: "none",
-            lidarrEnabled: false,
-            lidarrUrl: null,
-            lidarrApiKey: null,
-        });
-        soulseekService.isAvailable.mockResolvedValueOnce(false);
-        await expect(svc.getDownloadBehavior()).resolves.toEqual({
-            hasPrimarySource: false,
-            primarySource: null,
-            hasFallbackSource: false,
-            fallbackSource: null,
-        });
-
-        getSystemSettings.mockResolvedValueOnce({
+    it("respects the shared policy when an unavailable primary is set to Skip", async () => {
+        getSystemSettings.mockResolvedValue({
             downloadSource: "lidarr",
             primaryFailureFallback: "none",
-            lidarrEnabled: false,
-            lidarrUrl: null,
-            lidarrApiKey: null,
-        });
-        soulseekService.isAvailable.mockResolvedValueOnce(true);
-        await expect(svc.getDownloadBehavior()).resolves.toEqual({
-            hasPrimarySource: true,
-            primarySource: "soulseek",
-            hasFallbackSource: false,
-            fallbackSource: null,
         });
 
-        getSystemSettings.mockResolvedValueOnce({
-            downloadSource: "soulseek",
-            primaryFailureFallback: "none",
-            lidarrEnabled: true,
-            lidarrUrl: "http://lidarr",
-            lidarrApiKey: "key",
-        });
-        soulseekService.isAvailable.mockResolvedValueOnce(false);
-        await expect(svc.getDownloadBehavior()).resolves.toEqual({
-            hasPrimarySource: true,
-            primarySource: "lidarr",
-            hasFallbackSource: false,
-            fallbackSource: null,
+        await expect(
+            svc.acquireAlbum(
+                { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
+                { userId: "user-1" },
+            ),
+        ).resolves.toEqual({
+            success: false,
+            error: "No download sources available (neither Soulseek nor Lidarr configured)",
         });
 
-        getSystemSettings.mockResolvedValueOnce({
-            downloadSource: "lidarr",
-            primaryFailureFallback: undefined,
-            lidarrEnabled: true,
-            lidarrUrl: "http://lidarr",
-            lidarrApiKey: "key",
-        });
-        soulseekService.isAvailable.mockResolvedValueOnce(true);
-        await expect(svc.getDownloadBehavior()).resolves.toEqual({
-            hasPrimarySource: true,
-            primarySource: "lidarr",
-            hasFallbackSource: true,
-            fallbackSource: "soulseek",
-        });
-
-        getSystemSettings.mockResolvedValueOnce({
-            downloadSource: "soulseek",
-            primaryFailureFallback: "none",
-            lidarrEnabled: true,
-            lidarrUrl: "http://lidarr",
-            lidarrApiKey: "key",
-        });
-        soulseekService.isAvailable.mockResolvedValueOnce(true);
-        await expect(svc.getDownloadBehavior()).resolves.toEqual({
-            hasPrimarySource: true,
-            primarySource: "soulseek",
-            hasFallbackSource: false,
-            fallbackSource: null,
-        });
+        expect(processSoulseekDownload).not.toHaveBeenCalled();
+        expect(simpleDownloadManager.startDownload).not.toHaveBeenCalled();
     });
 
     it("updates queue concurrency when settings change", async () => {
@@ -378,50 +363,21 @@ describe("acquisitionService", () => {
         });
     });
 
-    it("routes primary/fallback logic in acquireAlbum", async () => {
-        jest.spyOn(svc, "updateQueueConcurrency").mockResolvedValue(undefined);
-        jest.spyOn(svc, "getDownloadBehavior")
-            .mockResolvedValueOnce({
-                hasPrimarySource: false,
-                primarySource: null,
-                hasFallbackSource: false,
-                fallbackSource: null,
-            })
-            .mockResolvedValueOnce({
-                hasPrimarySource: true,
-                primarySource: "soulseek",
-                hasFallbackSource: false,
-                fallbackSource: null,
-            })
-            .mockResolvedValueOnce({
-                hasPrimarySource: true,
-                primarySource: "soulseek",
-                hasFallbackSource: true,
-                fallbackSource: "lidarr",
-            })
-            .mockResolvedValueOnce({
-                hasPrimarySource: true,
-                primarySource: "lidarr",
-                hasFallbackSource: true,
-                fallbackSource: "soulseek",
-            });
-
-        jest.spyOn(svc, "acquireAlbumViaSoulseek")
-            .mockResolvedValueOnce({ success: true, source: "soulseek" })
-            .mockResolvedValueOnce({ success: false, error: "failed primary" })
-            .mockResolvedValueOnce({ success: true, source: "soulseek" });
-        jest.spyOn(svc, "acquireAlbumViaLidarr")
-            .mockResolvedValueOnce({ success: true, source: "lidarr" })
-            .mockResolvedValueOnce({ success: false, error: "lidarr failed" });
-
-        await expect(
-            svc.acquireAlbum(
-                { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
-                { userId: "user-1" },
-            ),
-        ).resolves.toEqual({
+    it("uses the shared policy for primary and runtime fallback routing", async () => {
+        getSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "soulseek",
+            primaryFailureFallback: "lidarr",
+        });
+        probeDownloadSourceAvailability.mockResolvedValue({
+            tidal: true,
+            lidarr: true,
+            soulseek: true,
+            youtube: true,
+        });
+        processSoulseekDownload.mockResolvedValueOnce({
             success: false,
-            error: "No download sources available (neither Soulseek nor Lidarr configured)",
+            error: "failed primary",
         });
 
         await expect(
@@ -429,27 +385,70 @@ describe("acquisitionService", () => {
                 { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
                 { userId: "user-1" },
             ),
-        ).resolves.toEqual({ success: true, source: "soulseek" });
+        ).resolves.toEqual({
+            success: true,
+            source: "lidarr",
+            downloadJobId: 101,
+            correlationId: "corr-1",
+        });
 
-        await expect(
-            svc.acquireAlbum(
-                { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
-                { userId: "user-1" },
-            ),
-        ).resolves.toEqual({ success: true, source: "lidarr" });
-
-        await expect(
-            svc.acquireAlbum(
-                { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
-                { userId: "user-1" },
-            ),
-        ).resolves.toEqual({ success: true, source: "soulseek" });
+        expect(processSoulseekDownload).toHaveBeenCalledWith(
+            "101",
+            "Artist",
+            "Album",
+            "user-1",
+        );
+        expect(simpleDownloadManager.startDownload).toHaveBeenCalledTimes(1);
     });
 
-    it("acquireAlbumViaSoulseek handles missing settings, missing mbid, and requested-track success", async () => {
-        getSystemSettings.mockResolvedValueOnce({ musicPath: "" });
+    it("routes a failed Lidarr primary to the Soulseek fallback", async () => {
+        getSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            soulseekConcurrentDownloads: 4,
+            downloadSource: "lidarr",
+            primaryFailureFallback: "soulseek",
+        });
+        probeDownloadSourceAvailability.mockResolvedValue({
+            tidal: false,
+            lidarr: true,
+            soulseek: true,
+            youtube: false,
+        });
+        simpleDownloadManager.startDownload.mockResolvedValueOnce({
+            success: false,
+            error: "Lidarr primary failed",
+        });
+
         await expect(
-            svc.acquireAlbumViaSoulseek(
+            svc.acquireAlbum(
+                { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
+                { userId: "user-1" },
+            ),
+        ).resolves.toEqual({
+            success: true,
+            source: "soulseek",
+            downloadJobId: 101,
+        });
+
+        expect(simpleDownloadManager.startDownload).toHaveBeenCalledTimes(1);
+        expect(processSoulseekDownload).toHaveBeenCalledWith(
+            "101",
+            "Artist",
+            "Album",
+            "user-1",
+        );
+    });
+
+    it("does not create a Soulseek job when the music path is missing", async () => {
+        getSystemSettings.mockResolvedValue({
+            musicPath: "",
+            soulseekConcurrentDownloads: 4,
+            downloadSource: "soulseek",
+            primaryFailureFallback: "none",
+        });
+
+        await expect(
+            svc.acquireAlbum(
                 { artistName: "Artist", albumTitle: "Album", mbid: "rg-1" },
                 { userId: "user-1" },
             ),
@@ -458,168 +457,41 @@ describe("acquisitionService", () => {
             error: "Music path not configured",
         });
 
-        getSystemSettings.mockResolvedValueOnce({ musicPath: "/music" });
+        expect(prisma.downloadJob.create).not.toHaveBeenCalled();
+        expect(processSoulseekDownload).not.toHaveBeenCalled();
+    });
+
+    it("delegates requested-track Soulseek albums to the moved processor", async () => {
+        const requestedTracks = [{ title: "Only Track" }, { title: "Two" }];
+
         await expect(
-            svc.acquireAlbumViaSoulseek(
-                { artistName: "Artist", albumTitle: "Album" },
+            svc.acquireAlbum(
+                {
+                    artistName: "Artist",
+                    albumTitle: "Album",
+                    mbid: "rg-3",
+                    requestedTracks,
+                },
                 { userId: "user-1" },
             ),
         ).resolves.toEqual({
-            success: false,
-            error: "Album MBID required for Soulseek download",
-        });
-
-        getSystemSettings.mockResolvedValueOnce({
-            musicPath: "/music",
-            soulseekConcurrentDownloads: 3,
-        });
-        prisma.downloadJob.create.mockResolvedValueOnce({
-            id: "303",
-            metadata: { soulseekAttempts: 1 },
-        });
-        soulseekService.searchAndDownloadBatch.mockResolvedValueOnce({
-            successful: 2,
-            errors: [],
-        });
-
-        const result = await svc.acquireAlbumViaSoulseek(
-            {
-                artistName: "Artist",
-                albumTitle: "Album",
-                mbid: "rg-3",
-                requestedTracks: [{ title: "Only Track" }, { title: "Two" }],
-            },
-            { userId: "user-1" },
-        );
-
-        expect(result).toEqual({
             success: true,
             source: "soulseek",
-            downloadJobId: 303,
-            tracksDownloaded: 2,
-            tracksTotal: 2,
-            error: undefined,
+            downloadJobId: 101,
         });
-        expect(soulseekService.searchAndDownloadBatch).toHaveBeenCalledWith(
-            [
-                { artist: "Artist", title: "Only Track", album: "Album" },
-                { artist: "Artist", title: "Two", album: "Album" },
-            ],
-            "/music",
-            3,
+
+        expect(prisma.downloadJob.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                targetMbid: "rg-3",
+                metadata: expect.objectContaining({ requestedTracks }),
+            }),
+        });
+        expect(processSoulseekDownload).toHaveBeenCalledWith(
+            "101",
+            "Artist",
+            "Album",
+            "user-1",
         );
-    });
-
-    it("acquireAlbumViaSoulseek uses MusicBrainz/Last.fm fallback and handles empty or partial failures", async () => {
-        getSystemSettings.mockResolvedValueOnce({
-            musicPath: "/music",
-            soulseekConcurrentDownloads: 4,
-        });
-        prisma.downloadJob.create.mockResolvedValueOnce({
-            id: "401",
-            metadata: {},
-        });
-        musicBrainzService.getAlbumTracks.mockResolvedValueOnce([]);
-        lastFmService.getAlbumInfo.mockResolvedValueOnce({
-            tracks: {
-                track: [{ name: "LFM Track", "@attr": { rank: "1" } }],
-            },
-        });
-        soulseekService.searchAndDownloadBatch.mockResolvedValueOnce({
-            successful: 0,
-            errors: ["Artist - LFM Track: missing"],
-        });
-
-        await expect(
-            svc.acquireAlbumViaSoulseek(
-                { artistName: "Artist", albumTitle: "Album", mbid: "rg-4" },
-                { userId: "user-1" },
-            ),
-        ).resolves.toEqual({
-            success: false,
-            tracksTotal: 1,
-            downloadJobId: 401,
-            error: "No tracks found on Soulseek (searched 1 tracks)",
-        });
-
-        getSystemSettings.mockResolvedValueOnce({
-            musicPath: "/music",
-            soulseekConcurrentDownloads: 4,
-        });
-        prisma.downloadJob.create.mockResolvedValueOnce({
-            id: "402",
-            metadata: {},
-        });
-        musicBrainzService.getAlbumTracks.mockResolvedValueOnce([
-            { title: "Track 1" },
-            { title: "Track 2" },
-            { title: "Track 3" },
-            { title: "Track 4" },
-        ]);
-        soulseekService.searchAndDownloadBatch.mockResolvedValueOnce({
-            successful: 1,
-            errors: ["x"],
-        });
-
-        const partialResult = await svc.acquireAlbumViaSoulseek(
-            { artistName: "Artist", albumTitle: "Album", mbid: "rg-5" },
-            { userId: "user-1" },
-        );
-        expect(partialResult).toEqual({
-            success: false,
-            source: "soulseek",
-            downloadJobId: 402,
-            tracksDownloaded: 1,
-            tracksTotal: 4,
-            error: "Only 1/4 tracks found",
-        });
-
-        getSystemSettings.mockResolvedValueOnce({
-            musicPath: "/music",
-            soulseekConcurrentDownloads: 4,
-        });
-        prisma.downloadJob.create.mockResolvedValueOnce({
-            id: "403",
-            metadata: {},
-        });
-        musicBrainzService.getAlbumTracks.mockResolvedValueOnce([]);
-        lastFmService.getAlbumInfo.mockResolvedValueOnce({
-            tracks: { track: [] },
-        });
-
-        await expect(
-            svc.acquireAlbumViaSoulseek(
-                { artistName: "Artist", albumTitle: "Album", mbid: "rg-6" },
-                { userId: "user-1" },
-            ),
-        ).resolves.toEqual({
-            success: false,
-            error: "Could not get track list from MusicBrainz or Last.fm",
-        });
-    });
-
-    it("acquireAlbumViaSoulseek handles thrown errors and job-status update failures", async () => {
-        getSystemSettings.mockResolvedValueOnce({
-            musicPath: "/music",
-            soulseekConcurrentDownloads: 4,
-        });
-        prisma.downloadJob.create.mockResolvedValueOnce({
-            id: "501",
-            metadata: {},
-        });
-        prisma.downloadJob.update
-            .mockRejectedValueOnce(new Error("status write failed"))
-            .mockResolvedValue({});
-
-        const result = await svc.acquireAlbumViaSoulseek(
-            { artistName: "Artist", albumTitle: "Album", mbid: "rg-7" },
-            { userId: "user-1" },
-        );
-
-        expect(result).toEqual({
-            success: false,
-            error: "status write failed",
-        });
     });
 
     it("acquireAlbumViaLidarr handles missing mbid, success, structured failure, and exception", async () => {

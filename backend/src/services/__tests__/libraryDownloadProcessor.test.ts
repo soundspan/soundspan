@@ -24,6 +24,12 @@ jest.mock("../simpleDownloadManager", () => ({
     simpleDownloadManager: { startDownload: jest.fn() },
 }));
 
+const processSoulseekDownload = jest.fn();
+jest.mock("../soulseekLibraryDownload", () => ({
+    processSoulseekDownload: (...args: unknown[]) =>
+        processSoulseekDownload(...args),
+}));
+
 jest.mock("../coalescedLibraryScan", () => ({
     requestCoalescedLibraryScan: jest.fn(),
 }));
@@ -73,10 +79,9 @@ const processorConfig: LibraryDownloadProcessorConfig<FakeMatch, FakeResult> = {
         metadata: { fakeResult: { downloaded: result.downloaded } },
     }),
     fallbackPeer: {
-        sourceKey: "peer",
+        sourceKey: "youtube",
         run: fallbackPeer,
     },
-    fallbackOrder: "manager-first",
     logFallbackSelection: false,
     prefixManagerFailureLog: false,
     scanSource: "fake-download",
@@ -102,16 +107,13 @@ describe("libraryDownloadProcessor", () => {
 
     it("hands a search miss to the configured peer", async () => {
         findMatch.mockResolvedValueOnce(null);
-        mockSettings.mockResolvedValueOnce({
-            primaryFailureFallback: "peer",
-        });
-
         await runLibraryAlbumDownload(
             processorConfig,
             "job-1",
             "Artist",
             "Album",
             "user-1",
+            { fallbackSource: "youtube" },
         );
 
         expect(fallbackPeer).toHaveBeenCalledWith(
@@ -128,12 +130,45 @@ describe("libraryDownloadProcessor", () => {
                     albumMbid: "rg-1",
                     queuedVia: "album-download-queue",
                     failedAt: "2026-08-24T10:00:00.000Z",
-                    currentSource: "peer",
-                    statusText: "Fake Music not found → peer",
+                    currentSource: "youtube",
+                    statusText: "Fake Music not found → youtube",
                 },
             },
         });
         expect(download).not.toHaveBeenCalled();
+    });
+
+    it("uses the resolved snapshot to hand a search miss to Soulseek", async () => {
+        findMatch.mockResolvedValueOnce(null);
+        mockSettings.mockResolvedValueOnce({
+            primaryFailureFallback: "lidarr",
+        });
+
+        await runLibraryAlbumDownload(
+            processorConfig,
+            "job-1",
+            "Artist",
+            "Album",
+            "user-1",
+            { fallbackSource: "soulseek" } as LibraryAlbumDownloadOptions,
+        );
+
+        expect(mockSettings).not.toHaveBeenCalled();
+        expect(processSoulseekDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "user-1",
+        );
+        expect(mockUpdate).toHaveBeenCalledWith({
+            where: { id: "job-1" },
+            data: {
+                metadata: expect.objectContaining({
+                    currentSource: "soulseek",
+                    statusText: "Fake Music not found → soulseek",
+                }),
+            },
+        });
     });
 
     it("marks a forwarded peer attempt as fallback and stops after both providers miss", async () => {
@@ -148,11 +183,11 @@ describe("libraryDownloadProcessor", () => {
             FakeResult
         > = {
             ...processorConfig,
-            sourceKey: "peer",
+            sourceKey: "youtube",
             sourceLabel: "Peer Music",
             findMatch: siblingFindMatch,
             fallbackPeer: {
-                sourceKey: "peer",
+                sourceKey: "youtube",
                 run: recursivePeer,
             },
         };
@@ -171,18 +206,17 @@ describe("libraryDownloadProcessor", () => {
             ...processorConfig,
             findMatch: primaryFindMatch,
             fallbackPeer: {
-                sourceKey: "peer",
+                sourceKey: "youtube",
                 run: (...args) => siblingProcessor(...args),
             },
         };
-        mockSettings.mockResolvedValue({ primaryFailureFallback: "peer" });
-
         await runLibraryAlbumDownload(
             forwardingConfig,
             "job-1",
             "Artist",
             "Album",
             "user-1",
+            { fallbackSource: "youtube" },
         );
 
         expect(siblingProcessor).toHaveBeenCalledWith(
@@ -253,17 +287,13 @@ describe("libraryDownloadProcessor", () => {
 
     it("does not hand a fallback search miss back to the peer", async () => {
         findMatch.mockResolvedValueOnce(null);
-        mockSettings.mockResolvedValueOnce({
-            primaryFailureFallback: "peer",
-        });
-
         await runLibraryAlbumDownload(
             processorConfig,
             "job-1",
             "Artist",
             "Album",
             "user-1",
-            { isFallback: true },
+            { isFallback: true, fallbackSource: "youtube" },
         );
 
         expect(fallbackPeer).not.toHaveBeenCalled();

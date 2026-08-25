@@ -67,6 +67,12 @@ jest.mock("../youtubeLibraryDownload", () => ({
         mockProcessYoutubeDownload(...args),
 }));
 
+const mockProcessSoulseekDownload = jest.fn();
+jest.mock("../soulseekLibraryDownload", () => ({
+    processSoulseekDownload: (...args: unknown[]) =>
+        mockProcessSoulseekDownload(...args),
+}));
+
 const mockStartDownload = jest.fn();
 jest.mock("../simpleDownloadManager", () => ({
     simpleDownloadManager: {
@@ -108,6 +114,7 @@ describe("dispatchAlbumDownload", () => {
         mockYoutubeAvailable.mockResolvedValue(false);
         mockProcessTidalDownload.mockResolvedValue(undefined);
         mockProcessYoutubeDownload.mockResolvedValue(undefined);
+        mockProcessSoulseekDownload.mockResolvedValue(undefined);
         mockStartDownload.mockResolvedValue({ success: true });
     });
 
@@ -169,6 +176,31 @@ describe("dispatchAlbumDownload", () => {
         expect(mockProcessTidalDownload).toHaveBeenCalledTimes(1);
     });
 
+    it("passes the resolved Soulseek runtime fallback snapshot to TIDAL", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            downloadSource: "tidal",
+            primaryFailureFallback: "soulseek",
+        });
+        mockTidalAvailable.mockResolvedValue(true);
+        const routing = await resolveAlbumDownloadRouting(baseParams);
+        mockGetSystemSettings.mockResolvedValue({
+            downloadSource: "tidal",
+            primaryFailureFallback: "lidarr",
+        });
+
+        await dispatchResolvedAlbumDownload(routing, baseParams);
+
+        expect(mockGetSystemSettings).toHaveBeenCalledTimes(1);
+        expect(mockProcessTidalDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "user-1",
+            { fallbackSource: "soulseek" },
+        );
+        expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+
     it("uses YouTube as an available explicit fallback", async () => {
         mockGetSystemSettings.mockResolvedValue({
             downloadSource: "tidal",
@@ -186,7 +218,7 @@ describe("dispatchAlbumDownload", () => {
         );
     });
 
-    it("falls back from unavailable YouTube to the manager-backed Soulseek path", async () => {
+    it("falls back from unavailable YouTube to Soulseek", async () => {
         mockGetSystemSettings.mockResolvedValue({
             downloadSource: "youtube",
             primaryFailureFallback: "soulseek",
@@ -194,17 +226,17 @@ describe("dispatchAlbumDownload", () => {
 
         await dispatchAlbumDownload(baseParams);
 
-        expect(mockStartDownload).toHaveBeenCalledWith(
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledWith(
             "job-1",
             "Artist",
             "Album",
-            "rg-1",
             "user-1",
         );
         expect(mockProcessYoutubeDownload).not.toHaveBeenCalled();
+        expect(mockStartDownload).not.toHaveBeenCalled();
     });
 
-    it("uses the manager for an available configured Soulseek source", async () => {
+    it("dispatches an available configured Soulseek source", async () => {
         await dispatchAlbumDownload({
             ...baseParams,
             artistName: undefined,
@@ -212,16 +244,37 @@ describe("dispatchAlbumDownload", () => {
             subject: "Split Artist - Split - Album",
         });
 
-        expect(mockStartDownload).toHaveBeenCalledWith(
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledWith(
             "job-1",
             "Split Artist",
             "Split - Album",
-            "rg-1",
             "user-1",
         );
+        expect(mockStartDownload).not.toHaveBeenCalled();
     });
 
-    it("passes a supplied artist MBID to the manager-backed source", async () => {
+    it("keeps an all-unavailable legacy resolution on Soulseek", async () => {
+        mockGetSystemSettings.mockResolvedValue({ downloadSource: "soulseek" });
+        mockLidarrAvailable.mockResolvedValue(false);
+        mockSoulseekAvailable.mockResolvedValue(false);
+
+        await dispatchAlbumDownload(baseParams);
+
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "user-1",
+        );
+        expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+
+    it("passes a supplied artist MBID to the Lidarr manager", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            downloadSource: "lidarr",
+            primaryFailureFallback: "none",
+        });
+
         await dispatchAlbumDownload({
             ...baseParams,
             artistMbid: "artist-mbid-1",
@@ -239,6 +292,11 @@ describe("dispatchAlbumDownload", () => {
     });
 
     it("uses the subject for both names when no delimiter or metadata exists", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            downloadSource: "lidarr",
+            primaryFailureFallback: "none",
+        });
+
         await dispatchAlbumDownload({
             ...baseParams,
             artistName: undefined,
@@ -256,6 +314,11 @@ describe("dispatchAlbumDownload", () => {
     });
 
     it("logs unsuccessful manager starts without throwing", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            downloadSource: "lidarr",
+            primaryFailureFallback: "none",
+        });
+
         mockStartDownload.mockResolvedValueOnce({
             success: false,
             error: "unavailable indexer",
@@ -346,13 +409,13 @@ describe("dispatchAlbumDownload", () => {
 
         await dispatchAlbumDownload(baseParams);
 
-        expect(mockStartDownload).toHaveBeenCalledWith(
+        expect(mockProcessSoulseekDownload).toHaveBeenCalledWith(
             "job-1",
             "Artist",
             "Album",
-            "rg-1",
             "user-1",
         );
+        expect(mockStartDownload).not.toHaveBeenCalled();
         expect(mockUpdate).not.toHaveBeenCalled();
     });
 

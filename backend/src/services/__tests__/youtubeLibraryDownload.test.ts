@@ -288,11 +288,9 @@ describe("youtubeLibraryDownload", () => {
 
     it("hands a search miss to a configured lidarr fallback", async () => {
         mockSearch.mockResolvedValueOnce([]);
-        mockSettings.mockResolvedValueOnce({
-            primaryFailureFallback: "lidarr",
+        await processYoutubeDownload("job-1", "Artist", "Album", "user-1", {
+            fallbackSource: "lidarr",
         });
-
-        await processYoutubeDownload("job-1", "Artist", "Album", "user-1");
 
         expect(mockFallback).toHaveBeenCalledWith(
             "job-1",
@@ -308,11 +306,9 @@ describe("youtubeLibraryDownload", () => {
 
     it("hands a search miss to a configured tidal fallback", async () => {
         mockSearch.mockResolvedValueOnce([]);
-        mockSettings.mockResolvedValueOnce({
-            primaryFailureFallback: "tidal",
+        await processYoutubeDownload("job-1", "Artist", "Album", "user-1", {
+            fallbackSource: "tidal",
         });
-
-        await processYoutubeDownload("job-1", "Artist", "Album", "user-1");
 
         expect(mockProcessTidalDownload).toHaveBeenCalledWith(
             "job-1",
@@ -342,6 +338,7 @@ describe("youtubeLibraryDownload", () => {
 
         await processYoutubeDownload("job-1", "Artist", "Album", "user-1", {
             isFallback: true,
+            fallbackSource: "tidal",
         });
 
         expect(mockProcessTidalDownload).not.toHaveBeenCalled();

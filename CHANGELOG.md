@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Album downloads that select Soulseek, including TIDAL or YouTube Music runtime fallbacks and the default setting, now download through Soulseek instead of silently using Lidarr (#788).
 - Playing music no longer re-renders large parts of the app once per second: pages and controls now subscribe only to the playback details they actually show, and dragging the volume slider updates just the volume controls instead of rippling through every open page (#785).
 - Queued album downloads waiting on the deployment-wide claim now return to Bull with a delay instead of occupying an active worker slot for up to four hours.
 - Pressing get-all-missing-albums now queues the artist's albums immediately even while other downloads are running (#808).

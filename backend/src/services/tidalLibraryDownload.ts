@@ -2,6 +2,7 @@
 
 import { logger } from "../utils/logger";
 import {
+    type LibraryAlbumDownloadOptions,
     type LibraryDownloadProcessorConfig,
     runLibraryAlbumDownload,
 } from "./libraryDownloadProcessor";
@@ -13,9 +14,7 @@ type TidalAlbumMatch = NonNullable<
 >;
 
 /** Controls hand-off behavior when this processor is itself a fallback. */
-export interface TidalLibraryDownloadOptions {
-    isFallback?: boolean;
-}
+export type TidalLibraryDownloadOptions = LibraryAlbumDownloadOptions;
 
 function completedStatusText(result: TidalAlbumDownloadResult): string {
     return result.failed > 0
@@ -76,7 +75,6 @@ const tidalLibraryDownloadConfig = {
             );
         },
     },
-    fallbackOrder: "manager-first",
     logFallbackSelection: true,
     prefixManagerFailureLog: false,
     scanSource: "tidal-download",

@@ -14,12 +14,18 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { getSystemSettings } from "../utils/systemSettings";
-import { soulseekService } from "./soulseek";
 import { simpleDownloadManager } from "./simpleDownloadManager";
-import { musicBrainzService } from "./musicbrainz";
+import { soulseekService } from "./soulseek";
 import { lastFmService } from "./lastfm";
-import { AcquisitionError, AcquisitionErrorType } from "./lidarr";
+import type { AcquisitionErrorType } from "./lidarr";
 import PQueue from "p-queue";
+import {
+    type DownloadSource,
+    type DownloadSourceAvailability,
+    probeDownloadSourceAvailability,
+    resolveDownloadSource,
+} from "./downloadSourcePolicy";
+import { processSoulseekDownload } from "./soulseekLibraryDownload";
 import { patchDownloadJobMetadata } from "./downloadJobStatus";
 
 /**
@@ -69,14 +75,6 @@ export interface AcquisitionResult {
 }
 
 /**
- * Service availability check result
- */
-interface ServiceAvailability {
-    lidarrAvailable: boolean;
-    soulseekAvailable: boolean;
-}
-
-/**
  * Download behavior matrix configuration
  */
 interface DownloadBehavior {
@@ -84,6 +82,93 @@ interface DownloadBehavior {
     primarySource: "soulseek" | "lidarr" | null;
     hasFallbackSource: boolean;
     fallbackSource: "soulseek" | "lidarr" | null;
+}
+
+const NO_ACQUISITION_SOURCES: DownloadBehavior = {
+    hasPrimarySource: false,
+    primarySource: null,
+    hasFallbackSource: false,
+    fallbackSource: null,
+};
+
+function acquisitionAvailability(
+    availability: DownloadSourceAvailability,
+): DownloadSourceAvailability {
+    return { ...availability, tidal: false, youtube: false };
+}
+
+function isAcquisitionSource(
+    source: DownloadSource,
+): source is "soulseek" | "lidarr" {
+    return source === "soulseek" || source === "lidarr";
+}
+
+function availableAcquisitionSource(
+    source: DownloadSource,
+    availability: DownloadSourceAvailability,
+): "soulseek" | "lidarr" | null {
+    return isAcquisitionSource(source) && availability[source] ? source : null;
+}
+
+function fallbackAcquisitionSource(
+    configuredSource: DownloadSource,
+    fallback: string | null | undefined,
+    availability: DownloadSourceAvailability,
+    primarySource: "soulseek" | "lidarr",
+): "soulseek" | "lidarr" | null {
+    const resolution = resolveDownloadSource({
+        configuredSource,
+        fallback,
+        availability: { ...availability, [primarySource]: false },
+    });
+    if (resolution.kind === "fail") return null;
+    return availableAcquisitionSource(resolution.source, availability);
+}
+
+function acquisitionBehavior(
+    configuredSource: DownloadSource,
+    fallback: string | null | undefined,
+    availability: DownloadSourceAvailability,
+): DownloadBehavior {
+    const primaryResolution = resolveDownloadSource({
+        configuredSource,
+        fallback,
+        availability,
+    });
+    if (primaryResolution.kind === "fail") return NO_ACQUISITION_SOURCES;
+    const primarySource = availableAcquisitionSource(
+        primaryResolution.source,
+        availability,
+    );
+    if (!primarySource) return NO_ACQUISITION_SOURCES;
+    const fallbackSource = fallbackAcquisitionSource(
+        configuredSource,
+        fallback,
+        availability,
+        primarySource,
+    );
+    const hasFallbackSource =
+        fallbackSource !== null && fallbackSource !== primarySource;
+    return {
+        hasPrimarySource: true,
+        primarySource,
+        hasFallbackSource,
+        fallbackSource: hasFallbackSource ? fallbackSource : null,
+    };
+}
+
+async function resolveAcquisitionBehavior(): Promise<DownloadBehavior> {
+    const settings = await getSystemSettings();
+    const configuredSource = (settings?.downloadSource ||
+        "soulseek") as DownloadSource;
+    const availability = acquisitionAvailability(
+        await probeDownloadSourceAvailability(),
+    );
+    return acquisitionBehavior(
+        configuredSource,
+        settings?.primaryFailureFallback,
+        availability,
+    );
 }
 
 class AcquisitionService {
@@ -113,118 +198,6 @@ class AcquisitionService {
                 `[Acquisition] Updated album queue concurrency to ${concurrency}`,
             );
         }
-    }
-
-    /**
-     * Get download behavior configuration (settings + service availability)
-     * Auto-detects and selects download source based on actual availability
-     */
-    private async getDownloadBehavior(): Promise<DownloadBehavior> {
-        const settings = await getSystemSettings();
-
-        // Get download source settings
-        const downloadSource = settings?.downloadSource || "soulseek";
-        const primaryFailureFallback = settings?.primaryFailureFallback;
-
-        // Determine actual availability
-        const hasSoulseek = await soulseekService.isAvailable();
-        const hasLidarr = !!(
-            settings?.lidarrEnabled &&
-            settings?.lidarrUrl &&
-            settings?.lidarrApiKey
-        );
-
-        // Case 1: No sources available
-        if (!hasSoulseek && !hasLidarr) {
-            logger.debug(
-                "[Acquisition] Available sources: Lidarr=false, Soulseek=false",
-            );
-            logger.error("[Acquisition] No download sources configured");
-            return {
-                hasPrimarySource: false,
-                primarySource: null,
-                hasFallbackSource: false,
-                fallbackSource: null,
-            };
-        }
-
-        // Case 2: Only one source available - use it regardless of preference
-        if (hasSoulseek && !hasLidarr) {
-            logger.debug(
-                "[Acquisition] Available sources: Lidarr=false, Soulseek=true",
-            );
-            logger.debug(
-                "[Acquisition] Using Soulseek as primary source (only source available)",
-            );
-            logger.debug(
-                "[Acquisition] No fallback configured (only one source available)",
-            );
-            return {
-                hasPrimarySource: true,
-                primarySource: "soulseek",
-                hasFallbackSource: false,
-                fallbackSource: null,
-            };
-        }
-
-        if (hasLidarr && !hasSoulseek) {
-            logger.debug(
-                "[Acquisition] Available sources: Lidarr=true, Soulseek=false",
-            );
-            logger.debug(
-                "[Acquisition] Using Lidarr as primary source (only source available)",
-            );
-            logger.debug(
-                "[Acquisition] No fallback configured (only one source available)",
-            );
-            return {
-                hasPrimarySource: true,
-                primarySource: "lidarr",
-                hasFallbackSource: false,
-                fallbackSource: null,
-            };
-        }
-
-        // Case 3: Both available - respect user preference for primary
-        const userPrimary = downloadSource; // "soulseek" or "lidarr"
-        const alternative = userPrimary === "soulseek" ? "lidarr" : "soulseek";
-
-        // Auto-enable fallback if both sources are configured and no explicit setting
-        let useFallback =
-            primaryFailureFallback !== "none" &&
-            primaryFailureFallback === alternative;
-
-        // Only auto-enable fallback if the setting is truly undefined/null (first-time users)
-        // "none" = explicit "Skip Track" choice, respect it (Fixes #68)
-        if (
-            !useFallback &&
-            (primaryFailureFallback === undefined ||
-                primaryFailureFallback === null)
-        ) {
-            useFallback = true;
-            logger.debug(
-                `[Acquisition] Auto-enabled fallback: ${alternative} (both sources configured)`,
-            );
-        }
-
-        logger.debug(
-            "[Acquisition] Available sources: Lidarr=true, Soulseek=true",
-        );
-        logger.debug(
-            `[Acquisition] Using ${userPrimary} as primary source (user preference)`,
-        );
-        logger.debug(
-            `[Acquisition] Fallback configured: ${
-                useFallback ? alternative : "none"
-            }`,
-        );
-
-        return {
-            hasPrimarySource: true,
-            primarySource: userPrimary,
-            hasFallbackSource: useFallback,
-            fallbackSource: useFallback ? alternative : null,
-        };
     }
 
     /**
@@ -307,7 +280,7 @@ class AcquisitionService {
         }
 
         // Get download behavior configuration
-        const behavior = await this.getDownloadBehavior();
+        const behavior = await resolveAcquisitionBehavior();
 
         // Validate at least one source is available
         if (!behavior.hasPrimarySource) {
@@ -322,7 +295,7 @@ class AcquisitionService {
 
         if (behavior.primarySource === "soulseek") {
             logger.debug(`[Acquisition] Trying primary: Soulseek`);
-            result = await this.acquireAlbumViaSoulseek(request, context);
+            result = await this.processSoulseekAcquisition(request, context);
 
             // Fallback to Lidarr if Soulseek fails and fallback is configured
             if (!result.success) {
@@ -365,7 +338,7 @@ class AcquisitionService {
                     logger.debug(
                         `[Acquisition] Attempting Soulseek fallback...`,
                     );
-                    result = await this.acquireAlbumViaSoulseek(
+                    result = await this.processSoulseekAcquisition(
                         request,
                         context,
                     );
@@ -474,193 +447,27 @@ class AcquisitionService {
         }
     }
 
-    /**
-     * Acquire album via Soulseek (track-by-track download)
-     * Gets track list from MusicBrainz or Last.fm, then batch downloads
-     * Marks job as completed immediately (no webhook needed)
-     *
-     * @param request - Album to acquire
-     * @param context - Tracking context
-     * @returns Acquisition result
-     */
-    private async acquireAlbumViaSoulseek(
+    private async processSoulseekAcquisition(
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext,
     ): Promise<AcquisitionResult> {
-        logger.debug(
-            `[Acquisition/Soulseek] Downloading: ${request.artistName} - ${request.albumTitle}`,
-        );
-
-        // Get music path
-        const settings = await getSystemSettings();
-        const musicPath = settings?.musicPath;
-        if (!musicPath) {
-            return { success: false, error: "Music path not configured" };
-        }
-
         if (!request.mbid) {
             return {
                 success: false,
                 error: "Album MBID required for Soulseek download",
             };
         }
-
-        let job: any;
-        try {
-            // Create download job at start for tracking
-            job = await this.createDownloadJob(request, context);
-
-            // Calculate attempt number (existing soulseek attempts + 1)
-            const jobMetadata = (job.metadata as any) || {};
-            const soulseekAttempts = (jobMetadata.soulseekAttempts || 0) + 1;
-            await this.updateJobStatusText(
-                job.id,
-                "soulseek",
-                soulseekAttempts,
-            );
-
-            let tracks: Array<{ title: string; position?: number }>;
-
-            // If specific tracks requested, use those instead of full album
-            if (request.requestedTracks && request.requestedTracks.length > 0) {
-                tracks = request.requestedTracks;
-                logger.debug(
-                    `[Acquisition/Soulseek] Using ${tracks.length} requested tracks (not full album)`,
-                );
-            } else {
-                // Strategy 1: Get track list from MusicBrainz
-                tracks = await musicBrainzService.getAlbumTracks(request.mbid);
-
-                // Strategy 2: Fallback to Last.fm (always try when MusicBrainz fails)
-                if (!tracks || tracks.length === 0) {
-                    logger.debug(
-                        `[Acquisition/Soulseek] MusicBrainz has no tracks, trying Last.fm`,
-                    );
-
-                    try {
-                        const albumInfo = await lastFmService.getAlbumInfo(
-                            request.artistName,
-                            request.albumTitle,
-                        );
-                        const lastFmTracks = albumInfo?.tracks?.track || [];
-
-                        if (
-                            Array.isArray(lastFmTracks) &&
-                            lastFmTracks.length > 0
-                        ) {
-                            tracks = lastFmTracks.map((t: any) => ({
-                                title: t.name || t.title,
-                                position: t["@attr"]?.rank
-                                    ? parseInt(t["@attr"].rank)
-                                    : undefined,
-                            }));
-                            logger.debug(
-                                `[Acquisition/Soulseek] Got ${tracks.length} tracks from Last.fm`,
-                            );
-                        }
-                    } catch (lastfmError: any) {
-                        logger.warn(
-                            `[Acquisition/Soulseek] Last.fm fallback failed: ${lastfmError.message}`,
-                        );
-                    }
-                }
-
-                if (!tracks || tracks.length === 0) {
-                    // Mark job as failed
-                    await this.updateJobStatus(
-                        job.id,
-                        "failed",
-                        "Could not get track list from MusicBrainz or Last.fm",
-                    );
-                    return {
-                        success: false,
-                        error: "Could not get track list from MusicBrainz or Last.fm",
-                    };
-                }
-
-                logger.debug(
-                    `[Acquisition/Soulseek] Found ${tracks.length} tracks for album`,
-                );
-            }
-
-            // Prepare tracks for batch download
-            const tracksToDownload = tracks.map((track) => ({
-                artist: request.artistName,
-                title: track.title,
-                album: request.albumTitle,
-            }));
-
-            // Use Soulseek batch download (parallel with concurrency limit)
-            const batchResult = await soulseekService.searchAndDownloadBatch(
-                tracksToDownload,
-                musicPath,
-                settings?.soulseekConcurrentDownloads || 4, // concurrency
-            );
-
-            if (batchResult.successful === 0) {
-                // Mark job as failed
-                await this.updateJobStatus(
-                    job.id,
-                    "failed",
-                    `No tracks found on Soulseek (searched ${tracks.length} tracks)`,
-                );
-                return {
-                    success: false,
-                    tracksTotal: tracks.length,
-                    downloadJobId: parseInt(job.id),
-                    error: `No tracks found on Soulseek (searched ${tracks.length} tracks)`,
-                };
-            }
-
-            // Success threshold: at least 50% of tracks
-            const successThreshold = Math.ceil(tracks.length * 0.5);
-            const isSuccess = batchResult.successful >= successThreshold;
-
-            logger.debug(
-                `[Acquisition/Soulseek] Downloaded ${batchResult.successful}/${tracks.length} tracks (threshold: ${successThreshold})`,
-            );
-
-            // Mark job as completed immediately (Soulseek doesn't use webhooks)
-            await this.updateJobStatus(
-                job.id,
-                isSuccess ? "completed" : "failed",
-                isSuccess
-                    ? undefined
-                    : `Only ${batchResult.successful}/${tracks.length} tracks found`,
-            );
-
-            // Update job metadata with track counts
-            await patchDownloadJobMetadata(job.id, {
-                tracksDownloaded: batchResult.successful,
-                tracksTotal: tracks.length,
-            });
-
-            return {
-                success: isSuccess,
-                source: "soulseek",
-                downloadJobId: parseInt(job.id),
-                tracksDownloaded: batchResult.successful,
-                tracksTotal: tracks.length,
-                error: isSuccess
-                    ? undefined
-                    : `Only ${batchResult.successful}/${tracks.length} tracks found`,
-            };
-        } catch (error: any) {
-            logger.error(`[Acquisition/Soulseek] Error: ${error.message}`);
-            // Update job status if job was created
-            if (job) {
-                await this.updateJobStatus(
-                    job.id,
-                    "failed",
-                    error.message,
-                ).catch((e) =>
-                    logger.error(
-                        `[Acquisition/Soulseek] Failed to update job status: ${e.message}`,
-                    ),
-                );
-            }
-            return { success: false, error: error.message };
+        const settings = await getSystemSettings();
+        if (!settings?.musicPath) {
+            return { success: false, error: "Music path not configured" };
         }
+        const job = await this.createDownloadJob(request, context);
+        return processSoulseekDownload(
+            job.id,
+            request.artistName,
+            request.albumTitle,
+            context.userId,
+        );
     }
 
     /**
@@ -803,6 +610,9 @@ class AcquisitionService {
                 artistName: request.artistName,
                 albumTitle: request.albumTitle,
                 albumMbid: request.mbid,
+                ...(request.requestedTracks
+                    ? { requestedTracks: request.requestedTracks }
+                    : {}),
             },
         };
 
