@@ -45,9 +45,11 @@ interface ArtistAlbumJobInput {
     batchId: string;
 }
 
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : "Artist expansion failed";
-}
+/**
+ * Persisted failure text is code-owned: the stored job error is returned to
+ * clients via GET /api/downloads, so raw error detail stays in server logs.
+ */
+const EXPANSION_FAILED_TEXT = "Artist expansion failed — see server logs";
 
 async function resolveCanonicalArtistName(
     artistMbid: string,
@@ -267,12 +269,16 @@ async function completeExpansion(
 }
 
 async function failExpansion(jobId: string, error: unknown): Promise<void> {
-    const message = errorMessage(error);
+    log.error("Artist expansion failed", { jobId, error });
     try {
         await patchDownloadJobMetadata(
             jobId,
-            { statusText: message },
-            { status: "failed", error: message, completedAt: new Date() },
+            { statusText: EXPANSION_FAILED_TEXT },
+            {
+                status: "failed",
+                error: EXPANSION_FAILED_TEXT,
+                completedAt: new Date(),
+            },
         );
     } catch (persistenceError) {
         log.error("Failed to persist artist expansion failure", {

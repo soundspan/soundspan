@@ -217,12 +217,12 @@ describe("artist download expansion processor", () => {
             where: { id: "artist-job-1" },
             data: {
                 status: "failed",
-                error: "MusicBrainz unavailable",
+                error: "Artist expansion failed — see server logs",
                 completedAt: expect.any(Date),
                 metadata: {
                     batchId: "batch-1",
                     preserved: true,
-                    statusText: "MusicBrainz unavailable",
+                    statusText: "Artist expansion failed — see server logs",
                 },
             },
         });
