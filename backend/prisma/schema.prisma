@@ -475,21 +475,9 @@ model Track {
   @@index([title])
   @@index([searchVector], type: Gin)
   @@index([analysisStatus])
+  @@index([analysisStatus, origin, removedAt])
   @@index([analysisMode])
-  @@index([bpm])
-  @@index([energy])
-  @@index([valence])
-  @@index([danceability])
-  @@index([moodHappy])
-  @@index([moodSad])
-  @@index([moodRelaxed])
-  @@index([moodAggressive])
-  @@index([moodParty])
-  @@index([moodAcoustic])
-  @@index([moodElectronic])
-  @@index([arousal])
-  @@index([acousticness])
-  @@index([instrumentalness])
+  @@index([vibeAnalysisStatus])
   @@index([hasUserOverrides])
   @@index([random])
   @@index([audioHash])
@@ -950,6 +938,7 @@ model LikedTrack {
   @@id([userId, trackId])
   @@index([userId])
   @@index([likedAt])
+  @@index([userId, likedAt])
 }
 
 model TrackRating {
@@ -1328,6 +1317,7 @@ model Notification {
 
   @@index([userId, cleared])
   @@index([userId, read])
+  @@index([userId, cleared, createdAt])
   @@index([createdAt])
 }
 

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Backend Jest tests now use transpile-only TypeScript transforms, six workers, and smaller runtime suites for faster test runs.
+- Database indexes now match frequent embedding, library, radio, playlist, and notification queries, while unused single-column audio-feature indexes no longer add write overhead.
 - Album covers now resolve through one provider ladder with unified caching, replacing six surface-specific implementations.
 - Artist images now resolve through one provider ladder with unified caching, instead of five surface-specific implementations.
 - Search now matches songs by artist and album name, tolerates typos, and ranks fallback results by similarity instead of alphabetically.
