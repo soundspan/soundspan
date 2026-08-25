@@ -1,7 +1,14 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { Virtuoso } from "react-virtuoso";
+import {
+    forwardRef,
+    useCallback,
+    useMemo,
+    useRef,
+    useState,
+    type HTMLAttributes,
+} from "react";
+import { Virtuoso, type Components } from "react-virtuoso";
 import { GripVertical } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useAudioState } from "@/lib/audio-state-context";
@@ -18,7 +25,8 @@ import type { TrackListProps } from "./types";
 /**
  * Above this item count the list windows its DOM via react-virtuoso unless
  * the caller pins `virtualized` explicitly. Reorderable lists never
- * auto-virtualize: the drag-and-drop handle math needs every row mounted.
+ * auto-virtualize (the drag-and-drop handle math needs every row mounted),
+ * and neither do TV sections (D-pad navigation walks the mounted cards).
  */
 const AUTO_VIRTUALIZE_THRESHOLD = 200;
 
@@ -78,7 +86,8 @@ export function TrackList<T>({
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dragOver, setDragOver] = useState<DragOverState | null>(null);
     const isVirtualized =
-        virtualized ?? (!reorder && items.length > AUTO_VIRTUALIZE_THRESHOLD);
+        virtualized ??
+        (!reorder && !tvSection && items.length > AUTO_VIRTUALIZE_THRESHOLD);
     const reorderEnabled = Boolean(reorder) && !isVirtualized;
 
     // Windowed lists scroll with the app's main scroll container when one is
@@ -90,6 +99,30 @@ export function TrackList<T>({
             node?.closest<HTMLElement>("[data-app-scroll-container]") ?? null,
         );
     }, []);
+
+    // The caller's className styles the element whose direct children are the
+    // row wrappers (divide-y/space-y utilities depend on that). In windowed
+    // mode that element is Virtuoso's internal item list, not our container,
+    // so forward the className there.
+    const virtuosoComponents = useMemo<Components>(
+        () => ({
+            List: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+                function VirtualRowList(
+                    { className: listClassName, ...props },
+                    ref,
+                ) {
+                    return (
+                        <div
+                            {...props}
+                            ref={ref}
+                            className={cn(listClassName, className)}
+                        />
+                    );
+                },
+            ),
+        }),
+        [className],
+    );
 
     const handlePlay = useCallback(
         (item: T, index: number) => () => onPlay(item, index),
@@ -269,11 +302,7 @@ export function TrackList<T>({
         return (
             <>
                 {header}
-                <div
-                    ref={virtualContainerRef}
-                    data-tv-section={tvSection}
-                    className={className}
-                >
+                <div ref={virtualContainerRef} data-tv-section={tvSection}>
                     <Virtuoso
                         totalCount={items.length}
                         initialItemCount={Math.min(
@@ -281,6 +310,7 @@ export function TrackList<T>({
                             INITIAL_WINDOW_COUNT,
                         )}
                         defaultItemHeight={estimatedItemHeight}
+                        components={virtuosoComponents}
                         itemContent={renderRow}
                         {...(scrollParent
                             ? { customScrollParent: scrollParent }

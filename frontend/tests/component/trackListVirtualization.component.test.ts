@@ -84,6 +84,8 @@ interface MountOptions {
     virtualized?: boolean;
     withReorder?: boolean;
     insideScrollContainer?: boolean;
+    tvSection?: string;
+    className?: string;
 }
 
 async function mountTrackList(options: MountOptions) {
@@ -107,6 +109,8 @@ async function mountTrackList(options: MountOptions) {
                 toRowItem,
                 onPlay: () => undefined,
                 virtualized: options.virtualized,
+                tvSection: options.tvSection,
+                className: options.className,
                 reorder: options.withReorder
                     ? { onReorder: () => undefined }
                     : undefined,
@@ -137,9 +141,41 @@ test("lists above the threshold window their rows automatically", async () => {
     );
     const mountedRows =
         mounted.container.querySelectorAll("[data-track-id]").length;
+    assert.equal(
+        mountedRows,
+        20,
+        "the initial pass mounts exactly the 20-row window",
+    );
+    await unmount(mounted);
+});
+
+test("TV sections never auto-virtualize", async () => {
+    const mounted = await mountTrackList({
+        itemCount: 250,
+        tvSection: "tracks",
+    });
+
+    assert.equal(queryScroller(mounted.container), null);
+    assert.equal(
+        mounted.container.querySelectorAll("[data-track-id]").length,
+        250,
+    );
+    await unmount(mounted);
+});
+
+test("caller className keeps styling the element that wraps the rows", async () => {
+    const mounted = await mountTrackList({
+        itemCount: 250,
+        className: "space-y-1",
+    });
+    const list = mounted.container.querySelector(
+        '[data-virtuoso-scroller] [data-testid="virtuoso-item-list"]',
+    );
+
+    assert.ok(list, "expected Virtuoso's item list");
     assert.ok(
-        mountedRows < 250,
-        `windowed list must not mount every row (mounted ${mountedRows})`,
+        list.className.includes("space-y-1"),
+        "divide/space utilities must land on the row wrapper parent",
     );
     await unmount(mounted);
 });

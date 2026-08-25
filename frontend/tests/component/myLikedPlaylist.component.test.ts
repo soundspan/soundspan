@@ -115,9 +115,13 @@ mock.module("@/lib/audio-context", {
         useAudioState: () => ({
             currentTrack: state.currentTrack,
         }),
-        useAudioPlayback: () => ({
-            isPlaying: state.isPlaying,
-        }),
+        useAudioPlayback: () => {
+            throw new Error(
+                "my-liked must not subscribe to the composite playback " +
+                    "context: it re-renders once per second during playback " +
+                    "(GH #784). Use usePlaybackStatus instead.",
+            );
+        },
         usePlaybackStatus: () => ({
             isPlaying: state.isPlaying,
         }),

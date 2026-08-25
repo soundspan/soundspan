@@ -122,8 +122,9 @@ export interface TrackListProps<T> {
     isLoading?: boolean;
     /**
      * Render items using react-virtuoso (windowed DOM). Defaults to true for
-     * lists above ~200 items without `reorder`, false otherwise; pass an
-     * explicit value to pin either mode.
+     * lists above ~200 items without `reorder` or `tvSection` (both need
+     * every row mounted), false otherwise; pass an explicit value to pin
+     * either mode.
      */
     virtualized?: boolean;
     /** Estimated row height in px when virtualized. Default: 64. */
