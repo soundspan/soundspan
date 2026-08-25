@@ -5,6 +5,7 @@ import { prisma } from "../utils/db";
 import { asPlainObject } from "../utils/plainObject";
 import { getSystemSettings } from "../utils/systemSettings";
 import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
+import { patchDownloadJobMetadata } from "./downloadJobStatus";
 import { simpleDownloadManager } from "./simpleDownloadManager";
 
 type DownloadMetadata = Record<string, unknown>;
@@ -77,37 +78,28 @@ function isManagerFallback(value: unknown): value is ManagerFallback {
 async function markSearching<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
     jobId: string,
-    metadata: DownloadMetadata,
 ): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
+    await patchDownloadJobMetadata(
+        jobId,
+        {
+            currentSource: config.sourceKey,
+            statusText: config.searchingStatusText,
+        },
+        {
             status: "processing",
             error: null,
-            metadata: {
-                ...metadata,
-                currentSource: config.sourceKey,
-                statusText: config.searchingStatusText,
-            },
         },
-    });
+    );
 }
 
 async function markSearchMissHandOff<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
     jobId: string,
     fallback: string,
-    metadata: DownloadMetadata,
 ): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            metadata: {
-                ...metadata,
-                currentSource: fallback,
-                statusText: `${config.sourceLabel} not found → ${fallback}`,
-            },
-        },
+    await patchDownloadJobMetadata(jobId, {
+        currentSource: fallback,
+        statusText: `${config.sourceLabel} not found → ${fallback}`,
     });
 }
 
@@ -190,12 +182,7 @@ async function handOffSearchMiss<TMatch, TResult>(
             `[${config.sourceLabel}] Album not found, falling back to ${selectedFallback}`,
         );
     }
-    await markSearchMissHandOff(
-        config,
-        context.jobId,
-        selectedFallback,
-        context.metadata,
-    );
+    await markSearchMissHandOff(config, context.jobId, selectedFallback);
     await dispatchHandOff(config, selectedFallback, context);
     return true;
 }
@@ -205,51 +192,48 @@ async function completeJob<TMatch, TResult>(
     jobId: string,
     match: TMatch,
     result: TResult,
-    metadata: DownloadMetadata,
 ): Promise<void> {
     const summary = config.resultSummary(match, result);
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
+    await patchDownloadJobMetadata(
+        jobId,
+        (current) => ({
+            ...withoutFailedAt(current),
+            currentSource: config.sourceKey,
+            statusText: summary.statusText,
+            ...summary.metadata,
+        }),
+        {
             status: "completed",
             completedAt: new Date(),
             error: null,
-            metadata: {
-                ...withoutFailedAt(metadata),
-                currentSource: config.sourceKey,
-                statusText: summary.statusText,
-                ...summary.metadata,
-            },
         },
-    });
+    );
 }
 
 async function failJob<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
     jobId: string,
-    metadata: DownloadMetadata,
 ): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
+    await patchDownloadJobMetadata(
+        jobId,
+        {
+            currentSource: config.sourceKey,
+            statusText: config.failedStatusText,
+            failedAt: new Date().toISOString(),
+        },
+        {
             status: "failed",
             error: config.failedError,
             completedAt: new Date(),
-            metadata: {
-                ...metadata,
-                currentSource: config.sourceKey,
-                statusText: config.failedStatusText,
-                failedAt: new Date().toISOString(),
-            },
         },
-    });
+    );
 }
 
 async function runAttempt<TMatch, TResult>(
     config: LibraryDownloadProcessorConfig<TMatch, TResult>,
     context: ProcessorContext,
 ): Promise<TResult | null> {
-    await markSearching(config, context.jobId, context.metadata);
+    await markSearching(config, context.jobId);
     const match = await config.findMatch(
         context.artistName,
         context.albumTitle,
@@ -264,7 +248,7 @@ async function runAttempt<TMatch, TResult>(
         jobId: context.jobId,
         metadata: context.metadata,
     });
-    await completeJob(config, context.jobId, match, result, context.metadata);
+    await completeJob(config, context.jobId, match, result);
     return result;
 }
 
@@ -314,7 +298,7 @@ export async function runLibraryAlbumDownload<TMatch, TResult>(
             `[${config.sourceLabel}] Download failed for job ${jobId}:`,
             error instanceof Error ? error.message : error,
         );
-        await failJob(config, jobId, metadata);
+        await failJob(config, jobId);
         return;
     }
     if (result === null) return;

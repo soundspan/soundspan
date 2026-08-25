@@ -30,7 +30,10 @@ import { parseArtistAlbumSubject } from "../utils/downloadSubject";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,
     failDownloadJob,
+    patchDownloadJobMetadata,
+    patchDownloadJobMetadataFrom,
 } from "./downloadJobStatus";
+import { asPlainObject } from "../utils/plainObject";
 
 // Type for transactional prisma client
 type TransactionClient = Omit<
@@ -258,40 +261,34 @@ class SimpleDownloadManager {
             // Update job with all tracking information
             // IMPORTANT: Preserve existing metadata (especially tier/similarity from discovery jobs)
             const now = new Date();
-            const existingJob = await prisma.downloadJob.findUnique({
-                where: { id: jobId },
-                select: { metadata: true },
-            });
-            const existingMetadata = (existingJob?.metadata as any) || {};
-            // Initialize status tracking for Lidarr download
-            const lidarrAttempts = (existingMetadata.lidarrAttempts || 0) + 1;
-            const statusText = `Lidarr #${lidarrAttempts}`;
-
-            await prisma.downloadJob.update({
-                where: { id: jobId },
-                data: {
+            await patchDownloadJobMetadata(
+                jobId,
+                (current) => {
+                    const lidarrAttempts =
+                        ((current.lidarrAttempts as number) || 0) + 1;
+                    return {
+                        ...current,
+                        albumTitle,
+                        artistName,
+                        artistMbid,
+                        albumMbid,
+                        lidarrMbid: actualLidarrMbid,
+                        downloadType: current.downloadType || "library",
+                        startedAt: now.toISOString(),
+                        currentSource: "lidarr" as const,
+                        lidarrAttempts,
+                        statusText: `Lidarr #${lidarrAttempts}`,
+                    };
+                },
+                {
                     correlationId, // Unique ID for webhook matching
                     status: "processing",
                     startedAt: now, // For timeout tracking (if field exists)
                     lidarrAlbumId: result.id, // Store Lidarr album ID for retry/cleanup
                     artistMbid: artistMbid, // Store artist MBID for same-artist fallback
                     attempts: 1,
-                    metadata: {
-                        ...existingMetadata, // Preserve tier, similarity, etc.
-                        albumTitle,
-                        artistName,
-                        artistMbid,
-                        albumMbid, // Original requested MBID
-                        lidarrMbid: actualLidarrMbid, // Actual Lidarr MBID (may differ)
-                        downloadType:
-                            existingMetadata.downloadType || "library",
-                        startedAt: now.toISOString(), // Backup in metadata for timeout tracking
-                        currentSource: "lidarr" as const,
-                        lidarrAttempts,
-                        statusText,
-                    },
                 },
-            });
+            );
 
             logger.debug(
                 `   Download started with correlation ID: ${correlationId}`,
@@ -312,7 +309,7 @@ class SimpleDownloadManager {
             const job = await prisma.downloadJob.findUnique({
                 where: { id: jobId },
             });
-            const existingMetadata = (job?.metadata as any) || {};
+            const existingMetadata = asPlainObject(job?.metadata);
 
             // Handle "No releases available" error - immediate failure
             if (error.message?.includes("No releases available")) {
@@ -348,20 +345,19 @@ class SimpleDownloadManager {
                 }
 
                 // Mark as failed with proper status text
-                await prisma.downloadJob.update({
-                    where: { id: jobId },
-                    data: {
+                await patchDownloadJobMetadata(
+                    jobId,
+                    {
+                        statusText: "No sources available",
+                        failedAt: new Date().toISOString(),
+                    },
+                    {
                         correlationId,
                         status: "failed",
                         error: error.message,
                         completedAt: new Date(),
-                        metadata: {
-                            ...existingMetadata,
-                            statusText: "No sources available",
-                            failedAt: new Date().toISOString(),
-                        },
                     },
-                });
+                );
 
                 // Check batch completion for discovery jobs
                 if (job?.discoveryBatchId) {
@@ -413,20 +409,19 @@ class SimpleDownloadManager {
             }
 
             // No replacement found - mark as failed
-            await prisma.downloadJob.update({
-                where: { id: jobId },
-                data: {
+            await patchDownloadJobMetadata(
+                jobId,
+                {
+                    statusText: "Failed to start",
+                    failedAt: new Date().toISOString(),
+                },
+                {
                     correlationId,
                     status: "failed",
                     error: error.message || "Failed to add album to Lidarr",
                     completedAt: new Date(),
-                    metadata: {
-                        ...existingMetadata,
-                        statusText: "Failed to start",
-                        failedAt: new Date().toISOString(),
-                    },
                 },
-            });
+            );
 
             // Check batch completion for discovery jobs
             if (job?.discoveryBatchId) {
@@ -570,6 +565,7 @@ class SimpleDownloadManager {
                         `   Matched by ${matchStrategy}: ${matchedJob.id}`,
                     );
 
+                    // Keep this metadata RMW on tx so it commits with the transaction.
                     await tx.downloadJob.update({
                         where: { id: matchedJob.id },
                         data: {
@@ -858,6 +854,7 @@ class SimpleDownloadManager {
                 // ═══════════════════════════════════════════════════════════════
                 // STEP 4: Mark Primary Job Complete
                 // ═══════════════════════════════════════════════════════════════
+                // Keep this metadata RMW on tx so it commits with the transaction.
                 await tx.downloadJob.update({
                     where: { id: job.id },
                     data: {
@@ -907,14 +904,8 @@ class SimpleDownloadManager {
                         result.metadata?.artistId,
                     );
 
-                    await prisma.downloadJob.update({
-                        where: { id: result.jobId },
-                        data: {
-                            metadata: {
-                                ...result.metadata,
-                                notificationSent: true,
-                            },
-                        },
+                    await patchDownloadJobMetadata(result.jobId, {
+                        notificationSent: true,
                     });
                 } else {
                     logger.debug(
@@ -1024,6 +1015,7 @@ class SimpleDownloadManager {
                 const lidarrAttempts = (metadata.lidarrAttempts || 1) + 1;
                 const statusText = `Lidarr #${lidarrAttempts}`;
 
+                // Keep this metadata RMW on tx so it commits with the transaction.
                 await tx.downloadJob.update({
                     where: { id: job.id },
                     data: {
@@ -1298,18 +1290,15 @@ class SimpleDownloadManager {
                     logger.debug(
                         `   Found completed duplicate job ${completedDuplicate.id} - marking this as completed too`,
                     );
-                    await prisma.downloadJob.update({
-                        where: { id: job.id },
-                        data: {
+                    await patchDownloadJobMetadata(
+                        job.id,
+                        { mergedWithJob: completedDuplicate.id },
+                        {
                             status: "completed",
                             completedAt: new Date(),
                             error: null,
-                            metadata: {
-                                ...meta,
-                                mergedWithJob: completedDuplicate.id,
-                            },
                         },
-                    });
+                    );
                     return { retried: false, failed: false, jobId: job.id };
                 }
             }
@@ -1347,14 +1336,8 @@ class SimpleDownloadManager {
                 );
 
                 // Mark notification as sent
-                await prisma.downloadJob.update({
-                    where: { id: job.id },
-                    data: {
-                        metadata: {
-                            ...meta,
-                            notificationSent: true,
-                        },
-                    },
+                await patchDownloadJobMetadata(job.id, {
+                    notificationSent: true,
                 });
             } else {
                 logger.debug(
@@ -1464,7 +1447,7 @@ class SimpleDownloadManager {
         const snapshot = existingSnapshot;
 
         const staleJobs: typeof processingJobs = [];
-        const jobsToExtend: { id: string; metadata: any }[] = [];
+        const jobsToExtend: typeof processingJobs = [];
 
         for (const job of processingJobs) {
             const metadata = job.metadata as any;
@@ -1498,14 +1481,7 @@ class SimpleDownloadManager {
 
                     if (downloadStatus.active) {
                         // Still downloading - collect for batch update
-                        jobsToExtend.push({
-                            id: job.id,
-                            metadata: {
-                                ...metadata,
-                                startedAt: new Date().toISOString(),
-                                extendedTimeout: true,
-                            },
-                        });
+                        jobsToExtend.push(job);
                         logger.debug(
                             `   ${job.subject}: Still downloading (${downloadStatus.progress || 0}%), extending timeout`,
                         );
@@ -1518,13 +1494,11 @@ class SimpleDownloadManager {
             // If no snapshot and job has lidarrRef, skip it (Lidarr unavailable, can't check status)
         }
 
-        // Batch update jobs that need timeout extension
-        // Note: updateMany can't set different metadata per job, so we still need individual updates here
-        // But we collected them to log once and process efficiently
-        for (const { id, metadata } of jobsToExtend) {
-            await prisma.downloadJob.update({
-                where: { id },
-                data: { metadata },
+        // Each job needs its own metadata value, so updateMany cannot apply here.
+        for (const job of jobsToExtend) {
+            await patchDownloadJobMetadataFrom(job.metadata, job.id, {
+                startedAt: new Date().toISOString(),
+                extendedTimeout: true,
             });
         }
         if (jobsToExtend.length > 0) {
@@ -1564,15 +1538,9 @@ class SimpleDownloadManager {
                     logger.debug(
                         `   ${job.subject}: ${policyDecision.reason} - extending timeout`,
                     );
-                    await prisma.downloadJob.update({
-                        where: { id: job.id },
-                        data: {
-                            metadata: {
-                                ...metadata,
-                                startedAt: new Date().toISOString(),
-                                timeoutExtendedByPolicy: true,
-                            },
-                        },
+                    await patchDownloadJobMetadataFrom(metadata, job.id, {
+                        startedAt: new Date().toISOString(),
+                        timeoutExtendedByPolicy: true,
                     });
                     continue; // Skip to next job
                 }
@@ -1624,18 +1592,16 @@ class SimpleDownloadManager {
                         logger.debug(
                             `   Found completed duplicate - marking this job as completed too`,
                         );
-                        await prisma.downloadJob.update({
-                            where: { id: job.id },
-                            data: {
+                        await patchDownloadJobMetadataFrom(
+                            metadata,
+                            job.id,
+                            { mergedWithJob: completedDuplicate.id },
+                            {
                                 status: "completed",
                                 completedAt: new Date(),
                                 error: null,
-                                metadata: {
-                                    ...metadata,
-                                    mergedWithJob: completedDuplicate.id,
-                                },
                             },
-                        });
+                        );
                         continue; // Skip to next stale job
                     }
                 }
@@ -2168,53 +2134,42 @@ class SimpleDownloadManager {
             const discoveryBatchIds = new Set<string>();
 
             // Collect jobs that need metadata updates (to batch where possible)
-            const jobsToResetCounter: { id: string; metadata: any }[] = [];
-            const jobsToIncrementCounter: {
-                id: string;
-                metadata: any;
-                count: number;
-            }[] = [];
+            type ProcessingJob = (typeof processingJobs)[number];
+            const jobsToResetCounter: ProcessingJob[] = [];
+            const jobsToIncrementCounter: [ProcessingJob, number][] = [];
             const jobsToUpdateDownloadId: {
-                id: string;
-                metadata: any;
+                job: ProcessingJob;
                 newDownloadId: string;
                 oldDownloadId: string;
             }[] = [];
-            const jobsToComplete: { id: string; metadata: any }[] = [];
-            const jobsToFail: {
-                id: string;
-                metadata: any;
-                missingCount: number;
-            }[] = [];
+            const jobsToComplete: ProcessingJob[] = [];
+            const jobsToFail: [ProcessingJob, number][] = [];
 
             // Check each processing job against snapshot
             for (const job of processingJobs) {
                 if (!job.lidarrRef) continue;
 
-                const metadata = job.metadata as any;
-                const artistName = metadata?.artistName;
-                const albumTitle = metadata?.albumTitle;
+                const metadata = asPlainObject(job.metadata);
+                const artistName = metadata.artistName as string | undefined;
+                const albumTitle = metadata.albumTitle as string | undefined;
+                const queueSyncMissingCount =
+                    typeof metadata.queueSyncMissingCount === "number"
+                        ? metadata.queueSyncMissingCount
+                        : 0;
 
                 // If download is found in queue, reset its missing counter
                 if (queueDownloadIds.has(job.lidarrRef)) {
-                    if (
-                        metadata?.queueSyncMissingCount &&
-                        metadata.queueSyncMissingCount > 0
-                    ) {
-                        jobsToResetCounter.push({ id: job.id, metadata });
+                    if (queueSyncMissingCount > 0) {
+                        jobsToResetCounter.push(job);
                     }
                     continue;
                 }
 
                 // Download ID not found in queue - check grace period
-                const missingCount = (metadata?.queueSyncMissingCount || 0) + 1;
+                const missingCount = queueSyncMissingCount + 1;
 
                 if (missingCount < 3) {
-                    jobsToIncrementCounter.push({
-                        id: job.id,
-                        metadata,
-                        count: missingCount,
-                    });
+                    jobsToIncrementCounter.push([job, missingCount]);
                     continue;
                 }
 
@@ -2234,8 +2189,7 @@ class SimpleDownloadManager {
 
                 if (replacementDownload && replacementDownload.downloadId) {
                     jobsToUpdateDownloadId.push({
-                        id: job.id,
-                        metadata,
+                        job,
                         newDownloadId: replacementDownload.downloadId,
                         oldDownloadId: job.lidarrRef,
                     });
@@ -2251,10 +2205,10 @@ class SimpleDownloadManager {
                 );
 
                 if (isAvailable) {
-                    jobsToComplete.push({ id: job.id, metadata });
+                    jobsToComplete.push(job);
                     cancelled++;
                 } else {
-                    jobsToFail.push({ id: job.id, metadata, missingCount });
+                    jobsToFail.push([job, missingCount]);
                     if (job.discoveryBatchId) {
                         discoveryBatchIds.add(job.discoveryBatchId);
                     }
@@ -2263,96 +2217,83 @@ class SimpleDownloadManager {
             }
 
             // Process updates (individual updates needed for different metadata per job)
-            for (const { id, metadata } of jobsToResetCounter) {
-                await prisma.downloadJob.update({
-                    where: { id },
-                    data: {
-                        metadata: {
-                            ...metadata,
-                            queueSyncMissingCount: 0,
-                            lastQueueSyncFound: new Date().toISOString(),
-                        },
-                    },
+            for (const job of jobsToResetCounter) {
+                await patchDownloadJobMetadataFrom(job.metadata, job.id, {
+                    queueSyncMissingCount: 0,
+                    lastQueueSyncFound: new Date().toISOString(),
                 });
             }
 
-            for (const { id, metadata, count } of jobsToIncrementCounter) {
-                await prisma.downloadJob.update({
-                    where: { id },
-                    data: {
-                        metadata: {
-                            ...metadata,
-                            queueSyncMissingCount: count,
-                            lastQueueSyncCheck: new Date().toISOString(),
-                        },
-                    },
+            for (const [job, missingCount] of jobsToIncrementCounter) {
+                await patchDownloadJobMetadataFrom(job.metadata, job.id, {
+                    queueSyncMissingCount: missingCount,
+                    lastQueueSyncCheck: new Date().toISOString(),
                 });
             }
 
             for (const {
-                id,
-                metadata,
+                job,
                 newDownloadId,
                 oldDownloadId,
             } of jobsToUpdateDownloadId) {
                 logger.debug(
-                    `   Job ${id}: Replacement download found: ${newDownloadId}`,
+                    `   Job ${job.id}: Replacement download found: ${newDownloadId}`,
                 );
-                await prisma.downloadJob.update({
-                    where: { id },
-                    data: {
+                await patchDownloadJobMetadataFrom(
+                    job.metadata,
+                    job.id,
+                    {
+                        previousDownloadId: oldDownloadId,
+                        replacementDetected: true,
+                        replacementDetectedAt: new Date().toISOString(),
+                        queueSyncMissingCount: 0,
+                    },
+                    {
                         lidarrRef: newDownloadId,
                         error: null,
-                        metadata: {
-                            ...metadata,
-                            previousDownloadId: oldDownloadId,
-                            replacementDetected: true,
-                            replacementDetectedAt: new Date().toISOString(),
-                            queueSyncMissingCount: 0,
-                        },
                     },
-                });
+                );
             }
 
-            for (const { id, metadata } of jobsToComplete) {
+            for (const job of jobsToComplete) {
                 logger.debug(
-                    `   Job ${id}: Album found in library - marking complete`,
+                    `   Job ${job.id}: Album found in library - marking complete`,
                 );
-                await prisma.downloadJob.update({
-                    where: { id },
-                    data: {
+                await patchDownloadJobMetadataFrom(
+                    job.metadata,
+                    job.id,
+                    {
+                        completedAt: new Date().toISOString(),
+                        queueSyncCompleted: true,
+                        queueSyncMissingCount: 0,
+                    },
+                    {
                         status: "completed",
                         completedAt: new Date(),
                         error: null,
-                        metadata: {
-                            ...metadata,
-                            completedAt: new Date().toISOString(),
-                            queueSyncCompleted: true,
-                            queueSyncMissingCount: 0,
-                        },
                     },
-                });
+                );
             }
 
-            for (const { id, metadata, missingCount } of jobsToFail) {
+            for (const [job, missingCount] of jobsToFail) {
                 logger.warn(
-                    `   Job ${id}: Download not found after 90s - marking as failed`,
+                    `   Job ${job.id}: Download not found after 90s - marking as failed`,
                 );
-                await prisma.downloadJob.update({
-                    where: { id },
-                    data: {
+                await patchDownloadJobMetadataFrom(
+                    job.metadata,
+                    job.id,
+                    {
+                        cancelledAt: new Date().toISOString(),
+                        queueSyncCancelled: true,
+                        queueSyncMissingCount: missingCount,
+                    },
+                    {
                         status: "failed",
                         error: "Lidarr queue sync: Download not found after 90s (3 checks).",
                         completedAt: new Date(),
                         lidarrRef: null,
-                        metadata: {
-                            ...metadata,
-                            cancelledAt: new Date().toISOString(),
-                            queueSyncCancelled: true,
-                            queueSyncMissingCount: missingCount,
-                        },
                     },
-                });
+                );
             }
 
             // Check discovery batch completions (deduplicated, with yielding)

@@ -27,6 +27,7 @@ import {
     reorderLockedPlaylistItems,
 } from "../services/playlistMutationLock";
 import { requestCoalescedLibraryScan } from "../services/coalescedLibraryScan";
+import { patchDownloadJobMetadataFrom } from "../services/downloadJobStatus";
 
 const router = Router();
 
@@ -2110,17 +2111,15 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
                         `Download complete: filePath=${result.filePath}`,
                     );
 
-                    await prisma.downloadJob.update({
-                        where: { id: downloadJob.id },
-                        data: {
+                    await patchDownloadJobMetadataFrom(
+                        downloadJob.metadata,
+                        downloadJob.id,
+                        { filePath: result.filePath },
+                        {
                             status: "completed",
                             completedAt: new Date(),
-                            metadata: {
-                                ...(downloadJob.metadata as any),
-                                filePath: result.filePath,
-                            },
                         },
-                    });
+                    );
 
                     // Trigger a library scan to add the track and reconcile pending
                     try {

@@ -1,10 +1,10 @@
 /** YouTube Music album search, sidecar job orchestration, and library scanning. */
 
-import { prisma } from "../utils/db";
 import {
     type LibraryDownloadProcessorConfig,
     runLibraryAlbumDownload,
 } from "./libraryDownloadProcessor";
+import { patchDownloadJobMetadata } from "./downloadJobStatus";
 import {
     type YtAlbumDownloadJobStatus,
     watchYouTubeDownloadJobUntilTerminal,
@@ -90,37 +90,23 @@ async function updateProgress(
     jobId: string,
     sidecarJobId: string,
     progressPct: number,
-    metadata: Record<string, unknown>,
 ): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            metadata: {
-                ...metadata,
-                currentSource: "youtube",
-                statusText: `YouTube Music ${progressPct}%`,
-                youtubeAlbumJobId: sidecarJobId,
-            },
-        },
+    await patchDownloadJobMetadata(jobId, {
+        currentSource: "youtube",
+        statusText: `YouTube Music ${progressPct}%`,
+        youtubeAlbumJobId: sidecarJobId,
     });
 }
 
 async function startAndWatchAlbum(
     jobId: string,
     browseId: string,
-    metadata: Record<string, unknown>,
 ): Promise<YtAlbumDownloadJobStatus> {
     const started = await youtubeDownloadService.startAlbumDownload(browseId);
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
-            metadata: {
-                ...metadata,
-                currentSource: "youtube",
-                statusText: "Downloading from YouTube Music...",
-                youtubeAlbumJobId: started.jobId,
-            },
-        },
+    await patchDownloadJobMetadata(jobId, {
+        currentSource: "youtube",
+        statusText: "Downloading from YouTube Music...",
+        youtubeAlbumJobId: started.jobId,
     });
     let lastProgress: number | null = null;
     const outcome = await watchYouTubeDownloadJobUntilTerminal(
@@ -130,12 +116,7 @@ async function startAndWatchAlbum(
             onStatus: async (status) => {
                 if (status.progressPct === lastProgress) return;
                 lastProgress = status.progressPct;
-                await updateProgress(
-                    jobId,
-                    started.jobId,
-                    status.progressPct,
-                    metadata,
-                );
+                await updateProgress(jobId, started.jobId, status.progressPct);
             },
         },
     );
@@ -152,8 +133,8 @@ const youtubeLibraryDownloadConfig = {
     failedError: "YouTube download failed",
     failedStatusText: "YouTube Music failed",
     findMatch: findAlbumBrowseId,
-    download: async (browseId, { jobId, metadata }) => {
-        const result = await startAndWatchAlbum(jobId, browseId, metadata);
+    download: async (browseId, { jobId }) => {
+        const result = await startAndWatchAlbum(jobId, browseId);
         if (result.downloaded === 0) {
             throw new Error(
                 `All ${result.totalTracks} tracks failed to download`,

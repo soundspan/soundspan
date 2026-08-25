@@ -31,6 +31,7 @@ describe("queueCleaner", () => {
             $connect: jest.fn(async () => undefined),
             downloadJob: {
                 findMany: jest.fn(),
+                findUnique: jest.fn(async () => ({ metadata: {} })),
                 update: jest.fn(async () => ({})),
                 updateMany: jest.fn(async () => ({ count: 0 })),
                 count: jest.fn(async () => 0),
@@ -404,7 +405,8 @@ describe("queueCleaner", () => {
         queueCleaner.stop();
     });
 
-    it("updates retry metadata for cleaned stuck downloads", async () => {
+    it("retries a committed retry-metadata write with the same fixed count", async () => {
+        jest.useFakeTimers();
         const {
             queueCleaner,
             prisma,
@@ -428,12 +430,22 @@ describe("queueCleaner", () => {
             .mockResolvedValueOnce([
                 { id: "job-1", metadata: { retryCount: 2 } },
             ]); // matching jobs
+        prisma.downloadJob.findUnique
+            .mockResolvedValueOnce({ metadata: { retryCount: 2 } })
+            .mockResolvedValueOnce({ metadata: { retryCount: 3 } });
+        prisma.downloadJob.update
+            .mockRejectedValueOnce(new Error("Connection reset after commit"))
+            .mockResolvedValueOnce({});
         prisma.downloadJob.count.mockResolvedValueOnce(1);
 
         (queueCleaner as any).isRunning = true;
-        await (queueCleaner as any).runCleanup();
+        const cleanupPromise = (queueCleaner as any).runCleanup();
+        await jest.advanceTimersByTimeAsync(400);
+        await cleanupPromise;
 
-        expect(prisma.downloadJob.update).toHaveBeenCalledWith({
+        expect(prisma.downloadJob.findUnique).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.update).toHaveBeenCalledTimes(2);
+        const expectedWrite = {
             where: { id: "job-1" },
             data: {
                 metadata: {
@@ -442,7 +454,10 @@ describe("queueCleaner", () => {
                         "Import failed - searching for alternative release",
                 },
             },
-        });
+        };
+        const updateMock = prisma.downloadJob.update as jest.Mock;
+        expect(updateMock.mock.calls[0]?.[0]).toEqual(expectedWrite);
+        expect(updateMock.mock.calls[1]?.[0]).toEqual(expectedWrite);
 
         queueCleaner.stop();
     });

@@ -3084,7 +3084,7 @@ describe("playlists route runtime", () => {
         });
         prisma.downloadJob.create.mockResolvedValueOnce({
             id: "job-success",
-            metadata: {},
+            metadata: "scalar metadata",
         });
         soulseekService.searchTrack.mockResolvedValueOnce({
             found: true,
@@ -3111,17 +3111,16 @@ describe("playlists route runtime", () => {
                 downloadJobId: "job-success",
             }),
         );
-        expect(prisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-success" },
-                data: expect.objectContaining({
-                    status: "completed",
-                    metadata: expect.objectContaining({
-                        filePath: "/music/Artist/Album/track.flac",
-                    }),
-                }),
-            }),
-        );
+        expect(prisma.downloadJob.update).toHaveBeenCalledWith({
+            where: { id: "job-success" },
+            data: {
+                status: "completed",
+                completedAt: expect.any(Date),
+                metadata: {
+                    filePath: "/music/Artist/Album/track.flac",
+                },
+            },
+        });
         expect(requestCoalescedLibraryScan).toHaveBeenCalledWith(
             "u1",
             "retry-pending-track",

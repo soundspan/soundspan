@@ -20,6 +20,7 @@ import { musicBrainzService } from "./musicbrainz";
 import { lastFmService } from "./lastfm";
 import { AcquisitionError, AcquisitionErrorType } from "./lidarr";
 import PQueue from "p-queue";
+import { patchDownloadJobMetadata } from "./downloadJobStatus";
 
 /**
  * Context for tracking acquisition origin
@@ -238,30 +239,19 @@ class AcquisitionService {
         const sourceLabel = source.charAt(0).toUpperCase() + source.slice(1);
         const statusText = `${sourceLabel} #${attemptNumber}`;
 
-        const job = await prisma.downloadJob.findUnique({
-            where: { id: jobId },
-            select: { metadata: true },
-        });
-        const existingMetadata = (job?.metadata as any) || {};
-
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                metadata: {
-                    ...existingMetadata,
-                    currentSource: source,
-                    lidarrAttempts:
-                        source === "lidarr"
-                            ? attemptNumber
-                            : existingMetadata.lidarrAttempts || 0,
-                    soulseekAttempts:
-                        source === "soulseek"
-                            ? attemptNumber
-                            : existingMetadata.soulseekAttempts || 0,
-                    statusText,
-                },
-            },
-        });
+        await patchDownloadJobMetadata(jobId, (current) => ({
+            ...current,
+            currentSource: source,
+            lidarrAttempts:
+                source === "lidarr"
+                    ? attemptNumber
+                    : current.lidarrAttempts || 0,
+            soulseekAttempts:
+                source === "soulseek"
+                    ? attemptNumber
+                    : current.soulseekAttempts || 0,
+            statusText,
+        }));
 
         logger.debug(`[Acquisition] Updated job ${jobId}: ${statusText}`);
     }
@@ -640,15 +630,9 @@ class AcquisitionService {
             );
 
             // Update job metadata with track counts
-            await prisma.downloadJob.update({
-                where: { id: job.id },
-                data: {
-                    metadata: {
-                        ...job.metadata,
-                        tracksDownloaded: batchResult.successful,
-                        tracksTotal: tracks.length,
-                    },
-                },
+            await patchDownloadJobMetadata(job.id, {
+                tracksDownloaded: batchResult.successful,
+                tracksTotal: tracks.length,
             });
 
             return {

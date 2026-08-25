@@ -1,11 +1,11 @@
 /** TIDAL album search, sidecar download orchestration, and library scanning. */
 
 import { logger } from "../utils/logger";
-import { prisma } from "../utils/db";
 import {
     type LibraryDownloadProcessorConfig,
     runLibraryAlbumDownload,
 } from "./libraryDownloadProcessor";
+import { patchDownloadJobMetadata } from "./downloadJobStatus";
 import { tidalService, type TidalAlbumDownloadResult } from "./tidal";
 
 type TidalAlbumMatch = NonNullable<
@@ -31,20 +31,14 @@ const tidalLibraryDownloadConfig = {
     failedStatusText: "TIDAL failed",
     findMatch: (artistName, albumTitle) =>
         tidalService.findAlbum(artistName, albumTitle),
-    download: async (match, { jobId, metadata }) => {
+    download: async (match, { jobId }) => {
         logger.debug(
             `[TIDAL] Found album: "${match.title}" by ${match.artist} (ID: ${match.albumId}, ${match.numberOfTracks} tracks)`,
         );
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                metadata: {
-                    ...metadata,
-                    currentSource: "tidal",
-                    statusText: `Downloading ${match.numberOfTracks} tracks...`,
-                    tidalAlbumId: match.albumId,
-                },
-            },
+        await patchDownloadJobMetadata(jobId, {
+            currentSource: "tidal",
+            statusText: `Downloading ${match.numberOfTracks} tracks...`,
+            tidalAlbumId: match.albumId,
         });
         const result = await tidalService.downloadAlbum(match.albumId);
         logger.debug(

@@ -11,6 +11,7 @@ import { simpleDownloadManager } from "./simpleDownloadManager";
 import { processTidalDownload } from "./tidalLibraryDownload";
 import { processYoutubeDownload } from "./youtubeLibraryDownload";
 import { parseArtistAlbumSubject } from "../utils/downloadSubject";
+import { patchDownloadJobMetadataFrom } from "./downloadJobStatus";
 
 const logger = rootLogger.child("DownloadDispatcher");
 
@@ -52,29 +53,20 @@ async function failJobWithoutDispatch(
 ): Promise<void> {
     logger.error(`${message} — job ${jobId} not dispatched`);
 
-    // Metadata is a Prisma Json column and may contain a scalar. Only plain
-    // objects can be spread without corrupting the stored metadata shape.
-    const baseMetadata =
-        jobMetadata &&
-        typeof jobMetadata === "object" &&
-        !Array.isArray(jobMetadata)
-            ? (jobMetadata as Record<string, unknown>)
-            : {};
-
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: {
+    await patchDownloadJobMetadataFrom(
+        jobMetadata,
+        jobId,
+        {
+            currentSource: source,
+            statusText,
+            failedAt: new Date().toISOString(),
+        },
+        {
             status: "failed",
             error: message,
             completedAt: new Date(),
-            metadata: {
-                ...baseMetadata,
-                currentSource: source,
-                statusText,
-                failedAt: new Date().toISOString(),
-            },
         },
-    });
+    );
 }
 
 async function dispatchResolvedSource(

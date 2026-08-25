@@ -1472,7 +1472,6 @@ describe("simpleDownloadManager", () => {
                 },
             },
         ]);
-
         mockLidarrService.isAlbumAvailableInSnapshot.mockImplementation(
             (
                 _snapshot: any,
@@ -1610,7 +1609,6 @@ describe("simpleDownloadManager", () => {
                 },
             },
         ]);
-
         mockLidarrService.isAlbumAvailableInSnapshot.mockImplementation(
             (_snapshot: any, mbid?: string) => mbid === "mbid-available",
         );
@@ -1619,6 +1617,7 @@ describe("simpleDownloadManager", () => {
             await simpleDownloadManager.syncWithLidarrQueue(snapshot);
 
         expect(result).toEqual({ cancelled: 2, errors: [] });
+        expect(mockPrisma.downloadJob.findUnique).not.toHaveBeenCalled();
         expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: { id: "job-sync-1" },

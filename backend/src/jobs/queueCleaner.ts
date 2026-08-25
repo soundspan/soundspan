@@ -14,7 +14,10 @@ import {
     parseArtistAlbumSubject,
     stripAlbumYearSuffix,
 } from "../utils/downloadSubject";
-import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../services/downloadJobStatus";
+import {
+    ACTIVE_DOWNLOAD_JOB_STATUSES,
+    patchDownloadJobMetadataFrom,
+} from "../services/downloadJobStatus";
 
 class QueueCleanerService {
     private isRunning = false;
@@ -250,18 +253,15 @@ class QueueCleanerService {
                             await this.withPrismaRetry(
                                 "runCleanup.downloadJob.update.retryMetadata",
                                 () =>
-                                    prisma.downloadJob.update({
-                                        where: { id: job.id },
-                                        data: {
-                                            metadata: {
-                                                ...metadata,
-                                                retryCount:
-                                                    currentRetryCount + 1,
-                                                lastError:
-                                                    "Import failed - searching for alternative release",
-                                            },
+                                    patchDownloadJobMetadataFrom(
+                                        metadata,
+                                        job.id,
+                                        {
+                                            retryCount: currentRetryCount + 1,
+                                            lastError:
+                                                "Import failed - searching for alternative release",
                                         },
-                                    }),
+                                    ),
                             );
 
                             logger.debug(

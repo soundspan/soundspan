@@ -32,6 +32,7 @@ const prisma = {
     downloadJob: {
         findMany: jest.fn(),
         updateMany: jest.fn(),
+        findUnique: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
         create: jest.fn(),
@@ -211,6 +212,7 @@ describe("notifications route runtime", () => {
 
         prisma.downloadJob.findMany.mockResolvedValue([]);
         prisma.downloadJob.updateMany.mockResolvedValue({ count: 1 });
+        prisma.downloadJob.findUnique.mockResolvedValue({ metadata: {} });
         prisma.downloadJob.findFirst.mockResolvedValue(null);
         prisma.downloadJob.update.mockResolvedValue({});
         prisma.downloadJob.create.mockResolvedValue({

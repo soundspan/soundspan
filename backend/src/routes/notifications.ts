@@ -12,6 +12,7 @@ import { parseArtistAlbumSubject } from "../utils/downloadSubject";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,
     failDownloadJob,
+    patchDownloadJobMetadata,
     TERMINAL_DOWNLOAD_JOB_STATUSES,
 } from "../services/downloadJobStatus";
 
@@ -650,17 +651,14 @@ router.post(
                     )
                     .then(async (result) => {
                         if (result.success) {
-                            await prisma.downloadJob.update({
-                                where: { id: newJobRecord.id },
-                                data: {
+                            await patchDownloadJobMetadata(
+                                newJobRecord.id,
+                                { filePath: result.filePath },
+                                {
                                     status: "completed",
                                     completedAt: new Date(),
-                                    metadata: {
-                                        ...(newJobRecord.metadata as any),
-                                        filePath: result.filePath,
-                                    },
                                 },
-                            });
+                            );
 
                             try {
                                 await requestCoalescedLibraryScan(
@@ -776,20 +774,19 @@ router.post(
                     )
                     .then(async (result) => {
                         if (result.successful > 0) {
-                            await prisma.downloadJob.update({
-                                where: { id: newJobRecord.id },
-                                data: {
+                            await patchDownloadJobMetadata(
+                                newJobRecord.id,
+                                {
+                                    source: "soulseek",
+                                    tracksDownloaded: result.successful,
+                                    files: result.files,
+                                },
+                                {
                                     status: "completed",
                                     completedAt: new Date(),
                                     error: null,
-                                    metadata: {
-                                        ...metadata,
-                                        source: "soulseek",
-                                        tracksDownloaded: result.successful,
-                                        files: result.files,
-                                    },
                                 },
-                            });
+                            );
                             logger.debug(
                                 `[Retry] ✓ Soulseek downloaded ${result.successful} tracks for ${artistName} - ${albumTitle}`,
                             );
@@ -809,21 +806,16 @@ router.post(
                                 failedJob.targetMbid &&
                                 !failedJob.targetMbid.startsWith("retry_")
                             ) {
-                                await prisma.downloadJob.update({
-                                    where: { id: newJobRecord.id },
-                                    data: {
-                                        status: "pending",
-                                        metadata: {
-                                            ...(newJobRecord.metadata as Record<
-                                                string,
-                                                unknown
-                                            >),
-                                            queuedVia:
-                                                ALBUM_DOWNLOAD_QUEUE_OWNER,
-                                            statusText: "Queued",
-                                        },
+                                await patchDownloadJobMetadata(
+                                    newJobRecord.id,
+                                    {
+                                        queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER,
+                                        statusText: "Queued",
                                     },
-                                });
+                                    {
+                                        status: "pending",
+                                    },
+                                );
                                 await enqueueAlbumDownload({
                                     jobId: newJobRecord.id,
                                     type: "album",

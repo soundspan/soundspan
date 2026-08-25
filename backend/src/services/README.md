@@ -54,6 +54,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/discovery/index.ts` | Discovery |
 | `backend/src/services/discoveryLogger.ts` | Core |
 | `backend/src/services/downloadDispatcher.ts` | Configured-source album download dispatch (policy resolution and provider routing) |
+| `backend/src/services/downloadJobStatus.ts` | Shared download-job status transitions and guarded metadata patch writes |
 | `backend/src/services/downloadQueue.ts` | Core |
 | `backend/src/services/embeddingSpaceLifecycle.ts` | Blue/green embedding-space cutover and retirement cleanup |
 | `backend/src/services/embeddingSpaces.ts` | Provider-space registry resolution, active cache, and worker target |
