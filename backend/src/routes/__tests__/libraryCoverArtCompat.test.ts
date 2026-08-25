@@ -107,6 +107,12 @@ jest.mock("../../services/deezer", () => ({
     },
 }));
 
+jest.mock("../../services/libraryRadioCache", () => ({
+    ...jest.requireActual("../../services/libraryRadioCache"),
+    loadGenreRadioAggregates: jest.fn(),
+    loadDecadeRadioAggregates: jest.fn(),
+}));
+
 jest.mock("../../services/imageProvider", () => ({
     imageProviderService: {
         getAlbumCover: jest.fn(),
@@ -264,6 +270,13 @@ const mockAlbumFindUnique = prisma.album.findUnique as jest.Mock;
 const mockAlbumUpdate = prisma.album.update as jest.Mock;
 const mockAlbumFindMany = prisma.album.findMany as jest.Mock;
 const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
+const {
+    loadGenreRadioAggregates: mockLoadGenreRadioAggregates,
+    loadDecadeRadioAggregates: mockLoadDecadeRadioAggregates,
+} = jest.requireMock("../../services/libraryRadioCache") as {
+    loadGenreRadioAggregates: jest.Mock;
+    loadDecadeRadioAggregates: jest.Mock;
+};
 const mockArtistUpdateMany = prisma.artist.updateMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockResolveAlbumCover = resolveAlbumCover as jest.Mock;
@@ -2358,13 +2371,9 @@ describe("library discovery metadata compatibility", () => {
         );
     });
 
-    it("returns genres while filtering out genres that match artist names", async () => {
-        mockArtistFindMany.mockResolvedValueOnce([
-            { name: "Radiohead", normalizedName: "radiohead" },
-        ]);
-        mockQueryRaw.mockResolvedValueOnce([
-            { genre: "radiohead", track_count: 42n },
-            { genre: "ambient", track_count: 19n },
+    it("returns genres from the cached SQL aggregate (artist-name filtering lives in SQL, pinned by the PostgreSQL fixture)", async () => {
+        mockLoadGenreRadioAggregates.mockResolvedValueOnce([
+            { genre: "ambient", count: 19 },
         ]);
 
         const req = {} as any;
@@ -2378,7 +2387,9 @@ describe("library discovery metadata compatibility", () => {
     });
 
     it("returns 500 when genre aggregation fails", async () => {
-        mockArtistFindMany.mockRejectedValueOnce(new Error("db-unavailable"));
+        mockLoadGenreRadioAggregates.mockRejectedValueOnce(
+            new Error("db-unavailable"),
+        );
 
         const req = {} as any;
         const res = createRes();
@@ -2387,32 +2398,10 @@ describe("library discovery metadata compatibility", () => {
         expect(res.statusCode).toBe(500);
     });
 
-    it("returns sorted decades with minimum-track filtering", async () => {
-        mockAlbumFindMany.mockResolvedValueOnce([
-            {
-                year: 1994,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 9 },
-            },
-            {
-                year: 1996,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 7 },
-            },
-            {
-                year: 2012,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 20 },
-            },
-            {
-                year: 1981,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 4 },
-            },
+    it("returns decades from the cached SQL aggregate (sorting and minimum-track filtering live in SQL, pinned by the PostgreSQL fixture)", async () => {
+        mockLoadDecadeRadioAggregates.mockResolvedValueOnce([
+            { decade: 2010, count: 20 },
+            { decade: 1990, count: 16 },
         ]);
 
         const req = {} as any;

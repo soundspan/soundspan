@@ -3,6 +3,7 @@ const mockPrismaQueryRaw = jest.fn();
 const mockComputeAggregateFeatureVector = jest.fn();
 const mockScoreTracksAgainstSeed = jest.fn();
 const mockBuildTrackPreferenceScoreMapForUser = jest.fn();
+const mockLoadScalarRadioCandidatePool = jest.fn();
 const MAX_SQL_FRAGMENT_VALUES = 64;
 
 interface SqlFragment {
@@ -85,6 +86,10 @@ jest.mock("../libraryTrackPreferences", () => ({
         mockBuildTrackPreferenceScoreMapForUser,
 }));
 
+jest.mock("../libraryRadioCache", () => ({
+    loadScalarRadioCandidatePool: mockLoadScalarRadioCandidatePool,
+}));
+
 jest.mock("../../utils/shuffle", () => ({
     shuffleArray: (values: unknown[]) => values,
 }));
@@ -151,6 +156,7 @@ describe("buildMultiTrackRadio genre fallback", () => {
         mockComputeAggregateFeatureVector.mockReturnValue({ energy: 0.5 });
         mockScoreTracksAgainstSeed.mockReturnValue([]);
         mockBuildTrackPreferenceScoreMapForUser.mockResolvedValue(new Map());
+        mockLoadScalarRadioCandidatePool.mockResolvedValue([]);
         mockPrismaQueryRaw.mockResolvedValue([]);
     });
 
@@ -161,7 +167,6 @@ describe("buildMultiTrackRadio genre fallback", () => {
         mockTrackFindMany
             .mockResolvedValueOnce([createSeedTrack(genre)])
             .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([])
             .mockResolvedValueOnce([]);
 
         await buildMultiTrackRadio(["seed-1"], ["seed-1"], 10, "user-1");
@@ -171,5 +176,26 @@ describe("buildMultiTrackRadio genre fallback", () => {
         const query = collectSql({ strings: [...strings], values });
         expect(query.values).toContain(pattern);
         expect(query.text).toContain("ESCAPE '\\'");
+    });
+
+    it("loads preferences only for the final scalar selection", async () => {
+        const candidates = [
+            { id: "candidate-1", album: { artistId: "artist-2" } },
+            { id: "candidate-2", album: { artistId: "artist-3" } },
+        ];
+        mockTrackFindMany.mockResolvedValueOnce([createSeedTrack("rock")]);
+        mockLoadScalarRadioCandidatePool.mockResolvedValue(candidates);
+        mockScoreTracksAgainstSeed.mockReturnValue([
+            { id: "candidate-1", score: 0.9 },
+            { id: "candidate-2", score: 0.8 },
+        ]);
+
+        await buildMultiTrackRadio(["seed-1"], ["seed-1"], 1, "user-1");
+
+        expect(mockLoadScalarRadioCandidatePool).toHaveBeenCalledTimes(1);
+        expect(mockBuildTrackPreferenceScoreMapForUser).toHaveBeenCalledWith(
+            "user-1",
+            ["candidate-1"],
+        );
     });
 });

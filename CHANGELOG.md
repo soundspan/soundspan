@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Pressing get-all-missing-albums now queues the artist's albums immediately even while other downloads are running (#808).
+- Radio stations now start quickly on large libraries, and genre and decade stations load instantly without recounting the full library on every request (#776). Preferences now reorder the selected station without promoting liked tracks into it or displacing disliked tracks near the cutoff.
 - Post-scan download reconciliation no longer risks heavy database load when many downloads are queued.
 - Long track lists (Liked Songs, queue, large playlists) now render only the rows on screen instead of every row at once, so pages with thousands of tracks scroll smoothly and no longer stutter once per second during playback (#784).
 - The metrics endpoint now rate-limits failed access attempts, and internal Subsonic auth-type reporting no longer re-reads credential query parameters.

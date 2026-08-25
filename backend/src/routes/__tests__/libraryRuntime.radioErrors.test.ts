@@ -15,6 +15,9 @@ import {
     mockTerminateCommittedStream,
     mockGetYtMusicUserIdOrPublic,
     mockBumpSearchCacheVersion,
+    mockLoadGenreRadioAggregates,
+    mockLoadDecadeRadioAggregates,
+    mockLoadVibeRadioCandidateIds,
     mockResolveArtistImage,
     mockPersistCatalogReleaseGroups,
     mockLidarrDeleteArtist,
@@ -241,6 +244,9 @@ describe("library catalog list runtime coverage", () => {
         mockSimilarArtistDeleteMany.mockReset();
         mockPrismaTransaction.mockReset();
         mockPrismaQueryRaw.mockReset();
+        mockLoadGenreRadioAggregates.mockReset();
+        mockLoadDecadeRadioAggregates.mockReset();
+        mockLoadVibeRadioCandidateIds.mockReset();
         mockUserSettingsFindUnique.mockReset();
         mockStreamGetStreamFilePath.mockReset();
         mockStreamWithRangeSupport.mockReset();
@@ -301,6 +307,9 @@ describe("library catalog list runtime coverage", () => {
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
         mockPrismaQueryRaw.mockResolvedValue([]);
+        mockLoadGenreRadioAggregates.mockResolvedValue([]);
+        mockLoadDecadeRadioAggregates.mockResolvedValue([]);
+        mockLoadVibeRadioCandidateIds.mockResolvedValue([]);
         mockPrismaExecuteRaw.mockResolvedValue(0);
         // The transactional client mirrors the full prisma mock so services
         // that run model operations inside $transaction (track deletion with
@@ -570,13 +579,8 @@ describe("library catalog list runtime coverage", () => {
     });
 
     it("filters artist-name genres and converts bigint counts", async () => {
-        mockArtistFindMany.mockResolvedValueOnce([
-            { name: "Radiohead", normalizedName: "radiohead" },
-            { name: "Aphex Twin", normalizedName: "aphextwin" },
-        ]);
-        mockPrismaQueryRaw.mockResolvedValueOnce([
-            { genre: "electronic", track_count: 24n },
-            { genre: "radiohead", track_count: 30n },
+        mockLoadGenreRadioAggregates.mockResolvedValueOnce([
+            { genre: "electronic", count: 24 },
         ]);
 
         const req = {} as any;
@@ -588,7 +592,7 @@ describe("library catalog list runtime coverage", () => {
             genres: [{ genre: "electronic", count: 24 }],
         });
 
-        mockPrismaQueryRaw.mockRejectedValueOnce(
+        mockLoadGenreRadioAggregates.mockRejectedValueOnce(
             new Error("genre query failed"),
         );
         const errRes = createRes();
@@ -597,25 +601,8 @@ describe("library catalog list runtime coverage", () => {
     });
 
     it("returns decades based on effective year and minimum track threshold", async () => {
-        mockAlbumFindMany.mockResolvedValueOnce([
-            {
-                year: 1992,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 8 },
-            },
-            {
-                year: 1998,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 9 },
-            },
-            {
-                year: 2005,
-                originalYear: null,
-                displayYear: null,
-                _count: { tracks: 6 },
-            },
+        mockLoadDecadeRadioAggregates.mockResolvedValueOnce([
+            { decade: 1990, count: 17 },
         ]);
 
         const req = {} as any;
@@ -627,7 +614,7 @@ describe("library catalog list runtime coverage", () => {
             decades: [{ decade: 1990, count: 17 }],
         });
 
-        mockAlbumFindMany.mockRejectedValueOnce(
+        mockLoadDecadeRadioAggregates.mockRejectedValueOnce(
             new Error("decade query failed"),
         );
         const errRes = createRes();
@@ -1117,7 +1104,7 @@ describe("library catalog list runtime coverage", () => {
         mockTrackFindMany.mockImplementation(async (args: any) => {
             if (
                 args.where?.analysisStatus === "completed" &&
-                args.where?.id?.not === "source-track"
+                Array.isArray(args.where?.id?.in)
             ) {
                 return [
                     {
@@ -1197,6 +1184,7 @@ describe("library catalog list runtime coverage", () => {
         mockSimilarArtistFindMany.mockResolvedValueOnce([
             { toArtistId: "artist-sim-1", weight: 0.9 },
         ]);
+        mockLoadVibeRadioCandidateIds.mockResolvedValueOnce(["an-1", "an-2"]);
         mockPrismaQueryRaw
             .mockResolvedValueOnce([{ id: "genre-c1" }])
             .mockResolvedValueOnce(
@@ -1238,6 +1226,39 @@ describe("library catalog list runtime coverage", () => {
                 audioFeatures: expect.objectContaining({
                     bpm: expect.any(Number),
                 }),
+            }),
+        );
+        const sameArtistQuery = mockTrackFindMany.mock.calls.find(
+            ([args]) => args.where?.album?.artistId === "artist-source",
+        )?.[0];
+        const similarArtistTracksQuery = mockTrackFindMany.mock.calls.find(
+            ([args]) => Array.isArray(args.where?.album?.artistId?.in),
+        )?.[0];
+        expect(sameArtistQuery).toEqual(
+            expect.objectContaining({
+                select: { id: true },
+                orderBy: { id: "asc" },
+                take: 400,
+            }),
+        );
+        expect(mockOwnedAlbumFindMany).toHaveBeenCalledWith({
+            select: { artistId: true },
+            distinct: ["artistId"],
+            orderBy: { artistId: "asc" },
+            take: 400,
+        });
+        expect(mockSimilarArtistFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                select: { toArtistId: true },
+                orderBy: [{ weight: "desc" }, { toArtistId: "asc" }],
+                take: 10,
+            }),
+        );
+        expect(similarArtistTracksQuery).toEqual(
+            expect.objectContaining({
+                select: { id: true },
+                orderBy: { id: "asc" },
+                take: 400,
             }),
         );
         expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[0], 55);

@@ -14,6 +14,12 @@ const mockServeMappedProviderStream = jest.fn();
 const mockTerminateCommittedStream = jest.fn((res: Response) => res.end());
 const mockGetYtMusicUserIdOrPublic = jest.fn();
 const mockBumpSearchCacheVersion = jest.fn().mockResolvedValue(undefined);
+const mockLoadGenreRadioAggregates = jest.fn();
+const mockLoadDecadeRadioAggregates = jest.fn();
+const mockLoadVibeRadioCandidateIds = jest.fn();
+const mockLoadRadioIdCandidatePool = jest.fn(
+    (_discriminator: string, loader: () => Promise<string[]>) => loader(),
+);
 
 jest.mock("dns/promises", () => ({
     lookup: (...args: unknown[]) => mockLookup(...args),
@@ -375,6 +381,13 @@ jest.mock("../../services/imageStorage", () => ({
 
 jest.mock("../../services/searchCacheVersion", () => ({
     bumpSearchCacheVersion: mockBumpSearchCacheVersion,
+}));
+
+jest.mock("../../services/libraryRadioCache", () => ({
+    loadGenreRadioAggregates: mockLoadGenreRadioAggregates,
+    loadDecadeRadioAggregates: mockLoadDecadeRadioAggregates,
+    loadVibeRadioCandidateIds: mockLoadVibeRadioCandidateIds,
+    loadRadioIdCandidatePool: mockLoadRadioIdCandidatePool,
 }));
 
 const mockPersistCatalogReleaseGroups = jest.fn();
@@ -754,6 +767,10 @@ export {
     mockTerminateCommittedStream,
     mockGetYtMusicUserIdOrPublic,
     mockBumpSearchCacheVersion,
+    mockLoadGenreRadioAggregates,
+    mockLoadDecadeRadioAggregates,
+    mockLoadVibeRadioCandidateIds,
+    mockLoadRadioIdCandidatePool,
     mockResolveArtistImage,
     mockPersistCatalogReleaseGroups,
     mockLidarrDeleteArtist,

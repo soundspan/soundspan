@@ -9,7 +9,6 @@ import {
     getMergedGenres,
     getArtistDisplaySummary,
 } from "../../utils/metadataOverrides";
-import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { separateArtists } from "../../utils/separateArtists";
 import {
@@ -43,6 +42,12 @@ import {
     selectLibraryRadioStationTracks,
 } from "../../services/libraryRadioStationSelection";
 import {
+    loadDecadeRadioAggregates,
+    loadGenreRadioAggregates,
+    loadRadioIdCandidatePool,
+    loadVibeRadioCandidateIds,
+} from "../../services/libraryRadioCache";
+import {
     hasReliableEnhancedAnalysis,
     TRACK_BROWSE_SQL,
     moodPoolCondition,
@@ -62,6 +67,7 @@ import {
  * Router segment for radio routes registered at this position.
  */
 export const radioRouter = Router();
+const VIBE_FALLBACK_QUERY_LIMIT = 400;
 /**
  * @openapi
  * /api/library/genres:
@@ -94,48 +100,7 @@ export const radioRouter = Router();
  * Handles GET /api/library/genres.
  */
 export async function handleGetGenres(req: Request, res: Response) {
-    // Get artist names to filter them out of genres (they sometimes get incorrectly tagged)
-    const artists = await prisma.artist.findMany({
-        select: { name: true, normalizedName: true },
-    });
-    const artistNames = new Set(
-        artists.flatMap((a) =>
-            [a.name.toLowerCase(), a.normalizedName?.toLowerCase()].filter(
-                Boolean,
-            ),
-        ),
-    );
-
-    // Query Artist.genres field (populated by enrichment from Last.fm tags)
-    // Use raw SQL to expand JSONB array and count tracks per genre
-    const minTracks = 15; // Minimum tracks for a genre to show up
-    const genreResults = await prisma.$queryRaw<
-        { genre: string; track_count: bigint }[]
-    >`
-            SELECT LOWER(g.genre) as genre, COUNT(DISTINCT t.id) as track_count
-            FROM "Artist" ar
-            CROSS JOIN LATERAL jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
-            JOIN "Album" a ON a."artistId" = ar.id
-            JOIN "Track" t ON t."albumId" = a.id
-            WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND ar.genres IS NOT NULL
-            GROUP BY LOWER(g.genre)
-            HAVING COUNT(DISTINCT t.id) >= ${minTracks}
-            ORDER BY track_count DESC
-            LIMIT 20
-        `;
-
-    // Filter out artist names and convert bigint to number
-    const genres = genreResults
-        .map((row) => ({
-            genre: row.genre,
-            count: Number(row.track_count),
-        }))
-        .filter((g) => !artistNames.has(g.genre.toLowerCase()));
-
-    logger.debug(
-        `[Genres] Found ${genres.length} genres from Artist.genres (min ${minTracks} tracks)`,
-    );
-
+    const genres = await loadGenreRadioAggregates();
     res.json({ genres });
 }
 
@@ -174,45 +139,7 @@ radioRouter.get("/genres", asyncHandler(handleGetGenres));
  * Handles GET /api/library/decades.
  */
 export async function handleGetDecades(req: Request, res: Response) {
-    // Get all albums with year fields and track count
-    const albums = await prisma.album.findMany({
-        select: {
-            year: true,
-            originalYear: true,
-            displayYear: true,
-            _count: {
-                select: {
-                    tracks: {
-                        where: {
-                            ...TRACK_VISIBLE_WHERE,
-                            ...TRACK_BROWSE_WHERE,
-                        },
-                    },
-                },
-            },
-        },
-    });
-
-    // Group by decade using effective year (displayYear > originalYear > year)
-    const decadeMap = new Map<number, number>();
-
-    for (const album of albums) {
-        const effectiveYear = getEffectiveYear(album);
-        if (effectiveYear) {
-            const decadeStart = getDecadeFromYear(effectiveYear);
-            decadeMap.set(
-                decadeStart,
-                (decadeMap.get(decadeStart) || 0) + album._count.tracks,
-            );
-        }
-    }
-
-    // Convert to array, filter by minimum tracks, and sort by decade
-    const decades = Array.from(decadeMap.entries())
-        .map(([decade, count]) => ({ decade, count }))
-        .filter((d) => d.count >= 15) // Minimum 15 tracks for a radio station
-        .sort((a, b) => b.decade - a.decade); // Newest first
-
+    const decades = await loadDecadeRadioAggregates();
     res.json({ decades });
 }
 
@@ -351,13 +278,18 @@ export async function handleGetRadio(req: Request, res: Response) {
             // Mood-based filtering using audio analysis features
             const moodValue = (radioValue || "").toLowerCase();
             const moodCondition = moodPoolCondition(moodValue);
-            const moodTracks = await prisma.$queryRaw<{ id: string }[]>`
+            trackIds = await loadRadioIdCandidatePool(
+                `mood:${moodValue}:${limitNum}`,
+                async () => {
+                    const moodTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
                     WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND ${moodCondition}
                     ORDER BY random()
                     LIMIT ${limitNum * 4}
                 `;
-            trackIds = moodTracks.map((t) => t.id);
+                    return moodTracks.map((track) => track.id);
+                },
+            );
             break;
         }
 
@@ -605,33 +537,6 @@ export async function handleGetRadio(req: Request, res: Response) {
                 );
             }
 
-            const similarTrackPreferenceScores =
-                await buildTrackPreferenceScoreMapForUser(
-                    userId,
-                    similarTracks.map((track) => track.id),
-                );
-            if (similarTrackPreferenceScores.size > 0) {
-                similarTracks = similarTracks
-                    .map((track) => {
-                        const adjustedScore =
-                            applyTrackPreferenceSimilarityBias(
-                                track.vibeScore ?? 0.5,
-                                similarTrackPreferenceScores.get(track.id) ?? 0,
-                            );
-                        return {
-                            ...track,
-                            vibeScore: adjustedScore,
-                        };
-                    })
-                    .sort(
-                        (left, right) =>
-                            (right.vibeScore ?? 0) - (left.vibeScore ?? 0),
-                    );
-                logger.debug(
-                    `[Radio:artist] Applied light preference weighting across ${similarTrackPreferenceScores.size} similar-track preferences`,
-                );
-            }
-
             // 7. Mix: ~40% original artist, ~60% similar (vibe-boosted)
             const originalCount = Math.min(
                 Math.ceil(limitNum * 0.4),
@@ -764,17 +669,17 @@ export async function handleGetRadio(req: Request, res: Response) {
             let vibeMatchedIds: string[] = [];
             const sourceArtistId = sourceTrack.album.artistId;
 
-            // 2. Try audio feature matching first (if track is analyzed)
-            const hasAudioData =
-                sourceTrack.bpm || sourceTrack.energy || sourceTrack.valence;
-
-            if (hasAudioData) {
-                // Get all analyzed tracks (excluding source) - include Enhanced mode fields
+            // 2. Use embedding similarity to bound the feature re-ranking pool.
+            const annCandidateIds =
+                await loadVibeRadioCandidateIds(sourceTrackId);
+            if (annCandidateIds.length > 0) {
+                // Hydrate only the bounded embedding-ranked pool for the existing
+                // feature and tag re-ranking step.
                 const analyzedTracks = await prisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
                         ...TRACK_BROWSE_WHERE,
-                        id: { not: sourceTrackId },
+                        id: { in: annCandidateIds },
                         analysisStatus: "completed",
                     },
                     select: {
@@ -1045,11 +950,7 @@ export async function handleGetRadio(req: Request, res: Response) {
 
                     // Build source feature vector once
                     const sourceVector = buildFeatureVector(sourceTrack);
-                    const vibePreferenceScores =
-                        await buildTrackPreferenceScoreMapForUser(
-                            userId,
-                            analyzedTracks.map((track) => track.id),
-                        );
+                    const vibePreferenceScores = new Map<string, number>();
 
                     // Check if source track has Enhanced mode data
                     const sourceUsesEnhancedFeatures =
@@ -1145,7 +1046,6 @@ export async function handleGetRadio(req: Request, res: Response) {
                 }
             }
 
-            // 3. Fallback A: Same artist's other tracks
             if (vibeMatchedIds.length < limitNum) {
                 const artistTracks = await prisma.track.findMany({
                     where: {
@@ -1155,6 +1055,8 @@ export async function handleGetRadio(req: Request, res: Response) {
                         id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
                     },
                     select: { id: true },
+                    orderBy: { id: "asc" },
+                    take: VIBE_FALLBACK_QUERY_LIMIT,
                 });
                 const newIds = artistTracks.map((t) => t.id);
                 vibeMatchedIds = [...vibeMatchedIds, ...newIds];
@@ -1162,27 +1064,26 @@ export async function handleGetRadio(req: Request, res: Response) {
                     `[Radio:vibe] Fallback A (same artist): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`,
                 );
             }
-
-            // 4. Fallback B: Similar artists from Last.fm (filtered to library)
             if (vibeMatchedIds.length < limitNum) {
                 const ownedArtistIds = await prisma.ownedAlbum.findMany({
                     select: { artistId: true },
                     distinct: ["artistId"],
+                    orderBy: { artistId: "asc" },
+                    take: VIBE_FALLBACK_QUERY_LIMIT,
                 });
                 const libraryArtistSet = new Set(
                     ownedArtistIds.map((o) => o.artistId),
                 );
                 libraryArtistSet.delete(sourceArtistId);
-
                 const similarArtists = await prisma.similarArtist.findMany({
                     where: {
                         fromArtistId: sourceArtistId,
                         toArtistId: { in: Array.from(libraryArtistSet) },
                     },
-                    orderBy: { weight: "desc" },
+                    select: { toArtistId: true },
+                    orderBy: [{ weight: "desc" }, { toArtistId: "asc" }],
                     take: 10,
                 });
-
                 if (similarArtists.length > 0) {
                     const similarArtistTracks = await prisma.track.findMany({
                         where: {
@@ -1198,6 +1099,8 @@ export async function handleGetRadio(req: Request, res: Response) {
                             },
                         },
                         select: { id: true },
+                        orderBy: { id: "asc" },
+                        take: VIBE_FALLBACK_QUERY_LIMIT,
                     });
                     const newIds = similarArtistTracks.map((t) => t.id);
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
@@ -1206,8 +1109,6 @@ export async function handleGetRadio(req: Request, res: Response) {
                     );
                 }
             }
-
-            // 5. Fallback C: Same genre (using TrackGenre relation)
             const sourceGenres = (sourceTrack.album.genres as string[]) || [];
             if (vibeMatchedIds.length < limitNum && sourceGenres.length > 0) {
                 // Search using the TrackGenre relation for better accuracy.
@@ -1237,7 +1138,6 @@ export async function handleGetRadio(req: Request, res: Response) {
                 );
             }
 
-            // 6. Fallback D: Random from library
             if (vibeMatchedIds.length < limitNum) {
                 const remainingLimit = limitNum - vibeMatchedIds.length;
                 const randomTracks = await prisma.$queryRaw<{ id: string }[]>`
@@ -1385,13 +1285,18 @@ export async function handleGetRadio(req: Request, res: Response) {
         case "all":
         default:
             // Random selection from all tracks in library
-            const allTracks = await prisma.$queryRaw<{ id: string }[]>`
+            trackIds = await loadRadioIdCandidatePool(
+                `all:${limitNum}`,
+                async () => {
+                    const allTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
                     WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
                     ORDER BY random()
                     LIMIT ${limitNum * 4}
                 `;
-            trackIds = allTracks.map((t) => t.id);
+                    return allTracks.map((track) => track.id);
+                },
+            );
     }
 
     // Keep deterministic ordering for vibe (similarity-ranked) and liked (likedAt-ranked) queues.
@@ -1435,21 +1340,18 @@ export async function handleGetRadio(req: Request, res: Response) {
             `[Radio:${radioType}] Artist-weighted selection: ${diversifiedPoolIds.length}/${basePoolIds.length} tracks (alpha=${config.generationDiversity.weightAlpha}, ceiling=${config.generationDiversity.shareCeiling})`,
         );
     }
+    const selectedPoolIds = diversifiedPoolIds.slice(0, limitNum);
     const preferenceScoreMap =
         radioType === "liked"
             ? new Map<string, number>()
             : await buildTrackPreferenceScoreMapForUser(
                   userId,
-                  diversifiedPoolIds,
+                  selectedPoolIds,
               );
-    const preferenceWeightedPoolIds =
+    const finalIds =
         preferenceScoreMap.size > 0
-            ? applyTrackPreferenceOrderBias(
-                  diversifiedPoolIds,
-                  preferenceScoreMap,
-              )
-            : diversifiedPoolIds;
-    const finalIds = preferenceWeightedPoolIds.slice(0, limitNum);
+            ? applyTrackPreferenceOrderBias(selectedPoolIds, preferenceScoreMap)
+            : selectedPoolIds;
 
     if (preferenceScoreMap.size > 0) {
         logger.debug(

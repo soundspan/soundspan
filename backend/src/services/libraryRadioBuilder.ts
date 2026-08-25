@@ -4,8 +4,12 @@ import {
     computeAggregateFeatureVector,
     scoreTracksAgainstSeed,
 } from "./radioVibeEngine";
-import { applyTrackPreferenceSimilarityBias } from "./trackPreference";
+import {
+    applyTrackPreferenceOrderBias,
+    applyTrackPreferenceSimilarityBias,
+} from "./trackPreference";
 import { buildTrackPreferenceScoreMapForUser } from "./libraryTrackPreferences";
+import { loadScalarRadioCandidatePool } from "./libraryRadioCache";
 import { getMergedGenres } from "../utils/metadataOverrides";
 import { shuffleArray } from "../utils/shuffle";
 import { escapeLikePattern } from "../utils/likePattern";
@@ -143,45 +147,12 @@ export const buildMultiTrackRadio = async (
 
     // 4. Score candidates via vibe matching (if we have a valid centroid)
     if (seedVector) {
-        const candidates = await prisma.track.findMany({
-            where: {
-                ...TRACK_VISIBLE_WHERE,
-                id: { notIn: [...excludeSet] },
-                analysisStatus: "completed",
-            },
-            select: {
-                id: true,
-                bpm: true,
-                energy: true,
-                valence: true,
-                arousal: true,
-                danceability: true,
-                keyScale: true,
-                moodTags: true,
-                lastfmTags: true,
-                essentiaGenres: true,
-                instrumentalness: true,
-                moodHappy: true,
-                moodSad: true,
-                moodRelaxed: true,
-                moodAggressive: true,
-                moodParty: true,
-                moodAcoustic: true,
-                moodElectronic: true,
-                danceabilityMl: true,
-                analysisMode: true,
-                analysisVersion: true,
-                album: { select: { artistId: true } },
-            },
-        });
+        const candidates = (await loadScalarRadioCandidatePool()).filter(
+            (candidate) => !excludeSet.has(candidate.id),
+        );
 
         logger.debug(
             `[Radio:multi-seed] Found ${candidates.length} analyzed candidates to score against ${seedTracks.length} seed tracks`,
-        );
-
-        const preferenceScores = await buildTrackPreferenceScoreMapForUser(
-            userId,
-            candidates.map((c) => c.id),
         );
 
         const scored = scoreTracksAgainstSeed(
@@ -189,7 +160,7 @@ export const buildMultiTrackRadio = async (
             [...allTags],
             [...allGenres],
             candidates,
-            preferenceScores,
+            new Map(),
             applyTrackPreferenceSimilarityBias,
         );
 
@@ -301,6 +272,17 @@ export const buildMultiTrackRadio = async (
                 `[Radio:multi-seed] Fallback C: added ${newRandomIds.length} random library tracks`,
             );
         }
+    }
+
+    const finalPreferenceScores = await buildTrackPreferenceScoreMapForUser(
+        userId,
+        resultIds,
+    );
+    if (finalPreferenceScores.size > 0) {
+        resultIds = applyTrackPreferenceOrderBias(
+            resultIds,
+            finalPreferenceScores,
+        );
     }
 
     logger.debug(`[Radio:multi-seed] Final queue: ${resultIds.length} tracks`);

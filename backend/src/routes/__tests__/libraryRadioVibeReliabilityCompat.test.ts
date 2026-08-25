@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 
+const mockLoadVibeRadioCandidateIds = jest.fn();
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
     requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
@@ -198,6 +200,16 @@ jest.mock("../../services/metadata/catalogPersistence", () => ({
     readFreshCatalogReleaseGroups: jest.fn(() => null),
 }));
 
+jest.mock("../../services/libraryRadioCache", () => ({
+    loadGenreRadioAggregates: jest.fn(),
+    loadDecadeRadioAggregates: jest.fn(),
+    loadVibeRadioCandidateIds: mockLoadVibeRadioCandidateIds,
+    loadRadioIdCandidatePool: (
+        _discriminator: string,
+        loader: () => Promise<string[]>,
+    ) => loader(),
+}));
+
 import router from "../library";
 import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
@@ -261,6 +273,7 @@ describe("library vibe radio reliability compatibility", () => {
         jest.clearAllMocks();
         mockLikedTrackFindMany.mockResolvedValue([]);
         mockDislikedEntityFindMany.mockResolvedValue([]);
+        mockLoadVibeRadioCandidateIds.mockResolvedValue(["candidate-track"]);
     });
 
     it("treats legacy enhanced analysis as standard and requests analysisVersion", async () => {
@@ -385,6 +398,9 @@ describe("library vibe radio reliability compatibility", () => {
             }),
         );
         expect(mockTrackFindMany).toHaveBeenCalled();
+        expect(mockLoadVibeRadioCandidateIds).toHaveBeenCalledWith(
+            "source-track",
+        );
         expect(mockTrackFindMany.mock.calls[0][0]).toEqual(
             expect.objectContaining({
                 select: expect.objectContaining({
@@ -532,6 +548,7 @@ describe("library vibe radio reliability compatibility", () => {
     });
 
     it("falls back to same-artist tracks when source has no audio analysis data", async () => {
+        mockLoadVibeRadioCandidateIds.mockResolvedValueOnce([]);
         const sourceTrack = {
             id: "source-track-noaudio",
             title: "Source Track Without Analysis",

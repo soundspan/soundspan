@@ -17,6 +17,7 @@ import {
     VISIBLE_TRACK_SQL,
 } from "../utils/libraryRadioPredicates";
 import { transformRadioTrack } from "./libraryRadioTrackResponse";
+import { loadRadioIdCandidatePool } from "./libraryRadioCache";
 
 const selectionLogger = logger.child("LibraryRadioStationSelection");
 type RadioSelectionClient = Prisma.TransactionClient | typeof prisma;
@@ -378,7 +379,13 @@ export async function selectLibraryRadioStationTracks(
     input: LibraryRadioStationSelectionInput,
     client: RadioSelectionClient = prisma,
 ): Promise<LibraryRadioStationSelection> {
-    const candidateIds = await selectCandidateIds(input, client);
+    const candidateIds =
+        client === prisma
+            ? await loadRadioIdCandidatePool(
+                  `${input.type}:${input.value ?? ""}:${input.limit}`,
+                  () => selectCandidateIds(input, client),
+              )
+            : await selectCandidateIds(input, client);
     const diversifiedIds = await diversifyIds(
         candidateIds,
         input.limit,
