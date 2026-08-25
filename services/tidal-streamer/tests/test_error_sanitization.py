@@ -12,6 +12,47 @@ from httpx import AsyncClient
 MARKER = "sekrit-token-abc123"
 
 
+def test_shared_http_error_logs_detail_and_returns_generic_exception(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Keep provider details in logs while returning only the stable client detail."""
+    from common.sidecar_runtime_utils import sanitized_http_error
+
+    logger = logging.getLogger("tidal-shared-error-test")
+    with caplog.at_level(logging.ERROR, logger=logger.name):
+        try:
+            raise RuntimeError(MARKER)
+        except RuntimeError as error:
+            result = sanitized_http_error(logger, "shared operation", error, 502, "Safe detail")
+
+    assert result.status_code == 502
+    assert result.detail == "Safe detail"
+    assert MARKER in caplog.text
+
+
+def test_shared_pool_warning_filter_throttles_repeated_warnings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Install the shared throttle in TIDAL and suppress repeated warnings."""
+    pool_logger = logging.getLogger("urllib3.connectionpool")
+    previous_filters = list(pool_logger.filters)
+    pool_logger.filters.clear()
+    try:
+        import app  # noqa: F401 -- importing the runtime installs the shared filter
+
+        with caplog.at_level(logging.WARNING, logger=pool_logger.name):
+            pool_logger.warning("Connection pool is full, discarding connection: one")
+            pool_logger.warning("Connection pool is full, discarding connection: two")
+    finally:
+        pool_logger.filters[:] = previous_filters
+
+    messages = [record.getMessage() for record in caplog.records if record.name == pool_logger.name]
+    assert messages == [
+        "urllib3 connection pool saturated; suppressing repeated pool-full warnings for 300s. "
+        "Increase upstream pool size if this persists."
+    ]
+
+
 @pytest.mark.anyio
 async def test_auth_device_error_sanitized(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture

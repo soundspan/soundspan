@@ -18,6 +18,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
+from . import environment as _environment
+
 DEFAULT_STREAM_CONNECT_TIMEOUT = 30.0
 DEFAULT_STREAM_READ_TIMEOUT = 300.0
 _KNOWN_DEFAULT_SECRET = "soundspan-internal-secret-change-me"  # noqa: S105 -- known insecure sentinel rejected at runtime
@@ -25,6 +27,47 @@ _KNOWN_DEFAULT_SECRET = "soundspan-internal-secret-change-me"  # noqa: S105 -- k
 # Prisma cuids (the only user_id the backend ever sends) are alphanumeric;
 # this also rejects any `/`, `.`, or `%` that could escape DATA_PATH.
 _USER_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_POOL_FULL_WARNING = "Connection pool is full, discarding connection"
+_POOL_WARNING_SUPPRESSION_SECONDS = 300
+_POOL_WARNING_REPLACEMENT = (
+    "urllib3 connection pool saturated; suppressing repeated pool-full "
+    "warnings for 300s. Increase upstream pool size if this persists."
+)
+
+
+class _ThrottlePoolFullWarning(logging.Filter):
+    """Throttle noisy urllib3 pool-full warnings while preserving signal."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._last_emit_at = 0.0
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Rewrite the first pool-full warning and suppress repeats for five minutes."""
+        message = record.getMessage()
+        if _POOL_FULL_WARNING not in message:
+            return True
+
+        now = time.monotonic()
+        if (now - self._last_emit_at) < _POOL_WARNING_SUPPRESSION_SECONDS:
+            return False
+
+        self._last_emit_at = now
+        record.msg = _POOL_WARNING_REPLACEMENT
+        record.args = ()
+        return True
+
+
+def install_urllib3_pool_warning_throttle() -> None:
+    """Install the shared five-minute urllib3 pool-full warning throttle.
+
+    Idempotent: module reimports (test harnesses reload consumer modules in
+    one process) must not stack duplicate filters on the shared logger.
+    """
+    pool_logger = logging.getLogger("urllib3.connectionpool")
+    if any(isinstance(f, _ThrottlePoolFullWarning) for f in pool_logger.filters):
+        return
+    pool_logger.addFilter(_ThrottlePoolFullWarning())
 
 
 class ThreadSafeRatePacer:
@@ -108,6 +151,23 @@ def register_error_handlers(app: FastAPI, logger: logging.Logger) -> None:
         )
 
 
+def sanitized_http_error(
+    logger: logging.Logger,
+    operation: str,
+    exc: Exception,
+    status: int,
+    detail: str,
+) -> HTTPException:
+    """Log full exception detail and return a generic client-facing error."""
+    logger.error(
+        "%s failed: %s",
+        operation,
+        exc,
+        exc_info=True,  # noqa: LOG014 -- callers invoke this from active exception handlers
+    )
+    return HTTPException(status_code=status, detail=detail)
+
+
 def require_internal_secret(request: Request) -> None:
     """FastAPI dependency: authenticate machine-to-machine sidecar calls.
 
@@ -139,14 +199,14 @@ def validate_user_id(user_id: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid user_id")
 
 
-def env_int(name: str, default: str) -> int:
-    """Parse an integer env var using a string default value."""
-    return int(os.getenv(name, default))
+def env_int(name: str, default: int | str) -> int:
+    """Parse an integer environment value through the lightweight shared boundary."""
+    return _environment.env_int(name, default)
 
 
-def env_float(name: str, default: str) -> float:
-    """Parse a float env var using a string default value."""
-    return float(os.getenv(name, default))
+def env_float(name: str, default: float | int | str) -> float:
+    """Parse a float environment value through the lightweight shared boundary."""
+    return _environment.env_float(name, default)
 
 
 def stream_proxy_timeout() -> httpx.Timeout:

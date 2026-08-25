@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Consolidated repeated backend error handling, download-job state transitions, availability probes, queue event wiring, and value parsing behind shared internal helpers.
+- The Python sidecars now share one hardened implementation of their path-safety and runtime helpers instead of maintaining copies.
 - Album downloads now use queued, serialized processing, one album at a time across the deployment, with renewable claims, restart recovery, and queue-owned lifecycle reconciliation.
 - The DCLAP vibe provider now answers malformed requests with the same 422 response the other sidecars use (previously 400).
 - Library scans now process several files at once within a configurable bound, making large-library scans significantly faster.

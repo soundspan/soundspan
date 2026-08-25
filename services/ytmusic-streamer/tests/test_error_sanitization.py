@@ -16,6 +16,69 @@ MARKER = "sekrit-yt-abc123"
 LOGGER_NAME = "ytmusic-streamer"
 
 
+def test_shared_http_error_logs_detail_and_returns_generic_exception(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Keep provider details in logs while returning only the stable client detail."""
+    import app  # noqa: F401 -- the runtime bootstraps the shared module path
+    from common.sidecar_runtime_utils import sanitized_http_error
+
+    logger = logging.getLogger("ytmusic-shared-error-test")
+    with caplog.at_level(logging.ERROR, logger=logger.name):
+        try:
+            raise RuntimeError(MARKER)
+        except RuntimeError as error:
+            result = sanitized_http_error(logger, "shared operation", error, 502, "Safe detail")
+
+    assert result.status_code == 502
+    assert result.detail == "Safe detail"
+    assert MARKER in caplog.text
+
+
+def test_shared_pool_warning_filter_throttles_repeated_warnings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Install the shared throttle in YouTube Music and suppress repeated warnings."""
+    pool_logger = logging.getLogger("urllib3.connectionpool")
+    previous_filters = list(pool_logger.filters)
+    pool_logger.filters.clear()
+    try:
+        import app  # noqa: F401 -- importing the runtime installs the shared filter
+
+        with caplog.at_level(logging.WARNING, logger=pool_logger.name):
+            pool_logger.warning("Connection pool is full, discarding connection: one")
+            pool_logger.warning("Connection pool is full, discarding connection: two")
+    finally:
+        pool_logger.filters[:] = previous_filters
+
+    messages = [record.getMessage() for record in caplog.records if record.name == pool_logger.name]
+    assert messages == [
+        "urllib3 connection pool saturated; suppressing repeated pool-full warnings for 300s. "
+        "Increase upstream pool size if this persists."
+    ]
+
+
+def test_shared_pool_warning_filter_installs_once() -> None:
+    """Repeated installs (module reimports) must not stack duplicate filters."""
+    from common.sidecar_runtime_utils import (
+        _ThrottlePoolFullWarning,
+        install_urllib3_pool_warning_throttle,
+    )
+
+    pool_logger = logging.getLogger("urllib3.connectionpool")
+    previous_filters = list(pool_logger.filters)
+    pool_logger.filters.clear()
+    try:
+        install_urllib3_pool_warning_throttle()
+        install_urllib3_pool_warning_throttle()
+        throttle_filters = [
+            f for f in pool_logger.filters if isinstance(f, _ThrottlePoolFullWarning)
+        ]
+        assert len(throttle_filters) == 1
+    finally:
+        pool_logger.filters[:] = previous_filters
+
+
 @pytest.mark.anyio
 async def test_auth_status_reason_sanitized(
     client: AsyncClient,

@@ -2,10 +2,7 @@
 
 import os
 
-
-def get_int_env(name: str, default: int | str) -> int:
-    """Read an integer env var with the same semantics as int(os.getenv(...))."""
-    return int(os.getenv(name, str(default)))
+from .environment import env_int
 
 
 def get_blocking_socket_timeout(
@@ -19,7 +16,7 @@ def get_blocking_socket_timeout(
     if blocking_timeout <= 0 or safety_margin <= 0:
         raise ValueError("blocking timeout and safety margin must be positive")
 
-    configured_timeout = get_int_env(name, default)
+    configured_timeout = env_int(name, default)
     if configured_timeout <= 0:
         raise ValueError(f"{name} must be positive")
 

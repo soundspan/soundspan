@@ -7,14 +7,21 @@ from pathlib import Path
 import pytest
 
 SIDECAR_ROOT = Path(__file__).resolve().parents[1]
+SERVICES_ROOT = SIDECAR_ROOT.parent
+if str(SERVICES_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICES_ROOT))
+
+from common.download_paths import (  # noqa: E402
+    require_contained_download_path,
+    sanitize_download_relative_path,
+    sanitize_path_component,
+)
+
 if str(SIDECAR_ROOT) not in sys.path:
     sys.path.insert(0, str(SIDECAR_ROOT))
 
 from yt_download import (  # noqa: E402
     _build_album_track_candidates,
-    _require_contained_download_path,
-    _sanitize_download_relative_path,
-    _sanitize_path_component,
     build_album_track_paths,
 )
 
@@ -22,16 +29,16 @@ from yt_download import (  # noqa: E402
 @pytest.mark.parametrize("component", ["", ".", "..", "   ", "..."])
 def test_sanitize_relative_path_rejects_invalid_components(component: str) -> None:
     with pytest.raises(ValueError, match="output template path"):
-        _sanitize_download_relative_path(f"Artist/{component}/Track")
+        sanitize_download_relative_path(f"Artist/{component}/Track")
 
 
 def test_sanitize_relative_path_rejects_absolute_path() -> None:
     with pytest.raises(ValueError, match="output template path"):
-        _sanitize_download_relative_path("/outside/Track")
+        sanitize_download_relative_path("/outside/Track")
 
 
 def test_sanitize_path_component_replaces_reserved_characters() -> None:
-    assert _sanitize_path_component('A<>:"/\\|?*B') == "A_________B"
+    assert sanitize_path_component('A<>:"/\\|?*B') == "A_________B"
 
 
 def test_containment_rejects_symlink_escape(tmp_path: Path) -> None:
@@ -42,7 +49,7 @@ def test_containment_rejects_symlink_escape(tmp_path: Path) -> None:
     (music / "linked").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(ValueError, match="outside MUSIC_PATH"):
-        _require_contained_download_path(music / "linked" / "track.mp3", music.resolve())
+        require_contained_download_path(music / "linked" / "track.mp3", music.resolve())
 
 
 def test_album_track_paths_reject_temporary_symlink_escape(

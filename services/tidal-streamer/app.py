@@ -13,13 +13,13 @@ query-parameter support retained for one release.
 """
 
 import asyncio as asyncio
-import logging
 import os
 import sys
 import threading
 import time as time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol, cast
 
@@ -37,8 +37,10 @@ if str(SERVICES_ROOT) not in sys.path:
 from common.logging_utils import configure_service_logger
 from common.sidecar_runtime_utils import (
     build_stream_proxy_client,
+    install_urllib3_pool_warning_throttle,
     register_error_handlers,
     require_internal_secret,
+    sanitized_http_error,
 )
 from tidal_downloads import (
     _DASH_MANIFEST_MIME_TYPE,
@@ -70,36 +72,8 @@ class TidalAPIProtocol(TrackDownloadAPIProtocol, AlbumAPIProtocol, Protocol):
 
 # ── Logging ─────────────────────────────────────────────────────────
 log = configure_service_logger("tidal-streamer")
-
-
-class _ThrottlePoolFullWarning(logging.Filter):
-    """Throttle noisy urllib3 pool-full warnings while preserving signal."""
-
-    _SUPPRESSION_WINDOW_SECONDS = 300
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._last_emit_at = 0.0
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        if "Connection pool is full, discarding connection" not in message:
-            return True
-
-        now = time.monotonic()
-        if (now - self._last_emit_at) < self._SUPPRESSION_WINDOW_SECONDS:
-            return False
-
-        self._last_emit_at = now
-        record.msg = (
-            "urllib3 connection pool saturated; suppressing repeated pool-full "
-            "warnings for 300s. Increase upstream pool size if this persists."
-        )
-        record.args = ()
-        return True
-
-
-logging.getLogger("urllib3.connectionpool").addFilter(_ThrottlePoolFullWarning())
+install_urllib3_pool_warning_throttle()
+_sanitized_http_error = partial(sanitized_http_error, log)
 
 
 async def _run_stream_cache_cleanup() -> None:
@@ -365,22 +339,6 @@ def require_admin_credentials(
         "Bearer — query support will be removed next release"
     )
     return AdminCredentials(access_token, user_id, country_code)
-
-
-def _sanitized_http_error(
-    operation: str,
-    exc: Exception,
-    status_code: int,
-    detail: str,
-) -> HTTPException:
-    """Log full exception detail; return a generic client-facing HTTPException."""
-    log.error(
-        "%s failed: %s",
-        operation,
-        exc,
-        exc_info=True,  # noqa: LOG014 -- callers invoke this helper from active exception handlers
-    )
-    return HTTPException(status_code=status_code, detail=detail)
 
 
 def _is_playlist_not_found_error(error: Exception) -> bool:

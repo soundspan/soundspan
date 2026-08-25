@@ -13,6 +13,12 @@ from uuid import uuid4
 from xml.etree.ElementTree import Element
 from xml.etree.ElementTree import fromstring as xml_fromstring
 
+from common.download_paths import (
+    require_contained_download_path as _require_contained_download_path,
+)
+from common.download_paths import (
+    sanitize_download_relative_path as _sanitize_download_relative_path,
+)
 from common.sidecar_runtime_utils import env_float
 from mutagen.easymp4 import EasyMP4
 from mutagen.flac import FLAC
@@ -84,34 +90,6 @@ class _TrackDownloaderProtocol(Protocol):
         output_template: str,
         dest_base: Path,
     ) -> JsonObject: ...
-
-
-def _sanitize_path_component(name: str) -> str:
-    """Remove or replace chars that are invalid on most filesystems."""
-    for ch in '<>:"/\\|?*':
-        name = name.replace(ch, "_")
-    return name.strip(". ")
-
-
-def _sanitize_download_relative_path(rendered_path: str) -> Path:
-    """Validate and sanitize every rendered download-path component."""
-    sanitized_parts = []
-    for component in rendered_path.split("/"):
-        sanitized = _sanitize_path_component(component)
-        if not sanitized or sanitized in {".", ".."} or Path(sanitized).is_absolute():
-            raise ValueError("Invalid output template path component")
-        sanitized_parts.append(sanitized)
-    return Path(*sanitized_parts)
-
-
-def _require_contained_download_path(path: Path, destination_root: Path) -> Path:
-    """Resolve a download path and reject targets outside the destination root."""
-    resolved_path = path.resolve()
-    try:
-        resolved_path.relative_to(destination_root)
-    except ValueError:
-        raise ValueError("Download path resolves outside MUSIC_PATH") from None
-    return resolved_path
 
 
 def _build_download_file_path(

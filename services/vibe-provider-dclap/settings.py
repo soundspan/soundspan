@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 
-from services.common.analyzer_env import configure_thread_env, get_int_env
+from services.common.analyzer_env import configure_thread_env
+from services.common.environment import env_int
 from services.common.logging_utils import configure_service_logger
 
 logger = configure_service_logger("vibe-provider-dclap")
@@ -18,9 +19,9 @@ DCLAP_TEXT_TOWER_HASH = "200d48f3905ff1f272af5006dd9851f94071a7dde4eafd9c07bc09c
 EMBEDDING_CHECKPOINT_HASH = "c892c7a8666dfa5adec5f0b76ecdd9b5394f5afa925d1362750309b6b9b96639"
 EMBEDDING_DIM = 512
 SAMPLE_RATE_HZ = 48000
-HTTP_PORT = get_int_env("DCLAP_HTTP_PORT", 8092)
-MODEL_IDLE_TIMEOUT = get_int_env("MODEL_IDLE_TIMEOUT", 300)
-ONNX_INTRA_OP_THREADS = get_int_env("DCLAP_ONNX_INTRA_OP_THREADS", 1)
+HTTP_PORT = env_int("DCLAP_HTTP_PORT", 8092)
+MODEL_IDLE_TIMEOUT = env_int("MODEL_IDLE_TIMEOUT", 300)
+ONNX_INTRA_OP_THREADS = env_int("DCLAP_ONNX_INTRA_OP_THREADS", 1)
 MODEL_DIRECTORY = os.getenv("DCLAP_MODEL_PATH", "/app/models")
 TOKENIZER_DIRECTORY = os.getenv("DCLAP_TOKENIZER_PATH", "/app/tokenizer")
 # This undeclared cap is part of the de-facto preprocessing contract. Changing

@@ -7,6 +7,8 @@ from pathlib import Path
 import music_path
 import pytest
 
+from services.common.music_path import resolve_contained_music_path
+
 
 @pytest.mark.parametrize(
     "track_ref",
@@ -56,3 +58,25 @@ def test_resolve_music_path_returns_real_in_library_path(
     monkeypatch.setattr(music_path, "MUSIC_PATH", str(tmp_path))
 
     assert music_path.resolve_music_path("artist/track.flac") == str(track.resolve())
+
+
+def test_common_music_path_normalizes_backslashes(tmp_path: Path) -> None:
+    """Normalize Windows-style separators in the shared containment boundary."""
+    track = tmp_path / "artist" / "track.flac"
+    track.parent.mkdir()
+    track.touch()
+
+    assert resolve_contained_music_path(str(tmp_path), "artist\\track.flac") == str(track.resolve())
+
+
+def test_resolve_music_path_normalizes_backslashes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep separator normalization active through the environment-bound wrapper."""
+    track = tmp_path / "artist" / "track.flac"
+    track.parent.mkdir()
+    track.touch()
+    monkeypatch.setattr(music_path, "MUSIC_PATH", str(tmp_path))
+
+    assert music_path.resolve_music_path("artist\\track.flac") == str(track.resolve())

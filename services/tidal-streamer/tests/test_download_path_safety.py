@@ -29,6 +29,32 @@ class _FakeDownloadApi:
         return types.SimpleNamespace(audioQuality=quality)
 
 
+@pytest.mark.parametrize("component", ["", ".", "..", "   ", "..."])
+def test_common_sanitizer_rejects_invalid_components(component: str) -> None:
+    """Reject components that become empty or retain dot-segment meaning."""
+    from common.download_paths import sanitize_download_relative_path
+
+    with pytest.raises(ValueError, match="output template path"):
+        sanitize_download_relative_path(f"Artist/{component}/Track")
+
+
+def test_common_sanitizer_replaces_reserved_characters() -> None:
+    """Replace the established cross-platform reserved-character set."""
+    from common.download_paths import sanitize_path_component
+
+    assert sanitize_path_component('A<>:"/\\|?*B') == "A_________B"
+
+
+def test_common_containment_resolves_the_destination_root(tmp_path: Path) -> None:
+    """Resolve an unresolved destination root before checking containment."""
+    from common.download_paths import require_contained_download_path
+
+    music = tmp_path / "parent" / ".." / "music"
+    expected = tmp_path / "music" / "track.m4a"
+
+    assert require_contained_download_path(expected, music) == expected.resolve()
+
+
 def _configure_download(
     monkeypatch: pytest.MonkeyPatch, app: Any, rendered_path: str, payload: bytes = b"audio"
 ) -> None:

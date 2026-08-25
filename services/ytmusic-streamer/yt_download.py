@@ -17,6 +17,13 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
+from common.download_paths import (
+    require_contained_download_path as _require_contained_download_path,
+)
+from common.download_paths import (
+    sanitize_download_relative_path as _sanitize_download_relative_path,
+)
+from common.download_paths import sanitize_path_component as _sanitize_path_component
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 from mutagen.mp4 import MP4
@@ -108,34 +115,6 @@ class _Mp4Reader(Protocol):
     """Typed view of Mutagen's optional MP4 tag container."""
 
     tags: _TagReader | None
-
-
-def _sanitize_path_component(name: str) -> str:
-    """Replace filesystem-reserved characters and trim unsafe suffixes."""
-    for char in '<>:"/\\|?*':
-        name = name.replace(char, "_")
-    return name.strip(". ")
-
-
-def _sanitize_download_relative_path(rendered_path: str) -> Path:
-    """Validate and sanitize every component of a relative download path."""
-    sanitized_parts: list[str] = []
-    for component in rendered_path.split("/"):
-        sanitized = _sanitize_path_component(component)
-        if not sanitized or sanitized in {".", ".."} or Path(sanitized).is_absolute():
-            raise ValueError("Invalid output template path component")
-        sanitized_parts.append(sanitized)
-    return Path(*sanitized_parts)
-
-
-def _require_contained_download_path(path: Path, destination_root: Path) -> Path:
-    """Resolve a path and reject targets outside the configured music root."""
-    resolved_path = path.resolve()
-    try:
-        resolved_path.relative_to(destination_root.resolve())
-    except ValueError:
-        raise ValueError("Download path resolves outside MUSIC_PATH") from None
-    return resolved_path
 
 
 def _build_bounded_filename(stem: str, suffix: str, extension: str) -> str:

@@ -2,23 +2,31 @@
 
 import os
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 
 SERVICES_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICES_ROOT) not in sys.path:
     sys.path.append(str(SERVICES_ROOT))
 
 from common.logging_utils import configure_service_logger
-from common.sidecar_runtime_utils import register_error_handlers, require_internal_secret
+from common.sidecar_runtime_utils import (
+    install_urllib3_pool_warning_throttle,
+    register_error_handlers,
+    require_internal_secret,
+    sanitized_http_error,
+)
 
 JsonObject = dict[str, Any]
 JsonList = list[JsonObject]
 
 # ── Logging ─────────────────────────────────────────────────────────
 log = configure_service_logger("ytmusic-streamer")
+install_urllib3_pool_warning_throttle()
+_sanitized_http_error = partial(sanitized_http_error, log)
 
 # ── FastAPI app ─────────────────────────────────────────────────────
 app = FastAPI(
@@ -49,19 +57,3 @@ def _bound_cache(cache: dict[str, JsonObject], max_size: int) -> None:
     """Evict oldest entries; callers must hold the owning cache's lock."""
     while len(cache) > max_size:
         cache.pop(next(iter(cache)))
-
-
-def _sanitized_http_error(
-    operation: str,
-    exc: Exception,
-    status_code: int,
-    detail: str,
-) -> HTTPException:
-    """Log full exception detail; return a generic client-facing HTTPException."""
-    log.error(
-        "%s failed: %s",
-        operation,
-        exc,
-        exc_info=True,  # noqa: LOG014 -- callers invoke this helper from active exception handlers
-    )
-    return HTTPException(status_code=status_code, detail=detail)

@@ -10,8 +10,8 @@ import pytest
 from services.common.analyzer_env import (
     configure_thread_env,
     get_blocking_socket_timeout,
-    get_int_env,
 )
+from services.common.environment import env_float, env_int
 
 THREAD_ENV_KEYS = [
     "OMP_NUM_THREADS",
@@ -86,17 +86,22 @@ def _load_analyzer_with_recording_redis(
     return module
 
 
-def test_get_int_env_uses_default_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_int_uses_integer_default_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MVR12_TEST_MISSING_INT", raising=False)
-    assert get_int_env("MVR12_TEST_MISSING_INT", 11) == 11
+    assert env_int("MVR12_TEST_MISSING_INT", 11) == 11
 
 
-def test_get_int_env_raises_value_error_for_invalid_value(
+def test_env_int_raises_value_error_for_invalid_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MVR12_TEST_INVALID_INT", "not-a-number")
     with pytest.raises(ValueError):
-        get_int_env("MVR12_TEST_INVALID_INT", 3)
+        env_int("MVR12_TEST_INVALID_INT", 3)
+
+
+def test_env_float_accepts_float_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MVR12_TEST_MISSING_FLOAT", raising=False)
+    assert env_float("MVR12_TEST_MISSING_FLOAT", 2.5) == 2.5
 
 
 def test_audio_blocking_socket_timeout_exceeds_brpop_timeout(

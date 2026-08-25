@@ -12,13 +12,15 @@ from itertools import islice
 from pathlib import Path
 from typing import Any
 
+from common.download_paths import (
+    require_contained_download_path as _require_contained_download_path,
+)
 from common.sidecar_runtime_utils import env_int
 from fastapi import HTTPException, Query
 from yt_download import (
     _build_album_track_candidates,
     _build_album_track_tmp_path,
     _read_embedded_video_id,
-    _require_contained_download_path,
     _stamp_audio_tags,
     build_album_track_paths,
     build_audio_download_opts,

@@ -8,6 +8,9 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from audio_paths import resolve_music_path
+
+from services.common.music_path import resolve_contained_music_path
 
 
 class RecordingAnalyzer:
@@ -20,6 +23,47 @@ class RecordingAnalyzer:
         """Record the resolved path and return a successful result."""
         self.paths.append(file_path)
         return {"bpm": 120.0}
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        "../outside.flac",
+        "artist/../outside.flac",
+        "artist/./track.flac",
+        "/etc/passwd",
+        "bad\x00.flac",
+    ],
+)
+def test_common_music_path_rejects_unsafe_paths(tmp_path: Path, file_path: str) -> None:
+    """Reject NUL, absolute, and explicit dot-segment paths in the shared boundary."""
+    assert resolve_contained_music_path(str(tmp_path), file_path) is None
+
+
+def test_common_music_path_normalizes_backslashes(tmp_path: Path) -> None:
+    """Normalize Windows-style separators before resolving a contained path."""
+    track_path = tmp_path / "artist" / "track.flac"
+    track_path.parent.mkdir()
+    track_path.touch()
+
+    assert resolve_contained_music_path(str(tmp_path), "artist\\track.flac") == str(
+        track_path.resolve()
+    )
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        "../outside.flac",
+        "artist/../outside.flac",
+        "artist/./track.flac",
+        "/etc/passwd",
+        "bad\x00.flac",
+    ],
+)
+def test_audio_path_wrapper_rejects_unsafe_paths(tmp_path: Path, file_path: str) -> None:
+    """Keep every shared rejection active through the analyzer wrapper."""
+    assert resolve_music_path(str(tmp_path), file_path) is None
 
 
 def _analyze_queued_path(

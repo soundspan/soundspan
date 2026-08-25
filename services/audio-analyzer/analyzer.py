@@ -35,13 +35,13 @@ from model_paths import MODEL_DIR, MODELS
 from services.common.analyzer_env import (
     configure_thread_env,
     get_blocking_socket_timeout,
-    get_int_env,
 )
 from services.common.database_url import resolve_database_url
+from services.common.environment import env_float, env_int
 from services.common.logging_utils import configure_service_logger
 
 # Get thread configuration from environment (default to 1 for safety)
-THREADS_PER_WORKER = get_int_env("THREADS_PER_WORKER", 1)
+THREADS_PER_WORKER = env_int("THREADS_PER_WORKER", 1)
 
 # Configure TensorFlow and BLAS/OpenMP threading before TensorFlow/Essentia imports.
 configure_thread_env(THREADS_PER_WORKER, configure_tensorflow=True)
@@ -134,13 +134,13 @@ TensorflowPredictMusiCNN = None  # Loaded in worker processes
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 DATABASE_URL = resolve_database_url(os.environ)
 MUSIC_PATH = os.getenv("MUSIC_PATH", "/music")
-BATCH_SIZE = get_int_env("BATCH_SIZE", 10)
-SLEEP_INTERVAL = get_int_env("SLEEP_INTERVAL", 5)
+BATCH_SIZE = env_int("BATCH_SIZE", 10)
+SLEEP_INTERVAL = env_int("SLEEP_INTERVAL", 5)
 
 # BRPOP timeout: how long to block waiting for work (seconds)
 # Also serves as the DB reconciliation interval
 # Uses SLEEP_INTERVAL for backward compatibility, minimum 5s
-BRPOP_TIMEOUT = max(5, get_int_env("BRPOP_TIMEOUT", SLEEP_INTERVAL))
+BRPOP_TIMEOUT = max(5, env_int("BRPOP_TIMEOUT", SLEEP_INTERVAL))
 REDIS_SOCKET_TIMEOUT = get_blocking_socket_timeout(
     "AUDIO_REDIS_SOCKET_TIMEOUT",
     BRPOP_TIMEOUT + 5,
@@ -150,20 +150,20 @@ REDIS_SOCKET_TIMEOUT = get_blocking_socket_timeout(
 # DB reconciliation cadence (adaptive backoff while idle)
 DB_RECONCILE_MIN_INTERVAL_SECONDS = max(
     BRPOP_TIMEOUT,
-    get_int_env("DB_RECONCILE_MIN_INTERVAL_SECONDS", BRPOP_TIMEOUT),
+    env_int("DB_RECONCILE_MIN_INTERVAL_SECONDS", BRPOP_TIMEOUT),
 )
 DB_RECONCILE_MAX_INTERVAL_SECONDS = max(
     DB_RECONCILE_MIN_INTERVAL_SECONDS,
-    get_int_env("DB_RECONCILE_MAX_INTERVAL_SECONDS", max(BRPOP_TIMEOUT * 12, 60)),
+    env_int("DB_RECONCILE_MAX_INTERVAL_SECONDS", max(BRPOP_TIMEOUT * 12, 60)),
 )
 DB_RECONCILE_BACKOFF_MULTIPLIER = max(
     1.0,
-    float(os.getenv("DB_RECONCILE_BACKOFF_MULTIPLIER", "2.0")),
+    env_float("DB_RECONCILE_BACKOFF_MULTIPLIER", 2.0),
 )
 
 # Idle timeout before unloading ML models from memory (seconds)
 # Models are reloaded automatically when new work arrives
-MODEL_IDLE_TIMEOUT = get_int_env("MODEL_IDLE_TIMEOUT", 300)
+MODEL_IDLE_TIMEOUT = env_int("MODEL_IDLE_TIMEOUT", 300)
 
 # Debounce delay for worker resize (seconds) -- prevents pool churn when user drags a slider
 RESIZE_DEBOUNCE_SECONDS = 5
@@ -172,10 +172,10 @@ RESIZE_DEBOUNCE_SECONDS = 5
 # Oversized files are permanently failed to avoid repeated timeout loops.
 # Set to 0 to disable file-size guardrail.
 # Default is tuned for FLAC-heavy libraries with larger hi-res tracks.
-MAX_FILE_SIZE_MB = get_int_env("MAX_FILE_SIZE_MB", 500)
+MAX_FILE_SIZE_MB = env_int("MAX_FILE_SIZE_MB", 500)
 # Hard timeout for an entire analysis batch. Never-started tracks are requeued
 # without retry cost; in-flight tracks fail non-permanently and consume one retry.
-BATCH_ANALYSIS_TIMEOUT_SECONDS = get_int_env("BATCH_ANALYSIS_TIMEOUT_SECONDS", 900)
+BATCH_ANALYSIS_TIMEOUT_SECONDS = env_int("BATCH_ANALYSIS_TIMEOUT_SECONDS", 900)
 
 
 def _resolve_music_path(file_path: str) -> str | None:
@@ -216,23 +216,23 @@ def _get_workers_from_db() -> int:
             logger.info(f"Loaded worker count from database: {workers}")
             return workers
         logger.info("No worker count found in database, using env var or default")
-        return get_int_env("NUM_WORKERS", DEFAULT_WORKERS)
+        return env_int("NUM_WORKERS", DEFAULT_WORKERS)
 
     except Exception as e:
         logger.warning(f"Failed to fetch worker count from database: {e}")
         logger.info("Falling back to env var or default")
-        return get_int_env("NUM_WORKERS", DEFAULT_WORKERS)
+        return env_int("NUM_WORKERS", DEFAULT_WORKERS)
 
 
 # Conservative default: 2 workers (stable on any system)
 # Previous default used auto-scaling which could cause OOM on memory-constrained systems
 DEFAULT_WORKERS = 2
-NUM_WORKERS = get_int_env("NUM_WORKERS", DEFAULT_WORKERS)
+NUM_WORKERS = env_int("NUM_WORKERS", DEFAULT_WORKERS)
 ESSENTIA_VERSION = "2.1b6-enhanced-v3"
 
 # Retry configuration
-MAX_RETRIES = get_int_env("MAX_RETRIES", 3)  # Max retry attempts per track
-STALE_PROCESSING_MINUTES = get_int_env(
+MAX_RETRIES = env_int("MAX_RETRIES", 3)  # Max retry attempts per track
+STALE_PROCESSING_MINUTES = env_int(
     "STALE_PROCESSING_MINUTES", 15
 )  # Reset tracks stuck in 'processing' (synchronized with backend)
 
@@ -602,7 +602,7 @@ class AudioAnalyzer:
             result["_error"] = "Essentia library not installed"
             return result
 
-        MAX_ANALYZE_SECONDS = get_int_env("MAX_ANALYZE_SECONDS", 90)
+        MAX_ANALYZE_SECONDS = env_int("MAX_ANALYZE_SECONDS", 90)
         audio_44k = None
         try:
             audio_44k = self.load_audio(file_path, max_duration=MAX_ANALYZE_SECONDS)
