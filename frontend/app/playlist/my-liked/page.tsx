@@ -280,7 +280,7 @@ export default function MyLikedPlaylistPage() {
         onSettled: () => {
             setRemovingTrackId(null);
             queryClient.invalidateQueries({
-                queryKey: ["library", "liked-playlist"],
+                queryKey: queryKeys.likedPlaylistAll(),
             });
         },
     });

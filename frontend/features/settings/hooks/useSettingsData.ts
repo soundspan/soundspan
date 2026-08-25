@@ -6,6 +6,7 @@ import { createFrontendLogger } from "@/lib/logger";
 import { emitUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import { UserSettings } from "../types";
 import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
+import { queryKeys } from "@/lib/queryKeys";
 
 const logger = createFrontendLogger("Settings.useSettingsData");
 
@@ -110,7 +111,9 @@ export function useSettingsData() {
             await api.updateSettings(newSettings);
             setSettings(newSettings);
             // Invalidate shared settings query so other consumers (e.g. Explore page) pick up changes immediately
-            queryClient.invalidateQueries({ queryKey: ["user-settings"] });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.userSettings(),
+            });
             // Long-lived surfaces outside the query cache (the audio
             // player's volume leveling) refresh through this event.
             emitUserSettingsUpdated();

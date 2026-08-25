@@ -9,6 +9,7 @@ import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceO
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { queryKeys } from "@/lib/queryKeys";
 
 /**
  * Executes useArtistActions.
@@ -214,7 +215,7 @@ export function useArtistActions() {
                     }
 
                     queryClient.invalidateQueries({
-                        queryKey: ["library", "liked-playlist"],
+                        queryKey: queryKeys.likedPlaylistAll(),
                     });
                     toast.success(`Liked ${allTracks.length} tracks`);
                 } catch (error) {
@@ -228,13 +229,13 @@ export function useArtistActions() {
                             );
                         } else {
                             queryClient.removeQueries({
-                                queryKey: ["track-preference", track.id],
+                                queryKey: queryKeys.trackPreference(track.id),
                             });
                         }
                     }
                     for (const track of allTracks) {
                         queryClient.invalidateQueries({
-                            queryKey: ["track-preference", track.id],
+                            queryKey: queryKeys.trackPreference(track.id),
                         });
                     }
                     throw error;

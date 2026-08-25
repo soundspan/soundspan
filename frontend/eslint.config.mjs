@@ -44,6 +44,23 @@ const eslintConfig = defineConfig([
         },
     },
     {
+        // React Query cache keys must come from the lib/queryKeys factory:
+        // hand-written literals only match the factory's shapes by accident,
+        // and a factory change silently orphans them (stale UI, no error).
+        files: ["app/**", "components/**", "features/**", "hooks/**", "lib/**"],
+        ignores: ["lib/queryKeys.ts"],
+        rules: {
+            "no-restricted-syntax": [
+                "error",
+                {
+                    selector: "Property[key.name='queryKey'] > ArrayExpression",
+                    message:
+                        "Use the queryKeys factory from lib/queryKeys.ts instead of a hand-written key literal (GH #786).",
+                },
+            ],
+        },
+    },
+    {
         files: ["components/player/hooks/**/*.{ts,tsx}"],
         rules: {
             "no-restricted-imports": [

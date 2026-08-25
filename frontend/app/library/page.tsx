@@ -26,6 +26,7 @@ import { useListenTogether } from "@/lib/listen-together-context";
 import { useAuth } from "@/lib/auth-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useFeatures } from "@/lib/features-context";
+import { queryKeys } from "@/lib/queryKeys";
 
 /**
  * Renders the LibraryPage component.
@@ -194,15 +195,15 @@ export default function LibraryPage() {
     const reloadData = useCallback(async () => {
         if (activeTab === "artists") {
             await queryClient.invalidateQueries({
-                queryKey: ["library", "artists"],
+                queryKey: queryKeys.libraryArtistsAll(),
             });
         } else if (activeTab === "albums") {
             await queryClient.invalidateQueries({
-                queryKey: ["library", "albums"],
+                queryKey: queryKeys.libraryAlbumsAll(),
             });
         } else {
             await queryClient.invalidateQueries({
-                queryKey: ["library", "tracks"],
+                queryKey: queryKeys.libraryTracksAll(),
             });
         }
     }, [activeTab, queryClient]);

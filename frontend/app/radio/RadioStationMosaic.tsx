@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
 import { Music } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Track } from "@/lib/audio-state-context";
@@ -44,14 +45,12 @@ export function RadioStationMosaic({
     const dailySeed = new Date().toISOString().slice(0, 10);
 
     const { data: tiles, isLoading } = useQuery({
-        queryKey: [
-            "radio",
-            "mosaic",
+        queryKey: queryKeys.radioMosaic(
             filter.type,
             filter.value ?? "",
             tileCount,
             dailySeed,
-        ],
+        ),
         queryFn: async () => {
             try {
                 const response = await api.getRadioTracks(

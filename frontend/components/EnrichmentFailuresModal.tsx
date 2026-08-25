@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { enrichmentApi } from "@/lib/enrichmentApi";
 import { createFrontendLogger } from "@/lib/logger";
 import { X, RefreshCw, SkipForward, Trash2, AlertCircle } from "lucide-react";
+import { queryKeys } from "@/lib/queryKeys";
 
 const logger = createFrontendLogger("EnrichmentFailuresModal");
 
@@ -146,10 +147,10 @@ export function EnrichmentFailuresModal({
 
     const invalidateFailureQueries = () => {
         queryClient.invalidateQueries({
-            queryKey: ["enrichment-failures"],
+            queryKey: queryKeys.enrichmentFailuresAll(),
         });
         queryClient.invalidateQueries({
-            queryKey: ["enrichment-failure-counts"],
+            queryKey: queryKeys.enrichmentFailureCounts(),
         });
     };
 
@@ -167,7 +168,7 @@ export function EnrichmentFailuresModal({
 
     // Fetch failures
     const { data: failures, isLoading } = useQuery({
-        queryKey: ["enrichment-failures", selectedType, currentPage],
+        queryKey: queryKeys.enrichmentFailures(selectedType, currentPage),
         queryFn: async () => {
             const params: Record<string, string | number | boolean> = {
                 limit: pageSize,
@@ -184,7 +185,7 @@ export function EnrichmentFailuresModal({
 
     // Fetch counts
     const { data: counts } = useQuery({
-        queryKey: ["enrichment-failure-counts"],
+        queryKey: queryKeys.enrichmentFailureCounts(),
         queryFn: () => enrichmentApi.getFailureCounts(),
         enabled: isOpen,
     });
@@ -195,13 +196,13 @@ export function EnrichmentFailuresModal({
             enrichmentApi.retryFailures(failureIds),
         onSuccess: () => {
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failures"],
+                queryKey: queryKeys.enrichmentFailuresAll(),
             });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failure-counts"],
+                queryKey: queryKeys.enrichmentFailureCounts(),
             });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-progress"],
+                queryKey: queryKeys.enrichmentProgress(),
             });
             setSelectedFailures(new Set());
         },
@@ -213,10 +214,10 @@ export function EnrichmentFailuresModal({
             enrichmentApi.skipFailures(failureIds),
         onSuccess: () => {
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failures"],
+                queryKey: queryKeys.enrichmentFailuresAll(),
             });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failure-counts"],
+                queryKey: queryKeys.enrichmentFailureCounts(),
             });
             setSelectedFailures(new Set());
         },
@@ -228,10 +229,10 @@ export function EnrichmentFailuresModal({
             enrichmentApi.deleteFailure(failureId),
         onSuccess: () => {
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failures"],
+                queryKey: queryKeys.enrichmentFailuresAll(),
             });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failure-counts"],
+                queryKey: queryKeys.enrichmentFailureCounts(),
             });
         },
     });
@@ -242,10 +243,10 @@ export function EnrichmentFailuresModal({
             enrichmentApi.clearAllFailures(entityType),
         onSuccess: () => {
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failures"],
+                queryKey: queryKeys.enrichmentFailuresAll(),
             });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-failure-counts"],
+                queryKey: queryKeys.enrichmentFailureCounts(),
             });
             setSelectedFailures(new Set());
         },
@@ -259,7 +260,7 @@ export function EnrichmentFailuresModal({
         onSuccess: async () => {
             invalidateFailureQueries();
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-progress"],
+                queryKey: queryKeys.enrichmentProgress(),
             });
             setSelectedFailures(new Set());
             try {

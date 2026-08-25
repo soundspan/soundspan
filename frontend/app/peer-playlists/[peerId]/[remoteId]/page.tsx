@@ -15,6 +15,7 @@ import {
     useFollowedPeerPlaylists,
     usePeerPlaylist,
 } from "@/features/social/hooks/usePeerPlaylists";
+import { queryKeys } from "@/lib/queryKeys";
 
 /** Maps a resolved peer playlist row onto the audio-context track shape. */
 function peerRowToAudioTrack(row: PeerPlaylistTrack): AudioTrack | null {
@@ -91,7 +92,9 @@ export default function PeerPlaylistDetailPage() {
     const isFollowed = followState === "followed";
 
     const invalidate = () =>
-        queryClient.invalidateQueries({ queryKey: ["peer-playlists"] });
+        queryClient.invalidateQueries({
+            queryKey: queryKeys.peerPlaylistsAll(),
+        });
 
     const run = async (action: () => Promise<void>) => {
         setBusy(true);

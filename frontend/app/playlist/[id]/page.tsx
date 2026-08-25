@@ -81,6 +81,7 @@ import type { LikeableTrack } from "@/hooks/useCollectionLikeAll";
 import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 import { RadioPlaylistActions } from "./RadioPlaylistActions";
 import { formatPlaylistDuration } from "./playlistDuration";
+import { queryKeys } from "@/lib/queryKeys";
 
 type PlaylistItem = PlaylistDetailTrackItem;
 type PendingTrack = PlaylistPendingTrackItem;
@@ -190,7 +191,7 @@ export default function PlaylistDetailPage() {
                 // Refresh playlist data after a delay to allow download + scan to complete
                 setTimeout(() => {
                     queryClient.invalidateQueries({
-                        queryKey: ["playlist", playlistId],
+                        queryKey: queryKeys.playlist(playlistId),
                     });
                 }, 10000); // 10 seconds for download + scan
             } else {
@@ -211,7 +212,7 @@ export default function PlaylistDetailPage() {
             await api.removePendingTrack(playlistId, pendingId);
             // Refresh playlist data
             queryClient.invalidateQueries({
-                queryKey: ["playlist", playlistId],
+                queryKey: queryKeys.playlist(playlistId),
             });
         } catch (error) {
             sharedFrontendLogger.error(
@@ -465,7 +466,7 @@ export default function PlaylistDetailPage() {
                     ),
             );
             queryClient.invalidateQueries({
-                queryKey: ["playlist", playlistId],
+                queryKey: queryKeys.playlist(playlistId),
             });
         } catch (error) {
             sharedFrontendLogger.error("Failed to remove track:", error);
@@ -491,14 +492,14 @@ export default function PlaylistDetailPage() {
                 moved.items.map((entry) => entry.id),
             );
             queryClient.invalidateQueries({
-                queryKey: ["playlist", playlistId],
+                queryKey: queryKeys.playlist(playlistId),
             });
         } catch (error) {
             sharedFrontendLogger.error("Failed to reorder playlist:", error);
             toast.error("Failed to reorder playlist");
             // Restore the server's order.
             queryClient.invalidateQueries({
-                queryKey: ["playlist", playlistId],
+                queryKey: queryKeys.playlist(playlistId),
             });
         }
     };

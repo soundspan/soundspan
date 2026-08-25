@@ -11,6 +11,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useUserSettingsExplorePrefs } from "./useUserSettingsExplorePrefs";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface TidalExploreState {
     /** True only when TIDAL is enabled, available, and authenticated. */
@@ -46,7 +47,7 @@ export function useTidalExploreEnabled(): TidalExploreState {
         authenticated: boolean;
         credentialsConfigured: boolean;
     }>({
-        queryKey: ["tidal-streaming-status"],
+        queryKey: queryKeys.tidalStreamingStatus(),
         queryFn: () => api.getTidalStreamingStatus(),
         staleTime: 5 * 60 * 1000,
     });

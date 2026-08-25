@@ -46,7 +46,7 @@ export function dispatchQueryEvent(
  *
  * @example
  * const unsubscribe = subscribeQueryEvent("audiobook-progress-updated", () => {
- *     queryClient.refetchQueries({ queryKey: ["audiobook", id] });
+ *     queryClient.refetchQueries({ queryKey: queryKeys.audiobook(id) });
  * });
  * // Later: unsubscribe();
  */

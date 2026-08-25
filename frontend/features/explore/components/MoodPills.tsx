@@ -18,6 +18,7 @@ import type { Track } from "@/lib/audio-state-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { queryKeys } from "@/lib/queryKeys";
 
 const MOOD_PILLS: {
     mood: MoodType;
@@ -126,7 +127,9 @@ export function MoodPills() {
                 toast.success(`${label} Mix`, {
                     description: `Playing ${tracks.length} tracks`,
                 });
-                await queryClient.refetchQueries({ queryKey: ["mixes"] });
+                await queryClient.refetchQueries({
+                    queryKey: queryKeys.mixes(),
+                });
                 window.dispatchEvent(new CustomEvent("mix-generated"));
                 window.dispatchEvent(new CustomEvent("mixes-updated"));
             } else {

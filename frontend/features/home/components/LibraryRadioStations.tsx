@@ -18,6 +18,7 @@ import {
     GenreCount,
     selectFeaturedRadioGenres,
 } from "./libraryRadioStationsGenreSelection";
+import { queryKeys } from "@/lib/queryKeys";
 
 /**
  * A renderable radio station card plus the playlist filter used to generate
@@ -138,13 +139,13 @@ const getGenreColor = (genre: string): string => {
  */
 export function useLibraryRadioData(skip = false) {
     const genresQuery = useQuery({
-        queryKey: ["library", "genres"],
+        queryKey: queryKeys.libraryGenres(),
         queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
         enabled: !skip,
         select: (data) => selectFeaturedRadioGenres(data.genres || []),
     });
     const decadesQuery = useQuery({
-        queryKey: ["library", "decades"],
+        queryKey: queryKeys.libraryDecades(),
         queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
         enabled: !skip,
         select: (data) =>

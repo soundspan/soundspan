@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { EnrichmentFailuresModal } from "@/components/EnrichmentFailuresModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { queryKeys } from "@/lib/queryKeys";
 
 const logger = createFrontendLogger("Settings.CacheSection");
 
@@ -241,7 +242,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         isPending: isProgressPending,
         isError: isProgressError,
     } = useQuery({
-        queryKey: ["enrichment-progress"],
+        queryKey: queryKeys.enrichmentProgress(),
         queryFn: () => api.getEnrichmentProgress(),
         refetchInterval: 5000,
         staleTime: 2000,
@@ -252,7 +253,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
     // Fetch enrichment state
     const { data: enrichmentState } = useQuery({
-        queryKey: ["enrichment-status"],
+        queryKey: queryKeys.enrichmentStatus(),
         queryFn: () => enrichmentApi.getStatus(),
         refetchInterval: 3000,
         staleTime: 1000,
@@ -260,7 +261,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
     // Fetch failure counts
     const { data: failureCounts } = useQuery({
-        queryKey: ["enrichment-failure-counts"],
+        queryKey: queryKeys.enrichmentFailureCounts(),
         queryFn: () => enrichmentApi.getFailureCounts(),
         refetchInterval: 10000,
     });
@@ -268,14 +269,14 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     // Fetch concurrency config
     const { data: concurrencyConfig, isLoading: isConcurrencyLoading } =
         useQuery({
-            queryKey: ["enrichment-concurrency"],
+            queryKey: queryKeys.enrichmentConcurrency(),
             queryFn: () => enrichmentApi.getConcurrency(),
             staleTime: 0,
         });
 
     // Fetch audio analyzer workers config
     const { data: workersConfig, isLoading: isWorkersLoading } = useQuery({
-        queryKey: ["analysis-workers"],
+        queryKey: queryKeys.analysisWorkers(),
         queryFn: () => enrichmentApi.getAnalysisWorkers(),
         staleTime: 0,
     });
@@ -291,7 +292,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         onMutate: async (newConcurrency) => {
             // Cancel outgoing refetches
             await queryClient.cancelQueries({
-                queryKey: ["enrichment-concurrency"],
+                queryKey: queryKeys.enrichmentConcurrency(),
             });
 
             // Snapshot previous value
@@ -324,7 +325,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             enrichmentApi.setAnalysisWorkers(workers),
         onMutate: async (newWorkers) => {
             await queryClient.cancelQueries({
-                queryKey: ["analysis-workers"],
+                queryKey: queryKeys.analysisWorkers(),
             });
 
             const previousWorkers = queryClient.getQueryData([
@@ -385,9 +386,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     }, [syncing, refetchProgress]);
 
     const refreshNotifications = () => {
-        queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        queryClient.invalidateQueries({ queryKey: queryKeys.notifications() });
         queryClient.invalidateQueries({
-            queryKey: ["unread-notification-count"],
+            queryKey: queryKeys.unreadNotificationCount(),
         });
         window.dispatchEvent(new CustomEvent("notifications-changed"));
     };
@@ -446,7 +447,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             });
             refreshNotifications();
             queryClient.invalidateQueries({
-                queryKey: ["mixes"],
+                queryKey: queryKeys.mixes(),
             });
         } catch (err) {
             logger.error("Failed to backfill mood buckets", { error: err });
@@ -564,7 +565,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const handlePause = async () => {
         try {
             await enrichmentApi.pause();
-            queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.enrichmentStatus(),
+            });
         } catch (err) {
             logger.error("Failed to pause enrichment", { error: err });
             setError("Failed to pause enrichment");
@@ -574,7 +577,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const handleResume = async () => {
         try {
             await enrichmentApi.resume();
-            queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.enrichmentStatus(),
+            });
         } catch (err) {
             logger.error("Failed to resume enrichment", { error: err });
             setError("Failed to resume enrichment");
@@ -584,9 +589,11 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const handleStop = async () => {
         try {
             await enrichmentApi.stop();
-            queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-progress"],
+                queryKey: queryKeys.enrichmentStatus(),
+            });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.enrichmentProgress(),
             });
         } catch (err) {
             logger.error("Failed to stop enrichment", { error: err });

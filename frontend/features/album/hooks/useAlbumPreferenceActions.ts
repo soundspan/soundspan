@@ -5,6 +5,7 @@ import type { TrackPreferenceResponse, TrackPreferenceSignal } from "@/lib/api";
 import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceOptimistic";
 import { toast } from "sonner";
 import type { Album } from "../types";
+import { queryKeys } from "@/lib/queryKeys";
 
 function albumTrackIds(album: Album): string[] {
     return Array.from(
@@ -55,7 +56,7 @@ export function useAlbumPreferenceActions() {
                 ),
             );
             await queryClient.invalidateQueries({
-                queryKey: ["library", "liked-playlist"],
+                queryKey: queryKeys.likedPlaylistAll(),
             });
             toast.success(preferenceSuccessMessage(signal, trackIds.length));
         } catch {
@@ -76,7 +77,7 @@ export function useAlbumLikedState(album: Album | null) {
     );
     const preferenceQueries = useQueries({
         queries: trackIds.map((trackId) => ({
-            queryKey: ["track-preference", trackId] as const,
+            queryKey: queryKeys.trackPreference(trackId),
             queryFn: () => api.getTrackPreference(trackId),
             staleTime: 120_000,
             enabled: trackIds.length > 0,

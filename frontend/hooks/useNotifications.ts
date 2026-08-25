@@ -14,6 +14,7 @@ import {
     useDocumentVisible,
     useRefetchOnVisible,
 } from "@/hooks/useDocumentVisibility";
+import { queryKeys } from "@/lib/queryKeys";
 
 const logger = createFrontendLogger("Hooks.useNotifications");
 const NOTIFICATIONS_POLL_INTERVAL_MS = 30_000;
@@ -95,7 +96,7 @@ export function useNotifications(
         error,
         refetch,
     } = useQuery<Notification[]>({
-        queryKey: ["notifications"],
+        queryKey: queryKeys.notifications(),
         queryFn: () => api.get<Notification[]>("/notifications"),
         enabled,
         staleTime: 15_000,
@@ -118,7 +119,9 @@ export function useNotifications(
     const markAsReadMutation = useMutation({
         mutationFn: (id: string) => api.post(`/notifications/${id}/read`),
         onMutate: async (id: string) => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
+            await queryClient.cancelQueries({
+                queryKey: queryKeys.notifications(),
+            });
             const previous = queryClient.getQueryData<Notification[]>([
                 "notifications",
             ]);
@@ -143,7 +146,9 @@ export function useNotifications(
     const markAllAsReadMutation = useMutation({
         mutationFn: () => api.post("/notifications/read-all"),
         onMutate: async () => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
+            await queryClient.cancelQueries({
+                queryKey: queryKeys.notifications(),
+            });
             const previous = queryClient.getQueryData<Notification[]>([
                 "notifications",
             ]);
@@ -166,7 +171,9 @@ export function useNotifications(
     const clearMutation = useMutation({
         mutationFn: (id: string) => api.post(`/notifications/${id}/clear`),
         onMutate: async (id: string) => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
+            await queryClient.cancelQueries({
+                queryKey: queryKeys.notifications(),
+            });
             const previous = queryClient.getQueryData<Notification[]>([
                 "notifications",
             ]);
@@ -189,7 +196,9 @@ export function useNotifications(
     const clearAllMutation = useMutation({
         mutationFn: () => api.post("/notifications/clear-all"),
         onMutate: async () => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
+            await queryClient.cancelQueries({
+                queryKey: queryKeys.notifications(),
+            });
             const previous = queryClient.getQueryData<Notification[]>([
                 "notifications",
             ]);
@@ -235,7 +244,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
         error,
         refetch,
     } = useQuery<DownloadHistoryItem[]>({
-        queryKey: ["download-history"],
+        queryKey: queryKeys.downloadHistory(),
         queryFn: fetchHistory,
         staleTime: 15_000,
         refetchOnWindowFocus: false,
@@ -324,7 +333,7 @@ export function useActiveDownloads(
         error,
         refetch,
     } = useQuery<DownloadHistoryItem[]>({
-        queryKey: ["active-downloads"],
+        queryKey: queryKeys.activeDownloads(),
         queryFn: fetchDownloads,
         enabled,
         staleTime: 8_000,

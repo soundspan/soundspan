@@ -58,6 +58,7 @@ import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import type { Track } from "@/lib/audio-state-context";
+import { queryKeys } from "@/lib/queryKeys";
 
 const OVERLAY_ACTIVE_TAB_KEY = OVERLAY_ACTIVE_TAB_STORAGE_KEY;
 
@@ -295,7 +296,7 @@ export function OverlayPlayer() {
         isLoading: isRelatedTracksLoading,
         isError: isRelatedTracksError,
     } = useQuery({
-        queryKey: ["player-related-tracks", currentTrack?.id],
+        queryKey: queryKeys.playerRelatedTracks(currentTrack?.id),
         queryFn: async () => {
             if (!currentTrack?.id) return [];
             const response = await api.getSimilarTracks(
@@ -320,11 +321,10 @@ export function OverlayPlayer() {
         isLoading: isRelatedArtistsLoading,
         isError: isRelatedArtistsError,
     } = useQuery({
-        queryKey: [
-            "player-related-artists",
+        queryKey: queryKeys.playerRelatedArtists(
             currentTrack?.artist?.name,
             currentTrack?.artist?.mbid,
-        ],
+        ),
         queryFn: async () => {
             if (!currentTrack?.artist?.name) return [];
             const response = await api.discoverSimilarArtists(
@@ -348,7 +348,7 @@ export function OverlayPlayer() {
         isLoading: isMoreFromArtistLoading,
         isError: isMoreFromArtistError,
     } = useQuery({
-        queryKey: ["player-related-albums", currentTrack?.artist?.id],
+        queryKey: queryKeys.playerRelatedAlbums(currentTrack?.artist?.id),
         queryFn: async () => {
             if (!currentTrack?.artist?.id) return [];
             const response = await api.getAlbums({
@@ -2474,10 +2474,9 @@ export function OverlayPlayer() {
                                                                     queryClient.invalidateQueries(
                                                                         {
                                                                             queryKey:
-                                                                                [
-                                                                                    "player-related-tracks",
+                                                                                queryKeys.playerRelatedTracks(
                                                                                     currentTrack?.id,
-                                                                                ],
+                                                                                ),
                                                                         },
                                                                     )
                                                                 }
@@ -2653,15 +2652,14 @@ export function OverlayPlayer() {
                                                                     queryClient.invalidateQueries(
                                                                         {
                                                                             queryKey:
-                                                                                [
-                                                                                    "player-related-artists",
+                                                                                queryKeys.playerRelatedArtists(
                                                                                     currentTrack
                                                                                         ?.artist
                                                                                         ?.name,
                                                                                     currentTrack
                                                                                         ?.artist
                                                                                         ?.mbid,
-                                                                                ],
+                                                                                ),
                                                                         },
                                                                     )
                                                                 }
@@ -2770,12 +2768,11 @@ export function OverlayPlayer() {
                                                                     queryClient.invalidateQueries(
                                                                         {
                                                                             queryKey:
-                                                                                [
-                                                                                    "player-related-albums",
+                                                                                queryKeys.playerRelatedAlbums(
                                                                                     currentTrack
                                                                                         ?.artist
                                                                                         ?.id,
-                                                                                ],
+                                                                                ),
                                                                         },
                                                                     )
                                                                 }

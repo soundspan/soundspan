@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type RadioPlaylistFilter } from "@/lib/api";
 import type { RadioStationCardStation } from "@/components/ui/RadioStationCard";
 import { isGeneratedPlaylistDecade } from "@/lib/radio/openRadioStation";
+import { queryKeys } from "@/lib/queryKeys";
 
 /**
  * Station shape used by the /radio page: the card's loose filter union is
@@ -140,14 +141,14 @@ const STATION_DATA_STALE_TIME_MS = 5 * 60 * 1000;
 /** Fetches library genre/decade counts and derives /radio station lists. */
 export function useRadioPageStations() {
     const { data: genreStations, isLoading: genresLoading } = useQuery({
-        queryKey: ["library", "genres"],
+        queryKey: queryKeys.libraryGenres(),
         queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
         staleTime: STATION_DATA_STALE_TIME_MS,
         select: (data) => buildGenreStations(data.genres || []),
     });
 
     const { data: decadeStations, isLoading: decadesLoading } = useQuery({
-        queryKey: ["library", "decades"],
+        queryKey: queryKeys.libraryDecades(),
         queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
         staleTime: STATION_DATA_STALE_TIME_MS,
         select: (data) => buildDecadeStations(data.decades || []),

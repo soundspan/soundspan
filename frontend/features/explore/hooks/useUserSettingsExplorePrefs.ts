@@ -6,6 +6,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface ExplorePrefs {
     showYtMusicExplore: boolean;
@@ -24,7 +25,7 @@ export function useUserSettingsExplorePrefs(): ExplorePrefs {
         showYtMusicExplore?: boolean;
         showTidalExplore?: boolean;
     }>({
-        queryKey: ["user-settings"],
+        queryKey: queryKeys.userSettings(),
         queryFn: () => api.getSettings(),
         staleTime: 5 * 60 * 1000,
     });

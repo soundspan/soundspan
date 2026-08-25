@@ -15,6 +15,7 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useFeatures } from "@/lib/features-context";
 import { PeerBadge } from "@/components/ui/PeerBadge";
 import type { PeerPodcastListing } from "@/lib/api/podcasts";
+import { queryKeys } from "@/lib/queryKeys";
 
 // Always proxy images through the backend for caching and mobile compatibility
 const getProxiedImageUrl = (imageUrl: string | undefined): string | null => {
@@ -60,7 +61,7 @@ export default function PodcastsPage() {
     // Fetch genre-based discovery podcasts
     const { data: relatedPodcasts = {}, isLoading: isLoadingRelatedPodcasts } =
         useQuery({
-            queryKey: ["podcasts", "discovery", "genres"],
+            queryKey: queryKeys.podcastDiscoveryGenres(),
             queryFn: async () => {
                 const genreIds = [1303, 1324, 1489, 1488, 1321, 1545, 1502];
                 return api.getPodcastsByGenre(genreIds);
@@ -704,7 +705,7 @@ function PeerPodcastsSection() {
     const [subscribingId, setSubscribingId] = useState<string | null>(null);
     const enabled = federation && isAuthenticated;
     const { data: listings = [], refetch } = useQuery({
-        queryKey: ["podcasts", "peers"],
+        queryKey: queryKeys.podcastPeers(),
         queryFn: () => api.getPeerPodcasts(),
         staleTime: 5 * 60 * 1000,
         enabled,

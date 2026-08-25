@@ -5,6 +5,7 @@ import type { TrackPreferenceResponse } from "@/lib/api";
 import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceOptimistic";
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface LikeableTrack {
     id: string;
@@ -57,7 +58,7 @@ export function useCollectionLikeAll(tracks: LikeableTrack[]) {
 
     const prefQueries = useQueries({
         queries: trackIds.map((trackId) => ({
-            queryKey: ["track-preference", trackId] as const,
+            queryKey: queryKeys.trackPreference(trackId),
             queryFn: () => api.getTrackPreference(trackId),
             staleTime: 120_000,
             enabled: trackIds.length > 0,
@@ -117,7 +118,7 @@ export function useCollectionLikeAll(tracks: LikeableTrack[]) {
             });
 
             queryClient.invalidateQueries({
-                queryKey: ["library", "liked-playlist"],
+                queryKey: queryKeys.likedPlaylistAll(),
             });
 
             if (nextSignal === "thumbs_up") {
@@ -146,13 +147,13 @@ export function useCollectionLikeAll(tracks: LikeableTrack[]) {
                     );
                 } else {
                     queryClient.removeQueries({
-                        queryKey: ["track-preference", trackId],
+                        queryKey: queryKeys.trackPreference(trackId),
                     });
                 }
             }
             for (const trackId of trackIds) {
                 queryClient.invalidateQueries({
-                    queryKey: ["track-preference", trackId],
+                    queryKey: queryKeys.trackPreference(trackId),
                 });
             }
         } finally {

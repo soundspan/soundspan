@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { CreateMusicRequestInput, MusicRequest } from "@/lib/api/requests";
 import { useAuth } from "@/lib/auth-context";
 import { isOpenRequestStatus } from "@/lib/musicRequests";
+import { queryKeys } from "@/lib/queryKeys";
 
 export const musicRequestKeys = {
     availability: ["music-requests", "availability"] as const,
@@ -74,7 +75,7 @@ export function useMusicRequestsAdmin(status: string, enabled: boolean) {
 function useInvalidateRequests() {
     const queryClient = useQueryClient();
     return () =>
-        queryClient.invalidateQueries({ queryKey: ["music-requests"] });
+        queryClient.invalidateQueries({ queryKey: queryKeys.musicRequests() });
 }
 
 /** Submit a new album request; invalidates every request-scoped query. */

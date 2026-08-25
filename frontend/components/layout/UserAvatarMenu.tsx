@@ -11,6 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { queryKeys } from "@/lib/queryKeys";
 
 /**
  * Renders the UserAvatarMenu component.
@@ -28,9 +29,11 @@ export function UserAvatarMenu() {
 
     const { isPolling: isScanPolling } = useJobStatus(scanJobId, "scan", {
         onComplete: () => {
-            queryClient.invalidateQueries({ queryKey: ["notifications"] });
             queryClient.invalidateQueries({
-                queryKey: ["enrichment-progress"],
+                queryKey: queryKeys.notifications(),
+            });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.enrichmentProgress(),
             });
             setScanJobId(null);
         },
@@ -88,7 +91,9 @@ export function UserAvatarMenu() {
             setLastScanTime(now);
             const response = await api.scanLibrary();
             setScanJobId(response.jobId);
-            queryClient.invalidateQueries({ queryKey: ["notifications"] });
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.notifications(),
+            });
         } catch (error) {
             sharedFrontendLogger.error(
                 "Failed to trigger library scan:",

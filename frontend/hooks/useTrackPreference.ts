@@ -12,6 +12,7 @@ import {
     applyOptimisticTrackPreferenceMutation,
     type TrackPreferenceOptimisticQueryClient,
 } from "@/hooks/trackPreferenceOptimistic";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface TrackPreferenceMetadata {
     title?: string;
@@ -101,7 +102,7 @@ export function useTrackPreference(
                 (["track-preference", data.trackId] as const);
             queryClient.setQueryData(canonicalQueryKey, data);
             queryClient.invalidateQueries({
-                queryKey: ["library", "liked-playlist"],
+                queryKey: queryKeys.likedPlaylistAll(),
             });
         },
         onError: (_error, _signal, context) => {

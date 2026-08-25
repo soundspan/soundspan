@@ -6,6 +6,7 @@ import { ListPlus, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useToast } from "@/lib/toast-context";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RadioPlaylistActionsProps {
     enabled: boolean;
@@ -21,7 +22,7 @@ function useRadioPlaylistActions(playlistId: string) {
 
     const refresh = async () => {
         await queryClient.invalidateQueries({
-            queryKey: ["playlist", playlistId],
+            queryKey: queryKeys.playlist(playlistId),
         });
         window.dispatchEvent(
             new CustomEvent("playlist-updated", { detail: { playlistId } }),
