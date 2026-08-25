@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SearchIcon } from "lucide-react";
 import { useSearchData } from "@/features/search/hooks/useSearchData";
+import { dedupeDiscoverTracks } from "@/features/search/songDedup";
 import { useSoulseekSearch } from "@/features/search/hooks/useSoulseekSearch";
 import { useYouTubeUrl } from "@/features/search/hooks/useYouTubeUrl";
 import { YouTubePreviewCard } from "@/features/search/components/YouTubePreviewCard";
@@ -166,10 +167,18 @@ export default function SearchPage() {
     const libraryPodcasts = libraryResults?.podcasts ?? [];
     const hasPodcastResults =
         libraryPodcasts.length > 0 || discoverPodcastResults.length > 0;
+    // One Songs section: external matches continue the owned list, minus
+    // songs the library results already cover.
+    const unownedDiscoverTracks = showDiscover
+        ? dedupeDiscoverTracks(discoverTracks, libraryTracks)
+        : [];
 
     // Determine if we should show the 2-column layout
     const hasTopResult = visibleLibraryTopArtist || topArtist;
-    const hasTracks = libraryTracks.length > 0 || soulseekResults.length > 0;
+    const hasTracks =
+        libraryTracks.length > 0 ||
+        soulseekResults.length > 0 ||
+        unownedDiscoverTracks.length > 0;
     const show2ColumnLayout =
         hasSearched &&
         hasTopResult &&
@@ -364,7 +373,7 @@ export default function SearchPage() {
                                         href={sectionViewLinks.tracks}
                                         className="hover:underline"
                                     >
-                                        Songs in Your Library
+                                        Songs
                                     </Link>
                                 )}
                             </h2>
@@ -390,12 +399,23 @@ export default function SearchPage() {
                                         </div>
                                     ))}
                                 </div>
-                            ) : showLibrary && libraryTracks.length > 0 ? (
-                                <LibraryTracksList
-                                    tracks={libraryTracks}
-                                    limit={isTracksView ? null : 10}
-                                />
-                            ) : null}
+                            ) : (
+                                <>
+                                    {showLibrary &&
+                                        libraryTracks.length > 0 && (
+                                            <LibraryTracksList
+                                                tracks={libraryTracks}
+                                                limit={isTracksView ? null : 10}
+                                            />
+                                        )}
+                                    {unownedDiscoverTracks.length > 0 && (
+                                        <DiscoverTracksList
+                                            tracks={unownedDiscoverTracks}
+                                            limit={5}
+                                        />
+                                    )}
+                                </>
+                            )}
                         </div>
                     </div>
                 ) : (
@@ -472,25 +492,34 @@ export default function SearchPage() {
                                 </section>
                             )}
 
-                        {/* Library Songs */}
+                        {/* Songs — owned results with unowned continuation */}
                         {hasSearched &&
-                            showLibrary &&
                             !isPodcastTab &&
                             (sectionView === null || isTracksView) &&
-                            libraryTracks.length > 0 && (
+                            ((showLibrary && libraryTracks.length > 0) ||
+                                unownedDiscoverTracks.length > 0) && (
                                 <section>
                                     <h2 className="text-2xl font-bold text-white mb-6">
                                         <Link
                                             href={sectionViewLinks.tracks}
                                             className="hover:underline"
                                         >
-                                            Songs in Your Library
+                                            Songs
                                         </Link>
                                     </h2>
-                                    <LibraryTracksList
-                                        tracks={libraryTracks}
-                                        limit={isTracksView ? null : 10}
-                                    />
+                                    {showLibrary &&
+                                        libraryTracks.length > 0 && (
+                                            <LibraryTracksList
+                                                tracks={libraryTracks}
+                                                limit={isTracksView ? null : 10}
+                                            />
+                                        )}
+                                    {unownedDiscoverTracks.length > 0 && (
+                                        <DiscoverTracksList
+                                            tracks={unownedDiscoverTracks}
+                                            limit={isTracksView ? null : 5}
+                                        />
+                                    )}
                                 </section>
                             )}
                     </>
@@ -579,19 +608,9 @@ export default function SearchPage() {
                         />
                     )}
 
-                {/* Songs to Discover — external track matches */}
-                {hasSearched &&
-                    showDiscover &&
-                    !isPodcastTab &&
-                    !isSectionView &&
-                    discoverTracks.length > 0 && (
-                        <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Songs to Discover
-                            </h2>
-                            <DiscoverTracksList tracks={discoverTracks} />
-                        </section>
-                    )}
+                {/* Songs to Discover merged into the unified Songs section
+                    above; external rows continue the owned list with badges
+                    instead of living four sections away. */}
 
                 {/* Related Artists */}
                 {hasSearched &&

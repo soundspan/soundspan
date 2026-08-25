@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Search now shows one Songs section: songs you own and songs you don't sit together (external matches carry provider badges and skip anything already in your library) instead of being split across distant "Songs in Your Library" and "Songs to Discover" sections (#756).
+
 - Songs now have shareable links: "Copy link to song" in a track's menu copies a link that opens the album with that song highlighted and starts playing it (browsers may require a tap first on brand-new devices) (#756).
 - Songs in search results now have the full row menu and like/dislike buttons, and external "Songs to Discover" play right from the results when a streaming provider match exists (with TIDAL/YouTube badges) instead of only linking to the artist page (#756).
 
