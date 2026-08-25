@@ -11,6 +11,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -100,6 +106,7 @@ jest.mock("../../utils/db", () => ({
 jest.mock("../../config", () => ({
     config: {
         fanart: { apiKey: undefined },
+        lastfm: { apiKey: "test-lastfm-key" },
         features: {
             audioAnalysis: true,
             discovery: true,
