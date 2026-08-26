@@ -44,6 +44,7 @@ import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 /**
  * Rows rendered on the first pass before react-virtuoso measures the
@@ -329,9 +330,7 @@ export default function QueuePage() {
                 {/* Now Playing */}
                 {currentTrack && (
                     <section className="bg-[#111] rounded-lg p-6">
-                        <h2 className="text-xl font-semibold text-white mb-4">
-                            Now Playing
-                        </h2>
+                        <SectionHeader title="Now Playing" size="sm" />
                         <Card>
                             <div
                                 className={`flex items-center gap-4 p-4 bg-surface-hover border-l-2 border-ai group ${isCurrentUnavailable ? "opacity-50" : ""}`}
@@ -429,9 +428,7 @@ export default function QueuePage() {
                 {/* Now Playing (podcast episode) */}
                 {currentEpisode && (
                     <section className="bg-[#111] rounded-lg p-6">
-                        <h2 className="text-xl font-semibold text-white mb-4">
-                            Now Playing
-                        </h2>
+                        <SectionHeader title="Now Playing" size="sm" />
                         <Card>
                             <div className="flex items-center gap-4 p-4 bg-surface-hover border-l-2 border-ai">
                                 <div className="relative flex-shrink-0 w-16 h-16">
@@ -472,9 +469,10 @@ export default function QueuePage() {
                 {/* Next Up */}
                 {nextTracks.length > 0 && (
                     <section className="bg-[#111] rounded-lg p-6">
-                        <h2 className="text-xl font-semibold text-white mb-4">
-                            Next Up ({nextTracks.length})
-                        </h2>
+                        <SectionHeader
+                            title={`Next Up (${nextTracks.length})`}
+                            size="sm"
+                        />
                         <Card>
                             <Virtuoso
                                 totalCount={nextTracks.length}
@@ -571,9 +569,10 @@ export default function QueuePage() {
                 {/* Previously Played */}
                 {previousTracks.length > 0 && (
                     <section className="bg-[#111] rounded-lg p-6">
-                        <h2 className="text-xl font-semibold text-white mb-4">
-                            Previously Played ({previousTracks.length})
-                        </h2>
+                        <SectionHeader
+                            title={`Previously Played (${previousTracks.length})`}
+                            size="sm"
+                        />
                         <Card>
                             <Virtuoso
                                 totalCount={previousTracks.length}

@@ -21,6 +21,7 @@ import {
     AlertCircle,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface DeviceLinkCode {
     code: string;
@@ -212,10 +213,15 @@ export default function DeviceLinkPage() {
                 <div className="grid md:grid-cols-2 gap-8">
                     {/* QR Code Section */}
                     <Card className="p-6 bg-white/[0.03] border border-white/5">
-                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                            <Smartphone className="w-5 h-5" />
-                            Device Link Code
-                        </h2>
+                        <SectionHeader
+                            title={
+                                <span className="flex items-center gap-2">
+                                    <Smartphone className="w-5 h-5" />
+                                    Device Link Code
+                                </span>
+                            }
+                            size="sm"
+                        />
 
                         {error && (
                             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm flex items-center gap-2">
@@ -352,9 +358,7 @@ export default function DeviceLinkPage() {
 
                     {/* Linked Devices Section */}
                     <Card className="p-6 bg-white/[0.03] border border-white/5">
-                        <h2 className="text-xl font-bold text-white mb-4">
-                            Linked Devices
-                        </h2>
+                        <SectionHeader title="Linked Devices" size="sm" />
 
                         {deviceError && (
                             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm flex items-center gap-2">
@@ -413,9 +417,7 @@ export default function DeviceLinkPage() {
 
                 {/* Instructions */}
                 <Card className="mt-8 p-6 bg-white/[0.03] border border-white/5">
-                    <h2 className="text-xl font-bold text-white mb-4">
-                        How to Link Your Device
-                    </h2>
+                    <SectionHeader title="How to Link Your Device" size="sm" />
                     <ol className="space-y-3 text-gray-400">
                         <li className="flex gap-3">
                             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand/20 text-brand text-sm font-bold flex items-center justify-center">

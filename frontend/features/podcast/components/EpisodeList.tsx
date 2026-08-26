@@ -6,6 +6,7 @@ import { Podcast, Episode } from "../types";
 import { formatDuration } from "@/utils/formatTime";
 import { formatDate } from "../utils";
 import { EpisodeOverflowMenu } from "./EpisodeOverflowMenu";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface EpisodeListProps {
     podcast: Podcast;
@@ -35,20 +36,25 @@ export function EpisodeList({
 }: EpisodeListProps) {
     return (
         <section>
-            <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-white">All Episodes</h2>
-                <button
-                    onClick={() =>
-                        onSortOrderChange(
-                            sortOrder === "newest" ? "oldest" : "newest",
-                        )
-                    }
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 text-sm text-white/70 hover:text-white transition-all"
-                >
-                    <ArrowUpDown className="w-4 h-4" />
-                    {sortOrder === "newest" ? "Newest First" : "Oldest First"}
-                </button>
-            </div>
+            <SectionHeader
+                title="All Episodes"
+                size="sm"
+                rightAction={
+                    <button
+                        onClick={() =>
+                            onSortOrderChange(
+                                sortOrder === "newest" ? "oldest" : "newest",
+                            )
+                        }
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 text-sm text-white/70 hover:text-white transition-all"
+                    >
+                        <ArrowUpDown className="w-4 h-4" />
+                        {sortOrder === "newest"
+                            ? "Newest First"
+                            : "Oldest First"}
+                    </button>
+                }
+            />
 
             <div className="space-y-1">
                 {episodes.map((episode, index) => {

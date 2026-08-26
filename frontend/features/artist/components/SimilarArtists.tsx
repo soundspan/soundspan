@@ -5,6 +5,7 @@ import { SimilarArtist } from "../types";
 import { Music, Library } from "lucide-react";
 import { api } from "@/lib/api";
 import { getArtistRouteParam } from "@/utils/artistRoute";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface SimilarArtistsProps {
     similarArtists: SimilarArtist[];
@@ -24,7 +25,7 @@ export function SimilarArtists({
 
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">Fans Also Like</h2>
+            <SectionHeader title="Fans Also Like" size="sm" />
             <div
                 data-tv-section="similar-artists"
                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"

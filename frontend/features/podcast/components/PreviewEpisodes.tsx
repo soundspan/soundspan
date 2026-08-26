@@ -6,6 +6,7 @@ import { PodcastPreview } from "../types";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { formatDuration } from "@/utils/formatTime";
 import { formatDate } from "../utils";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface PreviewEpisodesProps {
     previewData: PodcastPreview;
@@ -24,7 +25,7 @@ export function PreviewEpisodes({
 }: PreviewEpisodesProps) {
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">Latest Episodes</h2>
+            <SectionHeader title="Latest Episodes" size="sm" />
 
             {/* Episode Preview with Blur/Lock Effect */}
             <div className="relative">
@@ -125,7 +126,7 @@ export function PreviewEpisodes({
             {/* About Section */}
             {previewData.description && (
                 <div className="mt-8">
-                    <h2 className="text-xl font-bold mb-4">About</h2>
+                    <SectionHeader title="About" size="sm" />
                     <div className="bg-white/5 rounded-md p-4">
                         <div
                             className="prose prose-invert prose-sm max-w-none text-white/70 [&_a]:text-brand [&_a]:no-underline [&_a:hover]:underline"

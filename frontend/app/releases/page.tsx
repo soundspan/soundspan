@@ -28,6 +28,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { formatRelativeDate } from "@/utils/formatTime";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface ReleaseItem {
     id: number | string;
@@ -177,15 +178,17 @@ export default function ReleasesPage() {
                 {/* Upcoming Releases */}
                 {data?.upcoming && data.upcoming.length > 0 && (
                     <section>
-                        <div className="flex items-center gap-3 mb-6">
-                            <Clock className="w-5 h-5 text-amber-400" />
-                            <h2 className="text-xl font-semibold text-white">
-                                Coming Soon
-                            </h2>
-                            <span className="text-white/40 text-sm">
-                                ({data.upcoming.length})
-                            </span>
-                        </div>
+                        <SectionHeader
+                            title={
+                                <span className="flex items-center gap-3">
+                                    <Clock className="w-5 h-5 text-amber-400" />
+                                    Coming Soon
+                                    <span className="text-white/40 text-sm font-normal">
+                                        ({data.upcoming.length})
+                                    </span>
+                                </span>
+                            }
+                        />
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                             {data.upcoming.map((release) => (
@@ -214,15 +217,17 @@ export default function ReleasesPage() {
                 {/* Recently Released */}
                 {data?.recent && data.recent.length > 0 && (
                     <section>
-                        <div className="flex items-center gap-3 mb-6">
-                            <Disc className="w-5 h-5 text-emerald-400" />
-                            <h2 className="text-xl font-semibold text-white">
-                                Just Dropped
-                            </h2>
-                            <span className="text-white/40 text-sm">
-                                ({data.recent.length})
-                            </span>
-                        </div>
+                        <SectionHeader
+                            title={
+                                <span className="flex items-center gap-3">
+                                    <Disc className="w-5 h-5 text-emerald-400" />
+                                    Just Dropped
+                                    <span className="text-white/40 text-sm font-normal">
+                                        ({data.recent.length})
+                                    </span>
+                                </span>
+                            }
+                        />
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                             {data.recent.map((release) => (

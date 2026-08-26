@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import type { Album } from "../types";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { SectionHeader } from "@/components/layout/SectionHeader";
+import { ControlSelect } from "@/components/ui/ControlSelect";
 
 interface DiscographyProps {
     albums: Album[];
@@ -31,20 +33,22 @@ export function Discography({
 
     return (
         <section>
-            <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Discography</h2>
-                {/* Sort Dropdown */}
-                <select
-                    value={sortBy}
-                    onChange={(e) =>
-                        onSortChange(e.target.value as "year" | "dateAdded")
-                    }
-                    className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-surface-hover [&>option]:text-white"
-                >
-                    <option value="year">Year (Newest)</option>
-                    <option value="dateAdded">Date Added (Recent)</option>
-                </select>
-            </div>
+            <SectionHeader
+                title="Discography"
+                size="sm"
+                rightAction={
+                    <ControlSelect
+                        value={sortBy}
+                        onChange={(e) =>
+                            onSortChange(e.target.value as "year" | "dateAdded")
+                        }
+                        aria-label="Sort discography"
+                    >
+                        <option value="year">Year (Newest)</option>
+                        <option value="dateAdded">Date Added (Recent)</option>
+                    </ControlSelect>
+                }
+            />
             <div
                 data-tv-section="discography"
                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"

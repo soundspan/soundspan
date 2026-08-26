@@ -4,6 +4,7 @@ import { Disc3 } from "lucide-react";
 import { api } from "@/lib/api";
 import { SimilarAlbum } from "../types";
 import type { ColorPalette } from "@/hooks/useImageColor";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface SimilarAlbumsProps {
     similarAlbums: SimilarAlbum[];
@@ -21,7 +22,7 @@ export function SimilarAlbums({
 }: SimilarAlbumsProps) {
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">More Like This</h2>
+            <SectionHeader title="More Like This" size="sm" />
             <div
                 data-tv-section="similar-albums"
                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"

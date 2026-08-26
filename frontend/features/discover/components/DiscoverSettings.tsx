@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Trash2, Loader2 } from "lucide-react";
 import type { DiscoverConfig } from "../types";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface DiscoverSettingsProps {
     config: DiscoverConfig | null;
@@ -73,7 +74,7 @@ export function DiscoverSettings({
     return (
         <div className="max-w-7xl mx-auto px-4 md:px-8 py-6">
             <Card className="p-6">
-                <h2 className="text-xl font-bold mb-4">Settings</h2>
+                <SectionHeader title="Settings" size="sm" />
                 <div className="space-y-6">
                     <div>
                         <label className="block text-sm font-medium mb-2">

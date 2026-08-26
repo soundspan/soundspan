@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { useMemo, useState } from "react";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { cn } from "@/utils/cn";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface ArtistBioProps {
     bio: string;
@@ -33,7 +34,7 @@ export function ArtistBio({ bio }: ArtistBioProps) {
 
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">About</h2>
+            <SectionHeader title="About" size="sm" />
             <div className="bg-white/5 rounded-md p-4">
                 <div
                     className={cn(

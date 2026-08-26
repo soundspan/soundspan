@@ -7,14 +7,22 @@ interface SectionHeaderProps {
     title: ReactNode;
     /** Muted supporting line rendered under the title row. */
     description?: string;
+    /** md = page sections; sm = subsections on detail and utility pages. */
+    size?: "md" | "sm";
     showAllHref?: string;
     rightAction?: ReactNode;
     badge?: ReactNode;
 }
 
+const TITLE_STYLES = {
+    md: "text-2xl font-bold text-white",
+    sm: "text-xl font-bold text-white",
+} as const;
+
 const SectionHeader = memo(function SectionHeader({
     title,
     description,
+    size = "md",
     showAllHref,
     rightAction,
     badge,
@@ -23,7 +31,7 @@ const SectionHeader = memo(function SectionHeader({
         <div className="mb-4">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <h2 className="text-2xl font-bold text-white">{title}</h2>
+                    <h2 className={TITLE_STYLES[size]}>{title}</h2>
                     {badge && <Badge variant="ai">{badge}</Badge>}
                 </div>
                 {rightAction ? (

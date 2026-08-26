@@ -7,6 +7,7 @@ import { PlayableCard } from "@/components/ui/PlayableCard";
 import { Disc3 } from "lucide-react";
 import { api } from "@/lib/api";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 /** Request-flow controls threaded into the album grids for non-admins. */
 export interface AlbumRequestControls {
@@ -262,7 +263,7 @@ export function AvailableAlbums({
             {/* Studio Albums Section */}
             {studioAlbums.length > 0 && (
                 <section>
-                    <h2 className="text-xl font-bold mb-4">Albums Available</h2>
+                    <SectionHeader title="Albums Available" size="sm" />
                     <div data-tv-section="available-albums">
                         <AlbumGrid
                             albums={studioAlbums}
@@ -281,7 +282,7 @@ export function AvailableAlbums({
             {/* EPs, Singles & Demos Section */}
             {epsAndSingles.length > 0 && (
                 <section>
-                    <h2 className="text-xl font-bold mb-4">Singles and EPs</h2>
+                    <SectionHeader title="Singles and EPs" size="sm" />
                     <div data-tv-section="available-eps-singles">
                         <AlbumGrid
                             albums={epsAndSingles}

@@ -35,6 +35,7 @@ import { PopularTracks } from "@/features/artist/components/PopularTracks";
 import { Discography } from "@/features/artist/components/Discography";
 import { AvailableAlbums } from "@/features/artist/components/AvailableAlbums";
 import { SimilarArtists } from "@/features/artist/components/SimilarArtists";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 function ListSectionSkeleton({
     title,
@@ -45,7 +46,7 @@ function ListSectionSkeleton({
 }) {
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">{title}</h2>
+            <SectionHeader title={title} size="sm" />
             <div className="space-y-2">
                 {Array.from({ length: rows }).map((_, index) => (
                     <div
@@ -67,7 +68,7 @@ function GridSectionSkeleton({
 }) {
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">{title}</h2>
+            <SectionHeader title={title} size="sm" />
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {Array.from({ length: columns }).map((_, index) => (
                     <div

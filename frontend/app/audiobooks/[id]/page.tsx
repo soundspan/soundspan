@@ -12,6 +12,7 @@ import { useAudiobookActions } from "@/features/audiobook/hooks/useAudiobookActi
 import { AudiobookHero } from "@/features/audiobook/components/AudiobookHero";
 import { AudiobookActionBar } from "@/features/audiobook/components/AudiobookActionBar";
 import { ChapterList } from "@/features/audiobook/components/ChapterList";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 /**
  * Renders the AudiobookDetailPage component.
@@ -116,7 +117,7 @@ export default function AudiobookDetailPage() {
                     {/* Description / About */}
                     {showDescription && (
                         <section className="hidden md:block">
-                            <h2 className="text-xl font-bold mb-4">About</h2>
+                            <SectionHeader title="About" size="sm" />
                             <div className="bg-white/5 rounded-md p-4">
                                 <p className="text-sm text-white/70 leading-relaxed">
                                     {cleanDescription}
@@ -128,7 +129,7 @@ export default function AudiobookDetailPage() {
                     {/* Series info */}
                     {audiobook.series && (
                         <section>
-                            <h2 className="text-xl font-bold mb-4">Series</h2>
+                            <SectionHeader title="Series" size="sm" />
                             <div className="flex items-center gap-3 text-sm">
                                 <span className="text-brand font-medium">
                                     {audiobook.series.name}

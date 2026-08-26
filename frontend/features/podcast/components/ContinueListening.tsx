@@ -5,6 +5,7 @@ import { Podcast, Episode } from "../types";
 import { formatDuration } from "@/utils/formatTime";
 import { formatDate } from "../utils";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface ContinueListeningProps {
     podcast: Podcast;
@@ -60,7 +61,7 @@ export function ContinueListening({
 
     return (
         <section>
-            <h2 className="text-xl font-bold mb-4">Continue Listening</h2>
+            <SectionHeader title="Continue Listening" size="sm" />
             <div className="space-y-2">
                 {/* Previous Episode - Faded */}
                 {previousEpisode && (

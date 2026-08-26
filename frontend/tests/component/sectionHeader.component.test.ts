@@ -70,3 +70,19 @@ test("accepts a ReactNode title for linked section headings", async () => {
         /<h2[^>]*><a href="\/search\?view=tracks">Songs<\/a><\/h2>/,
     );
 });
+
+test("sm size renders the subsection scale", async () => {
+    const { SectionHeader } =
+        await import("../../components/layout/SectionHeader");
+    const html = renderToStaticMarkup(
+        React.createElement(SectionHeader, {
+            title: "Linked Devices",
+            size: "sm",
+        }),
+    );
+    assert.match(html, /<h2 class="text-xl font-bold text-white">/);
+    const md = renderToStaticMarkup(
+        React.createElement(SectionHeader, { title: "Linked Devices" }),
+    );
+    assert.match(md, /<h2 class="text-2xl font-bold text-white">/);
+});

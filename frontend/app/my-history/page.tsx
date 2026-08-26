@@ -15,6 +15,7 @@ import { useToast } from "@/lib/toast-context";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { TrackList } from "@/components/track";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import type {
     TrackRowItem,
     TrackRowSlots,
@@ -279,9 +280,10 @@ export default function MyHistoryPage() {
 
                 {!loading && !error && history.length > 0 && (
                     <section className="bg-[#111] rounded-lg p-6">
-                        <h2 className="text-xl font-semibold text-white mb-4">
-                            Recently Played ({history.length})
-                        </h2>
+                        <SectionHeader
+                            title={`Recently Played (${history.length})`}
+                            size="sm"
+                        />
 
                         <Card>
                             <TrackList<PlayHistoryEntry>
