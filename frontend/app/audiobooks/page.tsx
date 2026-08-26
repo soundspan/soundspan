@@ -3,7 +3,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { ControlSelect } from "@/components/ui/ControlSelect";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { FilterPills } from "@/components/ui/FilterPills";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { AudiobookCard } from "@/components/ui/AudiobookCard";
 import { api } from "@/lib/api";
@@ -419,26 +421,15 @@ export default function AudiobooksPage() {
                 <div className="mb-8 space-y-3">
                     {/* First Row: Filter Pills and Shuffle */}
                     <div className="flex flex-wrap items-center gap-2">
-                        <button
-                            onClick={() => setFilter("all")}
-                            className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
-                                filter === "all"
-                                    ? "bg-white text-black"
-                                    : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10"
-                            }`}
-                        >
-                            All Books
-                        </button>
-                        <button
-                            onClick={() => setFilter("finished")}
-                            className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
-                                filter === "finished"
-                                    ? "bg-white text-black"
-                                    : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10"
-                            }`}
-                        >
-                            Finished
-                        </button>
+                        <FilterPills<FilterType>
+                            aria-label="Filter audiobooks"
+                            options={[
+                                { value: "all", label: "All Books" },
+                                { value: "finished", label: "Finished" },
+                            ]}
+                            value={filter}
+                            onChange={setFilter}
+                        />
 
                         {/* Shuffle Button */}
                         <button
@@ -460,18 +451,17 @@ export default function AudiobooksPage() {
 
                     {/* Second Row: Sort, Series View, Genre */}
                     <div className="flex flex-wrap items-center gap-2">
-                        <select
+                        <ControlSelect
                             value={sortBy}
                             onChange={(e) =>
                                 setSortBy(e.target.value as SortType)
                             }
-                            className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 focus:bg-[#252525] transition-all [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value="title">Title</option>
                             <option value="author">Author</option>
                             <option value="recent">Recently Played</option>
                             <option value="series">Series</option>
-                        </select>
+                        </ControlSelect>
 
                         <button
                             onClick={() => setGroupBySeries(!groupBySeries)}
@@ -489,12 +479,12 @@ export default function AudiobooksPage() {
                         </button>
 
                         {allGenres.length > 0 && (
-                            <select
+                            <ControlSelect
                                 value={selectedGenre || ""}
                                 onChange={(e) =>
                                     setSelectedGenre(e.target.value || null)
                                 }
-                                className="flex-1 min-w-0 md:flex-initial md:min-w-[140px] px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 focus:bg-[#252525] transition-all truncate [&>option]:bg-surface-hover [&>option]:text-white"
+                                className="flex-1 min-w-0 md:flex-initial md:min-w-[140px] truncate"
                             >
                                 <option value="">All Genres</option>
                                 {allGenres.map((genre) => (
@@ -502,23 +492,22 @@ export default function AudiobooksPage() {
                                         {genre}
                                     </option>
                                 ))}
-                            </select>
+                            </ControlSelect>
                         )}
 
                         {/* Items per page */}
-                        <select
+                        <ControlSelect
                             value={itemsPerPage}
                             onChange={(e) => {
                                 setItemsPerPage(Number(e.target.value));
                                 setCurrentPage(1);
                             }}
-                            className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value={25}>25 per page</option>
                             <option value={50}>50 per page</option>
                             <option value={100}>100 per page</option>
                             <option value={250}>250 per page</option>
-                        </select>
+                        </ControlSelect>
                     </div>
 
                     {/* Results Count - Mobile only */}

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Mic2, Search, Plus, Link2 } from "lucide-react";
 import { useToast } from "@/lib/toast-context";
+import { ControlSelect } from "@/components/ui/ControlSelect";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePodcastsQuery, useTopPodcastsQuery } from "@/hooks/useQueries";
 import Image from "next/image";
@@ -381,50 +382,42 @@ export default function PodcastsPage() {
                 {/* My Podcasts */}
                 {(podcasts.length > 0 || showMyPodcastsSkeleton) && (
                     <section>
-                        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-                            <h2 className="text-xl font-bold text-white">
-                                My Podcasts
-                            </h2>
-                            <div className="flex flex-wrap items-center gap-2">
-                                {/* Sort Dropdown */}
-                                <select
-                                    value={sortBy}
-                                    onChange={(e) =>
-                                        setSortBy(e.target.value as SortOption)
-                                    }
-                                    className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-ai [&>option]:bg-surface-hover [&>option]:text-white"
-                                    disabled={showMyPodcastsSkeleton}
-                                >
-                                    <option value="title">Title (A-Z)</option>
-                                    <option value="author">Author (A-Z)</option>
-                                    <option value="recent">
-                                        Most Episodes
-                                    </option>
-                                </select>
+                        <h2 className="text-xl font-bold text-white mb-4">
+                            My Podcasts
+                        </h2>
+                        <div className="flex flex-wrap items-center gap-2 mb-6">
+                            {/* Sort Dropdown */}
+                            <ControlSelect
+                                value={sortBy}
+                                onChange={(e) =>
+                                    setSortBy(e.target.value as SortOption)
+                                }
+                                disabled={showMyPodcastsSkeleton}
+                            >
+                                <option value="title">Title (A-Z)</option>
+                                <option value="author">Author (A-Z)</option>
+                                <option value="recent">Most Episodes</option>
+                            </ControlSelect>
 
-                                {/* Items per page */}
-                                <select
-                                    value={itemsPerPage}
-                                    onChange={(e) => {
-                                        setItemsPerPage(Number(e.target.value));
-                                        setCurrentPage(1);
-                                    }}
-                                    className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-ai [&>option]:bg-surface-hover [&>option]:text-white"
-                                    disabled={showMyPodcastsSkeleton}
-                                >
-                                    <option value={25}>25 per page</option>
-                                    <option value={50}>50 per page</option>
-                                    <option value={100}>100 per page</option>
-                                    <option value={250}>250 per page</option>
-                                </select>
+                            {/* Items per page */}
+                            <ControlSelect
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                                disabled={showMyPodcastsSkeleton}
+                            >
+                                <option value={25}>25 per page</option>
+                                <option value={50}>50 per page</option>
+                                <option value={100}>100 per page</option>
+                                <option value={250}>250 per page</option>
+                            </ControlSelect>
 
-                                <span className="text-sm text-gray-400">
-                                    {podcasts.length}{" "}
-                                    {podcasts.length === 1
-                                        ? "podcast"
-                                        : "podcasts"}
-                                </span>
-                            </div>
+                            <span className="text-sm text-gray-400 ml-auto">
+                                {podcasts.length}{" "}
+                                {podcasts.length === 1 ? "podcast" : "podcasts"}
+                            </span>
                         </div>
                         {showMyPodcastsSkeleton ? (
                             <PodcastGridSkeleton count={10} />

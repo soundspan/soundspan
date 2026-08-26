@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Library, Audiobooks, and Podcasts pages now share one visual language for their header controls: filter pills, sort/genre/pagination dropdowns, and item counts use the same shared components and styling, and the Podcasts controls moved out of the "My Podcasts" heading into a left-aligned control row matching the sibling pages (#868).
 - The scheduled Audiobookshelf sync now also removes books that were deleted in Audiobookshelf — including cached covers and listening progress — instead of leaving that cleanup to the manual admin sync button; removals keep every safety guard from the manual path, only run against complete, verified library listings, and wait until a book has been absent from two consecutive verified listings taken several minutes apart (#864).
 
 ### Fixed

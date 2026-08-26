@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ControlSelect } from "@/components/ui/ControlSelect";
+import { FilterPills } from "@/components/ui/FilterPills";
 import { Tab, DeleteDialogState } from "@/features/library/types";
 import {
     useLibraryArtistsQuery,
@@ -484,47 +486,38 @@ export default function LibraryPage() {
                         {/* Filter Toggle (Owned / Discovery / All) - Only show for artists and albums */}
                         {(activeTab === "artists" ||
                             activeTab === "albums") && (
-                            <div className="flex items-center gap-1">
-                                <button
-                                    onClick={() => setFilter("owned")}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                                        filter === "owned"
-                                            ? "bg-brand text-black"
-                                            : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
-                                    }`}
-                                >
-                                    Owned
-                                </button>
-                                <button
-                                    onClick={() => setFilter("discovery")}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                                        filter === "discovery"
-                                            ? "bg-ai text-white"
-                                            : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
-                                    }`}
-                                >
-                                    Discovery
-                                </button>
-                                <button
-                                    onClick={() => setFilter("all")}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                                        filter === "all"
-                                            ? "bg-white/20 text-white"
-                                            : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
-                                    }`}
-                                >
-                                    All
-                                </button>
-                            </div>
+                            <FilterPills<LibraryFilter>
+                                aria-label="Filter library"
+                                size="sm"
+                                options={[
+                                    {
+                                        value: "owned",
+                                        label: "Owned",
+                                        activeClassName: "bg-brand text-black",
+                                    },
+                                    {
+                                        value: "discovery",
+                                        label: "Discovery",
+                                        activeClassName: "bg-ai text-white",
+                                    },
+                                    {
+                                        value: "all",
+                                        label: "All",
+                                        activeClassName:
+                                            "bg-white/20 text-white",
+                                    },
+                                ]}
+                                value={filter}
+                                onChange={setFilter}
+                            />
                         )}
 
                         {/* Sort Dropdown */}
-                        <select
+                        <ControlSelect
                             value={sortBy}
                             onChange={(e) =>
                                 setSortBy(e.target.value as SortOption)
                             }
-                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value="name">Name (A-Z)</option>
                             <option value="name-desc">Name (Z-A)</option>
@@ -534,21 +527,20 @@ export default function LibraryPage() {
                             {activeTab === "artists" && (
                                 <option value="tracks">Most Tracks</option>
                             )}
-                        </select>
+                        </ControlSelect>
 
                         {/* Items per page */}
-                        <select
+                        <ControlSelect
                             value={itemsPerPage}
                             onChange={(e) =>
                                 setItemsPerPage(Number(e.target.value))
                             }
-                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value={24}>24 per page</option>
                             <option value={40}>40 per page</option>
                             <option value={80}>80 per page</option>
                             <option value={200}>200 per page</option>
-                        </select>
+                        </ControlSelect>
                     </div>
                 )}
 
