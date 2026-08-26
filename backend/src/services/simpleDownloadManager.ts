@@ -11,29 +11,32 @@ import { prisma } from "../utils/db";
 import { Prisma, PrismaClient } from "@prisma/client";
 import {
     lidarrService,
-    LidarrRelease,
     AcquisitionError,
     AcquisitionErrorType,
     ReconciliationSnapshot,
 } from "./lidarr";
-import { yieldToEventLoop } from "../utils/async";
 import { resolveDownloadArtistMbid } from "./downloadArtistMbid";
 import { getSystemSettings } from "../utils/systemSettings";
-import { notificationService } from "./notificationService";
-import { notificationPolicyService } from "./notificationPolicyService";
-import { sessionLog } from "../utils/playlistLogger";
 import { config } from "../config";
 import * as crypto from "crypto";
-import { isAlbumDownloadQueueOwned } from "./albumDownloadQueueOwnership";
-import { parseArtistAlbumSubject } from "../utils/downloadSubject";
 import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,
     failDownloadJob,
     patchDownloadJobMetadata,
-    patchDownloadJobMetadataFrom,
 } from "./downloadJobStatus";
 import { asPlainObject } from "../utils/plainObject";
 import { toErrorMessage } from "../utils/errors";
+import {
+    tryNextAlbumFromArtist as executeAlbumRetry,
+    type AlbumRetryResult,
+} from "./download/albumRetryStrategy";
+import { DownloadJobEvents } from "./download/downloadJobEvents";
+import { registerDownloadJobNotificationSubscriber } from "./download/downloadJobNotificationSubscriber";
+import { markStaleJobsAsFailed as sweepStaleDownloadJobs } from "./download/staleDownloadSweeper";
+import {
+    reconcileWithLidarr,
+    syncWithLidarrQueue,
+} from "./download/lidarrQueueReconciler";
 
 // Type for transactional prisma client
 type TransactionClient = Omit<
@@ -48,10 +51,8 @@ function generateCorrelationId(): string {
 
 class SimpleDownloadManager {
     private readonly DEFAULT_MAX_ATTEMPTS = 3;
-    // Reduced timeouts for faster failure detection
-    private readonly IMPORT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes for imports
-    private readonly PENDING_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for pending
-    private readonly NO_SOURCE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for no sources found
+
+    constructor(private readonly downloadJobEvents: DownloadJobEvents) {}
 
     /**
      * Get max retry attempts from user's discover config, fallback to default
@@ -869,39 +870,12 @@ class SimpleDownloadManager {
 
         // Post-transaction operations (notifications, batch completion)
         if (result.jobId && result.userId) {
-            // Send notification
-            try {
-                const decision =
-                    await notificationPolicyService.evaluateNotification(
-                        result.jobId,
-                        "complete",
-                    );
-
-                if (decision.shouldNotify) {
-                    logger.debug(
-                        `   Sending completion notification: ${decision.reason}`,
-                    );
-                    await notificationService.notifyDownloadComplete(
-                        result.userId,
-                        result.subject,
-                        undefined,
-                        result.metadata?.artistId,
-                    );
-
-                    await patchDownloadJobMetadata(result.jobId, {
-                        notificationSent: true,
-                    });
-                } else {
-                    logger.debug(
-                        `   Suppressing completion notification: ${decision.reason}`,
-                    );
-                }
-            } catch (notifError) {
-                logger.error(
-                    "Failed to evaluate/send download notification:",
-                    notifError,
-                );
-            }
+            await this.downloadJobEvents.emit("download.completed", {
+                jobId: result.jobId,
+                userId: result.userId,
+                subject: result.subject,
+                artistId: result.metadata?.artistId,
+            });
 
             // Check batch completion
             if (result.batchId) {
@@ -1035,208 +1009,17 @@ class SimpleDownloadManager {
         return result;
     }
 
-    /**
-     * Try the next album from the same artist when current album is exhausted
-     * This is called when all releases for an album have been tried
-     *
-     * IMPORTANT:
-     * - For Discovery Weekly jobs, we DON'T do same-artist fallback.
-     *   Discovery should find NEW artists, not more albums from the same artist.
-     * - For Spotify Import jobs, we DON'T do same-artist fallback.
-     *   User wants EXACT playlist, not substitutes.
-     */
+    /** Delegate same-artist fallback policy to its focused strategy. */
     private async tryNextAlbumFromArtist(
         job: any,
         reason: string,
-    ): Promise<{ retried: boolean; failed: boolean; jobId?: string }> {
-        const metadata = (job.metadata as any) || {};
-        const artistMbid = job.artistMbid || metadata.artistMbid;
-        const artistName = metadata.artistName;
-
-        // CRITICAL: For Discovery Weekly, DON'T try same-artist fallback
-        // Discovery should prioritize ARTIST DIVERSITY - let the discovery system
-        // find a completely different artist instead
-        if (job.discoveryBatchId) {
-            logger.debug(
-                `[RETRY] Discovery job - skipping same-artist fallback (diversity enforced)`,
-            );
-            logger.debug(
-                `   Discovery should find NEW artists, not more from: ${artistName}`,
-            );
-            return await this.markJobExhausted(job, reason);
-        }
-
-        // CRITICAL: For Spotify Import, DON'T try same-artist fallback
-        // User wants the EXACT playlist, not substitutes from same artist
-        if (
-            metadata.spotifyImportJobId ||
-            metadata.downloadType === "spotify_import" ||
-            metadata.noFallback
-        ) {
-            logger.debug(
-                `[RETRY] Spotify Import job - skipping fallback (exact match required)`,
-            );
-            logger.debug(`   User wants exact album: ${job.subject}`);
-
-            // Mark as failed and trigger completion check
-            const result = await this.markJobExhausted(job, reason);
-
-            // Check if import is complete
-            if (metadata.spotifyImportJobId) {
-                const { spotifyImportService } =
-                    await import("./spotifyImport");
-                await spotifyImportService.checkImportCompletion(
-                    metadata.spotifyImportJobId,
-                );
-            }
-
-            return result;
-        }
-
-        if (!artistMbid) {
-            logger.debug(
-                `   No artistMbid - cannot try other albums from same artist`,
-            );
-            return await this.markJobExhausted(job, reason);
-        }
-
-        logger.debug(
-            `[RETRY] Trying other albums from artist: ${
-                artistName || artistMbid
-            }`,
-        );
-
-        try {
-            // Get albums available in LIDARR for this artist (not MusicBrainz)
-            // MusicBrainz has many obscure albums (bootlegs, live recordings) that Lidarr can't find
-            const lidarrAlbums =
-                await lidarrService.getArtistAlbums(artistMbid);
-
-            if (!lidarrAlbums || lidarrAlbums.length === 0) {
-                logger.debug(`   No albums found in Lidarr for artist`);
-                return await this.markJobExhausted(job, reason);
-            }
-
-            logger.debug(
-                `   Found ${lidarrAlbums.length} albums in Lidarr for artist`,
-            );
-
-            // Get albums we've already tried
-            const triedAlbumMbids = new Set<string>();
-
-            // Check for other jobs with same artist
-            const artistJobs = await prisma.downloadJob.findMany({
-                where: {
-                    artistMbid: artistMbid,
-                    status: {
-                        in: ["processing", "completed", "failed", "exhausted"],
-                    },
-                },
-            });
-            artistJobs.forEach((j: any) => {
-                triedAlbumMbids.add(j.targetMbid);
-            });
-
-            // Also add current job's album
-            triedAlbumMbids.add(job.targetMbid);
-
-            // Filter to untried albums that exist in Lidarr
-            const untriedAlbums = lidarrAlbums.filter(
-                (album: any) => !triedAlbumMbids.has(album.foreignAlbumId),
-            );
-
-            logger.debug(
-                `   Untried albums in Lidarr: ${untriedAlbums.length}`,
-            );
-
-            if (untriedAlbums.length === 0) {
-                logger.debug(`   All Lidarr albums from artist exhausted`);
-                return await this.markJobExhausted(job, reason);
-            }
-
-            // Pick the first untried album (prioritize studio albums over singles/EPs if possible)
-            const studioAlbums = untriedAlbums.filter(
-                (a: any) =>
-                    a.albumType?.toLowerCase() === "album" || !a.albumType,
-            );
-            const nextAlbum =
-                studioAlbums.length > 0 ? studioAlbums[0] : untriedAlbums[0];
-            logger.debug(
-                `[RETRY] Trying next album from same artist: ${nextAlbum.title}`,
-            );
-
-            // Mark current job as exhausted (not failed - we're continuing with same artist)
-            await prisma.downloadJob.update({
-                where: { id: job.id },
-                data: {
-                    status: "exhausted",
-                    error: `All releases exhausted - trying: ${nextAlbum.title}`,
-                    completedAt: new Date(),
-                },
-            });
-
-            // Use Lidarr's foreignAlbumId (MBID) for the new job
-            const albumMbid = nextAlbum.foreignAlbumId;
-
-            // Get music path from settings with fallback to config
-            const settings = await getSystemSettings();
-            const defaultMusicPath =
-                settings?.musicPath || config.music.musicPath;
-
-            // Create new job for the next album
-            const newJob = await prisma.downloadJob.create({
-                data: {
-                    userId: job.userId,
-                    subject: `${artistName || "Unknown"} - ${nextAlbum.title}`,
-                    type: "album",
-                    targetMbid: albumMbid,
-                    status: "pending",
-                    discoveryBatchId: job.discoveryBatchId,
-                    artistMbid: artistMbid,
-                    metadata: {
-                        artistName: artistName,
-                        artistMbid: artistMbid,
-                        albumTitle: nextAlbum.title,
-                        albumMbid: albumMbid,
-                        lidarrAlbumId: nextAlbum.id, // Store Lidarr album ID for faster lookup
-                        sameArtistFallback: true,
-                        originalJobId: job.id,
-                        downloadType: metadata.downloadType || "library",
-                        rootFolderPath:
-                            metadata.rootFolderPath || defaultMusicPath,
-                    },
-                },
-            });
-
-            logger.debug(`   Created fallback job: ${newJob.id}`);
-
-            // Start the download
-            const result = await this.startDownload(
-                newJob.id,
-                artistName || "Unknown Artist",
-                nextAlbum.title,
-                albumMbid,
-                job.userId,
-            );
-
-            if (result.success) {
-                logger.debug(`   Same-artist fallback download started`);
-                return { retried: true, failed: false, jobId: newJob.id };
-            } else {
-                logger.debug(
-                    `   Same-artist fallback failed to start: ${result.error}`,
-                );
-                // The new job will be marked as failed by startDownload
-                return { retried: false, failed: true, jobId: newJob.id };
-            }
-        } catch (error: any) {
-            logger.error(
-                `   Error trying same-artist fallback: ${error.message}`,
-            );
-            return await this.markJobExhausted(job, reason);
-        }
+    ): Promise<AlbumRetryResult> {
+        return executeAlbumRetry(job, reason, {
+            markJobExhausted: (retryJob, retryReason) =>
+                this.markJobExhausted(retryJob, retryReason),
+            startDownload: (...args) => this.startDownload(...args),
+        });
     }
-
     /**
      * Mark a job as exhausted (all releases and same-artist albums tried)
      *
@@ -1301,364 +1084,27 @@ class SimpleDownloadManager {
             );
         }
 
-        // Send failure notification using policy service
-        try {
-            const decision =
-                await notificationPolicyService.evaluateNotification(
-                    job.id,
-                    "failed",
-                );
-
-            if (decision.shouldNotify) {
-                logger.debug(
-                    `   Sending failure notification: ${decision.reason}`,
-                );
-                await notificationService.notifyDownloadFailed(
-                    job.userId,
-                    job.subject,
-                    reason,
-                );
-
-                // Mark notification as sent
-                await patchDownloadJobMetadata(job.id, {
-                    notificationSent: true,
-                });
-            } else {
-                logger.debug(
-                    `   Suppressing failure notification: ${decision.reason}`,
-                );
-            }
-        } catch (notifError) {
-            logger.error(
-                "Failed to evaluate/send failure notification:",
-                notifError,
-            );
-        }
+        await this.downloadJobEvents.emit("download.exhausted", {
+            jobId: job.id,
+            userId: job.userId,
+            subject: job.subject,
+            reason,
+        });
 
         return { retried: false, failed: true, jobId: job.id };
     }
 
-    /**
-     * Mark stale jobs as failed (called by cleanup job)
-     * Applies the configured pending, no-source, and import timeouts to legacy-owned jobs.
-     * Optionally accepts a pre-fetched snapshot to avoid duplicate API calls.
-     */
+    /** Preserve the cleanup worker's public seam. */
     async markStaleJobsAsFailed(
         existingSnapshot?: ReconciliationSnapshot,
     ): Promise<number> {
-        const pendingCutoff = new Date(Date.now() - this.PENDING_TIMEOUT_MS);
-        const noSourceCutoff = new Date(Date.now() - this.NO_SOURCE_TIMEOUT_MS);
-        const importCutoff = new Date(Date.now() - this.IMPORT_TIMEOUT_MS);
-
-        // Find all pending and processing jobs
-        const activeJobs = await prisma.downloadJob.findMany({
-            where: { status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES } },
+        return sweepStaleDownloadJobs(existingSnapshot, {
+            events: this.downloadJobEvents,
+            blocklistAndRetry: (downloadId) =>
+                this.blocklistAndRetry(downloadId),
+            tryNextAlbumFromArtist: (job, reason) =>
+                this.tryNextAlbumFromArtist(job, reason),
         });
-
-        // Log to session for debugging Spotify imports
-        if (activeJobs.length > 0) {
-            const spotifyJobs = activeJobs.filter((j) =>
-                j.id.startsWith("spotify_"),
-            );
-            if (spotifyJobs.length > 0) {
-                sessionLog(
-                    "CLEANUP",
-                    `Checking ${activeJobs.length} active jobs (${spotifyJobs.length} Spotify import)`,
-                );
-            }
-        }
-
-        // Separate pending from processing
-        const pendingJobs = activeJobs.filter((j) => j.status === "pending");
-        const processingJobs = activeJobs.filter(
-            (j) => j.status === "processing",
-        );
-
-        // Handle old pending jobs - batch update instead of individual updates
-        const stalePendingJobs = pendingJobs.filter(
-            (job) =>
-                !isAlbumDownloadQueueOwned(job.metadata) &&
-                job.createdAt < pendingCutoff,
-        );
-        const pendingDiscoveryBatchIds = new Set<string>();
-
-        if (stalePendingJobs.length > 0) {
-            logger.debug(
-                `\n⏰ Found ${stalePendingJobs.length} stuck PENDING jobs (never started)`,
-            );
-            sessionLog(
-                "CLEANUP",
-                `Found ${stalePendingJobs.length} stuck PENDING jobs`,
-            );
-
-            // Collect discovery batch IDs before batch update
-            for (const job of stalePendingJobs) {
-                if (job.discoveryBatchId) {
-                    pendingDiscoveryBatchIds.add(job.discoveryBatchId);
-                }
-            }
-
-            // Batch update all stale pending jobs at once
-            await prisma.downloadJob.updateMany({
-                where: { id: { in: stalePendingJobs.map((j) => j.id) } },
-                data: {
-                    status: "failed",
-                    error: "Download never started - timed out",
-                    completedAt: new Date(),
-                },
-            });
-
-            logger.debug(
-                `   Batch updated ${stalePendingJobs.length} pending jobs to failed`,
-            );
-        }
-
-        // Check discovery batch completions for pending jobs (with yielding)
-        if (pendingDiscoveryBatchIds.size > 0) {
-            const { discoverWeeklyService } = await import("./discoverWeekly");
-            for (const batchId of pendingDiscoveryBatchIds) {
-                await discoverWeeklyService.checkBatchCompletion(batchId);
-                await yieldToEventLoop();
-            }
-        }
-
-        if (processingJobs.length === 0) {
-            return stalePendingJobs.length;
-        }
-
-        // Use existing snapshot - do NOT re-fetch if undefined (means Lidarr is unavailable)
-        // If no snapshot provided, get one; but if explicitly undefined, skip Lidarr checks
-        const snapshot = existingSnapshot;
-
-        const staleJobs: typeof processingJobs = [];
-        const jobsToExtend: typeof processingJobs = [];
-
-        for (const job of processingJobs) {
-            const metadata = job.metadata as any;
-            const startedAt = metadata?.startedAt
-                ? new Date(metadata.startedAt)
-                : job.createdAt;
-
-            // Skip Soulseek jobs - they complete immediately with direct slsk-client
-            if (
-                metadata?.source === "slskd" ||
-                metadata?.source === "soulseek_direct"
-            ) {
-                continue;
-            }
-
-            // Jobs without lidarrRef = Lidarr never grabbed = no sources found
-            if (!job.lidarrRef) {
-                if (startedAt < noSourceCutoff) {
-                    staleJobs.push(job);
-                }
-            } else if (snapshot) {
-                // Jobs with lidarrRef = grabbed but potentially still downloading
-                // Only check if we have a snapshot (Lidarr is available)
-                if (startedAt < importCutoff) {
-                    // Check using snapshot (O(1) lookup, no API call)
-                    const downloadStatus =
-                        lidarrService.isDownloadActiveInSnapshot(
-                            snapshot,
-                            job.lidarrRef,
-                        );
-
-                    if (downloadStatus.active) {
-                        // Still downloading - collect for batch update
-                        jobsToExtend.push(job);
-                        logger.debug(
-                            `   ${job.subject}: Still downloading (${downloadStatus.progress || 0}%), extending timeout`,
-                        );
-                    } else {
-                        // Not actively downloading - mark as stale
-                        staleJobs.push(job);
-                    }
-                }
-            }
-            // If no snapshot and job has lidarrRef, skip it (Lidarr unavailable, can't check status)
-        }
-
-        // Each job needs its own metadata value, so updateMany cannot apply here.
-        for (const job of jobsToExtend) {
-            await patchDownloadJobMetadataFrom(job.metadata, job.id, {
-                startedAt: new Date().toISOString(),
-                extendedTimeout: true,
-            });
-        }
-        if (jobsToExtend.length > 0) {
-            await yieldToEventLoop();
-        }
-
-        if (staleJobs.length === 0) {
-            return stalePendingJobs.length;
-        }
-
-        logger.debug(`\n⏰ Found ${staleJobs.length} stale download jobs`);
-        sessionLog(
-            "CLEANUP",
-            `Found ${staleJobs.length} stale jobs to mark as failed`,
-        );
-
-        // Track unique batch IDs to check
-        const batchIds = new Set<string>();
-        const downloadBatchIds = new Set<string>();
-
-        for (const job of staleJobs) {
-            const metadata = (job.metadata as any) || {};
-
-            // Before marking as failed, check if still in retry window using policy service
-            try {
-                const policyDecision =
-                    await notificationPolicyService.evaluateNotification(
-                        job.id,
-                        "timeout",
-                    );
-
-                // If policy says to extend timeout (still in retry window), do so
-                if (
-                    policyDecision.reason.includes("retry window") ||
-                    policyDecision.reason.includes("extending timeout")
-                ) {
-                    logger.debug(
-                        `   ${job.subject}: ${policyDecision.reason} - extending timeout`,
-                    );
-                    await patchDownloadJobMetadataFrom(metadata, job.id, {
-                        startedAt: new Date().toISOString(),
-                        timeoutExtendedByPolicy: true,
-                    });
-                    continue; // Skip to next job
-                }
-            } catch (policyError) {
-                logger.error(
-                    `   Failed to evaluate policy for ${job.id}:`,
-                    policyError,
-                );
-                // Continue with failure handling if policy check fails
-            }
-
-            const hasLidarrRef = !!job.lidarrRef;
-            const errorMessage = hasLidarrRef
-                ? `Import failed - download stuck for ${
-                      this.IMPORT_TIMEOUT_MS / 60000
-                  } minutes`
-                : `No sources found - no indexer results`;
-
-            logger.debug(
-                `   Timing out: ${job.subject} (${
-                    hasLidarrRef ? "stuck import" : "no sources"
-                })`,
-            );
-            sessionLog(
-                "CLEANUP",
-                `Marking stale: ${job.subject} - ${errorMessage}`,
-            );
-            const artistName = metadata?.artistName?.toLowerCase().trim() || "";
-            const albumTitle = metadata?.albumTitle?.toLowerCase().trim() || "";
-
-            // FIRST: Check if a COMPLETED job already exists for this album
-            // This handles the case where a duplicate job succeeded while this one was processing
-            if (artistName && albumTitle) {
-                const completedDuplicate = await prisma.downloadJob.findFirst({
-                    where: {
-                        id: { not: job.id },
-                        status: "completed",
-                    },
-                });
-
-                if (completedDuplicate) {
-                    const dupMeta = completedDuplicate.metadata as any;
-                    const dupArtist =
-                        dupMeta?.artistName?.toLowerCase().trim() || "";
-                    const dupAlbum =
-                        dupMeta?.albumTitle?.toLowerCase().trim() || "";
-
-                    if (dupArtist === artistName && dupAlbum === albumTitle) {
-                        logger.debug(
-                            `   Found completed duplicate - marking this job as completed too`,
-                        );
-                        await patchDownloadJobMetadataFrom(
-                            metadata,
-                            job.id,
-                            { mergedWithJob: completedDuplicate.id },
-                            {
-                                status: "completed",
-                                completedAt: new Date(),
-                                error: null,
-                            },
-                        );
-                        continue; // Skip to next stale job
-                    }
-                }
-            }
-
-            // Clean up from Lidarr queue if possible. `job` is a DownloadJob
-            // from prisma.downloadJob.findMany (no select), and lidarrAlbumId is
-            // a real typed column (Int?), so no `as any` is needed — the cast
-            // only disabled type checking on the field that drives dedup/retry.
-            const lidarrAlbumId = job.lidarrAlbumId;
-            if (lidarrAlbumId && job.lidarrRef) {
-                await this.blocklistAndRetry(job.lidarrRef);
-            }
-
-            // Use same-artist fallback ONLY for non-discovery jobs
-            // Discovery jobs should find NEW artists via the discovery system
-            let replacementStarted = false;
-            const artistMbid = job.artistMbid || metadata.artistMbid;
-
-            if (artistMbid && !job.discoveryBatchId) {
-                logger.debug(`   Attempting same-artist fallback...`);
-                try {
-                    const fallbackResult = await this.tryNextAlbumFromArtist(
-                        { ...job, metadata },
-                        errorMessage,
-                    );
-                    if (fallbackResult.retried && fallbackResult.jobId) {
-                        logger.debug(
-                            `   Same-artist fallback started: ${fallbackResult.jobId}`,
-                        );
-                        replacementStarted = true;
-                    }
-                } catch (fallbackErr: any) {
-                    logger.error(
-                        `   Same-artist fallback error: ${fallbackErr.message}`,
-                    );
-                }
-            } else if (job.discoveryBatchId) {
-                logger.debug(
-                    `   Discovery job - letting discovery system find new artist`,
-                );
-            }
-
-            // If no replacement was started, mark the original job as failed
-            // NOTE: No notification here - stale cleanup is a background safety net
-            // Notifications are only sent from markJobExhausted when truly exhausted
-            if (!replacementStarted) {
-                await failDownloadJob(job.id, errorMessage);
-            }
-
-            if (job.discoveryBatchId) {
-                batchIds.add(job.discoveryBatchId);
-            }
-
-            // Track download batch IDs for artist downloads
-            if (metadata?.batchId) {
-                downloadBatchIds.add(metadata.batchId);
-            }
-        }
-
-        // Check discovery batch completion for affected batches (with yielding)
-        if (batchIds.size > 0) {
-            const { discoverWeeklyService } = await import("./discoverWeekly");
-            for (const batchId of batchIds) {
-                logger.debug(
-                    `   Checking discovery batch completion: ${batchId}`,
-                );
-                await discoverWeeklyService.checkBatchCompletion(batchId);
-                await yieldToEventLoop();
-            }
-        }
-
-        return stalePendingJobs.length + staleJobs.length;
     }
 
     /**
@@ -1717,20 +1163,7 @@ class SimpleDownloadManager {
         return { pending, processing, completed, failed };
     }
 
-    /**
-     * Reconcile processing jobs with Lidarr
-     * Checks if albums in "processing" state are already available in Lidarr
-     * and marks them as completed if so (fixes missed webhook completion events)
-     *
-     * IMPORTANT: Checks by both MBID and artist+album name to handle MBID mismatches
-     */
-    /**
-     * Reconcile processing jobs with Lidarr using batch snapshot approach.
-     * Fetches all Lidarr data once, then checks jobs against in-memory data.
-     *
-     * Optionally accepts a pre-fetched snapshot to avoid duplicate API calls
-     * when called alongside other reconciliation methods.
-     */
+    /** Preserve the reconciliation worker's public seam. */
     async reconcileWithLidarr(
         existingSnapshot?: ReconciliationSnapshot,
     ): Promise<{
@@ -1738,367 +1171,21 @@ class SimpleDownloadManager {
         errors: string[];
         snapshot?: ReconciliationSnapshot;
     }> {
-        logger.debug(
-            `\n[RECONCILE] Checking processing jobs against Lidarr...`,
-        );
-
-        const processingJobs = await prisma.downloadJob.findMany({
-            where: { status: "processing" },
-        });
-
-        if (processingJobs.length === 0) {
-            logger.debug(`   No processing jobs to reconcile`);
-            return { reconciled: 0, errors: [] };
-        }
-
-        logger.debug(`   Found ${processingJobs.length} processing job(s)`);
-
-        // Use existing snapshot - do NOT re-fetch if undefined (means Lidarr is unavailable)
-        if (!existingSnapshot) {
-            logger.debug(
-                `   No Lidarr snapshot available, skipping reconciliation`,
-            );
-            return { reconciled: 0, errors: [] };
-        }
-        const snapshot = existingSnapshot;
-
-        // Collect jobs to complete and discovery batches to check
-        const toComplete: string[] = [];
-        const discoveryBatchIds = new Set<string>();
-
-        for (const job of processingJobs) {
-            const metadata = job.metadata as any;
-            const albumMbid =
-                job.targetMbid || metadata?.albumMbid || metadata?.lidarrMbid;
-            const artistName = metadata?.artistName;
-            const albumTitle = metadata?.albumTitle;
-
-            // Check using snapshot (O(1) lookups, no API calls)
-            let isAvailable = lidarrService.isAlbumAvailableInSnapshot(
-                snapshot,
-                albumMbid,
-                artistName,
-                albumTitle,
-            );
-
-            // Also try lidarrMbid if different
-            if (
-                !isAvailable &&
-                metadata?.lidarrMbid &&
-                metadata.lidarrMbid !== albumMbid
-            ) {
-                isAvailable = lidarrService.isAlbumAvailableInSnapshot(
-                    snapshot,
-                    metadata.lidarrMbid,
-                    undefined,
-                    undefined,
-                );
-            }
-
-            // Strategy 3: Parse subject if no metadata (format: "Artist - Album")
-            if (!isAvailable && !artistName && job.subject) {
-                const parsed = parseArtistAlbumSubject(job.subject);
-                if (parsed.artist !== job.subject) {
-                    isAvailable = lidarrService.isAlbumAvailableInSnapshot(
-                        snapshot,
-                        undefined,
-                        parsed.artist,
-                        parsed.album,
-                    );
-                }
-            }
-
-            if (isAvailable) {
-                logger.debug(
-                    `   Job ${job.id}: Album "${job.subject}" found in Lidarr`,
-                );
-                toComplete.push(job.id);
-                if (job.discoveryBatchId) {
-                    discoveryBatchIds.add(job.discoveryBatchId);
-                }
-            } else {
-                // Only log for jobs older than 5 minutes
-                const jobAge = Date.now() - (job.createdAt?.getTime() || 0);
-                if (jobAge > 5 * 60 * 1000) {
-                    logger.debug(
-                        `   Job ${job.id}: "${job.subject}" not yet available (${Math.round(jobAge / 60000)}m old)`,
-                    );
-                }
-            }
-        }
-
-        // Batch update all completed jobs
-        if (toComplete.length > 0) {
-            await prisma.downloadJob.updateMany({
-                where: { id: { in: toComplete } },
-                data: {
-                    status: "completed",
-                    completedAt: new Date(),
-                    error: null,
-                },
-            });
-            logger.debug(
-                `   Batch updated ${toComplete.length} job(s) to completed`,
-            );
-        }
-
-        // Check discovery batch completions (deduplicated, with yielding)
-        if (discoveryBatchIds.size > 0) {
-            const { discoverWeeklyService } = await import("./discoverWeekly");
-            for (const batchId of discoveryBatchIds) {
-                await discoverWeeklyService.checkBatchCompletion(batchId);
-                await yieldToEventLoop();
-            }
-        }
-
-        logger.debug(`[RECONCILE] Reconciled ${toComplete.length} job(s)`);
-        return { reconciled: toComplete.length, errors: [], snapshot };
+        return reconcileWithLidarr(existingSnapshot);
     }
 
-    /**
-     * Sync with Lidarr's queue to detect cancelled/orphaned downloads.
-     * Uses snapshot approach for efficient batch checking.
-     *
-     * IMPORTANT: Implements grace period to prevent false cancellations when Lidarr
-     * auto-retries with a different release (new downloadId). Missing downloads are
-     * only marked as cancelled after 3 sync checks (90 seconds), and replacement
-     * detection handles downloadId changes.
-     *
-     * Optionally accepts a pre-fetched snapshot to avoid duplicate API calls.
-     */
+    /** Preserve the queue-sync worker's public seam. */
     async syncWithLidarrQueue(
         existingSnapshot?: ReconciliationSnapshot,
-    ): Promise<{
-        cancelled: number;
-        errors: string[];
-    }> {
-        logger.debug(
-            `\n[QUEUE-SYNC] Syncing processing jobs with Lidarr queue...`,
-        );
-
-        const processingJobs = await prisma.downloadJob.findMany({
-            where: {
-                status: "processing",
-                lidarrRef: { not: null },
-            },
-        });
-
-        if (processingJobs.length === 0) {
-            logger.debug(`   No processing jobs with lidarrRef to sync`);
-            return { cancelled: 0, errors: [] };
-        }
-
-        logger.debug(
-            `   Found ${processingJobs.length} processing job(s) with lidarrRef`,
-        );
-
-        // Use existing snapshot - do NOT re-fetch if undefined (means Lidarr is unavailable)
-        if (!existingSnapshot) {
-            logger.debug(
-                `   No Lidarr snapshot available, skipping queue sync`,
-            );
-            return { cancelled: 0, errors: [] };
-        }
-
-        try {
-            const snapshot = existingSnapshot;
-
-            // Build arrays for collecting downloadIds from snapshot queue
-            const queueDownloadIds = new Set(snapshot.queue.keys());
-            const queueItems = Array.from(snapshot.queue.values());
-
-            logger.debug(
-                `   Lidarr queue has ${queueDownloadIds.size} item(s)`,
-            );
-
-            let cancelled = 0;
-            const errors: string[] = [];
-            const discoveryBatchIds = new Set<string>();
-
-            // Collect jobs that need metadata updates (to batch where possible)
-            type ProcessingJob = (typeof processingJobs)[number];
-            const jobsToResetCounter: ProcessingJob[] = [];
-            const jobsToIncrementCounter: [ProcessingJob, number][] = [];
-            const jobsToUpdateDownloadId: {
-                job: ProcessingJob;
-                newDownloadId: string;
-                oldDownloadId: string;
-            }[] = [];
-            const jobsToComplete: ProcessingJob[] = [];
-            const jobsToFail: [ProcessingJob, number][] = [];
-
-            // Check each processing job against snapshot
-            for (const job of processingJobs) {
-                if (!job.lidarrRef) continue;
-
-                const metadata = asPlainObject(job.metadata);
-                const artistName = metadata.artistName as string | undefined;
-                const albumTitle = metadata.albumTitle as string | undefined;
-                const queueSyncMissingCount =
-                    typeof metadata.queueSyncMissingCount === "number"
-                        ? metadata.queueSyncMissingCount
-                        : 0;
-
-                // If download is found in queue, reset its missing counter
-                if (queueDownloadIds.has(job.lidarrRef)) {
-                    if (queueSyncMissingCount > 0) {
-                        jobsToResetCounter.push(job);
-                    }
-                    continue;
-                }
-
-                // Download ID not found in queue - check grace period
-                const missingCount = queueSyncMissingCount + 1;
-
-                if (missingCount < 3) {
-                    jobsToIncrementCounter.push([job, missingCount]);
-                    continue;
-                }
-
-                // After 3 checks, check for replacement downloads
-                const replacementDownload = queueItems.find((item) => {
-                    if (!item.downloadId || !albumTitle) return false;
-                    const queueTitle = item.title?.toLowerCase() || "";
-                    const searchAlbum = albumTitle.toLowerCase();
-                    const searchArtist = artistName?.toLowerCase() || "";
-                    return (
-                        queueTitle.includes(searchAlbum) &&
-                        (searchArtist
-                            ? queueTitle.includes(searchArtist)
-                            : true)
-                    );
-                });
-
-                if (replacementDownload && replacementDownload.downloadId) {
-                    jobsToUpdateDownloadId.push({
-                        job,
-                        newDownloadId: replacementDownload.downloadId,
-                        oldDownloadId: job.lidarrRef,
-                    });
-                    continue;
-                }
-
-                // No replacement - check if album is already downloaded using snapshot
-                const isAvailable = lidarrService.isAlbumAvailableInSnapshot(
-                    snapshot,
-                    job.targetMbid || undefined,
-                    artistName,
-                    albumTitle,
-                );
-
-                if (isAvailable) {
-                    jobsToComplete.push(job);
-                    cancelled++;
-                } else {
-                    jobsToFail.push([job, missingCount]);
-                    if (job.discoveryBatchId) {
-                        discoveryBatchIds.add(job.discoveryBatchId);
-                    }
-                    cancelled++;
-                }
-            }
-
-            // Process updates (individual updates needed for different metadata per job)
-            for (const job of jobsToResetCounter) {
-                await patchDownloadJobMetadataFrom(job.metadata, job.id, {
-                    queueSyncMissingCount: 0,
-                    lastQueueSyncFound: new Date().toISOString(),
-                });
-            }
-
-            for (const [job, missingCount] of jobsToIncrementCounter) {
-                await patchDownloadJobMetadataFrom(job.metadata, job.id, {
-                    queueSyncMissingCount: missingCount,
-                    lastQueueSyncCheck: new Date().toISOString(),
-                });
-            }
-
-            for (const {
-                job,
-                newDownloadId,
-                oldDownloadId,
-            } of jobsToUpdateDownloadId) {
-                logger.debug(
-                    `   Job ${job.id}: Replacement download found: ${newDownloadId}`,
-                );
-                await patchDownloadJobMetadataFrom(
-                    job.metadata,
-                    job.id,
-                    {
-                        previousDownloadId: oldDownloadId,
-                        replacementDetected: true,
-                        replacementDetectedAt: new Date().toISOString(),
-                        queueSyncMissingCount: 0,
-                    },
-                    {
-                        lidarrRef: newDownloadId,
-                        error: null,
-                    },
-                );
-            }
-
-            for (const job of jobsToComplete) {
-                logger.debug(
-                    `   Job ${job.id}: Album found in library - marking complete`,
-                );
-                await patchDownloadJobMetadataFrom(
-                    job.metadata,
-                    job.id,
-                    {
-                        completedAt: new Date().toISOString(),
-                        queueSyncCompleted: true,
-                        queueSyncMissingCount: 0,
-                    },
-                    {
-                        status: "completed",
-                        completedAt: new Date(),
-                        error: null,
-                    },
-                );
-            }
-
-            for (const [job, missingCount] of jobsToFail) {
-                logger.warn(
-                    `   Job ${job.id}: Download not found after 90s - marking as failed`,
-                );
-                await patchDownloadJobMetadataFrom(
-                    job.metadata,
-                    job.id,
-                    {
-                        cancelledAt: new Date().toISOString(),
-                        queueSyncCancelled: true,
-                        queueSyncMissingCount: missingCount,
-                    },
-                    {
-                        status: "failed",
-                        error: "Lidarr queue sync: Download not found after 90s (3 checks).",
-                        completedAt: new Date(),
-                        lidarrRef: null,
-                    },
-                );
-            }
-
-            // Check discovery batch completions (deduplicated, with yielding)
-            if (discoveryBatchIds.size > 0) {
-                const { discoverWeeklyService } =
-                    await import("./discoverWeekly");
-                for (const batchId of discoveryBatchIds) {
-                    await discoverWeeklyService.checkBatchCompletion(batchId);
-                    await yieldToEventLoop();
-                }
-            }
-
-            logger.debug(`[QUEUE-SYNC] Processed ${cancelled} orphaned job(s)`);
-            return { cancelled, errors };
-        } catch (error: any) {
-            logger.error(
-                `[QUEUE-SYNC] Failed to sync with Lidarr queue:`,
-                error.message,
-            );
-            return { cancelled: 0, errors: [error.message] };
-        }
+    ): Promise<{ cancelled: number; errors: string[] }> {
+        return syncWithLidarrQueue(existingSnapshot);
     }
 }
 
+const downloadJobEvents = new DownloadJobEvents();
+registerDownloadJobNotificationSubscriber(downloadJobEvents);
+
 // Singleton instance
-export const simpleDownloadManager = new SimpleDownloadManager();
+export const simpleDownloadManager = new SimpleDownloadManager(
+    downloadJobEvents,
+);

@@ -21,14 +21,17 @@ jest.mock("../../workers/queues", () => ({
 
 jest.mock("axios");
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
+jest.mock("../../utils/logger", () => {
+    const mockLogger = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-    },
-}));
+        child: jest.fn(),
+    };
+    mockLogger.child.mockReturnValue(mockLogger);
+    return { logger: mockLogger };
+});
 
 jest.mock("../../config", () => ({
     config: {

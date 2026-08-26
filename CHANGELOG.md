@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Download retries, stale-job cleanup, Lidarr queue reconciliation, and notification delivery now use focused internal modules without changing the manager's public behavior (#790).
 - Lidarr album acquisition, discovery tags, and reconciliation now use focused internal modules without changing the service API or download behavior (#790).
 - The full-screen player's swipe gestures (track skip, swipe-down to close, drawer handle) now run through one tested gesture module, in preparation for further player decomposition.
 - The full-screen player's Up Next list now renders only the rows in view, so very large queues open and scroll smoothly, and the Queue, Lyrics, and Related panels fetch their data independently so an open player does less background work.

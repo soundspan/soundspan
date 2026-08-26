@@ -152,7 +152,7 @@ class NotificationService {
         userId: string,
         subject: string,
         albumId?: string,
-        artistId?: string,
+        artistId?: unknown,
     ) {
         return this.create({
             userId,

@@ -12,6 +12,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -419,135 +425,6 @@ describe("simpleDownloadManager branch coverage", () => {
 
         expect(result.jobId).toBe("job-no-notify");
         expect(mockPrisma.downloadJob.update).not.toHaveBeenCalled();
-    });
-
-    it("logs spotify cleanup context and marks stale import as failed", async () => {
-        const oldDate = new Date(Date.now() - 20 * 60 * 1000);
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "spotify_stale_1",
-                status: "processing",
-                lidarrRef: "dl-stale-spotify",
-                lidarrAlbumId: 1001,
-                createdAt: oldDate,
-                artistMbid: null,
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist Spotify",
-                    albumTitle: "Album Spotify",
-                    startedAt: oldDate.toISOString(),
-                },
-            },
-        ]);
-        mockNotificationPolicyService.evaluateNotification.mockResolvedValueOnce(
-            {
-                shouldNotify: false,
-                reason: "no timeout extension",
-            } as any,
-        );
-        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce(null);
-
-        const result = await simpleDownloadManager.markStaleJobsAsFailed({
-            queue: new Map(),
-        } as any);
-
-        expect(result).toBe(1);
-        expect(mockSessionLog).toHaveBeenCalledWith(
-            "CLEANUP",
-            expect.stringContaining("Spotify import"),
-        );
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "spotify_stale_1" },
-                data: expect.objectContaining({ status: "failed" }),
-            }),
-        );
-    });
-
-    it("calls blocklistAndRetry for stale jobs that still have lidarr refs", async () => {
-        const oldDate = new Date(Date.now() - 20 * 60 * 1000);
-        const blocklistSpy = jest
-            .spyOn(simpleDownloadManager as any, "blocklistAndRetry")
-            .mockResolvedValue(undefined);
-        const fallbackSpy = jest
-            .spyOn(simpleDownloadManager as any, "tryNextAlbumFromArtist")
-            .mockResolvedValue({ retried: false, failed: true, jobId: "x" });
-
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-stale-lidarr-ref",
-                status: "processing",
-                lidarrRef: "dl-stale-lidarr-ref",
-                lidarrAlbumId: 501,
-                createdAt: oldDate,
-                artistMbid: "artist-ref",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist Ref",
-                    albumTitle: "Album Ref",
-                    startedAt: oldDate.toISOString(),
-                },
-            },
-        ]);
-        mockNotificationPolicyService.evaluateNotification.mockResolvedValueOnce(
-            {
-                shouldNotify: false,
-                reason: "timeout fail",
-            } as any,
-        );
-        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce(null);
-
-        await simpleDownloadManager.markStaleJobsAsFailed({
-            queue: new Map(),
-        } as any);
-
-        expect(blocklistSpy).toHaveBeenCalledWith("dl-stale-lidarr-ref");
-        blocklistSpy.mockRestore();
-        fallbackSpy.mockRestore();
-    });
-
-    it("marks stale job failed when same-artist fallback throws", async () => {
-        const oldDate = new Date(Date.now() - 20 * 60 * 1000);
-        const fallbackSpy = jest
-            .spyOn(simpleDownloadManager as any, "tryNextAlbumFromArtist")
-            .mockRejectedValue(new Error("fallback crash"));
-
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-stale-fallback-throws",
-                status: "processing",
-                lidarrRef: null,
-                createdAt: oldDate,
-                artistMbid: "artist-throws",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist Throws",
-                    albumTitle: "Album Throws",
-                    batchId: "download-batch-throws",
-                    startedAt: oldDate.toISOString(),
-                },
-            },
-        ]);
-        mockNotificationPolicyService.evaluateNotification.mockResolvedValueOnce(
-            {
-                shouldNotify: false,
-                reason: "no extension",
-            } as any,
-        );
-        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce(null);
-
-        const count = await simpleDownloadManager.markStaleJobsAsFailed();
-
-        expect(count).toBe(1);
-        expect(
-            mockPrisma.downloadJob.update.mock.calls.some(([args]: any[]) => {
-                return (
-                    args?.where?.id === "job-stale-fallback-throws" &&
-                    args?.data?.status === "failed"
-                );
-            }),
-        ).toBe(true);
-        fallbackSpy.mockRestore();
     });
 
     it("blocklistAndRetry handles queue lookup errors", async () => {

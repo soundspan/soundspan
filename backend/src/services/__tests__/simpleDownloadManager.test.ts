@@ -18,6 +18,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -940,6 +946,63 @@ describe("simpleDownloadManager", () => {
         ).not.toHaveBeenCalled();
     });
 
+    it("onDownloadComplete preserves null artistId and runs completion checks after a subscriber throws", async () => {
+        mockPrisma.$transaction.mockImplementationOnce(
+            async (operation: (tx: any) => Promise<any>) => {
+                const tx = makeTx();
+                tx.downloadJob.findFirst.mockResolvedValueOnce(null);
+                tx.downloadJob.findMany.mockResolvedValueOnce([
+                    {
+                        id: "job-emitter-failure",
+                        userId: "user-1",
+                        subject: "Artist - Album",
+                        status: "processing",
+                        lidarrRef: "dl-emitter-failure",
+                        targetMbid: "mbid-emitter-failure",
+                        discoveryBatchId: "batch-emitter-failure",
+                        metadata: {
+                            artistName: "Artist",
+                            albumTitle: "Album",
+                            artistId: null,
+                            spotifyImportJobId: "spotify-emitter-failure",
+                        },
+                    },
+                ]);
+                return operation(tx);
+            },
+        );
+        const unsubscribe = (simpleDownloadManager as any).downloadJobEvents.on(
+            "download.completed",
+            async () => {
+                throw new Error("subscriber failed");
+            },
+        );
+
+        try {
+            await expect(
+                simpleDownloadManager.onDownloadComplete(
+                    "dl-emitter-failure",
+                    "mbid-emitter-failure",
+                    "Artist",
+                    "Album",
+                ),
+            ).resolves.toEqual(
+                expect.objectContaining({ jobId: "job-emitter-failure" }),
+            );
+        } finally {
+            unsubscribe();
+        }
+        expect(
+            mockNotificationService.notifyDownloadComplete,
+        ).toHaveBeenCalledWith("user-1", "Artist - Album", undefined, null);
+        expect(
+            mockDiscoverWeeklyService.checkBatchCompletion,
+        ).toHaveBeenCalledWith("batch-emitter-failure");
+        expect(
+            mockSpotifyImportService.checkImportCompletion,
+        ).toHaveBeenCalledWith("spotify-emitter-failure");
+    });
+
     it("onImportFailed records failure and removes queue item for retry", async () => {
         mockPrisma.$transaction.mockImplementationOnce(
             async (operation: (tx: any) => Promise<any>) => {
@@ -970,48 +1033,6 @@ describe("simpleDownloadManager", () => {
             "dl-fail-1",
             false,
         );
-    });
-
-    it("markStaleJobsAsFailed updates stale pending jobs in batch", async () => {
-        const staleDate = new Date(Date.now() - 11 * 60 * 1000);
-        const freshDate = new Date(Date.now() - 1 * 60 * 1000);
-
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "pending-stale",
-                status: "pending",
-                discoveryBatchId: "batch-pending-1",
-                createdAt: staleDate,
-            },
-            {
-                id: "pending-fresh",
-                status: "pending",
-                createdAt: freshDate,
-            },
-            {
-                id: "pending-queue-owned",
-                status: "pending",
-                createdAt: staleDate,
-                metadata: { queuedVia: "album-download-queue" },
-            },
-        ]);
-        mockPrisma.downloadJob.updateMany.mockResolvedValueOnce({ count: 1 });
-
-        const count = await simpleDownloadManager.markStaleJobsAsFailed();
-
-        expect(count).toBe(1);
-        expect(mockPrisma.downloadJob.updateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: { in: ["pending-stale"] } },
-                data: expect.objectContaining({
-                    status: "failed",
-                    error: "Download never started - timed out",
-                }),
-            }),
-        );
-        expect(
-            mockDiscoverWeeklyService.checkBatchCompletion,
-        ).toHaveBeenCalledWith("batch-pending-1");
     });
 
     it("clears failed Lidarr queue items and triggers album search", async () => {
@@ -1202,494 +1223,6 @@ describe("simpleDownloadManager", () => {
                 }),
             }),
         );
-    });
-
-    it("tryNextAlbumFromArtist marks job exhausted when no artist MBID is available", async () => {
-        const job = {
-            id: "job-no-artist",
-            userId: "user-no-artist",
-            subject: "Unknown - Missing Album",
-            metadata: {
-                artistName: "Unknown",
-            },
-        };
-        const markSpy = jest
-            .spyOn(simpleDownloadManager as any, "markJobExhausted")
-            .mockResolvedValue({
-                retried: false,
-                failed: true,
-                jobId: "job-no-artist",
-            });
-
-        try {
-            const result = await (
-                simpleDownloadManager as any
-            ).tryNextAlbumFromArtist(job, "missing artist mbid");
-
-            expect(result).toEqual({
-                retried: false,
-                failed: true,
-                jobId: "job-no-artist",
-            });
-            expect(markSpy).toHaveBeenCalledWith(job, "missing artist mbid");
-        } finally {
-            markSpy.mockRestore();
-        }
-    });
-
-    it("tryNextAlbumFromArtist skips fallback for spotify import jobs and triggers import completion", async () => {
-        const markSpy = jest
-            .spyOn(simpleDownloadManager as any, "markJobExhausted")
-            .mockResolvedValue({
-                retried: false,
-                failed: true,
-                jobId: "job-spotify-1",
-            });
-
-        const spotifyJob = {
-            id: "job-spotify-1",
-            userId: "user-1",
-            subject: "Artist - Exact Album",
-            metadata: {
-                artistName: "Artist",
-                spotifyImportJobId: "spotify-import-1",
-            },
-        };
-
-        const result = await (
-            simpleDownloadManager as any
-        ).tryNextAlbumFromArtist(spotifyJob, "exact album unavailable");
-
-        expect(result).toEqual({
-            retried: false,
-            failed: true,
-            jobId: "job-spotify-1",
-        });
-        expect(markSpy).toHaveBeenCalledWith(
-            spotifyJob,
-            "exact album unavailable",
-        );
-        expect(
-            mockSpotifyImportService.checkImportCompletion,
-        ).toHaveBeenCalledWith("spotify-import-1");
-        markSpy.mockRestore();
-    });
-
-    it("tryNextAlbumFromArtist marks the job exhausted if Lidarr album lookup fails", async () => {
-        const job = {
-            id: "job-fallback-error",
-            userId: "user-err",
-            targetMbid: "mbid-current",
-            artistMbid: "artist-mbid-err",
-            subject: "Artist Err - Album Err",
-            metadata: {
-                artistName: "Artist Err",
-                artistMbid: "artist-mbid-err",
-            },
-        };
-
-        const markSpy = jest
-            .spyOn(simpleDownloadManager as any, "markJobExhausted")
-            .mockResolvedValue({
-                retried: false,
-                failed: true,
-                jobId: "job-fallback-error",
-            });
-
-        try {
-            mockLidarrService.getArtistAlbums.mockRejectedValueOnce(
-                new Error("Lidarr unavailable"),
-            );
-
-            const result = await (
-                simpleDownloadManager as any
-            ).tryNextAlbumFromArtist(job, "lidarr unavailable");
-
-            expect(result).toEqual({
-                retried: false,
-                failed: true,
-                jobId: "job-fallback-error",
-            });
-            expect(markSpy).toHaveBeenCalledWith(job, "lidarr unavailable");
-        } finally {
-            markSpy.mockRestore();
-        }
-    });
-
-    it("tryNextAlbumFromArtist creates a same-artist fallback job and starts it", async () => {
-        const startSpy = jest
-            .spyOn(simpleDownloadManager, "startDownload")
-            .mockResolvedValue({
-                success: true,
-                correlationId: "corr-fallback",
-            } as any);
-
-        mockLidarrService.getArtistAlbums.mockResolvedValueOnce([
-            {
-                id: 301,
-                title: "Already Tried",
-                foreignAlbumId: "mbid-tried",
-                albumType: "album",
-            },
-            {
-                id: 302,
-                title: "Next Studio Album",
-                foreignAlbumId: "mbid-next",
-                albumType: "album",
-            },
-        ] as any);
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            { id: "job-old", targetMbid: "mbid-tried" },
-        ]);
-        mockPrisma.downloadJob.create.mockResolvedValueOnce({
-            id: "job-fallback-1",
-        });
-
-        const job = {
-            id: "job-base-1",
-            userId: "user-1",
-            targetMbid: "mbid-current",
-            artistMbid: "artist-mbid-1",
-            subject: "Artist - Current Album",
-            metadata: {
-                artistName: "Artist",
-                artistMbid: "artist-mbid-1",
-                downloadType: "library",
-            },
-        };
-
-        const result = await (
-            simpleDownloadManager as any
-        ).tryNextAlbumFromArtist(job, "album exhausted");
-
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-base-1" },
-                data: expect.objectContaining({
-                    status: "exhausted",
-                }),
-            }),
-        );
-        expect(mockPrisma.downloadJob.create).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({
-                    targetMbid: "mbid-next",
-                    metadata: expect.objectContaining({
-                        sameArtistFallback: true,
-                        albumTitle: "Next Studio Album",
-                    }),
-                }),
-            }),
-        );
-        expect(startSpy).toHaveBeenCalledWith(
-            "job-fallback-1",
-            "Artist",
-            "Next Studio Album",
-            "mbid-next",
-            "user-1",
-        );
-        expect(result).toEqual({
-            retried: true,
-            failed: false,
-            jobId: "job-fallback-1",
-        });
-        startSpy.mockRestore();
-    });
-
-    it("reconcileWithLidarr completes jobs via MBID, lidarr MBID fallback, and parsed subject matching", async () => {
-        const snapshot = {
-            queue: new Map<string, any>(),
-        } as any;
-
-        const oldDate = new Date(Date.now() - 8 * 60 * 1000);
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-rec-1",
-                status: "processing",
-                targetMbid: "mbid-1",
-                subject: "Artist One - Album One",
-                discoveryBatchId: "batch-rec-1",
-                createdAt: new Date(),
-                metadata: {
-                    artistName: "Artist One",
-                    albumTitle: "Album One",
-                    albumMbid: "mbid-1",
-                },
-            },
-            {
-                id: "job-rec-2",
-                status: "processing",
-                targetMbid: "orig-2",
-                subject: "Artist Two - Album Two",
-                discoveryBatchId: null,
-                createdAt: new Date(),
-                metadata: {
-                    artistName: "Artist Two",
-                    albumTitle: "Album Two",
-                    albumMbid: "orig-2",
-                    lidarrMbid: "lidarr-2",
-                },
-            },
-            {
-                id: "job-rec-3",
-                status: "processing",
-                targetMbid: null,
-                subject: "Artist Three - Album Three",
-                discoveryBatchId: "batch-rec-3",
-                createdAt: new Date(),
-                metadata: {},
-            },
-            {
-                id: "job-rec-4",
-                status: "processing",
-                targetMbid: "mbid-missing",
-                subject: "Artist Four - Album Four",
-                discoveryBatchId: null,
-                createdAt: oldDate,
-                metadata: {
-                    artistName: "Artist Four",
-                    albumTitle: "Album Four",
-                },
-            },
-        ]);
-        mockLidarrService.isAlbumAvailableInSnapshot.mockImplementation(
-            (
-                _snapshot: any,
-                mbid?: string,
-                artist?: string,
-                album?: string,
-            ) => {
-                if (mbid === "mbid-1") return true;
-                if (mbid === "lidarr-2") return true;
-                if (artist === "Artist Three" && album === "Album Three") {
-                    return true;
-                }
-                return false;
-            },
-        );
-
-        const result =
-            await simpleDownloadManager.reconcileWithLidarr(snapshot);
-
-        expect(result.reconciled).toBe(3);
-        expect(result.errors).toEqual([]);
-        expect(result.snapshot).toBe(snapshot);
-        expect(mockPrisma.downloadJob.updateMany).toHaveBeenCalledWith({
-            where: { id: { in: ["job-rec-1", "job-rec-2", "job-rec-3"] } },
-            data: {
-                status: "completed",
-                completedAt: expect.any(Date),
-                error: null,
-            },
-        });
-        expect(
-            mockDiscoverWeeklyService.checkBatchCompletion,
-        ).toHaveBeenCalledWith("batch-rec-1");
-        expect(
-            mockDiscoverWeeklyService.checkBatchCompletion,
-        ).toHaveBeenCalledWith("batch-rec-3");
-    });
-
-    it("reconcileWithLidarr skips processing when no snapshot is available", async () => {
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-rec-skip",
-                status: "processing",
-                subject: "Artist - Album",
-                metadata: {},
-            },
-        ]);
-
-        const result =
-            await simpleDownloadManager.reconcileWithLidarr(undefined);
-
-        expect(result).toEqual({ reconciled: 0, errors: [] });
-        expect(mockPrisma.downloadJob.updateMany).not.toHaveBeenCalled();
-    });
-
-    it("syncWithLidarrQueue handles reset, increment, replacement, completion, and failure transitions", async () => {
-        const snapshot = {
-            queue: new Map<string, any>([
-                [
-                    "dl-found-1",
-                    {
-                        downloadId: "dl-found-1",
-                        title: "Artist One - Album One",
-                    },
-                ],
-                [
-                    "dl-replacement-3",
-                    {
-                        downloadId: "dl-replacement-3",
-                        title: "Artist Three - Album Three WEB",
-                    },
-                ],
-            ]),
-        } as any;
-
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-sync-1",
-                status: "processing",
-                lidarrRef: "dl-found-1",
-                targetMbid: "mbid-one",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist One",
-                    albumTitle: "Album One",
-                    queueSyncMissingCount: 2,
-                },
-            },
-            {
-                id: "job-sync-2",
-                status: "processing",
-                lidarrRef: "dl-missing-2",
-                targetMbid: "mbid-two",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist Two",
-                    albumTitle: "Album Two",
-                    queueSyncMissingCount: 1,
-                },
-            },
-            {
-                id: "job-sync-3",
-                status: "processing",
-                lidarrRef: "dl-missing-3",
-                targetMbid: "mbid-three",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist Three",
-                    albumTitle: "Album Three",
-                    queueSyncMissingCount: 2,
-                },
-            },
-            {
-                id: "job-sync-4",
-                status: "processing",
-                lidarrRef: "dl-missing-4",
-                targetMbid: "mbid-available",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist Four",
-                    albumTitle: "Album Four",
-                    queueSyncMissingCount: 2,
-                },
-            },
-            {
-                id: "job-sync-5",
-                status: "processing",
-                lidarrRef: "dl-missing-5",
-                targetMbid: "mbid-fail",
-                discoveryBatchId: "batch-sync-5",
-                metadata: {
-                    artistName: "Artist Five",
-                    albumTitle: "Album Five",
-                    queueSyncMissingCount: 2,
-                },
-            },
-        ]);
-        mockLidarrService.isAlbumAvailableInSnapshot.mockImplementation(
-            (_snapshot: any, mbid?: string) => mbid === "mbid-available",
-        );
-
-        const result =
-            await simpleDownloadManager.syncWithLidarrQueue(snapshot);
-
-        expect(result).toEqual({ cancelled: 2, errors: [] });
-        expect(mockPrisma.downloadJob.findUnique).not.toHaveBeenCalled();
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-sync-1" },
-                data: expect.objectContaining({
-                    metadata: expect.objectContaining({
-                        queueSyncMissingCount: 0,
-                        lastQueueSyncFound: expect.any(String),
-                    }),
-                }),
-            }),
-        );
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-sync-2" },
-                data: expect.objectContaining({
-                    metadata: expect.objectContaining({
-                        queueSyncMissingCount: 2,
-                        lastQueueSyncCheck: expect.any(String),
-                    }),
-                }),
-            }),
-        );
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-sync-3" },
-                data: expect.objectContaining({
-                    lidarrRef: "dl-replacement-3",
-                    metadata: expect.objectContaining({
-                        previousDownloadId: "dl-missing-3",
-                        replacementDetected: true,
-                        queueSyncMissingCount: 0,
-                    }),
-                }),
-            }),
-        );
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-sync-4" },
-                data: expect.objectContaining({
-                    status: "completed",
-                    metadata: expect.objectContaining({
-                        queueSyncCompleted: true,
-                    }),
-                }),
-            }),
-        );
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-sync-5" },
-                data: expect.objectContaining({
-                    status: "failed",
-                    lidarrRef: null,
-                    metadata: expect.objectContaining({
-                        queueSyncCancelled: true,
-                        queueSyncMissingCount: 3,
-                    }),
-                }),
-            }),
-        );
-        expect(
-            mockDiscoverWeeklyService.checkBatchCompletion,
-        ).toHaveBeenCalledWith("batch-sync-5");
-    });
-
-    it("syncWithLidarrQueue returns errors when update processing fails", async () => {
-        const snapshot = {
-            queue: new Map<string, any>(),
-        } as any;
-
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-sync-fail",
-                status: "processing",
-                lidarrRef: "dl-missing",
-                targetMbid: "mbid-fail",
-                discoveryBatchId: null,
-                metadata: {
-                    artistName: "Artist",
-                    albumTitle: "Album",
-                    queueSyncMissingCount: 2,
-                },
-            },
-        ]);
-        mockLidarrService.isAlbumAvailableInSnapshot.mockReturnValue(false);
-        mockPrisma.downloadJob.update.mockRejectedValueOnce(
-            new Error("write failed"),
-        );
-
-        const result =
-            await simpleDownloadManager.syncWithLidarrQueue(snapshot);
-
-        expect(result).toEqual({ cancelled: 0, errors: ["write failed"] });
     });
 
     it("blocklistAndRetry and removeFromLidarrQueue clean up matching queue entries", async () => {
@@ -2183,169 +1716,6 @@ describe("simpleDownloadManager", () => {
         expect(mockLidarrService.blocklistAndRemove).not.toHaveBeenCalled();
     });
 
-    it("tryNextAlbumFromArtist skips fallback for discovery jobs", async () => {
-        const markSpy = jest
-            .spyOn(simpleDownloadManager as any, "markJobExhausted")
-            .mockResolvedValue({
-                retried: false,
-                failed: true,
-                jobId: "job-discovery-fallback-skip",
-            });
-
-        const result = await (
-            simpleDownloadManager as any
-        ).tryNextAlbumFromArtist(
-            {
-                id: "job-discovery-fallback-skip",
-                discoveryBatchId: "batch-discovery",
-                metadata: {
-                    artistName: "Discovery Artist",
-                    artistMbid: "artist-discovery",
-                },
-            },
-            "discovery diversity",
-        );
-
-        expect(result).toEqual({
-            retried: false,
-            failed: true,
-            jobId: "job-discovery-fallback-skip",
-        });
-        expect(markSpy).toHaveBeenCalledWith(
-            expect.objectContaining({ id: "job-discovery-fallback-skip" }),
-            "discovery diversity",
-        );
-        markSpy.mockRestore();
-    });
-
-    it("tryNextAlbumFromArtist marks exhausted when Lidarr returns no albums", async () => {
-        const markSpy = jest
-            .spyOn(simpleDownloadManager as any, "markJobExhausted")
-            .mockResolvedValue({
-                retried: false,
-                failed: true,
-                jobId: "job-no-lidarr-albums",
-            });
-        mockLidarrService.getArtistAlbums.mockResolvedValueOnce([]);
-
-        const result = await (
-            simpleDownloadManager as any
-        ).tryNextAlbumFromArtist(
-            {
-                id: "job-no-lidarr-albums",
-                targetMbid: "mbid-current",
-                artistMbid: "artist-no-albums",
-                metadata: {
-                    artistName: "No Albums Artist",
-                    artistMbid: "artist-no-albums",
-                },
-            },
-            "no albums in lidarr",
-        );
-
-        expect(result).toEqual({
-            retried: false,
-            failed: true,
-            jobId: "job-no-lidarr-albums",
-        });
-        expect(markSpy).toHaveBeenCalledWith(
-            expect.objectContaining({ id: "job-no-lidarr-albums" }),
-            "no albums in lidarr",
-        );
-        markSpy.mockRestore();
-    });
-
-    it("tryNextAlbumFromArtist marks exhausted when all candidate albums were already tried", async () => {
-        const markSpy = jest
-            .spyOn(simpleDownloadManager as any, "markJobExhausted")
-            .mockResolvedValue({
-                retried: false,
-                failed: true,
-                jobId: "job-all-tried",
-            });
-        mockLidarrService.getArtistAlbums.mockResolvedValueOnce([
-            {
-                id: 12,
-                title: "Already Tried Album",
-                foreignAlbumId: "mbid-current",
-                albumType: "album",
-            },
-        ] as any);
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
-
-        const result = await (
-            simpleDownloadManager as any
-        ).tryNextAlbumFromArtist(
-            {
-                id: "job-all-tried",
-                targetMbid: "mbid-current",
-                artistMbid: "artist-all-tried",
-                userId: "user-all-tried",
-                metadata: {
-                    artistName: "All Tried Artist",
-                    artistMbid: "artist-all-tried",
-                },
-            },
-            "all albums exhausted",
-        );
-
-        expect(result).toEqual({
-            retried: false,
-            failed: true,
-            jobId: "job-all-tried",
-        });
-        expect(markSpy).toHaveBeenCalledWith(
-            expect.objectContaining({ id: "job-all-tried" }),
-            "all albums exhausted",
-        );
-        markSpy.mockRestore();
-    });
-
-    it("tryNextAlbumFromArtist returns failed when fallback job cannot start", async () => {
-        const startSpy = jest
-            .spyOn(simpleDownloadManager, "startDownload")
-            .mockResolvedValue({
-                success: false,
-                error: "start failed",
-            } as any);
-        mockLidarrService.getArtistAlbums.mockResolvedValueOnce([
-            {
-                id: 77,
-                title: "Fallback Album",
-                foreignAlbumId: "mbid-fallback",
-                albumType: "album",
-            },
-        ] as any);
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
-        mockPrisma.downloadJob.create.mockResolvedValueOnce({
-            id: "job-fallback-start-fail",
-        });
-
-        const result = await (
-            simpleDownloadManager as any
-        ).tryNextAlbumFromArtist(
-            {
-                id: "job-base-start-fail",
-                userId: "user-base-start-fail",
-                targetMbid: "mbid-original",
-                artistMbid: "artist-fallback-fail",
-                subject: "Artist - Original Album",
-                metadata: {
-                    artistName: "Artist",
-                    artistMbid: "artist-fallback-fail",
-                },
-            },
-            "retry different album",
-        );
-
-        expect(result).toEqual({
-            retried: false,
-            failed: true,
-            jobId: "job-fallback-start-fail",
-        });
-        startSpy.mockRestore();
-    });
-
     it("markJobExhausted suppresses notifications when policy blocks them", async () => {
         mockPrisma.downloadJob.findFirst.mockResolvedValueOnce(null);
         mockNotificationPolicyService.evaluateNotification.mockResolvedValueOnce(
@@ -2407,217 +1777,6 @@ describe("simpleDownloadManager", () => {
         ).not.toHaveBeenCalled();
     });
 
-    it("markStaleJobsAsFailed extends timeout for active Lidarr downloads", async () => {
-        const oldStartedAt = new Date(
-            Date.now() - 20 * 60 * 1000,
-        ).toISOString();
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-stale-active-download",
-                status: "processing",
-                lidarrRef: "dl-active",
-                createdAt: new Date(Date.now() - 20 * 60 * 1000),
-                metadata: {
-                    artistName: "Artist",
-                    albumTitle: "Album",
-                    startedAt: oldStartedAt,
-                },
-            },
-        ]);
-        mockLidarrService.isDownloadActiveInSnapshot.mockReturnValueOnce({
-            active: true,
-            progress: 63,
-        } as any);
-
-        const count = await simpleDownloadManager.markStaleJobsAsFailed({
-            queue: new Map(),
-        } as any);
-
-        expect(count).toBe(0);
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-stale-active-download" },
-                data: {
-                    metadata: expect.objectContaining({
-                        extendedTimeout: true,
-                    }),
-                },
-            }),
-        );
-    });
-
-    it("markStaleJobsAsFailed handles policy timeout extension and duplicate-completion merge", async () => {
-        const oldStartedAt = new Date(
-            Date.now() - 20 * 60 * 1000,
-        ).toISOString();
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-policy-extend",
-                status: "processing",
-                lidarrRef: null,
-                createdAt: new Date(Date.now() - 20 * 60 * 1000),
-                metadata: {
-                    artistName: "Artist One",
-                    albumTitle: "Album One",
-                    startedAt: oldStartedAt,
-                },
-            },
-            {
-                id: "job-duplicate-merge",
-                status: "processing",
-                lidarrRef: null,
-                createdAt: new Date(Date.now() - 20 * 60 * 1000),
-                metadata: {
-                    artistName: "Artist Two",
-                    albumTitle: "Album Two",
-                    startedAt: oldStartedAt,
-                },
-            },
-        ]);
-        mockNotificationPolicyService.evaluateNotification
-            .mockResolvedValueOnce({
-                shouldNotify: false,
-                reason: "still in retry window, extending timeout",
-            } as any)
-            .mockRejectedValueOnce(new Error("policy failed"));
-        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce({
-            id: "job-dup-completed",
-            metadata: {
-                artistName: "Artist Two",
-                albumTitle: "Album Two",
-            },
-        });
-
-        const count = await simpleDownloadManager.markStaleJobsAsFailed();
-
-        expect(count).toBe(2);
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-policy-extend" },
-                data: {
-                    metadata: expect.objectContaining({
-                        timeoutExtendedByPolicy: true,
-                    }),
-                },
-            }),
-        );
-        expect(mockPrisma.downloadJob.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "job-duplicate-merge" },
-                data: expect.objectContaining({
-                    status: "completed",
-                    metadata: expect.objectContaining({
-                        mergedWithJob: "job-dup-completed",
-                    }),
-                }),
-            }),
-        );
-    });
-
-    it("markStaleJobsAsFailed starts same-artist fallback for library jobs and checks discovery completion", async () => {
-        const oldStartedAt = new Date(
-            Date.now() - 20 * 60 * 1000,
-        ).toISOString();
-        const fallbackSpy = jest
-            .spyOn(simpleDownloadManager as any, "tryNextAlbumFromArtist")
-            .mockResolvedValueOnce({
-                retried: true,
-                failed: false,
-                jobId: "job-replacement-started",
-            });
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-stale-library",
-                status: "processing",
-                lidarrRef: null,
-                artistMbid: "artist-library",
-                discoveryBatchId: null,
-                createdAt: new Date(Date.now() - 20 * 60 * 1000),
-                metadata: {
-                    artistName: "Artist Library",
-                    albumTitle: "Album Library",
-                    artistMbid: "artist-library",
-                    startedAt: oldStartedAt,
-                },
-            },
-            {
-                id: "job-stale-discovery",
-                status: "processing",
-                lidarrRef: null,
-                artistMbid: null,
-                discoveryBatchId: "batch-stale-discovery",
-                createdAt: new Date(Date.now() - 20 * 60 * 1000),
-                metadata: {
-                    artistName: "Artist Discovery",
-                    albumTitle: "Album Discovery",
-                    startedAt: oldStartedAt,
-                },
-            },
-        ]);
-        mockNotificationPolicyService.evaluateNotification.mockResolvedValue({
-            shouldNotify: false,
-            reason: "policy says no notification",
-        } as any);
-        mockPrisma.downloadJob.findFirst.mockResolvedValue(null);
-
-        const count = await simpleDownloadManager.markStaleJobsAsFailed();
-
-        expect(count).toBe(2);
-        expect(fallbackSpy).toHaveBeenCalledTimes(1);
-        expect(fallbackSpy).toHaveBeenCalledWith(
-            expect.objectContaining({ id: "job-stale-library" }),
-            "No sources found - no indexer results",
-        );
-        expect(
-            mockPrisma.downloadJob.update.mock.calls.some(([args]: any) => {
-                return (
-                    args?.where?.id === "job-stale-library" &&
-                    args?.data?.status === "failed"
-                );
-            }),
-        ).toBe(false);
-        expect(
-            mockPrisma.downloadJob.update.mock.calls.some(([args]: any) => {
-                return (
-                    args?.where?.id === "job-stale-discovery" &&
-                    args?.data?.status === "failed"
-                );
-            }),
-        ).toBe(true);
-        expect(
-            mockDiscoverWeeklyService.checkBatchCompletion,
-        ).toHaveBeenCalledWith("batch-stale-discovery");
-        fallbackSpy.mockRestore();
-    });
-
-    it("markStaleJobsAsFailed skips direct Soulseek sources from stale checks", async () => {
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-soulseek-stale",
-                status: "processing",
-                lidarrRef: "dl-soulseek-stale",
-                createdAt: new Date(Date.now() - 20 * 60 * 1000),
-                metadata: {
-                    source: "soulseek_direct",
-                    artistName: "Soulseek Artist",
-                    albumTitle: "Soulseek Album",
-                    startedAt: new Date(
-                        Date.now() - 20 * 60 * 1000,
-                    ).toISOString(),
-                },
-            },
-        ]);
-
-        const count = await simpleDownloadManager.markStaleJobsAsFailed();
-
-        expect(count).toBe(0);
-        expect(mockPrisma.downloadJob.update).not.toHaveBeenCalled();
-        expect(mockPrisma.downloadJob.updateMany).not.toHaveBeenCalled();
-        expect(
-            mockNotificationPolicyService.evaluateNotification,
-        ).not.toHaveBeenCalled();
-    });
-
     it("clearLidarrQueue returns configuration error when Lidarr settings are missing", async () => {
         mockLidarrService.clearFailedQueue.mockResolvedValueOnce({
             removed: 0,
@@ -2630,45 +1789,6 @@ describe("simpleDownloadManager", () => {
             removed: 0,
             errors: ["Lidarr not configured"],
         });
-    });
-
-    it("reconcileWithLidarr returns quickly when there are no processing jobs", async () => {
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
-
-        const result = await simpleDownloadManager.reconcileWithLidarr({
-            queue: new Map(),
-        } as any);
-
-        expect(result).toEqual({ reconciled: 0, errors: [] });
-    });
-
-    it("syncWithLidarrQueue returns quickly when there are no processing jobs", async () => {
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
-
-        const result = await simpleDownloadManager.syncWithLidarrQueue({
-            queue: new Map(),
-        } as any);
-
-        expect(result).toEqual({ cancelled: 0, errors: [] });
-    });
-
-    it("syncWithLidarrQueue skips processing when snapshot is unavailable", async () => {
-        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([
-            {
-                id: "job-sync-no-snapshot",
-                status: "processing",
-                lidarrRef: "dl-sync-no-snapshot",
-                metadata: {
-                    artistName: "Artist",
-                    albumTitle: "Album",
-                },
-            },
-        ]);
-
-        const result =
-            await simpleDownloadManager.syncWithLidarrQueue(undefined);
-
-        expect(result).toEqual({ cancelled: 0, errors: [] });
     });
 
     it("falls back to default retry attempts when user settings fetch fails", async () => {
