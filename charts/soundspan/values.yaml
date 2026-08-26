@@ -761,12 +761,17 @@ config:
   # -- Set to true to expose API docs publicly
   docsPublic: false
   # -- Maximum number of music files processed concurrently during a library scan.
-  #    Range 1 through 10.
-  scanFileConcurrency: 3
+  #    The application default is 3; valid values range from 1 through 10.
+  #    When unset, the application default applies and any global.env/envFrom value passes through untouched.
+  scanFileConcurrency: null
   # -- Keep externally browsed artists and albums in the local catalog.
-  catalogPersistence: true
+  #    The application default is on. When unset, the application default applies
+  #    and any global.env/envFrom value passes through untouched.
+  catalogPersistence: null
   # -- Retention window in days for catalog entries that have not been accessed.
-  catalogRetentionDays: 180
+  #    The application default is 180 days. When unset, the application default applies
+  #    and any global.env/envFrom value passes through untouched.
+  catalogRetentionDays: null
   # -- Federation tombstone retention in days. Minimum 3 preserves the stale
   #    cursor safety margin before a consumer must perform a full resync.
   federationTombstoneRetentionDays: 90

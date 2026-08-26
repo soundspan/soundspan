@@ -205,21 +205,21 @@ spec:
             {{- if hasKey $aioEnv "SCAN_FILE_CONCURRENCY" }}
             - name: SCAN_FILE_CONCURRENCY
               value: {{ index $aioEnv "SCAN_FILE_CONCURRENCY" | quote }}
-            {{- else }}
+            {{- else if not (kindIs "invalid" .Values.config.scanFileConcurrency) }}
             - name: SCAN_FILE_CONCURRENCY
               value: {{ .Values.config.scanFileConcurrency | quote }}
             {{- end }}
             {{- if hasKey $aioEnv "CATALOG_PERSISTENCE" }}
             - name: CATALOG_PERSISTENCE
               value: {{ index $aioEnv "CATALOG_PERSISTENCE" | quote }}
-            {{- else }}
+            {{- else if not (kindIs "invalid" .Values.config.catalogPersistence) }}
             - name: CATALOG_PERSISTENCE
               value: {{ .Values.config.catalogPersistence | quote }}
             {{- end }}
             {{- if hasKey $aioEnv "CATALOG_RETENTION_DAYS" }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ index $aioEnv "CATALOG_RETENTION_DAYS" | quote }}
-            {{- else }}
+            {{- else if not (kindIs "invalid" .Values.config.catalogRetentionDays) }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ .Values.config.catalogRetentionDays | quote }}
             {{- end }}

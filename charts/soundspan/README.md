@@ -651,9 +651,9 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `DISCOVERY_ENABLED` | `config.features.discovery` | No | `true` |
 | `AUTO_PLAYLISTS_ENABLED` | `config.features.autoPlaylists` | No | `true` |
 | `FEDERATION_ENABLED` | `config.features.federation` | No | `false` |
-| `SCAN_FILE_CONCURRENCY` | `config.scanFileConcurrency` | No | `3` |
-| `CATALOG_PERSISTENCE` | `config.catalogPersistence` | No | `true` |
-| `CATALOG_RETENTION_DAYS` | `config.catalogRetentionDays` | No | `180` |
+| `SCAN_FILE_CONCURRENCY` | `config.scanFileConcurrency` | No | App default: `3` (chart leaves unset unless configured) |
+| `CATALOG_PERSISTENCE` | `config.catalogPersistence` | No | App default: `true` (chart leaves unset unless configured) |
+| `CATALOG_RETENTION_DAYS` | `config.catalogRetentionDays` | No | App default: `180` (chart leaves unset unless configured) |
 | `FEDERATION_TOMBSTONE_RETENTION_DAYS` | `config.federationTombstoneRetentionDays` | No | `90` |
 | `PROVIDER_TRACK_RETENTION_DAYS` | `config.providerTrackRetentionDays` | No | `30` |
 | `FEDERATION_SYNC_INTERVAL_MINUTES` | `config.federationSyncIntervalMinutes` | No | `15` |

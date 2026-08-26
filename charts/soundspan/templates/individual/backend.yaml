@@ -469,21 +469,21 @@ spec:
             {{- if hasKey $backendEnv "SCAN_FILE_CONCURRENCY" }}
             - name: SCAN_FILE_CONCURRENCY
               value: {{ index $backendEnv "SCAN_FILE_CONCURRENCY" | quote }}
-            {{- else }}
+            {{- else if not (kindIs "invalid" .Values.config.scanFileConcurrency) }}
             - name: SCAN_FILE_CONCURRENCY
               value: {{ .Values.config.scanFileConcurrency | quote }}
             {{- end }}
             {{- if hasKey $backendEnv "CATALOG_PERSISTENCE" }}
             - name: CATALOG_PERSISTENCE
               value: {{ index $backendEnv "CATALOG_PERSISTENCE" | quote }}
-            {{- else }}
+            {{- else if not (kindIs "invalid" .Values.config.catalogPersistence) }}
             - name: CATALOG_PERSISTENCE
               value: {{ .Values.config.catalogPersistence | quote }}
             {{- end }}
             {{- if hasKey $backendEnv "CATALOG_RETENTION_DAYS" }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ index $backendEnv "CATALOG_RETENTION_DAYS" | quote }}
-            {{- else }}
+            {{- else if not (kindIs "invalid" .Values.config.catalogRetentionDays) }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ .Values.config.catalogRetentionDays | quote }}
             {{- end }}

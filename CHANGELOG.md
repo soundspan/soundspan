@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Helm deployments can now configure library scan concurrency and catalog persistence retention through chart values.
+- Helm deployments can now optionally set library scan concurrency and catalog persistence retention through chart values.
 - Audio analysis now stores Chromaprint fingerprints for local tracks and optionally resolves high-confidence MusicBrainz identities through AcoustID when `ACOUSTID_API_KEY` is configured (#763).
 - Soulseek album downloads now require one folder to cover at least 90% of requested tracks with at least 0.85 content coherence, then use bounded peer signals only to rank eligible folders before falling back to per-track assembly (#762).
 - Per-user Last.fm and ListenBrainz connections can now forward music scrobbles and now-playing updates through documented backend endpoints (#761).
