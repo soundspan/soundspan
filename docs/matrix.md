@@ -1,6 +1,6 @@
 # Playback Surface Matrix
 
-> **Status — reviewed 2026-08-16.** The numerical line references in earlier
+> **Status — reviewed 2026-08-26.** The numerical line references in earlier
 > revisions predated the `backend/src/routes/library/` decomposition. This
 > revision keeps stable file citations and points library limits to their
 > current submodules.
@@ -98,11 +98,14 @@ Pagination Defaults / Maximums
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
 │ Recently added albums │ —       │ 20 (hard) │ backend/src/routes/library/albums.ts  │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
-│ Music search          │ 20      │ 100       │ backend/src/services/search.ts        │
+│ Music search          │ 20      │ 100       │ backend/src/routes/search.ts:18-37    │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
-│ Podcast search        │ 20      │ 50        │ backend/src/services/search.ts        │
+│ Podcast search        │ 20      │ 100       │ backend/src/routes/search.ts:18-37    │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
-│ Similar artists       │ 20      │ 50        │ backend/src/services/search.ts        │
+│ Search offset         │ 0       │ 10,000    │ backend/src/routes/search.ts:36       │
+│ (type-scoped)         │         │           │                                       │
+├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
+│ Similar artists       │ 6       │ 50        │ backend/src/routes/search.ts:682-690  │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
 │ Vibe search           │ 20      │ 100       │ backend/src/routes/vibe.ts            │
 └───────────────────────┴─────────┴───────────┴───────────────────────────────────────┘
@@ -114,9 +117,13 @@ Radio / Generated Content
 ┌───────────────────────────┬─────────────────────────┬───────────────────────────────────────────────┐
 │           What            │          Limit          │                     Where                     │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
-│ Radio tracks (standard)   │ 100 max, 50 default     │ backend/src/routes/library/radio.ts           │
+│ Radio tracks (standard)   │ 100 max, 50 default     │ backend/src/routes/library/radio.ts:199-208   │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
-│ Radio tracks (liked type) │ 10,000 max              │ backend/src/routes/library/radio.ts           │
+│ Radio tracks (liked type) │ 10,000 max              │ backend/src/routes/library/radio.ts:199-208   │
+├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
+│ Radio scalar candidates   │ 4,000                   │ backend/src/services/libraryRadioCache.ts:21  │
+├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
+│ Radio ANN candidates      │ 500                     │ backend/src/services/libraryRadioCache.ts:24  │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
 │ Programmatic playlists    │ 20 tracks               │ backend/src/services/programmaticPlaylists/   │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
@@ -128,17 +135,30 @@ Radio / Generated Content
 └───────────────────────────┴─────────────────────────┴───────────────────────────────────────────────┘
 ```
 
-UI Display Caps
+UI Display Caps / Windows
 
 ```text
 ┌─────────────────────────────────┬───────┬──────────────────────────────────────────────┐
 │              What               │ Limit │                    Where                     │
 ├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
-│ Overlay related tracks          │ 8     │ frontend/components/player/OverlayPlayer.tsx │
+│ Overlay related tracks          │ 8     │ frontend/components/player/overlay-tabs/     │
+│                                 │       │ OverlayRelatedTab.tsx:271-277                │
 ├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
-│ Overlay related artists         │ 9     │ frontend/components/player/OverlayPlayer.tsx │
+│ Overlay related artists         │ 9     │ frontend/components/player/overlay-tabs/     │
+│                                 │       │ OverlayRelatedSections.tsx:202-208           │
 ├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
-│ Overlay more-from-artist albums │ 6     │ frontend/components/player/OverlayPlayer.tsx │
+│ Overlay more-from-artist albums │ 6     │ frontend/components/player/overlay-tabs/     │
+│                                 │       │ OverlayRelatedSections.tsx:253-259           │
+├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
+│ Long TrackList DOM window       │ >200; │ frontend/components/track/TrackList.tsx:     │
+│                                 │ 20    │ 25-37,88-90                                  │
+│                                 │ first │                                              │
+├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
+│ Full queue DOM window           │ 20    │ frontend/app/queue/page.tsx:479-493          │
+│                                 │ first │                                              │
+├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
+│ Overlay queue DOM window        │ 20    │ frontend/components/player/overlay-tabs/     │
+│                                 │ first │ OverlayQueueTab.tsx:111-126                  │
 ├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤
 │ Artist top tracks               │ 10    │ backend/src/routes/library/artists.ts        │
 ├─────────────────────────────────┼───────┼──────────────────────────────────────────────┤

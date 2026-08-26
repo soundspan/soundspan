@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (65 models, 1492 lines)
+Schema source: `backend/prisma/schema.prisma` (68 models, 1547 lines)
 
 ## Entity Relationship Overview
 
@@ -24,6 +24,7 @@ erDiagram
     User ||--o{ InviteCode : creates
     User ||--o| UserDiscoverConfig : configures
     User ||--o{ FederationPeer : creates
+    User ||--o{ ScrobbleConnection : configures
 
     Artist ||--o{ Album : has
     Artist ||--o{ TrackTidal : "resolved from"
@@ -41,6 +42,7 @@ erDiagram
     Track ||--o{ MoodBucket : categorized
     Track ||--o{ TrackGenre : tagged
     Track ||--o{ TrackEmbedding : "has embeddings by space"
+    Track ||--o| TrackFingerprint : "has fingerprint"
     Track ||--o| TrackLyrics : "has lyrics"
     Track ||--o{ Track : "deduplicates federated copies"
     EmbeddingSpace ||--o{ TrackEmbedding : contains
@@ -79,6 +81,7 @@ erDiagram
 | `TranscodedFile`      | Cached transcoded variant for locally served content                      | `trackId`, `quality`, `cachePath`                                                                                                                   |
 | `EmbeddingSpace`      | Registry identity and lifecycle for one compatible vector space           | `family`, `checkpointHash`, `dim`, `preprocessing`, `status`, `hadVectors`                                                                          |
 | `TrackEmbedding`      | Space-scoped 512-dim vector; peer embeddings can be imported when compatible | composite `(trackId, spaceId)` primary key, `embedding` (pgvector), `analyzedAt`                                                                  |
+| `TrackFingerprint`    | Local Chromaprint plus optional AcoustID lookup state                      | primary/foreign key `trackId`, `fingerprint`, `duration`, lookup status/retry/result fields, timestamps                                              |
 | `TrackLyrics`         | Synced/plain lyrics for local tracks                                      | `trackId`, `source` (lrclib, embedded, none)                                                                                                        |
 | `LibraryHealthRecord` | Current missing-file or unreadable-metadata condition for one local track | unique `trackId`, `status`, `filePath`, `detail`, detection/update timestamps                                                                       |
 
@@ -121,14 +124,19 @@ TrackMapping is **advisory, not authoritative**:
 
 | Entity   | Purpose                                | Notes                                                                                                                                    |
 | -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `Artist` | Universal artist (MusicBrainz-backed)  | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, optional peer identity                            |
-| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`), optional peer identity |
+| `Artist` | Universal artist (MusicBrainz-backed)  | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, nullable `catalogSyncedAt`, optional peer identity                       |
+| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`, `CATALOG`), nullable `catalogTouchedAt`, optional peer identity |
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 
 - Artist pages showing both local and remote tracks
 - Album pages with mixed local/remote content
 - Unified play counts across providers
+
+Metadata-catalog persistence reuses `Artist` and `Album`; it does not introduce
+separate catalog models. Persisted catalog albums use `Album.location=CATALOG`
+and `catalogTouchedAt` for retention paging. `Artist.catalogSyncedAt` records the
+last catalog synchronization.
 
 ### Federation
 
@@ -181,6 +189,7 @@ remains temporarily for rollback compatibility but is no longer refreshed.
 | `ExternalIdentity`               | OIDC link with `userId`, `provider`, and `providerSubject` keys; unique `(provider, providerSubject)` and `(userId, provider)` pairs |
 | `AppPassword`                    | Revocable OpenSubsonic credential with AES-GCM `encryptedSecret`, `revokedAt`, and `lastUsedAt`                                      |
 | `UserSettings`                   | Per-user preferences, OAuth tokens (encrypted) for YT Music and TIDAL                                                                |
+| `ScrobbleConnection`             | Per-user outbound scrobble provider connection, encrypted credential/pending token, username, and enabled state; unique by user/service |
 | `ApiKey`                         | Subsonic/API key auth                                                                                                                |
 | `DeviceLinkCode`                 | Device pairing codes                                                                                                                 |
 | `InviteCode` / `InviteCodeUsage` | Invite system                                                                                                                        |

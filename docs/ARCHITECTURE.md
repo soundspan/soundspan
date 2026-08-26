@@ -102,6 +102,12 @@ Each user authenticates their own TIDAL account via device-code OAuth flow. Stre
 
 TIDAL has **two separate auth identities**: the per-user OAuth above (streaming only) and a single admin-owned download connection whose encrypted tokens live in `SystemSettings.tidalAccessToken`/`tidalRefreshToken`. Album downloads always use the admin connection (`backend/src/services/tidal.ts`), never per-user credentials. The admin connection is established exclusively through the `/api/system-settings/tidal-auth` device-code endpoints; the general settings API neither returns the token material (`GET` reports a `tidalConnected` boolean instead) nor accepts it on save, so a settings round-trip cannot overwrite the stored tokens.
 
+The TIDAL sidecar keeps `app.py` as a compatibility entrypoint and composition
+shim. Focused auth, browse, download, lifecycle, search, serialization, and
+stream modules own route behavior; `tidal_runtime.py` owns FastAPI composition,
+logging, paths, and client construction. Sidecar imports of shared helpers use
+the repository-qualified `services.common` prefix.
+
 ### Gap-Fill Playback (YouTube Music)
 
 ```
@@ -263,6 +269,20 @@ The backend supports three runtime roles via `BACKEND_PROCESS_ROLE`:
 | `worker` | No (health endpoint only) | Yes               |         |
 
 For small deployments, `all` is fine. For scale-out, run separate `api` and `worker` containers sharing the same DB and Redis.
+
+### Durable Worker Lanes
+
+| Queue                  | Ownership      | Runtime contract                                                                                                                                     |
+| ---------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `album-download`       | backend-worker | Durable Bull queue with two attempts and exponential backoff. One processor per worker plus a renewable Redis claim serializes provider dispatch across replicas; claim contention is re-enqueued with a delay. |
+| `scrobble-forwarding`  | backend-worker | Durable, per-user-rate-limited Bull queue for Last.fm and ListenBrainz. Four processors consume secret-free jobs with three bounded attempts; invalid credentials disable only the exact connection that failed. |
+
+Scheduled and serialized worker operations share
+`utils/schedulerClaim.ts`. The primitive acquires Redis `NX`/expiry leases with
+bounded connection recovery, identifies each owner with a unique token, and
+releases or extends a lease only when that token still owns it. Album downloads
+use the same primitive instead of busy-polling while another replica holds the
+claim.
 
 Coarse feature flags (`AUDIO_ANALYSIS_ENABLED`, `DISCOVERY_ENABLED`, and
 `AUTO_PLAYLISTS_ENABLED`, all default `true`; `FEDERATION_ENABLED`, default
