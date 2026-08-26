@@ -1,9 +1,7 @@
 # Playback Surface Matrix
 
-> **Status — reviewed 2026-08-26.** The numerical line references in earlier
-> revisions predated the `backend/src/routes/library/` decomposition. This
-> revision keeps stable file citations and points library limits to their
-> current submodules.
+> Library limits cite submodule files rather than line numbers because
+> `backend/src/routes/library/` is decomposed and lines shift frequently.
 
 ```text
 ┌──────────────────────┬───────┬──────────┬──────────┬──────────┬─────────────┬──────────────┬───────────┬────────┬──────┐
@@ -52,10 +50,10 @@ Hard Caps (enforced, user-facing)
 ┌───────────────────────────────────┬─────────────────────────────────────────┬──────────────────────────────────────────────┐
 │               What                │                  Limit                  │                    Where                     │
 ├───────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────┤
-│ Listen Together queue on creation │ 500 tracks                              │ backend/src/routes/listenTogether.ts         │
+│ Listen Together queue on creation │ 500 tracks (MAX_QUEUE_SIZE)             │ backend/src/services/listenTogetherManager.ts│
 ├───────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────┤
-│ Listen Together queue after       │ No cap (bounded by 1 MB socket payload) │ backend/src/services/listenTogetherSocket.ts │
-│ creation                          │                                         │                                              │
+│ Listen Together queue after       │ 500 tracks total; adds are truncated to │ backend/src/services/listenTogetherManager.ts│
+│ creation                          │ the remaining capacity                  │                                              │
 ├───────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────┤
 │ Persisted playback queue          │ 100 tracks (silently truncated on both  │ frontend/lib/audio-playback-context.tsx,     │
 │                                   │ ends)                                   │ backend/src/routes/playbackState.ts          │
@@ -96,7 +94,8 @@ Pagination Defaults / Maximums
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
 │ Library artists       │ 50      │ 10,000    │ backend/src/routes/library/artists.ts │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
-│ Recently added albums │ —       │ 20 (hard) │ backend/src/routes/library/albums.ts  │
+│ Recently added albums │ —       │ 20 (hard) │ backend/src/routes/library/            │
+│                       │         │           │ maintenance.ts                        │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤
 │ Music search          │ 20      │ 100       │ backend/src/routes/search.ts:18-37    │
 ├───────────────────────┼─────────┼───────────┼───────────────────────────────────────┤

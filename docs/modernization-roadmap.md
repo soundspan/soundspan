@@ -4,7 +4,7 @@ Canonical index of the modernization review findings (F1–F53, plus F54 added o
 
 > **Read me first.**
 >
-> - **Status:** PR #21 = 5 complete + 3 partial (8 findings). The **Wave-1 continuation** (stacked PRs #22–#32) then shipped: **F54, F22, F29, F28, F36, F35, F33** complete; the **F3/F24/F6/F18** follow-ups (cast removal + TDD backfill); **F32** partial (rate-limit + no-full-scan shipped, hard-fail-closed auth deferred). The whole **#11 secrets program is done (4/4)**. **F31** and **F37** are **deferred-with-a-note** (see their entries) — F31 because the env had no Python toolchain to verify the security-critical sidecar code, F37 as a cross-cutting redesign. **Merged to `main` so far:** #3, #9, #21, #22 (F54), and #23 (the TDD backfill), each squash-merged; a post-review fix wave landed directly on `main` after them. The remaining Wave-1 continuation — stacked PRs #24–#26 and #28–#33 (nine PRs) — merged to `main` on 2026-07-08. Releases **1.6.0**, **1.7.0**, **1.8.0**, **2.0.0**, and **2.1.0** have since shipped; nothing from the Wave-1 continuation remains unmerged. ✅ complete · 🟡 partial · ⬜ open/deferred.
+> - **Status:** PR #21 = 5 complete + 3 partial (8 findings). The **Wave-1 continuation** (stacked PRs #22–#32) then shipped: **F54, F22, F29, F28, F36, F35, F33** complete; the **F3/F24/F6/F18** follow-ups (cast removal + TDD backfill); **F32** partial (rate-limit + no-full-scan shipped, hard-fail-closed auth deferred). The whole **#11 secrets program is done (4/4)**. **F31** and **F37** are **deferred-with-a-note** (see their entries) — F31 because the env had no Python toolchain to verify the security-critical sidecar code, F37 as a cross-cutting redesign. **Merged to `main` so far:** #3, #9, #21, #22 (F54), and #23 (the TDD backfill), each squash-merged; a post-review fix wave landed directly on `main` after them. The remaining Wave-1 continuation — stacked PRs #24–#26 and #28–#33 (nine PRs) — merged to `main` on 2026-07-08; nothing from the Wave-1 continuation remains unmerged. ✅ complete · 🟡 partial · ⬜ open/deferred.
 > - **Audit corrections are inline.** Where the audit corrected a count, severity, or premise, the finding carries an **Audit note** (✓ = re-verified against the tree here; "per audit" = relayed). Severity columns show `orig→recalibrated` where adjusted for this single-operator deployment.
 > - **Line numbers** in finding bodies were captured against the pre-#3 branch tree and may be off by a few lines on `main`.
 > - **Historical paths stay verbatim.** Finding bodies preserve the files and services that existed when each review was recorded, even after later releases remove them. Use the current architecture, testing, and upgrade guides for the live tree.
@@ -1085,18 +1085,18 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 **Shape.** soundspan is a **modular monolith + Python sidecars**: a Next.js PWA (custom server proxy, one `ApiClient.request<T>()` chokepoint, AudioEngine adapter strategy) → an Express API + Bull workers in one codebase (role-split by `BACKEND_PROCESS_ROLE`, one Prisma gateway) → Postgres 16 + pgvector, Redis (queues + locks + embed streams), and four Python sidecars. The two analyzers are **`BRPOP` workers that write results straight to Postgres** (DB-as-contract), not HTTP services — a deliberate, good seam.
 
-### Deferred modernization after 2.0.0
+### Deferred modernization
 
-These items are deliberately deferred past the 2.0.0 release because each is
-invasive and offers little immediate consumer value compared with the release
-risk:
+These items are deliberately deferred (originally past the 2.0.0 release)
+because each is invasive and offers little immediate consumer value compared
+with the release risk:
 
 | Area                  | Owned decision                                                                                                                                                                                                                                                                                                             |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend module format | Defer the CommonJS-to-ESM migration. Revisit it as a coordinated runtime, build, test, and dependency change rather than a pre-release conversion.                                                                                                                                                                         |
 | Python sidecar layout | Defer a shared `src/`-layout re-architecture. Revisit it with an explicit packaging and container-entrypoint plan across all sidecars.                                                                                                                                                                                     |
-| Frontend lint debt    | Keep the current 0-error/182-warning result as a tracked ratchet: no warning growth, with warning classes burned down in focused follow-ups.                                                                                                                                                                               |
-| Branch governance     | Keep `enforce_admins`, required approvals, required conversation resolution, and rulesets off (owner decision, 2026-08-13). The project has one maintainer and an auto-merge flow that these settings would block. 21 status checks are required. Revisit per issue #441 when a second contributor joins or fork PRs open. |
+| Frontend lint debt    | Keep the lint result as a tracked ratchet (the exact warning cap lives in the frontend lint script's `--max-warnings` flag): no warning growth, with warning classes burned down in focused follow-ups.                                                                                                                                                                               |
+| Branch governance     | Keep `enforce_admins`, required approvals, required conversation resolution, and rulesets off (owner decision, 2026-08-13). The project has one maintainer and an auto-merge flow that these settings would block; required status checks are maintained in branch protection. Revisit per issue #441 when a second contributor joins or fork PRs open. |
 
 ### The kernel — preserve and lean into (do not rewrite)
 

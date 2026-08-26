@@ -16,6 +16,7 @@ Start-here guide for `frontend/features/podcast`.
 | --- | --- |
 | `components/ContinueListening.tsx` | components |
 | `components/EpisodeList.tsx` | components |
+| `components/EpisodeOverflowMenu.tsx` | components |
 | `components/index.ts` | components |
 | `components/PodcastActionBar.tsx` | components |
 | `components/PodcastHero.tsx` | components |

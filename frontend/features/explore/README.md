@@ -19,6 +19,7 @@ Start-here guide for `frontend/features/explore`.
 | `browseCollectionCopy.ts` | pure copy + duration formatting for browse collection pages |
 | `hooks/useBrowseCollection.ts` | hooks |
 | `hooks/useBrowseCollectionActions.ts` | hooks |
+| `components/BrowseCard.tsx` | components |
 | `components/BrowseCollectionPage.tsx` | components |
 | `components/FeaturedShelvesSection.tsx` | components |
 | `components/ExploreDegradedNotice.tsx` | components |

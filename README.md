@@ -18,11 +18,11 @@ soundspan is built for people who want streaming convenience without giving up o
 
 - Local FLAC, MP3, AAC/M4A, OGG/Opus, WAV, WMA, APE, and WavPack library with automatic MusicBrainz/Last.fm enrichment
 - YouTube Music and TIDAL gap-fill streaming with per-user OAuth and quality controls
-- DCLAP ONNX-powered vibe matching, mood mixer presets, and radar-style analysis views
+- DCLAP ONNX-powered vibe matching and mood mixer presets
 - Podcast search/subscribe via RSS with resume, played-state tracking, and mobile skip controls
 - Audiobookshelf integration with unified browsing/playback and progress sync
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
-- Synced lyrics, source/quality badges, and overhauled browser/PWA/overlay player flows
+- Synced lyrics, source/quality badges, and browser/PWA/overlay player flows
 - Per-user Last.fm and ListenBrainz scrobbling with now-playing updates, including plays from Subsonic clients
 - Unified song search that ranks owned and discoverable songs together, with shareable per-song links
 - Multiple users with isolated playlists, likes, history, and settings, plus admin roles, optional 2FA, and Listen Together group sessions
@@ -58,8 +58,7 @@ Open `http://localhost:3030` and create your account.
 
 The AIO image includes the MusicCNN analyzer and a CPU-first DCLAP ONNX
 provider. The backend sends text and audio vibe embedding work to the provider
-over container loopback. Its vendored artifacts are a few hundred MB instead of
-the former multi-GB torch model stack.
+over container loopback. Its vendored artifacts total a few hundred MB.
 
 ### Optional GPU mode for MusiCNN analysis
 
@@ -192,7 +191,7 @@ graph TD
 
 ## Roadmap
 
-- Offline playback in the PWA (offline downloads/cache already shipped)
+- Offline playback in the PWA (a backend offline-cache API exists; no app support yet)
 
 ---
 

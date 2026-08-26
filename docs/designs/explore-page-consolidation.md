@@ -1,6 +1,6 @@
 # Explore Page Consolidation
 
-Brainstormed 2026-03-02. Status: design phase, no implementation yet.
+Brainstormed 2026-03-02. Status: shipped (partial: an Explore surface exists with Made For You, moods/genres, and provider shelves, but Home remains the default landing page and was not absorbed as this document proposes).
 
 ## Core Concept
 

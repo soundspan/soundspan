@@ -1,6 +1,6 @@
 # Native Audio Element Engine
 
-The native engine is the **default** direct-playback backend as of 1.8.0: it drives a single browser-owned `<audio>` element instead of Howler.js, implements the same `AudioEngine` contract as the other backends, and plugs into the hybrid runtime router — no orchestrator changes. Howler remains the gated fallback: set `STREAMING_ENGINE_MODE=howler` to revert a deployment, and the Android WebView platform pin selects Howler automatically.
+The native engine is the **default** direct-playback backend: it drives a single browser-owned `<audio>` element instead of Howler.js, implements the same `AudioEngine` contract as the other backends, and plugs into the hybrid runtime router — no orchestrator changes. Howler remains the gated fallback: set `STREAMING_ENGINE_MODE=howler` to revert a deployment, and the Android WebView platform pin selects Howler automatically.
 
 Tracked in GH issue #42.
 
@@ -75,8 +75,8 @@ All playback client metrics (`[Playback][ClientMetric]` log lines and the backen
 - `engineMode` — the deployment flag (`STREAMING_ENGINE_MODE` as resolved). Identifies the rollout cohort.
 - `activeEngine` — the engine actually driving playback at the moment of the event (`howler` or `native`). Platform pins (Android WebView → howler) make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
 
-For 2.0.0 log queries, `player.howler_startup` became
-`player.engine_startup`, and client-signal ingestion moved from
+In historical logs, `player.howler_startup` is the old name for
+`player.engine_startup`, and client-signal ingestion previously used
 `route.client.signal` / `[SegmentedStreaming.Trace]` to
 `playback.client.signal` / `[Playback.Trace]`. The always-on client-signal
 metric log identity likewise moved from `[SegmentedStreaming][Metric]` to
@@ -87,9 +87,9 @@ engine in issue #534.)
 
 This makes howler and native directly comparable over a soak window: playback error events by `MEDIA_ERR` code, playback-start latency, and recovery attempts. The engine additionally emits `[NativeAudioEngine][Telemetry]` events (`playback_start_latency`, `recovery_attempt`, `playback_error`, `load_retry_applied`) tagged `engineMode: native`.
 
-Those were the exit criteria for flipping the default (met during the 1.7.0 soak: no metric regression against the howler baseline, zero new double-play/background-death reports). They remain the criteria for evaluating any deployment that reverts to `howler` and considers switching back.
+The criteria for evaluating any deployment that reverts to `howler` and considers switching back: no metric regression against the howler baseline and zero new double-play/background-death reports over a soak window.
 
-## Manual Test Matrix (exercised during the 1.7.0 soak; re-run when the engine changes materially)
+## Manual Test Matrix (re-run when the engine changes materially)
 
 - Desktop Chrome/Firefox/Safari playback, seek, track advance
 - 24/192 FLAC plays via the bare element pipeline (no AudioContext in the default path)
@@ -102,4 +102,4 @@ Those were the exit criteria for flipping the default (met during the 1.7.0 soak
 
 ## Rollout
 
-Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` in 1.8.0. Howler remains the gated fallback (not removed). Out of scope at rollout time: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs). Since then the Tauri adapter (issue #607) and the Video.js segmented engine (issue #534) have both been removed; the engine matrix is native (default) plus Howler (fallback).
+The engine matrix is native (default) plus Howler (the permanent gated fallback). The Tauri adapter and the Video.js segmented engine were removed; crossfade and true bit-perfect hi-res output remain out of scope (impossible from web APIs).

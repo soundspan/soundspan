@@ -36,8 +36,7 @@ Open `http://localhost:3030` and create your account.
 
 The AIO image starts the MusicCNN analyzer and the CPU-first DCLAP ONNX provider
 by default. The backend sends text and audio vibe embedding work to DCLAP over
-container loopback. The provider vendors a few hundred MB of artifacts instead
-of the former torch stack and its 2.35 GB checkpoint. Plan for up to 8 GiB of
+container loopback. The provider vendors a few hundred MB of artifacts. Plan for up to 8 GiB of
 memory, or disable audio analysis on constrained hosts.
 
 ### AIO with MusiCNN GPU acceleration (optional)
@@ -131,7 +130,7 @@ BACKEND_PORT=0 docker compose -f docker-compose.yml -f docker-compose.override.h
 Notes:
 
 - `BACKEND_PORT=0` avoids fixed host-port collisions when scaling backend replicas on one Docker host.
-- Worker-required env var reference is documented in [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md#backend-worker-environment-variables-complete-reference).
+- Worker-required env var reference is documented in [`CONFIGURATION_AND_SECURITY.md`](ENVIRONMENT_VARIABLES.md).
 - Keep `LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED=true`, `LISTEN_TOGETHER_STATE_SYNC_ENABLED=true`, and `LISTEN_TOGETHER_STATE_STORE_ENABLED=true` for cross-replica Listen Together behavior.
 - Keep `LISTEN_TOGETHER_MUTATION_LOCK_ENABLED=true` for per-group playback/queue/ready write serialization across replicas.
 - Keep `LISTEN_TOGETHER_ALLOW_POLLING=false` (default) unless your load balancer guarantees sticky sessions.
@@ -141,7 +140,7 @@ Notes:
 - Tune `READINESS_DEPENDENCY_CHECK_INTERVAL_MS` and `READINESS_DEPENDENCY_CHECK_TIMEOUT_MS` for dependency probe cadence/timeouts.
 - For frontend replicas `>1`, put a reverse proxy/load balancer in front and route app traffic to the frontend service; fixed host-port publishing on each replica is not a safe scale pattern.
 - Redis remains critical for sessions/queues/realtime; use a highly available Redis endpoint for HA-focused deployments.
-- Compose defaults now set `REDIS_FLUSH_ON_STARTUP=false` to preserve Redis stream/group metadata unless you explicitly override it.
+- Compose defaults set `REDIS_FLUSH_ON_STARTUP=false` to preserve Redis stream/group metadata unless you explicitly override it.
 
 ## Building Images with Docker Bake
 

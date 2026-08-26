@@ -23,12 +23,6 @@ Connect soundspan to Lidarr to request/download new music and trigger imports.
 4. Set Lidarr API key (Lidarr → Settings → General)
 5. Test and save
 
-Audiobook detail metadata and section navigation are served from soundspan's
-local cache. Scheduled or manual Audiobookshelf sync validates chapter coverage
-and fills section data for rows created before this model was added. Multi-file
-part boundaries are playable because the stream proxy exposes all files as one
-byte-addressable audiobook resource.
-
 ### Networking note
 
 Lidarr must reach the soundspan callback URL.
@@ -45,6 +39,12 @@ environment:
 ## Audiobookshelf
 
 Connect your Audiobookshelf instance for audiobook playback in soundspan.
+
+Audiobook detail metadata and section navigation are served from soundspan's
+local cache. Scheduled or manual Audiobookshelf sync validates chapter coverage
+and backfills section data for rows that do not have it yet. Multi-file
+part boundaries are playable because the stream proxy exposes all files as one
+byte-addressable audiobook resource.
 
 ### Setup
 
@@ -71,7 +71,7 @@ soundspan can connect directly to Soulseek for discovery/download flows.
 - Discovery results include filename, size, bitrate, and parsed metadata
 - Download progress appears in Activity Panel
 - Quality/availability depends on peer uptime and speed
-- Album downloads prefer one uploader's complete album folder: a folder is only chosen when it covers at least 90% of the requested tracks and its contents clearly belong to the same album. When no folder qualifies, tracks are assembled one by one from the best individual matches, as before.
+- Album downloads prefer one uploader's complete album folder: a folder is only chosen when it covers at least 90% of the requested tracks and its contents clearly belong to the same album. When no folder qualifies, tracks are assembled one by one from the best individual matches.
 
 ## YouTube Music
 
@@ -124,7 +124,7 @@ soundspan also exposes provider mapping and playlist import routes for cross-pro
 
 | Endpoint                                 | Purpose                                                              |
 | ---------------------------------------- | -------------------------------------------------------------------- |
-| `POST /api/browse/playlists/parse`       | Parse Spotify/Deezer playlist URLs before import                     |
+| `POST /api/browse/playlists/parse`       | Parse Spotify, Deezer, YouTube Music, and TIDAL playlist URLs before import                     |
 | `GET /api/track-mappings/album/:albumId` | Read provider mappings for an album's local tracks                   |
 | `POST /api/track-mappings/batch`         | Persist multiple mapping links in one request                        |
 | `POST /api/import/preview`               | Resolve playlist tracks (local/YT/TIDAL) without creating a playlist |
@@ -213,7 +213,7 @@ Main-channel image:
 docker pull ghcr.io/soundspan/soundspan-tidal-streamer:main
 ```
 
-The old `ghcr.io/soundspan/soundspan-tidal-downloader` image remains published as an alias, and the old Compose hostname `tidal-downloader` still resolves to `tidal-streamer`.
+`ghcr.io/soundspan/soundspan-tidal-downloader` is published as an alias of `soundspan-tidal-streamer`, and the `tidal-downloader` Compose hostname resolves to `tidal-streamer`.
 
 ## YouTube Music Downloads
 

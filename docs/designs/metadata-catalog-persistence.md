@@ -1,5 +1,7 @@
 # Metadata catalog persistence
 
+Status: shipped.
+
 MusicBrainz release groups and tracklists already fetched for artist and album
 views are retained as hidden local skeletons. Persisted albums use the
 `CATALOG` `AlbumLocation`; their tracks have no playable file path and remain

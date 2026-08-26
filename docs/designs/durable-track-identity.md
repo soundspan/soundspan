@@ -1,6 +1,6 @@
 # Durable Track Identity
 
-Spec drafted 2026-08-14 for [issue #457](https://github.com/soundspan/soundspan/issues/457). Status: implemented, pending release. Phases 1 and 3 delivered durable keys plus move/replacement matching; phases 2a–2c delivered soft removal/revival, read-surface exclusion and retention purge, then frontend and admin visibility.
+Spec drafted 2026-08-14 for [issue #457](https://github.com/soundspan/soundspan/issues/457). Status: shipped. Phases 1 and 3 delivered durable keys plus move/replacement matching; phases 2a–2c delivered soft removal/revival, read-surface exclusion and retention purge, then frontend and admin visibility.
 
 Spun out of the federated library sharing design ([issue #451](https://github.com/soundspan/soundspan/issues/451), `docs/designs/federated-library-sharing.md`) as a standalone prerequisite feature: it fixes a real local data-loss bug today and independently upgrades cross-source track matching from fuzzy to exact.
 

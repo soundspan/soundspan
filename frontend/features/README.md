@@ -28,7 +28,7 @@ Start-here index for domain modules under `frontend/features`.
 
 ## Recognized Exception: Vibe Map
 
-The Vibe Map — the interactive vibe navigator (`#203`) and currently the newest major frontend surface — does **not** live under `frontend/features/`. Its components, hooks, and model live in `frontend/components/vibe/` (entrypoint `VibeMapTab.tsx` / `VibeMapView.tsx`), its route is `frontend/app/vibe/page.tsx`, and its unit coverage is `frontend/tests/unit/` (`mapSearch`, `vibeMapModel`, `vibeModeMachine`, `travelCompass`, and siblings). It is indexed here so the surface is discoverable and its placement is a documented, recognized location rather than undocumented drift.
+The Vibe Map — the interactive vibe navigator — does **not** live under `frontend/features/`. Its components, hooks, and model live in `frontend/components/vibe/` (entrypoint `VibeMapTab.tsx` / `VibeMapView.tsx`), its route is `frontend/app/vibe/page.tsx`, and its unit coverage is `frontend/tests/unit/` (`mapSearch`, `vibeMapModel`, `vibeModeMachine`, `travelCompass`, and siblings). It is indexed here so the surface is discoverable and its placement is a documented, recognized location rather than undocumented drift.
 
 Relocating it to `frontend/features/vibe/` to match the domain-module convention is an owner decision (large import churn across `frontend/components/vibe/**` and the tests above) and has not been made; until then, extend the Vibe Map in place under `frontend/components/vibe/`.
 

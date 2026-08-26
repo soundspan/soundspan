@@ -1,6 +1,6 @@
 # Federation Protocol Compatibility for Additive Fields
 
-Drafted 2026-08-18 from the 2.0.0→2.3.2 review. Status: Implemented (receiver + sender), 2026-08-18.
+Drafted 2026-08-18. Status: shipped (receiver + sender).
 
 ## Problem
 

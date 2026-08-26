@@ -49,9 +49,9 @@ Python advisories and their removal conditions remain in the
 
 ## CodeQL alert dismissal record
 
-All open CodeQL alerts were triaged before the 2.0.0 release: 33 were fixed in
-code and 45 were dismissed with per-alert justifications recorded on each alert
-in the GitHub code-scanning UI (2026-08-12). Dismissals fall into the classes
+Every CodeQL alert is triaged: fixed in code, or dismissed with a per-alert
+justification recorded on the alert in the GitHub code-scanning UI. Open alerts
+are a merge gate, not a backlog. Dismissals fall into the classes
 below; re-evaluate them whenever the cited guard modules change materially.
 
 | Reason | Rule | Alerts | Class justification |

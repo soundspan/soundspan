@@ -1,5 +1,7 @@
 # Provider track garbage collection
 
+Status: shipped.
+
 `TrackTidal` and `TrackYtMusic` rows use one retention policy for garbage
 collection and parent-catalog liveness.
 

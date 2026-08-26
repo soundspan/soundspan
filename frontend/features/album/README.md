@@ -27,7 +27,9 @@ Start-here guide for `frontend/features/album`.
 | `hooks/useAlbumData.ts` | hooks |
 | `hooks/useAlbumPlaybackActions.ts` | playback and queue hook |
 | `hooks/useAlbumPreferenceActions.ts` | album preference hooks |
+| `hooks/useAlbumRequest.ts` | hooks |
 | `hooks/useTidalGapFill.ts` | hooks |
+| `hooks/useTrackDeepLink.ts` | hooks |
 | `hooks/useYtMusicGapFill.ts` | hooks |
 | `types.ts` | root |
 

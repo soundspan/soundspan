@@ -1,6 +1,6 @@
 # Provider Strategy & Track Mapping Redesign
 
-Brainstormed 2026-02-28. Status: design phase, no implementation yet.
+Brainstormed 2026-02-28. Status: shipped (the provider strategy and the TrackMapping model landed; details evolved — YouTube Music additionally became a library download source).
 
 ---
 

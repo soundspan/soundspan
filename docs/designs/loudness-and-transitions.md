@@ -1,6 +1,6 @@
 # Loudness Normalization and Smart Transitions
 
-Spec drafted 2026-08-16 for [issue #526](https://github.com/soundspan/soundspan/issues/526) (loudness) and [issue #527](https://github.com/soundspan/soundspan/issues/527) (transitions). Status: design phase. The two features share analyzer plumbing and are sequenced: transitions assume leveled loudness.
+Spec drafted 2026-08-16 for [issue #526](https://github.com/soundspan/soundspan/issues/526) (loudness) and [issue #527](https://github.com/soundspan/soundspan/issues/527) (transitions). Status: shipped (partial: loudness measurement and volume leveling are live; transitions remain design phase). The two features share analyzer plumbing and are sequenced: transitions assume leveled loudness.
 
 ## Problem
 

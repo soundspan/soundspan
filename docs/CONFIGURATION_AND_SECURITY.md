@@ -124,7 +124,7 @@ Never commit `.env` files or credentials.
 | `TIDAL_SIDECAR_URL`       | TIDAL sidecar URL                                                               | If using TIDAL                                     |
 
 Soulseek credentials are configured via System Settings and stored encrypted in the database.
-Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
+Last.fm lookups require a key you provide. Set `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
 Last.fm scrobble forwarding also requires `LASTFM_SHARED_SECRET` as a runtime secret. Per-user Last.fm session keys and ListenBrainz tokens are encrypted with `SETTINGS_ENCRYPTION_KEY` before database storage and are never returned by status endpoints.
 
 ### Metrics exposure
@@ -142,12 +142,12 @@ labels.
 
 ## Authentication and Credential Security
 
-Cookie-session authentication has been removed. Each authenticated request now uses an explicit credential transport, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests.
+Every authenticated request uses an explicit credential transport — there is no cookie-session authentication, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests.
 
 | Surface | Credential transport | Lifetime | Revocation path |
 | ------- | -------------------- | -------- | --------------- |
 | Web UI and first-party API | `Authorization: Bearer` JWT access token plus refresh token in the refresh request body | Access: 24 hours. Refresh: 30 days. | A self-service password change or administrator-set password increments `tokenVersion`, invalidating outstanding access and refresh JWTs. Ordinary logout removes the current browser's tokens only; there is no separate logout-all-devices endpoint. |
-| OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. App-password credentials remain valid until revoked. The legacy dedicated Subsonic password is deprecated: it can no longer be set from Settings, but direct API updates remain possible during the compatibility period and existing values are still honored until removal. | Revoke an app password individually. Account password changes and administrator-set passwords clear any legacy dedicated Subsonic password. |
+| OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. App-password credentials remain valid until revoked. The legacy dedicated Subsonic password is deprecated: it cannot be set from Settings, but direct API updates remain possible and existing stored values are honored. | Revoke an app password individually. Account password changes and administrator-set passwords clear any legacy dedicated Subsonic password. |
 | External API clients | `X-API-Key` header | 90 days from creation | Delete the API key. |
 | Federation peer API | Dedicated opaque `Authorization: Bearer` peer credential | No automatic expiry. | Rotate the credential, revoke the peer, or delete the peer. |
 | Internal sidecar requests | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |

@@ -10,7 +10,7 @@ It assumes both repositories are side-by-side on disk:
 ## Compatibility Status (Read First)
 
 - soundspan's schema is a forward superset of Lidify's schema. After a Lidify database is restored, `prisma migrate deploy` applies soundspan-only migrations additively.
-- This migration path has not been re-verified against the soundspan 2.1.0 migrations. Test the complete procedure on a copy of the database before the production cutover.
+- This migration path is not re-verified against every soundspan release. Test the complete procedure on a copy of the database before the production cutover.
 - Runtime compatibility is not automatic. You must migrate runtime identifiers and defaults:
     - `LIDIFY_CALLBACK_URL` -> `SOUNDSPAN_CALLBACK_URL`
     - Compose defaults changed for PostgreSQL (from user/database `lidifydb/lidify` to `soundspan/soundspan`)

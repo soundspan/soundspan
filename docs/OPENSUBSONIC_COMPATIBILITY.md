@@ -1,17 +1,15 @@
-# OpenSubsonic Compatibility (Current Fork Status)
-
-Last updated: 2026-08-19
+# OpenSubsonic Compatibility
 
 ## Scope
 
-This document defines the current `/rest` compatibility contract implemented in this fork and captures readiness evidence used to close the current OpenSubsonic phase gate.
+This document defines the `/rest` compatibility contract implemented in this fork and captures the readiness evidence behind it.
 
 > **Contract authority / OpenAPI exemption.** This document is the authoritative contract for the Subsonic-compatible `/rest` surface (`backend/src/routes/subsonic/index.ts`). Those endpoints follow the published OpenSubsonic/Subsonic API rather than soundspan's own REST shape, so they are **intentionally exempt** from per-endpoint OpenAPI (`@openapi`) annotation — see the Documentation-coverage rule in [`AGENTS.md`](../AGENTS.md). Keep the endpoint surface below current when `/rest` behavior changes; that is the substitute for OpenAPI coverage on this prefix.
 
-## Milestone Status
+## Coverage
 
-- Current OpenSubsonic compatibility milestone: `Complete` (for soundspan's in-scope music client surface)
-- Remaining missing domains are intentionally out-of-scope for this milestone unless real client demand requires promotion.
+- soundspan's in-scope music client surface is fully implemented.
+- The missing domains listed under Explicit Non-Goals stay out of scope unless real client demand requires promotion.
 
 ## Client-Facing Companion
 
@@ -25,7 +23,7 @@ The per-client compatibility matrix, connection quickstart, and extension roadma
 ## Supported Auth Modes
 
 - `u` + `p` (plain and `enc:` hex password forms). `p` accepts a local password or an active app password.
-- `u` + `t` + `s` token mode (`t = md5(secret + salt)`). `secret` is an active app password (Settings → Sign-in & Security → App Passwords). Accounts that set a dedicated Subsonic password before it was deprecated keep working until that legacy credential is removed in a future release.
+- `u` + `t` + `s` token mode (`t = md5(secret + salt)`). `secret` is an active app password (Settings → Sign-in & Security → App Passwords). Accounts with a stored legacy dedicated Subsonic password keep working; the credential is deprecated and cannot be set from Settings.
 - `apiKey` query auth (OpenSubsonic extension), with optional `u` username consistency check
 - Required protocol params: one auth mode, `v`, `c` (`u` required for password/token auth, optional for `apiKey`)
 - Response formats: JSON, XML, JSONP (`f` + optional `callback`)
@@ -55,7 +53,7 @@ response path removes its temporary output, and a process-wide 15-minute gate
 limits stale-file sweeps. Each bounded sweep removes orphaned files older than
 one hour while excluding files owned by active responses. Raw/original streams
 ignore the offset. Federated
-stream proxy requests currently ignore `timeOffset` because the peer stream API
+stream proxy requests ignore `timeOffset` because the peer stream API
 forwards quality and Range metadata rather than arbitrary Subsonic parameters.
 This extension is distinct from the missing `getTranscodeDecision` and
 `getTranscodeStream` endpoint extensions.
@@ -69,8 +67,8 @@ request URL (so they cannot reach URL-based logging).
 
 `replayGain` gains are computed against the server's configurable
 `LOUDNESS_TARGET_LUFS` (default `-18` LUFS, the ReplayGain 2 reference).
-Tracks analyzed before the loudness rollout omit the object until the backfill
-measures them. Peaks are linear true-peak amplitudes.
+Tracks the analyzer has not measured yet omit the object until the background
+measurement reaches them. Peaks are linear true-peak amplitudes.
 
 ## Implemented Endpoint Surface
 
@@ -123,7 +121,7 @@ Protocol-facing IDs are deterministic and typed:
 
 Legacy/raw ID fallback remains supported where endpoint type context is sufficient.
 
-## Readiness Evidence (2026-02-14 Manual Validation)
+## Readiness Evidence (manual validation)
 
 Environment:
 
@@ -163,7 +161,7 @@ DB side-effect checkpoints:
 - `Play` row delta for validated submitted track: `+1`
 - `LikedTrack` final count for tested track after unstar: `0`
 
-## Third-Party Client Profile Matrix (2026-02-14)
+## Third-Party Client Profile Matrix
 
 Environment:
 
@@ -207,7 +205,7 @@ Automation support:
 - `SMOKE_ENABLE_FIXTURES=true` provisions a temporary DB-backed artist/album/track fixture when full-mode strict checks require tracks but the library has none; cleanup is automatic by default (`SMOKE_FIXTURE_CLEANUP=false` disables cleanup for debugging).
 - `SUBSONIC_TRACE_LOGS=true` enables backend `/rest` trace lines for real-client troubleshooting (`endpoint`, `c`, `v`, `f`, HTTP status, Subsonic protocol status/error code) without logging auth secrets.
 
-Automated run evidence (2026-02-14):
+Automated run evidence:
 
 - Command: `cd backend && SOUNDSPAN_BASE_URL=http://127.0.0.1:3007 SMOKE_SUBSONIC_USER=opensubsonic-matrix SMOKE_SUBSONIC_PASSWORD=*** SMOKE_MODE=full SMOKE_REQUIRE_TRACKS=true SMOKE_ENABLE_FIXTURES=true DATABASE_URL=postgresql://... npm run test:smoke`
 - Result: `health` + `matrix` + strict full emulation all passed; a temporary fixture track was created and cleaned automatically to execute track-dependent checks on an empty-library dataset.
@@ -215,7 +213,7 @@ Automated run evidence (2026-02-14):
 ## Known Gaps / Non-Goals for Current Milestone
 
 - This is not a full OpenSubsonic superset; unimplemented endpoints remain out of scope for the current phase.
-- Validation now includes a third-party client-profile matrix (curl-driven request emulation of real client patterns), but full GUI-client certification runs are still pending.
+- Validation includes a third-party client-profile matrix (curl-driven request emulation of real client patterns), but does not include full GUI-client certification runs.
 
 ### Known-Gap Backlog (Carry Forward)
 
@@ -249,25 +247,25 @@ Promote a deferred gap to in-scope when at least one of these is true:
 
 - `star` / `unstar` support `albumId` and `artistId` via track-like projection (all matching library tracks are starred/unstarred), not separate album/artist favorite tables.
 - `getStarred`/`getStarred2` `artist` and `album` arrays are derived from liked-track projection state.
-- `getNowPlaying` currently reports only the authenticated user's active playback state, not global multi-user now-playing.
+- `getNowPlaying` reports only the authenticated user's active playback state, not global multi-user now-playing.
 - Song payloads include the authenticated user's latest `played` timestamp for that track, and album payloads include the latest `played` timestamp across that album's tracks. Both fields are omitted when no matching play exists.
 - Song payloads also include `starred`, `userRating`, and `playCount` from authenticated-user state. `bitRate` is derived from stored byte size and duration because the scanner does not persist bitrate. These optional fields are omitted when their source state or derivation is unavailable. Album `starred` and `playCount` values are projections across the album's visible tracks.
 - Remaining optional song fields not currently projected include `path`, `sortName`, `mediaType`, and `averageRating`.
 - Classic `getPlayQueue`/`savePlayQueue` use the legacy playback-state device bucket (`deviceId=legacy`). `getPlayQueue.current` is the current protocol song ID, and `savePlayQueue.current` resolves a protocol or raw song ID to its first submitted queue position. A bare in-range integer remains accepted as this server's legacy index form when it does not match a submitted song ID.
 - `getPlayQueueByIndex` returns a `playQueueByIndex` envelope whose `currentIndex` is 0-based into the returned `entry` list. `savePlayQueueByIndex` reads the required `currentIndex` parameter for a non-empty queue and returns Subsonic error 10 when it is missing, negative, non-integral, or outside the submitted `id` list. Calls without `id` clear the queue and omit `currentIndex`. The optional device-bucket `index` still maps `0` to `deviceId=legacy` and `N` to `deviceId=legacy-N`.
 - Queue reads return their required queue object when no playback state exists, with `entry=[]`, `position=0`, the authenticated `username`, the empty snapshot's current server time as the ISO `changed` timestamp, and `changedBy=soundspan`. Empty classic queues omit `current`, and empty index-based queues omit the conditionally required `currentIndex`. Populated responses use the state's ISO `changed` timestamp and the same ownership metadata because playback state does not persist a client name. Reads resolve persisted current state against the unfiltered queue before projecting visible entries. Classic reads omit `current` when that track was filtered. Index-based reads select the nearest following surviving entry, or index `0` when none follows. Both forms reset `position` to `0` when the persisted current track was filtered.
-- `getBookmarks`/`createBookmark`/`deleteBookmark` now persist per-user bookmark state keyed by track id, with bookmark positions stored in seconds and returned in protocol milliseconds.
+- `getBookmarks`/`createBookmark`/`deleteBookmark` persist per-user bookmark state keyed by track id, with bookmark positions stored in seconds and returned in protocol milliseconds.
 - `startScan` is compatibility-throttled with a cooldown window; repeated requests during cooldown return current scan status and do not enqueue new scan jobs.
-- `getIndexes` now honors `musicFolderId` filtering and `ifModifiedSince` no-change semantics.
-- `getArtists` now honors `musicFolderId` filtering.
-- `search`/`search2`/`search3` now honor `musicFolderId` filtering, normalize quoted-empty full-sync queries (`query=\"\"`), and treat zero counts as bounded full-sync requests.
-- `search`/`search2`/`search3` now pass through large offset values without a hard `10000` clamp so client pagination can complete on very large libraries.
-- Song/album protocol payloads now project `genre` from library metadata (prefer `userGenres`, then `genres`), and genre-filtered song responses (`getSongsByGenre`, `getRandomSongs` with `genre`) force explicit `genre` values in each returned song item. `getSongsByGenre` uses a day-stable order so offset pages remain coherent throughout the day.
+- `getIndexes` honors `musicFolderId` filtering and `ifModifiedSince` no-change semantics.
+- `getArtists` honors `musicFolderId` filtering.
+- `search`/`search2`/`search3` honor `musicFolderId` filtering, normalize quoted-empty full-sync queries (`query=\"\"`), and treat zero counts as bounded full-sync requests.
+- `search`/`search2`/`search3` pass through large offset values without a hard `10000` clamp so client pagination can complete on very large libraries.
+- Song/album protocol payloads project `genre` from library metadata (prefer `userGenres`, then `genres`), and genre-filtered song responses (`getSongsByGenre`, `getRandomSongs` with `genre`) force explicit `genre` values in each returned song item. `getSongsByGenre` uses a day-stable order so offset pages remain coherent throughout the day.
 - `getRandomSongs` uses artist-diversity weighted sampling with a top-up to the requested size before returning its flat shuffled song list.
-- `getTopSongs` now deterministically falls back to case-insensitive artist-name lookup when ID-path lookup misses, including artist names containing hyphens.
+- `getTopSongs` deterministically falls back to case-insensitive artist-name lookup when ID-path lookup misses, including artist names containing hyphens.
 - `getSimilarSongs` uses artist-to-similar-artist graph data; `getSimilarSongs2` merges similar-artist tracks with genre and same-artist fallback sources to avoid empty responses when similarity metadata is sparse.
-- `getLyrics` currently resolves by best-match library track (artist/title query), then returns plain lyrics or synced lyrics flattened to plain text lines.
-- Auth middleware now supports `u/p`, `u/t/s`, and `apiKey`; bearer-token style OpenSubsonic auth variants remain unsupported.
+- `getLyrics` resolves by best-match library track (artist/title query), then returns plain lyrics or synced lyrics flattened to plain text lines.
+- Auth middleware supports `u/p`, `u/t/s`, and `apiKey`; bearer-token style OpenSubsonic auth variants remain unsupported.
 - `getAlbumInfo2` `notes` currently use mapped library metadata (album title fallback) because soundspan does not maintain dedicated album notes fields.
 - Classic `getArtistInfo` accepts artist, album, or song IDs and resolves album/song inputs to their owning artist. Classic `getAlbumInfo` accepts album or song IDs and resolves songs to their owning album. Raw IDs use the same fallback resolution. The `*Info2` variants retain strict artist-ID and album-ID typing.
 - Local streams, including transcode tiers, are fully materialized to a file before the response starts. The streaming service therefore sends the exact file length. `estimateContentLength=true` does not replace that known value with an estimate, and Range responses continue to use their exact range length. This avoids an inaccurate HTTP message length that could truncate playback or leave a client waiting for bytes that will never arrive.

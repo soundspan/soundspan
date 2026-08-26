@@ -107,7 +107,7 @@ SLO warning sensitivity (default `3` consecutive skips).
 
 ### Rollout Safety Controls (Individual Mode)
 
-Backend, frontend, and backend-worker now expose rollout controls in values:
+Backend, frontend, and backend-worker expose rollout controls in values:
 
 - `*.strategy` (Deployment strategy; defaults to RollingUpdate with `maxUnavailable: 0`)
 - `*.pdb` (optional PodDisruptionBudget)
@@ -134,7 +134,7 @@ When `backend.replicas > 1`, pay attention to backend cache/log persistence:
 
 - `backend.persistence.cache` and `backend.persistence.logs` default to PVC mode with `ReadWriteOnce`
 - this is not safe for multi-replica scheduling unless you provide RWX storage
-- chart validation now fails early unless one of these is true:
+- chart validation fails early unless one of these is true:
   - access mode is `ReadWriteMany`
   - an explicit `existingClaim` is provided
   - storage type is `emptyDir`
@@ -154,7 +154,7 @@ backend:
 
 Native covers and transcode artifacts are stored under
 `TRANSCODE_CACHE_PATH/../covers` and `TRANSCODE_CACHE_PATH`.
-In individual mode, the chart now defaults `TRANSCODE_CACHE_PATH` to:
+In individual mode, the chart defaults `TRANSCODE_CACHE_PATH` to:
 
 - `/music/.soundspan/transcodes`
 
@@ -610,8 +610,8 @@ Scheduling precedence:
 `global.securityContext` are each single global sources used by all chart-managed pods.
 
 Note: Root-level `serviceAccount`, `podSecurityContext`, `securityContext`,
-`nodeSelector`, `tolerations`, `affinity`, and `imagePullSecrets` are no longer
-used by this chart.
+`nodeSelector`, `tolerations`, `affinity`, and `imagePullSecrets` are ignored
+by this chart; set them per workload instead.
 
 ### Backend Worker Env Vars (Individual Mode)
 

@@ -77,7 +77,7 @@ Non-admin users cannot download music directly. Instead, they can ask for it:
 
 Limits: you cannot request an album that is already in the library, already requested, or already downloading, and there is a daily per-user cap (default 10, operators can change `REQUESTS_PER_USER_PER_DAY`). Operators can turn the whole feature off with `FEATURE_REQUESTS=false`.
 
-Discover Weekly no longer downloads albums for non-admin users. On the default recommendation mode, playlists still generate for everyone from music the server already has. The legacy download-based mode is admin-only.
+On the default recommendation mode, Discover Weekly playlists generate for everyone from music the server already has and never download albums. The legacy download-based mode is admin-only.
 
 ## Keyboard Shortcuts
 
@@ -164,7 +164,7 @@ That is four steps across the two servers. Each peer's card shows the two direct
 
 #### Instance display name
 
-By default your server introduces itself to peers using its hostname, which in container deployments can look like `soundspan-backend-84975bdf86-h27qt`. Set a friendly name in `Admin -> Federation -> Instance display name` before pairing so the other side sees something readable.
+By default your server introduces itself to peers using its hostname, which in container deployments can look like `soundspan-backend-84975bdf86-h27qt`. Set a friendly name in `Admin -> Federation -> Instance display name` before you issue or accept a credential so the other side sees something readable.
 
 #### Health and diagnostics
 

@@ -1,6 +1,6 @@
 # Federated Library Sharing — Implementation Plan
 
-Companion to [federated-library-sharing.md](federated-library-sharing.md) (the spec, issue #451). Drafted 2026-08-15 at the start of implementation on `feature/federated-library-sharing`. Status: **F1–F14 complete; implementation is pending its F10 release review**. The spec's Resolved Decisions are implemented; this document records the build order, per-chunk contracts, and reviewed implementation decisions marked **[D]**.
+Companion to [federated-library-sharing.md](federated-library-sharing.md) (the spec, issue #451). Drafted 2026-08-15 at the start of implementation on `feature/federated-library-sharing`. Status: **shipped** (F1–F14 complete). The spec's Resolved Decisions are implemented; this document records the build order, per-chunk contracts, and reviewed implementation decisions marked **[D]**.
 
 ## Context updates since the spec
 

@@ -1,6 +1,6 @@
 # library-health
 
-Library Insights dashboard (issue #532): admin-facing read-model panels for
+Library Insights dashboard: admin-facing read-model panels for
 metadata gaps, analysis coverage, duplicate clusters, and storage/quality
 analytics. Rendered on the Admin page as the `library-insights` section; data
 comes from the admin-gated `/api/library-health` API via

@@ -284,15 +284,17 @@ releases or extends a lease only when that token still owns it. Album downloads
 use the same primitive instead of busy-polling while another replica holds the
 claim.
 
-Coarse feature flags (`AUDIO_ANALYSIS_ENABLED`, `DISCOVERY_ENABLED`, and
-`AUTO_PLAYLISTS_ENABLED`, all default `true`; `FEDERATION_ENABLED`, default
-`false`) gate both sides. With a flag off, the API process mounts a disabled
+Coarse feature flags (`AUDIO_ANALYSIS_ENABLED`, `DISCOVERY_ENABLED`,
+`AUTO_PLAYLISTS_ENABLED`, and `FEATURE_REQUESTS`, all default `true`;
+`FEDERATION_ENABLED`, default `false`) gate both sides. `FEATURE_REQUESTS`
+gates `/api/requests` and the request-fulfillment reconciler. With a flag off, the API process mounts a disabled
 handler for the subsystem's routes (requests get `404` with
 `code: FEATURE_DISABLED`) and the worker process does not register its queues or
 schedules. Disabling federation also prevents identity initialization,
-tombstone writes, peer sync/health work, and federated playback branches. The
-flags are exposed through Helm values (`config.features.*`) and forwarded by
-the docker-compose files.
+tombstone writes, peer sync/health work, and federated playback branches. All flags
+except `FEATURE_REQUESTS` are exposed through Helm values (`config.features.*`)
+and forwarded by the docker-compose files; `FEATURE_REQUESTS` is set through
+the chart's raw env passthrough.
 
 ### Scheduled Federation Jobs
 
@@ -314,6 +316,6 @@ The worker process runs an event-loop stall watchdog (`services/workerEventLoopM
 
 - **Frontend API boundary:** `frontend/lib/api.ts` — all HTTP calls go through here. The `ApiClient` is composed from an abstract `ApiClientCore` (`frontend/lib/api/core.ts`, holding the token/URL/`request` plumbing) plus per-domain mixin modules under `frontend/lib/api/` (library, playlists, media, discover, downloads, podcasts, audiobooks, vibe, ytmusic, youtube, tidal, etc.); `api.ts` re-exports the shared response types and the `api` singleton, so consumers keep calling `api.<method>()` unchanged
 - **Backend config:** `backend/src/config.ts` — Zod-validated env vars
-- **Database access:** Prisma only, no raw SQL
+- **Database access:** Prisma; raw SQL is limited to the pgvector, full-text-search, and row-locking exceptions defined in `AGENTS.md`
 - **Logging:** Shared helpers (`frontend/lib/logger.ts`, `backend/src/utils/logger.ts`, `services/common/logging_utils.py`)
 - **DCLAP provider boundary:** `services/vibe-provider-dclap/http_server.py` — authenticated HTTP-only embedding and space-identity contract

@@ -1,6 +1,6 @@
 # Federated Library Sharing ("Swarming")
 
-Spec drafted 2026-08-14 for [issue #451](https://github.com/BonzTM/soundspan/issues/451). Status: **implemented, pending release**. The implementation includes per-peer settings and dedup arbitration through chunk F14; contract documentation is synchronized through F14.
+Spec drafted 2026-08-14 for [issue #451](https://github.com/BonzTM/soundspan/issues/451). Status: **shipped**. The implementation includes per-peer settings and dedup arbitration through chunk F14; contract documentation is synchronized through F14.
 
 ## Summary
 

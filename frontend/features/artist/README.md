@@ -24,9 +24,11 @@ Start-here guide for `frontend/features/artist`.
 | `components/SimilarArtists.tsx` | components |
 | `hooks/index.ts` | hooks |
 | `hooks/useArtistActions.ts` | hooks |
+| `hooks/useArtistAlbumRequests.ts` | hooks |
 | `hooks/useArtistData.ts` | hooks |
 | `hooks/useDownloadActions.ts` | hooks |
 | `hooks/useTidalTopTracks.ts` | hooks |
+| `hooks/useTrackAlbumResolutions.ts` | hooks |
 | `hooks/useYtMusicTopTracks.ts` | hooks |
 | `types.ts` | root |
 

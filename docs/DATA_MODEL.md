@@ -145,6 +145,7 @@ last catalog synchronization.
 | `FederationPeer`           | One host, consumer, or bidirectional instance link                       | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `showDedupedCopies`, nullable `maxConcurrentStreams`/`maxStreamKbps`, sync cursors, `createdById` |
 | `FederationTombstone`      | Deleted host catalog identity retained for incremental peer deltas       | `entityType`, `entityId`, indexed `deletedAt`                                                                                                                                                                                                |
 | `FederationPodcastListing` | Lightweight peer podcast catalog row; never a native subscription mirror | `peerId`, `remoteId`, `feedUrl`, `title`, nullable `author`/`imageUrl`, `updatedAt`; unique `(peerId, remoteId)`, indexed `feedUrl`                                                                                                          |
+| `FederationPlaylistFollow` | A user's live follow of a peer's public playlist                         | `userId`, `peerId`, `remoteId`, `name`; cascades from both `User` and `FederationPeer`                                                                                                                                                       |
 
 `FederationPeer.createdById` uses a restricted user relation, so an owning
 administrator cannot be deleted while the peer remains. Deleting a peer
@@ -179,7 +180,7 @@ drive native per-user subscription state without violating the global
 JSON object with `kind` (`chapters`, `parts`, or `none`) and ordered
 `{ index, title, startSeconds }` entries. Legacy and federated rows may keep this
 column null; API readers map null or invalid JSON to `none`. `numChapters`
-remains temporarily for rollback compatibility but is no longer refreshed.
+is an unused legacy column retained in the schema; nothing reads or writes it.
 
 ### User & Auth
 
@@ -193,6 +194,7 @@ remains temporarily for rollback compatibility but is no longer refreshed.
 | `ApiKey`                         | Subsonic/API key auth                                                                                                                |
 | `DeviceLinkCode`                 | Device pairing codes                                                                                                                 |
 | `InviteCode` / `InviteCodeUsage` | Invite system                                                                                                                        |
+| `MusicRequest`                   | Non-admin album request queue backing `/api/requests`: requester, `artistName`/`albumTitle`/`rgMbid`, `status` lifecycle (pending through fulfilled/denied), reviewer fields, optional `downloadJobId` |
 
 `User.passwordHash` is nullable for OIDC-only accounts. The credential-stranding
 guard blocks unlinking an external identity when the account has no local
@@ -371,11 +373,12 @@ Album loads → check TrackMapping for existing mappings
 | --------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
 | `ListenSource`        | `LIBRARY`, `DISCOVERY`, `DISCOVERY_KEPT`, `TIDAL`, `YOUTUBE_MUSIC` | `Play.source`                                                   |
 | `DiscoverStatus`      | `ACTIVE`, `LIKED`, `MOVED`, `DELETED`                              | `DiscoveryAlbum.status`                                         |
-| `AlbumLocation`       | `LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`                       | `Album.location`                                                |
+| `AlbumLocation`       | `LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`, `CATALOG`            | `Album.location`                                                |
 | `TrackOrigin`         | `LOCAL`, `FEDERATED`                                               | `Track.origin`                                                  |
 | `PeerDirection`       | `HOST`, `CONSUMER`, `BOTH`                                         | `FederationPeer.direction`                                      |
 | `PeerStatus`          | `PENDING`, `ACTIVE`, `OFFLINE`, `REVOKED`                          | `FederationPeer.inboundStatus`, `FederationPeer.outboundStatus` |
 | `LibraryHealthStatus` | `MISSING_FROM_DISK`, `UNREADABLE_METADATA`                         | `LibraryHealthRecord.status`                                    |
+| `EmbeddingSpaceStatus` | `active`, `migrating`, `retired`                                  | `EmbeddingSpace.status`                                         |
 
 ## Migration Conventions
 

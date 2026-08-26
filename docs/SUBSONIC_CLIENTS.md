@@ -1,6 +1,5 @@
 # Subsonic Clients on Mobile
 
-Last updated: 2026-08-19 (server surface as of the current main branch, including the extension-truth fixes for #624/#625/#626)
 
 ## The mobile story
 
@@ -85,15 +84,15 @@ Advertised today at v1: `apiKeyAuthentication`, `formPost`, `replayGain`, `songL
 
 | Extension | State | Next step |
 | --- | --- | --- |
-| `replayGain` | Shipped (loudness work, 2.3.2) | None — gains computed against `LOUDNESS_TARGET_LUFS`; pre-rollout tracks fill in as the backfill measures them |
+| `replayGain` | Shipped | None — gains computed against `LOUDNESS_TARGET_LUFS`; unmeasured tracks fill in as the background measurement reaches them |
 | `formPost` | Shipped (validated with Music Assistant) | None |
 | `apiKeyAuthentication` | Shipped | None |
 | `songLyrics` | Shipped | None |
-| `transcodeOffset` | Shipped (#624) | None — ffmpeg input seeking on transcode tiers; raw streams ignore the offset |
-| `songPlayedDate` / `albumPlayedDate` | Shipped (#625) | None — per-user `played` timestamps on songs and albums |
-| `indexBasedQueue` | Shipped (#626) | None — advertised with the `currentIndex` wire contract |
+| `transcodeOffset` | Shipped | None — ffmpeg input seeking on transcode tiers; raw streams ignore the offset |
+| `songPlayedDate` / `albumPlayedDate` | Shipped | None — per-user `played` timestamps on songs and albums |
+| `indexBasedQueue` | Shipped | None — advertised with the `currentIndex` wire contract |
 | Transcoding decision (`getTranscodeDecision`/`getTranscodeStream`) | Not implemented | Deferred — revisit if a target client fails a core workflow without it |
-| HLS | Not implemented | Deferred — native/Howler playback replaced segmented streaming server-wide |
+| HLS | Not implemented | Deferred — soundspan streams via the native/Howler engines; segmented streaming is out of scope |
 
 The exhaustive missing-endpoint catalog, non-goals, and revisit triggers live in [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md).
 

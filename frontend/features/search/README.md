@@ -4,7 +4,7 @@ Start-here guide for `frontend/features/search`.
 
 ## Start Here
 
-1. Route entrypoints: `frontend/app/browse/playlists/page.tsx`, `frontend/app/search/page.tsx`
+1. Route entrypoints: `frontend/app/playlists/page.tsx`, `frontend/app/search/page.tsx`
 2. Primary tests and route entrypoints for this domain are listed below.
 3. Targeted verification commands:
 - `npm --prefix backend test -- --runInBand src/routes/__tests__/searchRuntime.test.ts src/routes/__tests__/browseRuntime.test.ts`

@@ -4,7 +4,7 @@ Start-here guide for `frontend/features/discover`.
 
 ## Start Here
 
-1. Route entrypoints: `frontend/app/discover/page.tsx`, `frontend/app/mix/page.tsx`
+1. Route entrypoints: `frontend/app/discover/page.tsx`, `frontend/app/mix/[id]/page.tsx`
 2. Primary tests and route entrypoints for this domain are listed below.
 3. Targeted verification commands:
 - `npm --prefix backend test -- --runInBand src/routes/__tests__/discoverRuntime.test.ts src/routes/__tests__/mixesRuntime.test.ts`
@@ -21,10 +21,8 @@ Start-here guide for `frontend/features/discover`.
 | `components/HowItWorks.tsx` | components |
 | `components/TrackList.tsx` | components |
 | `components/UnavailableAlbums.tsx` | components |
-| `hooks/useDiscoverActions.test.ts` | hooks |
 | `hooks/useDiscoverActions.ts` | hooks |
 | `hooks/useDiscoverData.ts` | hooks |
-| `hooks/useDiscoverProviderGapFill.test.ts` | hooks |
 | `hooks/useDiscoverProviderGapFill.ts` | hooks |
 | `hooks/usePreviewPlayer.ts` | hooks |
 | `types.ts` | root |

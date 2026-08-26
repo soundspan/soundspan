@@ -56,7 +56,7 @@ This index is the central navigation page for all project documentation under `d
 | [`KUBERNETES.md`](KUBERNETES.md)                                                               | Kubernetes operators     | Helm and manual Kubernetes deployment guidance                                                                                                  |
 | [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md)                                 | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance                                                                                            |
 | [`MIGRATING_FROM_LIDIFY.md`](MIGRATING_FROM_LIDIFY.md)                                         | Operators/maintainers    | Step-by-step migration runbook for moving a Lidify deployment to soundspan                                                                      |
-| [`NATIVE_AUDIO_ENGINE.md`](NATIVE_AUDIO_ENGINE.md)                                             | Users/operators          | Native `<audio>`-element playback engine (default as of 1.8.0): selection precedence, platform pins, and how to opt back into the legacy engine |
+| [`NATIVE_AUDIO_ENGINE.md`](NATIVE_AUDIO_ENGINE.md)                                             | Users/operators          | Native `<audio>`-element playback engine (the default): selection precedence, platform pins, and how to opt back into the legacy engine |
 | [`observability/README.md`](observability/README.md)                                           | Operators                | Prometheus metrics, Grafana dashboard, and the federation alert pack                                                                            |
 
 ## For Contributors and Maintainers
