@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Helm deployments can configure the music-requests feature flag through `config.features.requests`.
+
 ### Changed
 
 - CI now verifies that environment variables used by the backend and Python services stay documented and available through a deployment surface.

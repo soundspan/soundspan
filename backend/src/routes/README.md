@@ -223,7 +223,7 @@ stays rate limited (`apiLimiter`) and returns
 - `DISCOVERY_ENABLED`: `/api/discover`, `/api/recommendations`
 - `AUTO_PLAYLISTS_ENABLED`: `/api/mixes`
 - `FEDERATION_ENABLED`: `/api/federation/v1`, `/api/federation/admin`, consumer sync/health jobs, and federated playback/cover branches
-- `FEATURE_REQUESTS`: `/api/requests` (no Helm `config.features.*` value; set it via the chart's raw env passthrough)
+- `FEATURE_REQUESTS`: `/api/requests` (Helm value: `config.features.requests`)
 
 ## Conventions
 

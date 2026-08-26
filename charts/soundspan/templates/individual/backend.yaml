@@ -152,6 +152,7 @@ spec:
             "AUDIO_ANALYSIS_ENABLED" true
             "DISCOVERY_ENABLED" true
             "AUTO_PLAYLISTS_ENABLED" true
+            "FEATURE_REQUESTS" true
             "FEDERATION_ENABLED" true
             "SCAN_FILE_CONCURRENCY" true
             "CATALOG_PERSISTENCE" true
@@ -528,6 +529,13 @@ spec:
             {{- else }}
             - name: AUTO_PLAYLISTS_ENABLED
               value: {{ .Values.config.features.autoPlaylists | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "FEATURE_REQUESTS" }}
+            - name: FEATURE_REQUESTS
+              value: {{ index $backendEnv "FEATURE_REQUESTS" | quote }}
+            {{- else }}
+            - name: FEATURE_REQUESTS
+              value: {{ .Values.config.features.requests | quote }}
             {{- end }}
             {{- if hasKey $backendEnv "LIDARR_ENABLED" }}
             - name: LIDARR_ENABLED

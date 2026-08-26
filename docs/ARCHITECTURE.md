@@ -291,10 +291,9 @@ gates `/api/requests` and the request-fulfillment reconciler. With a flag off, t
 handler for the subsystem's routes (requests get `404` with
 `code: FEATURE_DISABLED`) and the worker process does not register its queues or
 schedules. Disabling federation also prevents identity initialization,
-tombstone writes, peer sync/health work, and federated playback branches. All flags
-except `FEATURE_REQUESTS` are exposed through Helm values (`config.features.*`)
-and forwarded by the docker-compose files; `FEATURE_REQUESTS` is set through
-the chart's raw env passthrough.
+tombstone writes, peer sync/health work, and federated playback branches. The flags are exposed through Helm values (`config.features.*`, with
+`FEATURE_REQUESTS` as `config.features.requests`) and forwarded by the
+docker-compose files.
 
 ### Scheduled Federation Jobs
 

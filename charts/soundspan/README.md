@@ -401,8 +401,8 @@ workload ordering.
 ### Feature Flags
 
 Coarse feature flags render on the backend, backend-worker, and AIO workloads.
-Existing ML/recommendation flags default to `true`. Federation defaults to
-`false`. Per-workload `env` maps override these values.
+Application feature flags default to `true`. Federation defaults to `false`.
+Per-workload `env` maps override these values.
 
 ```yaml
 config:
@@ -410,6 +410,7 @@ config:
     audioAnalysis: true   # audio analysis queueing, mood buckets, /api/analysis, /api/vibe
     discovery: true       # Discover Weekly cron/processor, /api/discover, /api/recommendations
     autoPlaylists: true   # Made For You mixes, /api/mixes
+    requests: true        # music request API and request-fulfillment reconciliation
     federation: false     # scoped peer credentials and /api/federation host API
   federationTombstoneRetentionDays: 90
   federationSyncIntervalMinutes: 15
@@ -650,6 +651,7 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `AUDIO_ANALYSIS_ENABLED` | `config.features.audioAnalysis` | No | `true` |
 | `DISCOVERY_ENABLED` | `config.features.discovery` | No | `true` |
 | `AUTO_PLAYLISTS_ENABLED` | `config.features.autoPlaylists` | No | `true` |
+| `FEATURE_REQUESTS` | `config.features.requests` | No | `true` |
 | `FEDERATION_ENABLED` | `config.features.federation` | No | `false` |
 | `SCAN_FILE_CONCURRENCY` | `config.scanFileConcurrency` | No | App default: `3` (chart leaves unset unless configured) |
 | `CATALOG_PERSISTENCE` | `config.catalogPersistence` | No | App default: `true` (chart leaves unset unless configured) |

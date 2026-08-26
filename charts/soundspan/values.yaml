@@ -780,11 +780,11 @@ config:
   providerTrackRetentionDays: 30
   # -- Consumer federation catalog sync interval in minutes. Minimum 1.
   federationSyncIntervalMinutes: 15
-  # -- Coarse feature flags. Existing ML/recommendation flags default ON;
-  #    federation defaults OFF.
+  # -- Coarse feature flags. Application feature flags default ON; federation
+  #    defaults OFF.
   #    Rendered as AUDIO_ANALYSIS_ENABLED / DISCOVERY_ENABLED /
-  #    AUTO_PLAYLISTS_ENABLED / FEDERATION_ENABLED on the backend,
-  #    backend-worker, and AIO workloads.
+  #    AUTO_PLAYLISTS_ENABLED / FEATURE_REQUESTS / FEDERATION_ENABLED on the
+  #    backend, backend-worker, and AIO workloads.
   features:
     # -- Backend queueing/consumption of audio analysis work, mood-bucket
     #    worker, /api/analysis and /api/vibe routes. The Essentia analyzer
@@ -796,6 +796,8 @@ config:
     discovery: true
     # -- Made For You mixes (on-demand programmatic playlists, /api/mixes).
     autoPlaylists: true
+    # -- Music request API and request-fulfillment reconciliation.
+    requests: true
     # -- Scoped peer credentials and read-only host federation API.
     federation: false
   # -- Enables Socket.IO Redis adapter for Listen Together cross-pod fanout.
@@ -875,4 +877,3 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-
