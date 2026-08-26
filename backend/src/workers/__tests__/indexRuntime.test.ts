@@ -434,6 +434,9 @@ describe("workers runtime behavior", () => {
         jest.clearAllMocks();
     });
 
+    // Imports the full worker module graph under coverage instrumentation;
+    // the cold require crossed jest's 5s default once the graph grew (#812
+    // made coverage blocking), so this test carries its own budget.
     it("imports without registering processors, then starts explicitly", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
@@ -657,7 +660,7 @@ describe("workers runtime behavior", () => {
                 jobId: "scheduler:catalog-retention:repeat",
             },
         );
-    });
+    }, 15_000);
 
     it("registers slow and fast jobs on structurally isolated queues", async () => {
         process.env = { ...originalEnv };
