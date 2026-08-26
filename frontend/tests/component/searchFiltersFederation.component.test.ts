@@ -42,3 +42,36 @@ test("SearchFilters shows the Peers pill when federation is enabled", async () =
     assert.match(html, />Peers</);
     assert.match(html, /bg-brand/);
 });
+
+test("SearchFilters keeps TV navigation attributes on every pill", async () => {
+    const { SearchFilters } =
+        await import("../../features/search/components/SearchFilters");
+    const html = renderToStaticMarkup(
+        React.createElement(SearchFilters, {
+            filterTab: "all",
+            onFilterChange: () => undefined,
+            soulseekEnabled: true,
+            federationEnabled: false,
+            hasSearched: true,
+        }),
+    );
+    assert.match(html, /data-tv-section="search-filters"/);
+    // Soulseek takes index 4 when federation is disabled
+    assert.match(html, /data-tv-card-index="4"[^>]*>[\s\S]*?Soulseek/);
+    assert.equal(html.match(/data-tv-card=""/g)?.length, 5);
+});
+
+test("SearchFilters renders nothing before a search has run", async () => {
+    const { SearchFilters } =
+        await import("../../features/search/components/SearchFilters");
+    const html = renderToStaticMarkup(
+        React.createElement(SearchFilters, {
+            filterTab: "all",
+            onFilterChange: () => undefined,
+            soulseekEnabled: true,
+            federationEnabled: true,
+            hasSearched: false,
+        }),
+    );
+    assert.equal(html, "");
+});

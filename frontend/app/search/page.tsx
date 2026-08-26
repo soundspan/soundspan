@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SearchIcon } from "lucide-react";
 import { useSearchData } from "@/features/search/hooks/useSearchData";
@@ -499,14 +500,16 @@ export default function SearchPage() {
                             ((showLibrary && libraryTracks.length > 0) ||
                                 unownedDiscoverTracks.length > 0) && (
                                 <section>
-                                    <h2 className="text-2xl font-bold text-white mb-6">
-                                        <Link
-                                            href={sectionViewLinks.tracks}
-                                            className="hover:underline"
-                                        >
-                                            Songs
-                                        </Link>
-                                    </h2>
+                                    <SectionHeader
+                                        title={
+                                            <Link
+                                                href={sectionViewLinks.tracks}
+                                                className="hover:underline"
+                                            >
+                                                Songs
+                                            </Link>
+                                        }
+                                    />
                                     {showLibrary &&
                                         libraryTracks.length > 0 && (
                                             <LibraryTracksList
@@ -532,14 +535,16 @@ export default function SearchPage() {
                     (sectionView === null || isAlbumsView) &&
                     libraryAlbums.length > 0 && (
                         <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                <Link
-                                    href={sectionViewLinks.albums}
-                                    className="hover:underline"
-                                >
-                                    Your Albums
-                                </Link>
-                            </h2>
+                            <SectionHeader
+                                title={
+                                    <Link
+                                        href={sectionViewLinks.albums}
+                                        className="hover:underline"
+                                    >
+                                        Your Albums
+                                    </Link>
+                                }
+                            />
                             <LibraryAlbumsGrid
                                 albums={libraryAlbums}
                                 limit={isAlbumsView ? null : 6}
@@ -553,9 +558,7 @@ export default function SearchPage() {
                     !isSectionView &&
                     libraryPodcasts.length > 0 && (
                         <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Podcasts in Your Library
-                            </h2>
+                            <SectionHeader title="Podcasts in Your Library" />
                             <LibraryPodcastsGrid
                                 podcasts={libraryPodcasts}
                                 limit={isPodcastTab ? null : 6}
@@ -569,9 +572,7 @@ export default function SearchPage() {
                     !isSectionView &&
                     discoverPodcastResults.length > 0 && (
                         <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Discover Podcasts
-                            </h2>
+                            <SectionHeader title="Discover Podcasts" />
                             <DiscoverPodcastsGrid
                                 podcasts={discoverPodcastResults}
                                 limit={isPodcastTab ? null : 6}
@@ -587,9 +588,7 @@ export default function SearchPage() {
                     libraryResults?.audiobooks &&
                     libraryResults.audiobooks.length > 0 && (
                         <section>
-                            <h2 className="text-2xl font-bold text-white mb-6">
-                                Audiobooks
-                            </h2>
+                            <SectionHeader title="Audiobooks" />
                             <LibraryAudiobooksGrid
                                 audiobooks={libraryResults.audiobooks}
                             />

@@ -24,7 +24,7 @@ const marker = (label: string) => {
 
 const Icon = () => React.createElement("i");
 
-mock.module("@/features/home/components/SectionHeader", {
+mock.module("@/components/layout/SectionHeader", {
     namedExports: {
         SectionHeader: ({ title }: { title: string }) =>
             React.createElement("h2", null, title),

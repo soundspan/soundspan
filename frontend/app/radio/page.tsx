@@ -10,6 +10,7 @@ import {
     type RadioPageStation,
 } from "@/lib/radio/radioPageStations";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { RadioStationCard } from "@/components/ui/RadioStationCard";
 
 // Static radio stations
@@ -47,24 +48,6 @@ const STATIC_STATIONS: RadioPageStation[] = [
         minTracks: 10,
     },
 ];
-
-// Section Header Component
-function SectionHeader({
-    title,
-    description,
-}: {
-    title: string;
-    description?: string;
-}) {
-    return (
-        <div className="mb-4">
-            <h2 className="text-xl font-bold text-white">{title}</h2>
-            {description && (
-                <p className="text-sm text-white/50 mt-1">{description}</p>
-            )}
-        </div>
-    );
-}
 
 function StationGridSkeleton() {
     return (

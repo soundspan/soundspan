@@ -13,8 +13,11 @@ export interface FilterPillsProps<T extends string> {
     options: ReadonlyArray<FilterPillOption<T>>;
     value: T;
     onChange: (value: T) => void;
-    size?: "md" | "sm";
+    /** Style preset: md/sm filter pills, or a wrapped segmented compact toggle. */
+    size?: "md" | "sm" | "segmented";
     className?: string;
+    /** When set, stamps TV navigation data attributes on the group and pills. */
+    tvSection?: string;
     "aria-label"?: string;
 }
 
@@ -32,6 +35,12 @@ const SIZE_STYLES = {
         active: "bg-white text-black",
         inactive: "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10",
     },
+    segmented: {
+        group: "flex items-center gap-1 rounded-full bg-white/5 p-1",
+        pill: "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+        active: "bg-brand text-black",
+        inactive: "text-gray-400 hover:text-white",
+    },
 } as const;
 
 function FilterPillsInner<T extends string>({
@@ -40,6 +49,7 @@ function FilterPillsInner<T extends string>({
     onChange,
     size = "md",
     className,
+    tvSection,
     "aria-label": ariaLabel,
 }: FilterPillsProps<T>) {
     const styles = SIZE_STYLES[size];
@@ -47,10 +57,18 @@ function FilterPillsInner<T extends string>({
         <div
             role="group"
             aria-label={ariaLabel}
+            data-tv-section={tvSection}
             className={cn(styles.group, className)}
         >
-            {options.map((option) => {
+            {options.map((option, index) => {
                 const isActive = option.value === value;
+                const tvProps = tvSection
+                    ? {
+                          "data-tv-card": "",
+                          "data-tv-card-index": index,
+                          tabIndex: 0,
+                      }
+                    : {};
                 return (
                     <button
                         key={option.value}
@@ -58,6 +76,7 @@ function FilterPillsInner<T extends string>({
                         aria-pressed={isActive}
                         title={option.title}
                         onClick={() => onChange(option.value)}
+                        {...tvProps}
                         className={cn(
                             styles.pill,
                             isActive

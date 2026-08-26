@@ -29,6 +29,7 @@ import { cn } from "@/utils/cn";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { CoverMosaic } from "@/components/ui/CoverMosaic";
+import { FilterPills } from "@/components/ui/FilterPills";
 import {
     createMosaicCandidates,
     selectMosaicCovers,
@@ -419,32 +420,17 @@ export default function PlaylistsPage() {
                     actions={
                         <>
                             {federation && !showHiddenTab && (
-                                <div
-                                    role="group"
+                                <FilterPills
+                                    options={[
+                                        { value: "all", label: "All" },
+                                        { value: "local", label: "Local" },
+                                        { value: "peers", label: "Peers" },
+                                    ]}
+                                    value={effectiveOrigin}
+                                    onChange={setOrigin}
+                                    size="segmented"
                                     aria-label="Playlist source"
-                                    className="flex items-center gap-1 rounded-full bg-white/5 p-1"
-                                >
-                                    {(
-                                        [
-                                            ["all", "All"],
-                                            ["local", "Local"],
-                                            ["peers", "Peers"],
-                                        ] as const
-                                    ).map(([value, label]) => (
-                                        <button
-                                            key={value}
-                                            onClick={() => setOrigin(value)}
-                                            className={cn(
-                                                "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
-                                                effectiveOrigin === value
-                                                    ? "bg-brand text-black"
-                                                    : "text-gray-400 hover:text-white",
-                                            )}
-                                        >
-                                            {label}
-                                        </button>
-                                    ))}
-                                </div>
+                                />
                             )}
                             <Link
                                 href="/import"

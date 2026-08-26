@@ -19,6 +19,7 @@ import {
     type PlaylistImportResolvedTrack,
 } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
+import { FilterPills } from "@/components/ui/FilterPills";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { formatTime } from "@/utils/formatTime";
@@ -417,30 +418,33 @@ function ImportPageContent() {
 
                 {step === "input" && (
                     <div className="space-y-4">
-                        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
-                            <button
-                                onClick={() => setImportMode("url")}
-                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-                                    importMode === "url"
-                                        ? "bg-white/10 text-white"
-                                        : "text-gray-400 hover:text-gray-300"
-                                }`}
-                            >
-                                <Link className="w-4 h-4" />
-                                URL Import
-                            </button>
-                            <button
-                                onClick={() => setImportMode("file")}
-                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-                                    importMode === "file"
-                                        ? "bg-white/10 text-white"
-                                        : "text-gray-400 hover:text-gray-300"
-                                }`}
-                            >
-                                <FileUp className="w-4 h-4" />
-                                M3U File
-                            </button>
-                        </div>
+                        <FilterPills
+                            options={[
+                                {
+                                    value: "url",
+                                    label: (
+                                        <span className="flex items-center gap-2">
+                                            <Link className="w-4 h-4" />
+                                            URL Import
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "file",
+                                    label: (
+                                        <span className="flex items-center gap-2">
+                                            <FileUp className="w-4 h-4" />
+                                            M3U File
+                                        </span>
+                                    ),
+                                },
+                            ]}
+                            value={importMode}
+                            onChange={setImportMode}
+                            size="segmented"
+                            className="w-fit"
+                            aria-label="Import source"
+                        />
 
                         {importMode === "url" && (
                             <>

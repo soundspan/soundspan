@@ -4,7 +4,7 @@ import { cn } from "@/utils/cn";
 
 interface PageHeaderProps {
     title: string;
-    subtitle: string;
+    subtitle?: string;
     icon: LucideIcon;
     iconClassName?: string;
     titleClassName?: string;
@@ -49,9 +49,16 @@ export function PageHeader({
                         </h1>
                         {badge}
                     </div>
-                    <p className={cn("text-white/60 mt-1", subtitleClassName)}>
-                        {subtitle}
-                    </p>
+                    {subtitle && (
+                        <p
+                            className={cn(
+                                "text-white/60 mt-1",
+                                subtitleClassName,
+                            )}
+                        >
+                            {subtitle}
+                        </p>
+                    )}
                 </div>
                 {actions ? (
                     <div className="flex items-center gap-2">{actions}</div>

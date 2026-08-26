@@ -21,6 +21,7 @@ import { Book, ListTree, Shuffle } from "lucide-react";
 import { shuffleArray } from "@/utils/shuffle";
 import { BRAND_NAME } from "@/lib/brand";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface Audiobook {
     id: string;
@@ -523,9 +524,7 @@ export default function AudiobooksPage() {
                         filter === "all" &&
                         !groupBySeries && (
                             <section>
-                                <h2 className="text-xl font-bold text-white mb-6">
-                                    Continue Listening
-                                </h2>
+                                <SectionHeader title="Continue Listening" />
                                 <div
                                     className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
                                     data-tv-section="continue-listening"
@@ -555,9 +554,7 @@ export default function AudiobooksPage() {
                                 {/* Series Cards */}
                                 {series.length > 0 && (
                                     <section>
-                                        <h2 className="text-xl font-bold text-white mb-6">
-                                            Series
-                                        </h2>
+                                        <SectionHeader title="Series" />
                                         <div
                                             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
                                             data-tv-section="series"
@@ -598,9 +595,7 @@ export default function AudiobooksPage() {
                                 {/* Standalone Books */}
                                 {standalone.length > 0 && (
                                     <section>
-                                        <h2 className="text-xl font-bold text-white mb-6">
-                                            Standalone Books
-                                        </h2>
+                                        <SectionHeader title="Standalone Books" />
                                         <div
                                             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-6"
                                             data-tv-section="standalone"

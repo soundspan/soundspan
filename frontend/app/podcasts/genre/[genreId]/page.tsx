@@ -6,6 +6,7 @@ import Image from "next/image";
 import { Mic2, ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Podcast {
@@ -128,10 +129,14 @@ export default function GenrePage() {
                     <ArrowLeft className="w-5 h-5" />
                     Back to Podcasts
                 </button>
-                <h1 className="text-4xl md:text-5xl font-bold">{genre.name}</h1>
-                <p className="text-gray-400 mt-2">
-                    {podcasts.length} podcast{podcasts.length !== 1 ? "s" : ""}
-                </p>
+                <PageHeader
+                    title={genre.name}
+                    subtitle={`${podcasts.length} podcast${
+                        podcasts.length !== 1 ? "s" : ""
+                    }`}
+                    icon={Mic2}
+                    className="mb-0"
+                />
             </div>
 
             {/* Podcast Grid */}

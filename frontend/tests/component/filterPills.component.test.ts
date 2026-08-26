@@ -86,6 +86,53 @@ test("per-option activeClassName overrides the default active styling", async ()
     );
 });
 
+test("segmented preset renders the wrapped compact-toggle grammar", async () => {
+    const { FilterPills } = await import("../../components/ui/FilterPills");
+    const html = renderToStaticMarkup(
+        React.createElement(FilterPills, {
+            options: OPTIONS,
+            value: "all",
+            onChange: () => undefined,
+            size: "segmented",
+            "aria-label": "Playlist source",
+        }),
+    );
+    assert.match(html, /rounded-full bg-white\/5 p-1/);
+    assert.match(html, /text-xs font-medium/);
+    const active = html.slice(html.indexOf('aria-pressed="true"'));
+    assert.match(active.slice(0, active.indexOf(">")), /bg-brand text-black/);
+});
+
+test("tvSection stamps TV navigation attributes on the group and pills", async () => {
+    const { FilterPills } = await import("../../components/ui/FilterPills");
+    const html = renderToStaticMarkup(
+        React.createElement(FilterPills, {
+            options: OPTIONS,
+            value: "all",
+            onChange: () => undefined,
+            tvSection: "search-filters",
+        }),
+    );
+    assert.match(html, /data-tv-section="search-filters"/);
+    assert.equal(html.match(/data-tv-card=""/g)?.length, 2);
+    assert.match(html, /data-tv-card-index="0"/);
+    assert.match(html, /data-tv-card-index="1"/);
+    assert.equal(html.match(/tabindex="0"/g)?.length, 2);
+});
+
+test("TV attributes are absent without tvSection", async () => {
+    const { FilterPills } = await import("../../components/ui/FilterPills");
+    const html = renderToStaticMarkup(
+        React.createElement(FilterPills, {
+            options: OPTIONS,
+            value: "all",
+            onChange: () => undefined,
+        }),
+    );
+    assert.doesNotMatch(html, /data-tv-section/);
+    assert.doesNotMatch(html, /data-tv-card/);
+});
+
 test("sm size renders the chip scale, md the pill scale", async () => {
     const { FilterPills } = await import("../../components/ui/FilterPills");
     const sm = renderToStaticMarkup(

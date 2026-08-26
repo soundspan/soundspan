@@ -26,6 +26,7 @@ import {
     Loader2,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface Audiobook {
     id: string;
@@ -139,7 +140,7 @@ export default function SeriesDetailPage() {
                             <div className="text-sm font-bold text-white/90 mb-2">
                                 SERIES
                             </div>
-                            <h1 className="text-5xl md:text-7xl font-bold text-white mb-6">
+                            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white leading-tight mb-6">
                                 {seriesName}
                             </h1>
 
@@ -179,9 +180,7 @@ export default function SeriesDetailPage() {
 
             {/* Books List */}
             <div className="max-w-7xl mx-auto px-8 pb-24">
-                <h2 className="text-2xl font-bold text-white mb-6">
-                    Books in Series
-                </h2>
+                <SectionHeader title="Books in Series" />
 
                 <div className="space-y-2">
                     {books.map((book, index) => {

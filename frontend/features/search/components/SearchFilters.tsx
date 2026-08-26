@@ -1,5 +1,8 @@
 import { Download, Network } from "lucide-react";
-import { cn } from "@/utils/cn";
+import {
+    FilterPills,
+    type FilterPillOption,
+} from "@/components/ui/FilterPills";
 import { FilterTab } from "../types";
 
 interface SearchFiltersProps {
@@ -8,6 +11,44 @@ interface SearchFiltersProps {
     soulseekEnabled: boolean;
     federationEnabled: boolean;
     hasSearched: boolean;
+}
+
+/** Builds the filter options for the enabled search sources. */
+function buildFilterOptions(
+    soulseekEnabled: boolean,
+    federationEnabled: boolean,
+): FilterPillOption<FilterTab>[] {
+    const options: FilterPillOption<FilterTab>[] = [
+        { value: "all", label: "All" },
+        { value: "library", label: "My Library" },
+        { value: "discover", label: "Discover" },
+        { value: "podcasts", label: "Podcasts" },
+    ];
+    if (federationEnabled) {
+        options.push({
+            value: "peers",
+            label: (
+                <span className="flex items-center gap-2">
+                    <Network className="h-4 w-4" />
+                    Peers
+                </span>
+            ),
+            activeClassName: "bg-brand text-black",
+        });
+    }
+    if (soulseekEnabled) {
+        options.push({
+            value: "soulseek",
+            label: (
+                <span className="flex items-center gap-2">
+                    <Download className="w-4 h-4" />
+                    Soulseek
+                </span>
+            ),
+            activeClassName: "bg-brand text-black",
+        });
+    }
+    return options;
 }
 
 /**
@@ -25,97 +66,13 @@ export function SearchFilters({
     }
 
     return (
-        <div className="flex gap-2 mb-8" data-tv-section="search-filters">
-            <button
-                data-tv-card
-                data-tv-card-index={0}
-                tabIndex={0}
-                onClick={() => onFilterChange("all")}
-                className={cn(
-                    "px-4 py-2 text-sm font-bold rounded-full transition-all",
-                    filterTab === "all"
-                        ? "bg-white text-black"
-                        : "bg-[#232323] text-white hover:bg-[#2a2a2a]",
-                )}
-            >
-                All
-            </button>
-            <button
-                data-tv-card
-                data-tv-card-index={1}
-                tabIndex={0}
-                onClick={() => onFilterChange("library")}
-                className={cn(
-                    "px-4 py-2 text-sm font-bold rounded-full transition-all",
-                    filterTab === "library"
-                        ? "bg-white text-black"
-                        : "bg-[#232323] text-white hover:bg-[#2a2a2a]",
-                )}
-            >
-                My Library
-            </button>
-            <button
-                data-tv-card
-                data-tv-card-index={2}
-                tabIndex={0}
-                onClick={() => onFilterChange("discover")}
-                className={cn(
-                    "px-4 py-2 text-sm font-bold rounded-full transition-all",
-                    filterTab === "discover"
-                        ? "bg-white text-black"
-                        : "bg-[#232323] text-white hover:bg-[#2a2a2a]",
-                )}
-            >
-                Discover
-            </button>
-            <button
-                data-tv-card
-                data-tv-card-index={3}
-                tabIndex={0}
-                onClick={() => onFilterChange("podcasts")}
-                className={cn(
-                    "px-4 py-2 text-sm font-bold rounded-full transition-all",
-                    filterTab === "podcasts"
-                        ? "bg-white text-black"
-                        : "bg-[#232323] text-white hover:bg-[#2a2a2a]",
-                )}
-            >
-                Podcasts
-            </button>
-            {federationEnabled && (
-                <button
-                    data-tv-card
-                    data-tv-card-index={4}
-                    tabIndex={0}
-                    onClick={() => onFilterChange("peers")}
-                    className={cn(
-                        "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition-all",
-                        filterTab === "peers"
-                            ? "bg-brand text-black"
-                            : "bg-surface-hover text-white hover:bg-surface-highlight",
-                    )}
-                >
-                    <Network className="h-4 w-4" />
-                    Peers
-                </button>
-            )}
-            {soulseekEnabled && (
-                <button
-                    data-tv-card
-                    data-tv-card-index={federationEnabled ? 5 : 4}
-                    tabIndex={0}
-                    onClick={() => onFilterChange("soulseek")}
-                    className={cn(
-                        "px-4 py-2 text-sm font-bold rounded-full transition-all flex items-center gap-2",
-                        filterTab === "soulseek"
-                            ? "bg-brand text-black"
-                            : "bg-[#232323] text-white hover:bg-[#2a2a2a]",
-                    )}
-                >
-                    <Download className="w-4 h-4" />
-                    Soulseek
-                </button>
-            )}
-        </div>
+        <FilterPills
+            options={buildFilterOptions(soulseekEnabled, federationEnabled)}
+            value={filterTab}
+            onChange={onFilterChange}
+            className="mb-8"
+            tvSection="search-filters"
+            aria-label="Search result filter"
+        />
     );
 }

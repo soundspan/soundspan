@@ -4,7 +4,7 @@
  * Shows YT Music curated featured shelves.
  */
 
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { api } from "@/lib/api";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import type { YtMusicHomeShelf } from "@/hooks/useQueries";

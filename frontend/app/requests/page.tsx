@@ -5,9 +5,9 @@ import Link from "next/link";
 import { Check, Inbox, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
-import { cn } from "@/utils/cn";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/Badge";
+import { FilterPills } from "@/components/ui/FilterPills";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import type { MusicRequest } from "@/lib/api/requests";
 import {
@@ -55,26 +55,14 @@ function RequestFilterPills(props: {
     onChange: (value: MusicRequestFilter) => void;
 }) {
     return (
-        <div
-            role="group"
+        <FilterPills
+            options={REQUEST_FILTER_OPTIONS}
+            value={props.filter}
+            onChange={props.onChange}
+            size="segmented"
+            className="flex-wrap"
             aria-label="Request status filter"
-            className="flex flex-wrap items-center gap-1 rounded-full bg-white/5 p-1"
-        >
-            {REQUEST_FILTER_OPTIONS.map((option) => (
-                <button
-                    key={option.value}
-                    onClick={() => props.onChange(option.value)}
-                    className={cn(
-                        "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
-                        props.filter === option.value
-                            ? "bg-brand text-black"
-                            : "text-gray-400 hover:text-white",
-                    )}
-                >
-                    {option.label}
-                </button>
-            ))}
-        </div>
+        />
     );
 }
 

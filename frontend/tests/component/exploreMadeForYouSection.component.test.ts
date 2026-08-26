@@ -55,7 +55,7 @@ mock.module("@/lib/features-context", {
     },
 });
 
-mock.module("@/features/home/components/SectionHeader", {
+mock.module("@/components/layout/SectionHeader", {
     namedExports: {
         SectionHeader: ({
             title,

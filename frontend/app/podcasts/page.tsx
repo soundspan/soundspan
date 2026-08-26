@@ -12,6 +12,7 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePodcastsQuery, useTopPodcastsQuery } from "@/hooks/useQueries";
 import Image from "next/image";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useFeatures } from "@/lib/features-context";
 import { PeerBadge } from "@/components/ui/PeerBadge";
@@ -382,9 +383,7 @@ export default function PodcastsPage() {
                 {/* My Podcasts */}
                 {(podcasts.length > 0 || showMyPodcastsSkeleton) && (
                     <section>
-                        <h2 className="text-xl font-bold text-white mb-4">
-                            My Podcasts
-                        </h2>
+                        <SectionHeader title="My Podcasts" />
                         <div className="flex flex-wrap items-center gap-2 mb-6">
                             {/* Sort Dropdown */}
                             <ControlSelect
@@ -521,9 +520,7 @@ export default function PodcastsPage() {
                 {/* Top Podcasts */}
                 {(topPodcasts.length > 0 || showTopPodcastsSkeleton) && (
                     <section>
-                        <h2 className="text-xl font-bold text-white mb-6">
-                            Top Podcasts
-                        </h2>
+                        <SectionHeader title="Top Podcasts" />
                         {showTopPodcastsSkeleton ? (
                             <PodcastGridSkeleton count={10} />
                         ) : (
@@ -582,9 +579,7 @@ export default function PodcastsPage() {
 
                 {showGenreDiscoverySkeleton && (
                     <section>
-                        <h2 className="text-xl font-bold text-white mb-6">
-                            Loading Discovery
-                        </h2>
+                        <SectionHeader title="Loading Discovery" />
                         <PodcastGridSkeleton count={5} />
                     </section>
                 )}
@@ -603,21 +598,10 @@ export default function PodcastsPage() {
 
                     return genrePodcasts.length > 0 ? (
                         <section key={genreId}>
-                            <div className="flex items-center justify-between mb-6">
-                                <h2 className="text-xl font-bold text-white">
-                                    {genreName}
-                                </h2>
-                                <button
-                                    onClick={() =>
-                                        router.push(
-                                            `/podcasts/genre/${genreId}`,
-                                        )
-                                    }
-                                    className="text-sm font-semibold text-gray-400 hover:text-white transition-colors"
-                                >
-                                    View More
-                                </button>
-                            </div>
+                            <SectionHeader
+                                title={genreName}
+                                showAllHref={`/podcasts/genre/${genreId}`}
+                            />
                             <div
                                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 2xl:grid-cols-5 3xl:grid-cols-5 gap-4"
                                 data-tv-section={`genre-${genreId}`}
@@ -727,9 +711,7 @@ function PeerPodcastsSection() {
 
     return (
         <section>
-            <h2 className="text-xl font-bold text-white mb-6">
-                From your peers
-            </h2>
+            <SectionHeader title="From your peers" />
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {listings.map((listing) => (
                     <div

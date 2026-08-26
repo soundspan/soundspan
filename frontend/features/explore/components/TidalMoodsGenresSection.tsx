@@ -8,7 +8,7 @@ import { useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Music2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { frontendLogger } from "@/lib/logger";

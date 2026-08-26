@@ -5,6 +5,7 @@ import { DiscoverResult } from "../types";
 import { api } from "@/lib/api";
 import { formatListeners } from "@/lib/format";
 import { getArtistRouteParam } from "@/utils/artistRoute";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface SimilarArtistsGridProps {
     similarArtists: DiscoverResult[];
@@ -31,15 +32,17 @@ export function SimilarArtistsGrid({
 
     return (
         <section>
-            {titleHref ? (
-                <h2 className="text-2xl font-bold text-white mb-6">
-                    <Link href={titleHref} className="hover:underline">
-                        {title}
-                    </Link>
-                </h2>
-            ) : (
-                <h2 className="text-2xl font-bold text-white mb-6">{title}</h2>
-            )}
+            <SectionHeader
+                title={
+                    titleHref ? (
+                        <Link href={titleHref} className="hover:underline">
+                            {title}
+                        </Link>
+                    ) : (
+                        title
+                    )
+                }
+            />
             <div
                 className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-4"
                 data-tv-section="search-results-artists"

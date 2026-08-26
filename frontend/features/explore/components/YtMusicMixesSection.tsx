@@ -10,7 +10,7 @@
  * render. Revisit when ytmusicapi resolves #813.
  */
 
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import {
     HorizontalCarousel,

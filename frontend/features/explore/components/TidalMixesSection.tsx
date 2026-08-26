@@ -4,7 +4,7 @@
  * Shows a carousel of personal TIDAL mixes using HorizontalCarousel.
  */
 
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import {
     HorizontalCarousel,

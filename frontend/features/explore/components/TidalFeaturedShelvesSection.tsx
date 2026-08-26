@@ -4,7 +4,7 @@
  * Shows TIDAL curated home + explore shelves combined.
  */
 
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { api } from "@/lib/api";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import type {

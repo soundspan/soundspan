@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { Artist, DiscoverResult } from "../types";
 import { getArtistRouteParam } from "@/utils/artistRoute";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 interface TopResultProps {
     libraryArtist?: Artist;
     discoveryArtist?: DiscoverResult;
@@ -55,7 +56,7 @@ export function TopResult({
 
     return (
         <section data-tv-section="search-top-result">
-            <h2 className="text-2xl font-bold text-white mb-6">Top result</h2>
+            <SectionHeader title="Top result" />
             <Link
                 href={`/artist/${artistId}`}
                 className="bg-surface-sunken hover:bg-surface-elevated p-6 rounded-lg transition-all flex items-center gap-6 w-full sm:w-96"

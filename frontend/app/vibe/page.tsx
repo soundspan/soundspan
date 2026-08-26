@@ -11,7 +11,6 @@ import Image from "next/image";
 import Link from "next/link";
 import {
     Loader2,
-    RefreshCw,
     AlertCircle,
     Disc3,
     Play,
@@ -19,10 +18,12 @@ import {
     Shuffle,
     X,
     AudioWaveform,
-    Map,
+    Waves,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { VibeMapTab } from "@/components/vibe/VibeMapTab";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { VibeHeader, type VibeTab } from "@/components/vibe/VibeHeader";
 
 interface TrackFeatures {
     energy: number;
@@ -79,7 +80,6 @@ interface VibePreset {
 }
 
 type ViewMode = "comparison" | "search-results";
-type VibeTab = "explore" | "map";
 
 function trackDataToTrack(track: TrackData) {
     return {
@@ -667,7 +667,7 @@ export default function VibePage() {
     if (!vibeEmbeddings || !audioAnalysis) {
         return (
             <div className="p-6">
-                <h1 className="text-xl font-semibold text-white mb-4">Vibe</h1>
+                <PageHeader title="Vibe" icon={Waves} className="mb-4" />
                 <div className="bg-surface-raised border border-surface-active rounded-lg p-6">
                     <p className="text-content-secondary mb-2">
                         Feature not available
@@ -1113,80 +1113,20 @@ function VibePageContent() {
             <div className="relative px-6 py-6">
                 {/* Header */}
                 <div className="mb-8">
-                    <div className="flex items-center justify-between mb-1">
-                        <h1 className="text-2xl font-semibold text-white tracking-tight">
-                            Vibe
-                        </h1>
-                        <div className="flex items-center gap-1">
-                            {/* Use Current Track button - only show when something is playing */}
-                            {currentTrack && (
-                                <button
-                                    onClick={handleUseCurrentTrack}
-                                    disabled={isLoading}
-                                    className={cn(
-                                        "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors disabled:opacity-50",
-                                        sourceTrack?.id === currentTrack.id
-                                            ? "text-brand bg-brand/10"
-                                            : "text-content-muted hover:text-white hover:bg-white/5",
-                                    )}
-                                    title={`Find tracks similar to "${currentTrack.title}"`}
-                                >
-                                    <AudioWaveform className="w-4 h-4" />
-                                    <span className="hidden sm:inline">
-                                        Now Playing
-                                    </span>
-                                </button>
-                            )}
-                            <button
-                                onClick={handleRandomTrack}
-                                disabled={
-                                    isLoading || libraryTracks.length === 0
-                                }
-                                className="flex items-center gap-2 px-3 py-1.5 text-sm text-content-muted hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
-                            >
-                                <Shuffle className="w-4 h-4" />
-                                <span className="hidden sm:inline">Random</span>
-                            </button>
-                            <button
-                                onClick={handleRefresh}
-                                disabled={isLoading}
-                                className="p-1.5 text-content-muted hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
-                            >
-                                <RefreshCw
-                                    className={cn(
-                                        "w-4 h-4",
-                                        isLoading && "animate-spin",
-                                    )}
-                                />
-                            </button>
-                        </div>
-                    </div>
-                    {vibeStatus && (
-                        <p className="text-sm text-content-disabled">
-                            {vibeStatus.embeddedTracks.toLocaleString()} tracks
-                            with audio fingerprints
-                        </p>
-                    )}
-
-                    {/* Explore / Map tab bar. The map tab early-returns the
-                        full-bleed surface above, so within this header the
-                        Explore tab is always the active one. */}
-                    <div className="flex gap-1 mt-4 bg-white/5 rounded-lg p-1 max-w-xs">
-                        <button
-                            onClick={() => setVibeTab("explore")}
-                            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors bg-white/10 text-white"
-                        >
-                            <AudioWaveform className="w-4 h-4" />
-                            Explore
-                        </button>
-                        <button
-                            onClick={() => setVibeTab("map")}
-                            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-400 hover:text-gray-300"
-                        >
-                            <Map className="w-4 h-4" />
-                            Map
-                        </button>
-                    </div>
+                    <VibeHeader
+                        currentTrack={currentTrack}
+                        sourceTrackId={sourceTrack?.id ?? null}
+                        isLoading={isLoading}
+                        hasLibraryTracks={libraryTracks.length > 0}
+                        embeddedTrackCount={
+                            vibeStatus ? vibeStatus.embeddedTracks : null
+                        }
+                        vibeTab={vibeTab}
+                        onTabChange={setVibeTab}
+                        onUseCurrentTrack={handleUseCurrentTrack}
+                        onRandomTrack={handleRandomTrack}
+                        onRefresh={handleRefresh}
+                    />
 
                     {/* Search — only visible in explore tab */}
                     {vibeTab === "explore" && (

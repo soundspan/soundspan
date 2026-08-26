@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useDownloadContext } from "@/lib/download-context";
 import {
     openRequestRgMbids,
@@ -155,20 +156,20 @@ export default function ReleasesPage() {
                 <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent" />
 
                 <div className="relative h-full flex flex-col justify-end p-6 md:p-8">
-                    <div className="flex items-center gap-3 mb-2">
-                        <Calendar className="w-6 h-6 text-amber-400" />
-                        <span className="text-amber-400 text-sm font-medium uppercase tracking-wider">
-                            Release Radar
-                        </span>
-                    </div>
-                    <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-                        New & Upcoming
-                    </h1>
-                    <p className="text-white/60 text-sm md:text-base max-w-xl">
-                        {data?.monitoredArtistCount || 0} monitored artists •
-                        {data?.upcoming.length || 0} upcoming •
-                        {data?.recent.length || 0} recent releases
-                    </p>
+                    <PageHeader
+                        title="New & Upcoming"
+                        subtitle={`${data?.monitoredArtistCount || 0} monitored artists • ${
+                            data?.upcoming.length || 0
+                        } upcoming • ${data?.recent.length || 0} recent releases`}
+                        icon={Calendar}
+                        iconClassName="text-amber-400"
+                        badge={
+                            <span className="text-amber-400 text-sm font-medium uppercase tracking-wider">
+                                Release Radar
+                            </span>
+                        }
+                        className="mb-0"
+                    />
                 </div>
             </div>
 

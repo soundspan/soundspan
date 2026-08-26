@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/HorizontalCarousel";
 import { MixCard } from "@/components/MixCard";
 import { useFeatures } from "@/lib/features-context";
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { StaticPlaylistCard } from "@/features/home/components/StaticPlaylistCard";
 import type { Mix } from "@/features/home/types";
 import type {

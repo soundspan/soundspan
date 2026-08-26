@@ -1,6 +1,7 @@
 import { Music, Download, CheckCircle } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { SoulseekResult } from "../types";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 
 interface SoulseekSongsListProps {
     soulseekResults: SoulseekResult[];
@@ -74,7 +75,7 @@ export function SoulseekSongsList({
 
     return (
         <section>
-            <h2 className="text-2xl font-bold text-white mb-6">Songs</h2>
+            <SectionHeader title="Songs" />
             <div className="space-y-2" data-tv-section="search-results-songs">
                 {soulseekResults.slice(0, 5).map((result, index) => {
                     const parsed = result.parsedArtist

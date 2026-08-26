@@ -25,7 +25,6 @@ Start-here guide for `frontend/features/home`.
 | `components/MixesGrid.tsx` | components |
 | `components/PodcastsGrid.tsx` | components |
 | `components/PopularArtistsGrid.tsx` | components |
-| `components/SectionHeader.tsx` | components |
 | `components/StaticPlaylistCard.tsx` | components |
 | `hooks/useHomeData.ts` | hooks |
 | `types.ts` | root |

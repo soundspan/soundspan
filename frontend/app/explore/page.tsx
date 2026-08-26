@@ -4,7 +4,7 @@ import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useExploreData } from "@/features/explore/hooks/useExploreData";
 import { useUserSettingsExplorePrefs } from "@/features/explore/hooks/useUserSettingsExplorePrefs";
 import { HomeHero } from "@/features/home/components/HomeHero";
-import { SectionHeader } from "@/features/home/components/SectionHeader";
+import { SectionHeader } from "@/components/layout/SectionHeader";
 import { ArtistsGrid } from "@/features/home/components/ArtistsGrid";
 import { LibraryRadioStations } from "@/features/home/components/LibraryRadioStations";
 import { PopularArtistsGrid } from "@/features/home/components/PopularArtistsGrid";

@@ -104,7 +104,7 @@ mock.module("@/features/home/components/HomeHero", {
     namedExports: { HomeHero: marker("home-hero") },
 });
 
-mock.module("@/features/home/components/SectionHeader", {
+mock.module("@/components/layout/SectionHeader", {
     namedExports: {
         SectionHeader: ({ title }: { title: string }) =>
             React.createElement("h2", null, title),
