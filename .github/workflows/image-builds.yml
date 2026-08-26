@@ -63,6 +63,8 @@ jobs:
                       needs_node: true
                       include_frontend_build_args: true
                       cache_scope: aio
+                      smoke_import: ""
+                      smoke_user: ""
                     - id: backend
                       job_name: Build & Push Backend Image
                       runs_on: ubuntu-latest
@@ -76,6 +78,8 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: backend
+                      smoke_import: ""
+                      smoke_user: ""
                     - id: backend-worker
                       job_name: Build & Push Backend Worker Image
                       runs_on: ubuntu-latest
@@ -89,6 +93,8 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: backend-worker
+                      smoke_import: ""
+                      smoke_user: ""
                     - id: frontend
                       job_name: Build & Push Frontend Image
                       runs_on: ubuntu-latest
@@ -102,6 +108,8 @@ jobs:
                       needs_node: true
                       include_frontend_build_args: true
                       cache_scope: frontend
+                      smoke_import: ""
+                      smoke_user: ""
                     - id: audio-analyzer
                       job_name: Build & Push Audio Analyzer Image
                       runs_on: ubuntu-latest
@@ -115,6 +123,8 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: audio-analyzer
+                      smoke_import: import analyzer
+                      smoke_user: ""
                     - id: vibe-provider-dclap
                       job_name: Build & Push DCLAP Provider Image
                       runs_on: self-hosted
@@ -128,6 +138,9 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: vibe-provider-dclap
+                      # Import the actual entrypoint file; its __main__ guard prevents the server from starting.
+                      smoke_import: import importlib.util as u; s = u.spec_from_file_location('smoke_entry', '/app/__main__.py'); m = u.module_from_spec(s); s.loader.exec_module(m)
+                      smoke_user: ""
                     - id: tidal-streamer
                       job_name: Build & Push TIDAL Streamer Image
                       runs_on: ubuntu-latest
@@ -143,6 +156,8 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: tidal-streamer
+                      smoke_import: import app
+                      smoke_user: ""
                     - id: ytmusic-streamer
                       job_name: Build & Push YTMusic Streamer Image
                       runs_on: ubuntu-latest
@@ -156,6 +171,8 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: ytmusic-streamer
+                      smoke_import: import app
+                      smoke_user: ytmusic
         permissions:
             contents: read
             packages: write
@@ -185,8 +202,9 @@ jobs:
               with:
                   node-version: "24"
 
+            # runner.environment is the supported runner-type property.
             - name: Self-hosted pre-build cleanup (neighbor-safe)
-              if: ${{ contains(runner.labels, 'self-hosted') }}
+              if: ${{ runner.environment == 'self-hosted' }}
               run: |
                   set -euo pipefail
                   # The daemon is shared with concurrently running jobs, so
@@ -303,6 +321,77 @@ jobs:
                     echo "EOF"
                   } >> "$GITHUB_OUTPUT"
 
+            # Load sidecars locally first so their container-layout imports gate
+            # GHCR publication while the exported cache stays warm for future builds.
+            - name: Build image for smoke test
+              if: ${{ matrix.smoke_import != '' }}
+              uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+              with:
+                  context: ${{ matrix.context }}
+                  file: ${{ matrix.file }}
+                  build-contexts: ${{ matrix.build_contexts }}
+                  push: false
+                  load: true
+                  build-args: ${{ steps.build-inputs.outputs.build_args }}
+                  # Pass HF_TOKEN straight from the secrets context to the build-secret
+                  # mount; never transit GITHUB_OUTPUT/step outputs. False legs mount no
+                  # secret; an unset token mounts empty exactly as before.
+                  secrets: ${{ matrix.include_hf_token && format('hf_token={0}', secrets.HF_TOKEN) || '' }}
+                  tags: soundspan-smoke-${{ matrix.id }}:${{ github.run_id }}
+                  labels: |
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=${{ steps.tag-config.outputs.version_label }}
+                  cache-from: type=gha,scope=${{ matrix.cache_scope }}
+                  # ignore-error: a cache-write failure must not fail a leg whose image built successfully.
+                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }},ignore-error=true
+                  # ARM64 disabled due to QEMU emulation issues with npm packages
+                  platforms: linux/amd64
+
+            - name: Container-layout import smoke test (${{ matrix.id }})
+              if: ${{ matrix.smoke_import != '' }}
+              run: |
+                  PYTHON_BINARY=python
+                  SMOKE_USER="${{ matrix.smoke_user }}"
+                  USER_ARGS=()
+                  if [ "${{ matrix.id }}" = "audio-analyzer" ]; then
+                    PYTHON_BINARY=python3
+                  fi
+                  if [ -n "${SMOKE_USER}" ]; then
+                    USER_ARGS=(--user "${SMOKE_USER}")
+                  fi
+
+                  if ! docker run --rm \
+                    "${USER_ARGS[@]}" \
+                    --entrypoint "${PYTHON_BINARY}" \
+                    "soundspan-smoke-${{ matrix.id }}:${{ github.run_id }}" \
+                    -c "${{ matrix.smoke_import }}"; then
+                    echo "Container-layout import smoke test failed for ${{ matrix.id }}." >&2
+                    exit 1
+                  fi
+
+            # Commit-pinned and release-version tags are unique to this job, so they
+            # are byte-exact copies of the smoke-tested image. Mutable channel tags
+            # are already last-writer-wins at the registry; a shared-daemon race can
+            # only substitute another smoke-verified image for the same channel and
+            # converges to the same registry state. Thus every commit-pinned/version
+            # tag is byte-exact, while each channel tag points to a smoke-tested image.
+            # Accepted trade-off: plain docker push emits no buildx provenance
+            # attestation for these four sidecar images.
+            - name: Promote smoke-tested image
+              if: ${{ matrix.smoke_import != '' }}
+              run: |
+                  set -euo pipefail
+                  SMOKE_IMAGE="soundspan-smoke-${{ matrix.id }}:${{ github.run_id }}"
+                  while IFS= read -r tag; do
+                    if [ -z "${tag}" ]; then
+                      continue
+                    fi
+                    docker tag "${SMOKE_IMAGE}" "${tag}"
+                    docker push "${tag}"
+                  done <<'EOF'
+                  ${{ steps.tag-config.outputs.tags }}
+                  EOF
+
             - name: Build and push image (with target)
               if: ${{ matrix.target != '' }}
               uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -328,7 +417,7 @@ jobs:
                   platforms: linux/amd64
 
             - name: Build and push image
-              if: ${{ matrix.target == '' }}
+              if: ${{ matrix.target == '' && matrix.smoke_import == '' }}
               uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
               with:
                   context: ${{ matrix.context }}
@@ -351,7 +440,7 @@ jobs:
                   platforms: linux/amd64
 
             - name: Self-hosted post-build cleanup (neighbor-safe)
-              if: ${{ always() && contains(runner.labels, 'self-hosted') }}
+              if: ${{ always() && runner.environment == 'self-hosted' }}
               run: |
                   set -euo pipefail
                   BUILDER_NAME="${{ steps.buildx.outputs.name }}"
@@ -366,6 +455,23 @@ jobs:
                       docker buildx rm --force "${BUILDER_NAME}" >/dev/null 2>&1 || true
                   fi
 
+                  if [ -n "${{ matrix.smoke_import }}" ]; then
+                    while IFS= read -r tag; do
+                      if [ -z "${tag}" ]; then
+                        continue
+                      fi
+                      # Removing a tag only unrefs its name; after this job's last local
+                      # name is gone, the image is prunable. A concurrent job may have
+                      # re-pointed main/develop/latest; removing that name after its push
+                      # completes is safe because pushes read the name at push time and
+                      # each job re-tags immediately before pushing.
+                      docker rmi -f "${tag}" || true
+                    done <<'EOF'
+                  ${{ steps.tag-config.outputs.tags }}
+                  EOF
+                    docker rmi -f "soundspan-smoke-${{ matrix.id }}:${{ github.run_id }}" || true
+                  fi
+
                   # Neighbor-safe daemon hygiene only — see the pre-build
                   # step for the rationale. Global buildx/builder prunes
                   # were removed: they stopped concurrent jobs' builders
@@ -375,3 +481,21 @@ jobs:
 
                   echo "Container disk usage after cleanup:"
                   docker system df || true
+
+            - name: GitHub-hosted smoke image cleanup
+              if: ${{ always() && matrix.smoke_import != '' && runner.environment != 'self-hosted' }}
+              run: |
+                  while IFS= read -r tag; do
+                    if [ -z "${tag}" ]; then
+                      continue
+                    fi
+                    # Removing a tag only unrefs its name; after this job's last local
+                    # name is gone, the image is prunable. A concurrent job may have
+                    # re-pointed main/develop/latest; removing that name after its push
+                    # completes is safe because pushes read the name at push time and
+                    # each job re-tags immediately before pushing.
+                    docker rmi -f "${tag}" || true
+                  done <<'EOF'
+                  ${{ steps.tag-config.outputs.tags }}
+                  EOF
+                  docker rmi -f "soundspan-smoke-${{ matrix.id }}:${{ github.run_id }}" || true
