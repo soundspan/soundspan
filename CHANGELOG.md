@@ -4,8 +4,15 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+## [2.6.0] - 2026-08-26
 
 ### Added
 
@@ -32,7 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subsonic search and artist views now share the main library's data layer.
 - Internal route handling now shares validation, pagination, and ownership middleware, and enrichment and YouTube Music administrator errors use the documented response format.
 - App screens now share one catalog of data-cache keys, so library, playlist, download, and notification views refresh reliably after changes instead of occasionally showing stale lists.
-- `DISCOVERY_MODE=legacy` remains accepted but now serves the modern discovery implementation and logs one deprecation warning at process startup (#795).
 - The TIDAL streamer now uses focused internal modules, and all Python sidecars use one shared-package import prefix without changing their HTTP APIs.
 - Worker claims and transient Prisma retries now use shared internal primitives, and worker modules can be imported without registering processors or schedules.
 - Internal TIDAL and YouTube provider plumbing now uses shared types and routing adapters, and Deezer API calls now use the shared rate limiter.
@@ -44,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python sidecar image builds now import their runtime entrypoints from the built container before publishing tags to GHCR (#845).
 - Backend Jest tests now use transpile-only TypeScript transforms, six workers, and smaller runtime suites for faster test runs.
 - Database indexes now match frequent embedding, library, radio, playlist, and notification queries, while unused single-column audio-feature indexes no longer add write overhead.
-- Removed the unused frontend charting dependency and moved backend Listen Together and federation metrics contracts into cycle-free type modules.
+- Moved backend Listen Together and federation metrics contracts into cycle-free type modules.
 - Moved the shared route error-response helper into utilities and expanded the route module index with an enforced CI coverage check.
 - Album covers now resolve through one provider ladder with unified caching, replacing six surface-specific implementations.
 - Artist images now resolve through one provider ladder with unified caching, instead of five surface-specific implementations.
@@ -58,6 +64,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lidarr-routed album downloads no longer wait behind in-flight TIDAL/YouTube downloads; the one-at-a-time throttle now applies only to the streaming providers.
 - The DCLAP vibe provider now answers malformed requests with the same 422 response the other sidecars use (previously 400).
 - Library scans now process several files at once within a configurable bound, making large-library scans significantly faster.
+
+### Deprecated
+
+- `DISCOVERY_MODE=legacy` remains accepted but now serves the modern discovery implementation and logs one deprecation warning at process startup (#795).
+
+### Removed
+
+- The legacy discovery implementation was removed behind an accept-and-redirect shim; `DISCOVERY_MODE=legacy` now serves the modern discovery pages (#795).
+- Removed the unused frontend charting dependency (recharts).
+
+### Security
+
+- The metrics endpoint now rate-limits failed access attempts, and internal Subsonic auth-type reporting no longer re-reads credential query parameters.
+- The DCLAP vibe provider now refuses requests when its internal secret is missing or left at the default, instead of silently allowing them.
 
 ### Fixed
 
@@ -78,7 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provider matching now treats accents, punctuation, conjunctions, and album edition suffixes consistently, reducing wrong or missed album and track matches (#791).
 - Post-scan download reconciliation no longer risks heavy database load when many downloads are queued.
 - Long track lists (Liked Songs, queue, large playlists) now render only the rows on screen instead of every row at once, so pages with thousands of tracks scroll smoothly and no longer stutter once per second during playback (#784).
-- The metrics endpoint now rate-limits failed access attempts, and internal Subsonic auth-type reporting no longer re-reads credential query parameters.
 - Download reconciliation, album recovery, and Lidarr cleanup now use a dedicated fast Bull queue, while long-running maintenance jobs use a separate monitored queue. Reconciliation breaker state is shared through TTL-managed Redis with a process-local outage fallback, so worker replicas coordinate open and half-open states without leaving probes stuck forever (#780).
 - Slow or unresponsive Lidarr album-catalog requests now abort within a bounded reconciliation tick instead of piling up overlapping requests and memory use (#779).
 - Album genres, label, and release year now populate during normal background enrichment instead of only via the admin per-album tool, and admin re-enrichment now applies the same rules as the background worker.
@@ -89,7 +108,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Artist-wide download jobs now expose durable enumeration progress through the artist MBID instead of leaving the Download All button waiting on per-album rows.
 - Album and artist jobs rejected during Redis queue admission now remain pending for automatic recovery instead of becoming stranded failures.
 - Retrying a download no longer cuts off album titles that contain a dash.
-- The DCLAP vibe provider now refuses requests when its internal secret is missing or left at the default, instead of silently allowing them.
 - Finishing a batch of album downloads now triggers one combined library scan instead of one scan per album, which could crash the background worker.
 - Library scans now skip embedded covers during routine metadata parsing and extract new-album covers one at a time to reduce memory spikes.
 - Two different TIDAL tracks whose names collapse to the same filename no longer overwrite each other; the second download is saved under a disambiguated name, while legacy files without embedded TIDAL identity still refresh in place at their planned path.

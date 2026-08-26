@@ -34,6 +34,7 @@ data volume while the container is stopped.
 
 | Upgrading across | Action needed? |
 | ---------------- | -------------- |
+| **2.6.0** | Usually none — plain rolling update; database migrations apply automatically. **Exception:** if you bring your own PostgreSQL and the app role cannot create extensions, run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` as a superuser first. Heads-up: the first start rebuilds database indexes (one-time, longer on large libraries); browsed artists/albums are now cached in the database by default (`CATALOG_PERSISTENCE=off` to disable); Last.fm scrobbling needs `LASTFM_API_KEY` + `LASTFM_SHARED_SECRET` set by the operator, and Helm existing-Secret users must add the shared secret to their Secret. |
 | **2.5.0** | Usually none — plain rolling update; database migrations apply automatically. **Heads-up on two default changes:** users who share online presence become visible to federated peer servers too (and public playlists are shared with peers) — turning off **Share online presence** or making a playlist private restores local-only behavior; and the new music-request feature is on by default (`FEATURE_REQUESTS=false` to disable). Federation pairing codes are removed — new peer connections use the host-credential flow, and both servers must be on versions that support it. The TIDAL sidecar is also renamed to `tidal-streamer`, but every old reference keeps working; see the section below. |
 | **2.4.1** | None — plain rolling update; no database migrations. Fixes Subsonic full syncs of large libraries (Symfonium and similar clients importing nothing) and the Library Enrichment failures view. If your server must federate through an egress proxy, the new `FEDERATION_ALLOW_PROXY=true` opt-in restores proxy support that 2.4.0 disabled. |
 | **2.4.0** | Usually none — plain rolling update; all database migrations apply automatically. **Exception:** federation now resolves peer hostnames and rejects private, loopback, and link-local addresses whether configured literally or returned by DNS — if any peer lives on a LAN or VPN, set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading or that peer stops syncing. Federation traffic also no longer routes through `HTTP(S)_PROXY` egress proxies. Heads-up for very large libraries: two migrations do heavier work (track-mapping housekeeping and an album-ownership guard), so the first startup can take longer than usual. Also new: a daily cleanup removes stale, unliked, unplayable TIDAL/YouTube Music catalog rows after 30 days (`PROVIDER_TRACK_RETENTION_DAYS` to tune); liked, playlisted, recently played, and file-backed content is always kept. |
@@ -49,7 +50,7 @@ Anything not listed: drop-in.
 
 ---
 
-## Unreleased: scrobbling, AcoustID, and database changes
+## 2.6.0: scrobbling, AcoustID, and database changes
 
 Most installs need no action: pull, restart, and the database migrations
 apply automatically. Read on if you run an external or managed PostgreSQL,
