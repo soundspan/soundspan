@@ -27,6 +27,7 @@ jest.mock("../../utils/logger", () => ({
 const prisma = {
     audiobook: {
         upsert: jest.fn(),
+        updateMany: jest.fn(),
         findUnique: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
@@ -239,6 +240,7 @@ describe("audiobook cache service behavior", () => {
         fsPromises.unlink.mockResolvedValue(undefined);
 
         prisma.audiobook.upsert.mockResolvedValue({});
+        prisma.audiobook.updateMany.mockResolvedValue({ count: 0 });
         prisma.audiobook.findUnique.mockResolvedValue(null);
         mockAudiobookQueries();
         transactionClient.audiobook.findMany.mockResolvedValue([]);
@@ -1033,6 +1035,22 @@ describe("audiobook cache service behavior", () => {
         expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
+    it("surfaces an expired deadline before reconciling a cached library id", async () => {
+        const service = new AudiobookCacheService();
+
+        await expect(
+            (service as any).reconcileCachedLibraryIds(
+                [buildBook({ id: "moved-book", libraryId: "library-b" })],
+                [{ id: "moved-book", libraryId: "library-a" }],
+                Date.now() - 1,
+            ),
+        ).rejects.toMatchObject({
+            name: "AudiobookSyncTimeoutError",
+            message: "Full audiobook sync timed out after 6600000ms",
+        });
+        expect(prisma.audiobook.updateMany).not.toHaveBeenCalled();
+    });
+
     it("cleans a committed prune batch before surfacing an expired deadline", async () => {
         const service = new AudiobookCacheService();
         const staleRows = Array.from({ length: 101 }, (_, index) => ({
@@ -1168,18 +1186,24 @@ describe("audiobook cache service behavior", () => {
 
     it("syncs only audiobooks missing from the local ABS cache", async () => {
         const service = new AudiobookCacheService();
-
-        mockGetAllAudiobooks.mockResolvedValue([
+        const books = [
             buildBook({ id: "book-1" }),
             buildBook({ id: "book-2" }),
-        ]);
+        ];
+
+        mockGetAudiobookListing.mockResolvedValue({
+            books,
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
         mockAudiobookQueries({ cachedRows: [{ id: "book-1" }] });
 
         const result = await service.syncMissing();
 
+        expect(mockGetAudiobookListing).toHaveBeenCalledTimes(1);
+        expect(mockGetAllAudiobooks).not.toHaveBeenCalled();
         expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
             where: { peerId: null },
-            select: { id: true },
+            select: { id: true, libraryId: true },
         });
         expect(result).toEqual({
             synced: 1,
@@ -1206,17 +1230,594 @@ describe("audiobook cache service behavior", () => {
         ).not.toHaveBeenCalled();
     });
 
+    it("prunes an absent local audiobook after the incremental absence grace", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const absenceGraceMs = 5 * 60 * 1000;
+        const service = new AudiobookCacheService();
+        const coverPath = path.join(
+            "/srv/music",
+            "cover-cache",
+            "audiobooks",
+            "stale-cover.jpg",
+        );
+        const currentBook = buildBook({ id: "current-book" });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [currentBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            pruneRows: [{ id: "stale-book", localCoverPath: coverPath }],
+            cachedRows: [{ id: "current-book", libraryId: "library-1" }],
+        });
+
+        const firstResult = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(firstResult.deleted).toBe(0);
+        expect(logger.debug).toHaveBeenCalledWith(
+            "Deferred pruning 1 audiobook during the absence grace period",
+        );
+
+        jest.advanceTimersByTime(absenceGraceMs - 1);
+        const secondResult = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(secondResult.deleted).toBe(0);
+
+        jest.advanceTimersByTime(1);
+        const thirdResult = await service.syncMissing();
+
+        const pruneCutoff = transactionClient.audiobook.deleteMany.mock
+            .calls[0][0].where.lastSyncedAt.lt as Date;
+        expect(mockGetAllAudiobooks).not.toHaveBeenCalled();
+        expect(prisma.audiobook.upsert).not.toHaveBeenCalled();
+        expect(fsPromises.mkdir).not.toHaveBeenCalled();
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+            where: {
+                peerId: null,
+                libraryId: { in: ["library-1"] },
+                lastSyncedAt: { lt: pruneCutoff },
+            },
+            select: { id: true, localCoverPath: true },
+        });
+        expect(transactionClient.audiobook.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["stale-book"] },
+                peerId: null,
+                lastSyncedAt: { lt: pruneCutoff },
+            },
+        });
+        expect(
+            transactionClient.audiobookProgress.deleteMany,
+        ).toHaveBeenCalledWith({
+            where: { audiobookshelfId: { in: ["stale-book"] } },
+        });
+        expect(transactionClient.playbackState.updateMany).toHaveBeenCalledWith(
+            {
+                where: { audiobookId: { in: ["stale-book"] } },
+                data: { audiobookId: null },
+            },
+        );
+        expect(
+            transactionClient.federationTombstone.createMany,
+        ).not.toHaveBeenCalled();
+        expect(fsPromises.unlink).toHaveBeenCalledWith(coverPath);
+        expect(thirdResult).toEqual({
+            synced: 0,
+            failed: 0,
+            skipped: 1,
+            deleted: 1,
+            errors: [],
+        });
+    });
+
+    it("syncs a missing book and prunes an absent book across incremental cycles", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const service = new AudiobookCacheService();
+        const books = [
+            buildBook({ id: "current-book" }),
+            buildBook({ id: "new-book" }),
+        ];
+        mockGetAudiobookListing.mockResolvedValue({
+            books,
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            pruneRows: [{ id: "stale-book", localCoverPath: null }],
+            cachedRows: [{ id: "current-book", libraryId: "library-1" }],
+        });
+
+        const firstResult = await service.syncMissing();
+
+        expect(prisma.audiobook.upsert).toHaveBeenCalledTimes(1);
+        expect(prisma.audiobook.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { id: "new-book" } }),
+        );
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(firstResult).toEqual({
+            synced: 1,
+            failed: 0,
+            skipped: 1,
+            deleted: 0,
+            errors: [],
+        });
+
+        mockAudiobookQueries({
+            pruneRows: [{ id: "stale-book", localCoverPath: null }],
+            cachedRows: [
+                { id: "current-book", libraryId: "library-1" },
+                { id: "new-book", libraryId: "library-1" },
+            ],
+        });
+        jest.advanceTimersByTime(5 * 60 * 1000);
+        const secondResult = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["stale-book"] },
+                peerId: null,
+                lastSyncedAt: { lt: expect.any(Date) },
+            },
+        });
+        expect(secondResult).toEqual({
+            synced: 0,
+            failed: 0,
+            skipped: 2,
+            deleted: 1,
+            errors: [],
+        });
+    });
+
+    it("incrementally prunes only verified-complete libraries", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const service = new AudiobookCacheService();
+        const currentBook = buildBook({
+            id: "library-a-current",
+            libraryId: "library-a",
+        });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [currentBook],
+            verifiedCompleteLibraryIds: new Set(["library-a"]),
+        });
+        mockAudiobookQueries({
+            pruneRows: [
+                {
+                    id: "library-a-stale",
+                    libraryId: "library-a",
+                    localCoverPath: null,
+                },
+                {
+                    id: "library-b-stale",
+                    libraryId: "library-b",
+                    localCoverPath: null,
+                },
+            ],
+            cachedRows: [{ id: "library-a-current", libraryId: "library-a" }],
+        });
+
+        const firstResult = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(firstResult.deleted).toBe(0);
+
+        jest.advanceTimersByTime(5 * 60 * 1000);
+        const secondResult = await service.syncMissing();
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+            where: {
+                peerId: null,
+                libraryId: { in: ["library-a"] },
+                lastSyncedAt: { lt: expect.any(Date) },
+            },
+            select: { id: true, localCoverPath: true },
+        });
+        expect(transactionClient.audiobook.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["library-a-stale"] },
+                peerId: null,
+                lastSyncedAt: { lt: expect.any(Date) },
+            },
+        });
+        expect(secondResult.deleted).toBe(1);
+    });
+
+    it("restarts the incremental absence grace after a candidate reappears", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const service = new AudiobookCacheService();
+        const currentBook = buildBook({ id: "current-book" });
+        const staleBook = buildBook({ id: "stale-book" });
+        mockAudiobookQueries({
+            pruneRows: [{ id: "stale-book", localCoverPath: null }],
+            cachedRows: [{ id: "current-book", libraryId: "library-1" }],
+        });
+        mockGetAudiobookListing.mockResolvedValueOnce({
+            books: [currentBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+
+        const firstResult = await service.syncMissing();
+
+        expect(firstResult.deleted).toBe(0);
+        jest.advanceTimersByTime(5 * 60 * 1000);
+        mockGetAudiobookListing.mockResolvedValueOnce({
+            books: [currentBook, staleBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+
+        const secondResult = await service.syncMissing();
+
+        expect(secondResult.deleted).toBe(0);
+        mockGetAudiobookListing.mockResolvedValueOnce({
+            books: [currentBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+
+        const thirdResult = await service.syncMissing();
+
+        expect(thirdResult.deleted).toBe(0);
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(
+            logger.debug.mock.calls.filter(
+                ([message]) =>
+                    message ===
+                    "Deferred pruning 1 audiobook during the absence grace period",
+            ),
+        ).toHaveLength(2);
+    });
+
+    it("reconciles a cached audiobook moved to another ABS library", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const service = new AudiobookCacheService();
+        const lastSyncedAt = new Date("2026-08-26T11:00:00.000Z");
+        const cachedRows = [
+            {
+                id: "moved-book",
+                libraryId: "library-a",
+                lastSyncedAt,
+                localCoverPath: null,
+            },
+        ];
+        const movedBook = buildBook({
+            id: "moved-book",
+            libraryId: "library-b",
+        });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [movedBook],
+            verifiedCompleteLibraryIds: new Set(["library-a", "library-b"]),
+        });
+        mockAudiobookQueries({ cachedRows });
+
+        const moveResult = await service.syncMissing();
+
+        expect(prisma.audiobook.updateMany).toHaveBeenCalledTimes(1);
+        expect(prisma.audiobook.updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["moved-book"] }, peerId: null },
+            data: { libraryId: "library-b" },
+        });
+        expect(cachedRows[0].lastSyncedAt).toBe(lastSyncedAt);
+        expect(
+            prisma.audiobook.updateMany.mock.calls[0][0].data,
+        ).not.toHaveProperty("lastSyncedAt");
+        expect(moveResult.deleted).toBe(0);
+
+        cachedRows[0].libraryId = "library-b";
+        const remainingBook = buildBook({
+            id: "remaining-book",
+            libraryId: "library-b",
+        });
+        cachedRows.push({
+            id: "remaining-book",
+            libraryId: "library-b",
+            lastSyncedAt,
+            localCoverPath: null,
+        });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [remainingBook],
+            verifiedCompleteLibraryIds: new Set(["library-a", "library-b"]),
+        });
+        mockAudiobookQueries({ cachedRows });
+
+        const deferredResult = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(deferredResult.deleted).toBe(0);
+
+        jest.advanceTimersByTime(5 * 60 * 1000 + 1);
+        const pruneResult = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["moved-book"] },
+                peerId: null,
+                lastSyncedAt: { lt: expect.any(Date) },
+            },
+        });
+        expect(pruneResult.deleted).toBe(1);
+    });
+
+    it("does not update cached library ids when no audiobook moved", async () => {
+        const service = new AudiobookCacheService();
+        const listedBook = buildBook({
+            id: "listed-book",
+            libraryId: "library-a",
+        });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [listedBook],
+            verifiedCompleteLibraryIds: new Set(["library-a"]),
+        });
+        mockAudiobookQueries({
+            cachedRows: [{ id: "listed-book", libraryId: "library-a" }],
+        });
+
+        await service.syncMissing();
+
+        expect(prisma.audiobook.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when an incremental listing is empty but local rows exist", async () => {
+        const service = new AudiobookCacheService();
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            pruneRows: [{ id: "local-book", localCoverPath: null }],
+        });
+
+        const result = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "Skipped pruning audiobooks because Audiobookshelf returned an empty listing",
+            ),
+        );
+        expect(result.deleted).toBe(0);
+    });
+
+    it("rate-limits repeated empty-listing prune warnings for one hour", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const service = new AudiobookCacheService();
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            pruneRows: [{ id: "local-book", localCoverPath: null }],
+        });
+
+        await service.syncMissing();
+
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "Skipped pruning audiobooks because Audiobookshelf returned an empty listing",
+            ),
+        );
+
+        await service.syncMissing();
+
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+
+        jest.advanceTimersByTime(60 * 60 * 1000 + 1);
+        await service.syncMissing();
+
+        expect(logger.warn).toHaveBeenCalledTimes(2);
+    });
+
+    it("bounds prune warning rate-limit state to 100 keys", () => {
+        const service = new AudiobookCacheService();
+        let now = 0;
+        jest.spyOn(Date, "now").mockImplementation(() => now++);
+
+        for (let index = 0; index < 101; index++) {
+            (service as any).warnRateLimited(
+                `empty-library:library-${index}`,
+                `warning ${index}`,
+            );
+        }
+
+        const warnMap = (service as any).pruneWarnLastAt as Map<string, number>;
+        expect(warnMap.size).toBeLessThanOrEqual(100);
+        expect(warnMap.has("empty-library:library-0")).toBe(false);
+        expect(warnMap.has("empty-library:library-100")).toBe(true);
+    });
+
+    it("fails closed when an incremental listing contains an item without an id", async () => {
+        const service = new AudiobookCacheService();
+        const currentBook = buildBook({ id: "current-book" });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [currentBook, {}],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            pruneRows: [{ id: "stale-book", localCoverPath: null }],
+            cachedRows: [{ id: "current-book" }],
+        });
+
+        const result = await service.syncMissing();
+
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledWith(
+            "Skipped pruning audiobooks because Audiobookshelf returned a malformed listing",
+        );
+        expect(result.deleted).toBe(0);
+    });
+
+    it("does not prune federated rows during an incremental cycle", async () => {
+        const service = new AudiobookCacheService();
+        const currentBook = buildBook({ id: "current-book" });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [currentBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            federatedRows: [
+                {
+                    id: "federated-book",
+                    peerId: "peer-1",
+                    localCoverPath: null,
+                },
+            ],
+            cachedRows: [{ id: "current-book" }],
+        });
+
+        const result = await service.syncMissing();
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+            where: {
+                peerId: null,
+                libraryId: { in: ["library-1"] },
+                lastSyncedAt: { lt: expect.any(Date) },
+            },
+            select: { id: true, localCoverPath: true },
+        });
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(result.deleted).toBe(0);
+    });
+
+    it.each([
+        { federationEnabled: false, writesTombstone: false },
+        { federationEnabled: true, writesTombstone: true },
+    ])(
+        "writes incremental prune tombstones when federation enabled is $federationEnabled",
+        async ({ federationEnabled, writesTombstone }) => {
+            jest.useFakeTimers({
+                now: new Date("2026-08-26T12:00:00.000Z"),
+            });
+            const service = new AudiobookCacheService();
+            mockConfig.features.federation = federationEnabled;
+            const currentBook = buildBook({ id: "current-book" });
+            mockGetAudiobookListing.mockResolvedValue({
+                books: [currentBook],
+                verifiedCompleteLibraryIds: new Set(["library-1"]),
+            });
+            mockAudiobookQueries({
+                pruneRows: [{ id: "stale-book", localCoverPath: null }],
+                cachedRows: [{ id: "current-book", libraryId: "library-1" }],
+            });
+
+            const firstResult = await service.syncMissing();
+
+            expect(firstResult.deleted).toBe(0);
+            expect(
+                transactionClient.federationTombstone.createMany,
+            ).not.toHaveBeenCalled();
+
+            jest.advanceTimersByTime(5 * 60 * 1000);
+            const secondResult = await service.syncMissing();
+
+            if (writesTombstone) {
+                expect(
+                    transactionClient.federationTombstone.createMany,
+                ).toHaveBeenCalledWith({
+                    data: [{ entityType: "audiobook", entityId: "stale-book" }],
+                });
+            } else {
+                expect(
+                    transactionClient.federationTombstone.createMany,
+                ).not.toHaveBeenCalled();
+            }
+            expect(secondResult.deleted).toBe(1);
+        },
+    );
+
+    it("keeps a stale cached audiobook that remains in the incremental listing", async () => {
+        const service = new AudiobookCacheService();
+        const listedBook = buildBook({ id: "listed-book" });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [listedBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
+        mockAudiobookQueries({
+            cachedRows: [
+                {
+                    id: "listed-book",
+                    lastSyncedAt: new Date("2020-01-01T00:00:00.000Z"),
+                },
+            ],
+        });
+
+        const result = await service.syncMissing();
+
+        expect(prisma.audiobook.upsert).not.toHaveBeenCalled();
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(result).toEqual({
+            synced: 0,
+            failed: 0,
+            skipped: 1,
+            deleted: 0,
+            errors: [],
+        });
+    });
+
+    it("spares an absent row refreshed after the incremental prune cutoff", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-08-26T12:00:00.000Z"),
+        });
+        const service = new AudiobookCacheService();
+        const pruneCutoff = new Date();
+        const refreshedAt = new Date(pruneCutoff.getTime() + 500);
+        const currentBook = buildBook({ id: "current-book" });
+        mockGetAudiobookListing.mockImplementationOnce(async () => {
+            jest.setSystemTime(new Date(pruneCutoff.getTime() + 1_000));
+            return {
+                books: [currentBook],
+                verifiedCompleteLibraryIds: new Set(["library-1"]),
+            };
+        });
+        mockAudiobookQueries({
+            pruneRows: [
+                {
+                    id: "concurrently-refreshed-book",
+                    localCoverPath: null,
+                    lastSyncedAt: refreshedAt,
+                },
+            ],
+            cachedRows: [{ id: "current-book" }],
+        });
+
+        const result = await service.syncMissing();
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+            where: {
+                peerId: null,
+                libraryId: { in: ["library-1"] },
+                lastSyncedAt: { lt: pruneCutoff },
+            },
+            select: { id: true, localCoverPath: true },
+        });
+        expect(transactionClient.audiobook.deleteMany).not.toHaveBeenCalled();
+        expect(result.deleted).toBe(0);
+    });
+
     it("records the error message when a missing audiobook fails to sync", async () => {
         const service = new AudiobookCacheService();
 
-        mockGetAllAudiobooks.mockResolvedValue([
-            buildBook({
-                id: "book-broken",
-                media: {
-                    metadata: { title: "Broken Book" },
-                },
-            }),
-        ]);
+        const brokenBook = buildBook({
+            id: "book-broken",
+            media: {
+                metadata: { title: "Broken Book" },
+            },
+        });
+        mockGetAudiobookListing.mockResolvedValue({
+            books: [brokenBook],
+            verifiedCompleteLibraryIds: new Set(["library-1"]),
+        });
         prisma.audiobook.upsert.mockRejectedValueOnce(
             new Error("db write failed"),
         );
@@ -1227,6 +1828,7 @@ describe("audiobook cache service behavior", () => {
         expect(result.errors[0]).toBe(
             "Failed to sync Broken Book: db write failed",
         );
+        expect(mockGetAllAudiobooks).not.toHaveBeenCalled();
     });
 
     it("preserves stored sections on minified updates and creates them as unknown", async () => {

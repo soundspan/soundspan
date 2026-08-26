@@ -40,12 +40,20 @@ interface SyncResult {
 
 const AUDIOBOOK_CACHE_STALE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const AUDIOBOOK_PRUNE_BATCH_SIZE = 100;
+const AUDIOBOOK_PRUNE_ABSENCE_GRACE_MS = 5 * 60 * 1000;
+const PRUNE_WARN_INTERVAL_MS = 60 * 60 * 1000;
+const PRUNE_WARN_MAX_KEYS = 100;
 const audiobookCacheLogger = logger.child("AudiobookCache");
 const AUDIOBOOK_SYNC_TIMEOUT_MESSAGE = `Full audiobook sync timed out after ${AUDIOBOOK_SYNC_WORK_TIMEOUT_MS}ms`;
 
 type LocalAudiobookRow = {
     id: string;
     localCoverPath: string | null;
+};
+
+type CachedAudiobookRow = {
+    id: string;
+    libraryId: string | null;
 };
 
 function hasNonEmptyAudiobookId(book: any): boolean {
@@ -79,6 +87,11 @@ function throwIfSyncDeadlineExpired(deadlineMs: number): void {
 export class AudiobookCacheService {
     private coverCacheDir: string;
     private coverCacheAvailable: boolean = false;
+    // Grace state is process-local and resets on restart. A reset can only delay
+    // deletion by one cycle; it cannot accelerate deletion beyond two verified
+    // snapshots observed by the same process.
+    private readonly pruneCandidateFirstSeenAt = new Map<string, number>();
+    private readonly pruneWarnLastAt = new Map<string, number>();
 
     constructor() {
         // Store covers in: <MUSIC_PATH>/cover-cache/audiobooks/
@@ -87,6 +100,28 @@ export class AudiobookCacheService {
             "cover-cache",
             "audiobooks",
         );
+    }
+
+    private warnRateLimited(key: string, message: string): void {
+        const now = Date.now();
+        const lastWarnAt = this.pruneWarnLastAt.get(key);
+        if (
+            lastWarnAt !== undefined &&
+            now - lastWarnAt < PRUNE_WARN_INTERVAL_MS
+        ) {
+            return;
+        }
+        if (
+            lastWarnAt === undefined &&
+            this.pruneWarnLastAt.size >= PRUNE_WARN_MAX_KEYS
+        ) {
+            const oldestKey = [...this.pruneWarnLastAt.entries()].reduce(
+                (oldest, entry) => (entry[1] < oldest[1] ? entry : oldest),
+            )[0];
+            this.pruneWarnLastAt.delete(oldestKey);
+        }
+        this.pruneWarnLastAt.set(key, now);
+        audiobookCacheLogger.warn(message);
     }
 
     /**
@@ -165,6 +200,7 @@ export class AudiobookCacheService {
             listing.verifiedCompleteLibraryIds,
             pruneCutoff,
             deadlineMs,
+            { deferFirstAbsence: false },
         );
         this.logSyncSummary(result);
         return result;
@@ -212,20 +248,77 @@ export class AudiobookCacheService {
 
     private async syncMissingLocked(deadlineMs: number): Promise<SyncResult> {
         const result = createSyncResult();
-        const audiobooks = await audiobookshelfService.getAllAudiobooks();
-        if (audiobooks.length === 0) return result;
+        const pruneCutoff = new Date();
+        const listing = await audiobookshelfService.getAudiobookListing();
+        const audiobooks = listing.books;
         const cachedAudiobooks = await prisma.audiobook.findMany({
             where: { peerId: null },
-            select: { id: true },
+            select: { id: true, libraryId: true },
         });
         const cachedIds = new Set(
             cachedAudiobooks.map((audiobook) => audiobook.id),
+        );
+        await this.reconcileCachedLibraryIds(
+            audiobooks,
+            cachedAudiobooks,
+            deadlineMs,
         );
         const missingAudiobooks = audiobooks.filter(
             (audiobook) => !cachedIds.has(audiobook.id),
         );
         result.skipped = audiobooks.length - missingAudiobooks.length;
-        if (missingAudiobooks.length === 0) return result;
+        await this.syncMissingBooks(missingAudiobooks, result, deadlineMs);
+        result.deleted = await this.pruneMissingAudiobooks(
+            audiobooks,
+            listing.verifiedCompleteLibraryIds,
+            pruneCutoff,
+            deadlineMs,
+            { deferFirstAbsence: true },
+        );
+        audiobookCacheLogger.debug(
+            `Incremental sync complete: ${result.synced} new, ${result.skipped} already cached or skipped, ${result.deleted} deleted, ${result.failed} failed`,
+        );
+        return result;
+    }
+
+    private async reconcileCachedLibraryIds(
+        books: any[],
+        cachedRows: CachedAudiobookRow[],
+        deadlineMs: number,
+    ): Promise<void> {
+        const listedLibraryIds = new Map<string, string>();
+        for (const book of books) {
+            if (
+                hasNonEmptyAudiobookId(book) &&
+                typeof book.libraryId === "string" &&
+                book.libraryId.length > 0
+            ) {
+                listedLibraryIds.set(book.id, book.libraryId);
+            }
+        }
+        const movedIdsByLibrary = new Map<string, string[]>();
+        for (const row of cachedRows) {
+            const targetLibraryId = listedLibraryIds.get(row.id);
+            if (!targetLibraryId || targetLibraryId === row.libraryId) continue;
+            const ids = movedIdsByLibrary.get(targetLibraryId) ?? [];
+            ids.push(row.id);
+            movedIdsByLibrary.set(targetLibraryId, ids);
+        }
+        for (const [libraryId, ids] of movedIdsByLibrary) {
+            throwIfSyncDeadlineExpired(deadlineMs);
+            await prisma.audiobook.updateMany({
+                where: { id: { in: ids }, peerId: null },
+                data: { libraryId },
+            });
+        }
+    }
+
+    private async syncMissingBooks(
+        missingAudiobooks: any[],
+        result: SyncResult,
+        deadlineMs: number,
+    ): Promise<void> {
+        if (missingAudiobooks.length === 0) return;
         await this.ensureCoverCacheDir();
         await this.syncBooks(
             missingAudiobooks,
@@ -235,10 +328,6 @@ export class AudiobookCacheService {
             },
             deadlineMs,
         );
-        logger.debug(
-            `[AUDIOBOOK] Incremental sync complete: ${result.synced} new, ${result.skipped} already cached or skipped, ${result.failed} failed`,
-        );
-        return result;
     }
 
     private async findFederatedCollisionIds(
@@ -304,9 +393,11 @@ export class AudiobookCacheService {
         verifiedCompleteLibraryIds: ReadonlySet<string>,
         pruneCutoff: Date,
         deadlineMs: number,
+        options: { deferFirstAbsence: boolean },
     ): Promise<number> {
         if (!books.every(hasNonEmptyAudiobookId)) {
-            audiobookCacheLogger.warn(
+            this.warnRateLimited(
+                "malformed-listing",
                 "Skipped pruning audiobooks because Audiobookshelf returned a malformed listing",
             );
             return 0;
@@ -320,7 +411,8 @@ export class AudiobookCacheService {
         });
 
         if (books.length === 0 && localRowCount > 0) {
-            audiobookCacheLogger.warn(
+            this.warnRateLimited(
+                "empty-listing",
                 "Skipped pruning audiobooks because Audiobookshelf returned an empty listing; the configured library may be unavailable",
             );
             return 0;
@@ -341,7 +433,49 @@ export class AudiobookCacheService {
         });
         const listedIds = new Set(books.map((book) => book.id));
         const staleRows = localRows.filter((row) => !listedIds.has(row.id));
-        return this.pruneAudiobookBatches(staleRows, pruneCutoff, deadlineMs);
+        const { eligibleRows, deferredCount } = this.partitionPruneCandidates(
+            staleRows,
+            options.deferFirstAbsence,
+        );
+        if (deferredCount > 0) {
+            audiobookCacheLogger.debug(
+                `Deferred pruning ${deferredCount} audiobook${deferredCount === 1 ? "" : "s"} during the absence grace period`,
+            );
+        }
+        return this.pruneAudiobookBatches(
+            eligibleRows,
+            pruneCutoff,
+            deadlineMs,
+        );
+    }
+
+    private partitionPruneCandidates(
+        staleRows: LocalAudiobookRow[],
+        deferFirstAbsence: boolean,
+    ): { eligibleRows: LocalAudiobookRow[]; deferredCount: number } {
+        const staleIds = new Set(staleRows.map((row) => row.id));
+        for (const id of this.pruneCandidateFirstSeenAt.keys()) {
+            if (!staleIds.has(id)) this.pruneCandidateFirstSeenAt.delete(id);
+        }
+        if (!deferFirstAbsence) {
+            return { eligibleRows: staleRows, deferredCount: 0 };
+        }
+        const eligibleRows: LocalAudiobookRow[] = [];
+        const now = Date.now();
+        for (const row of staleRows) {
+            const firstSeenAt = this.pruneCandidateFirstSeenAt.get(row.id);
+            if (firstSeenAt === undefined) {
+                this.pruneCandidateFirstSeenAt.set(row.id, now);
+                continue;
+            }
+            if (now - firstSeenAt >= AUDIOBOOK_PRUNE_ABSENCE_GRACE_MS) {
+                eligibleRows.push(row);
+            }
+        }
+        return {
+            eligibleRows,
+            deferredCount: staleRows.length - eligibleRows.length,
+        };
     }
 
     private async getPrunableLibraryIds(
@@ -369,7 +503,8 @@ export class AudiobookCacheService {
                 prunableLibraryIds.push(libraryId);
                 continue;
             }
-            audiobookCacheLogger.warn(
+            this.warnRateLimited(
+                `empty-library:${libraryId}`,
                 `Skipped pruning audiobook library ${libraryId} because Audiobookshelf returned an empty listing while ${localRowCount} local rows exist`,
             );
         }
@@ -401,7 +536,8 @@ export class AudiobookCacheService {
             ],
         );
         if (unknownLibraryCount > 0) {
-            audiobookCacheLogger.warn(
+            this.warnRateLimited(
+                "unknown-library",
                 `skipped ${unknownLibraryCount} audiobooks with unknown library during prune`,
             );
         }
@@ -433,6 +569,9 @@ export class AudiobookCacheService {
                 pruneCutoff,
             );
             deleted += deletedRows.length;
+            for (const row of deletedRows) {
+                this.pruneCandidateFirstSeenAt.delete(row.id);
+            }
             await this.unlinkAudiobookCovers(deletedRows);
         }
         return deleted;

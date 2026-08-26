@@ -570,9 +570,12 @@ async function processAudiobookAutoSyncJob(
         }
         return false;
     }
-    if (result && (mode === "startup" || result.synced || result.failed)) {
+    if (
+        result &&
+        (mode === "startup" || result.synced || result.deleted || result.failed)
+    ) {
         startupLog.debug(
-            `Audiobook auto-sync complete: ${result.synced} new, ${result.skipped} already cached, ${result.failed} failed`,
+            `Audiobook auto-sync complete: ${result.synced} new, ${result.skipped} already cached or skipped, ${result.deleted} deleted, ${result.failed} failed`,
         );
     }
     return result !== undefined;

@@ -41,8 +41,15 @@ environment:
 Connect your Audiobookshelf instance for audiobook playback in soundspan.
 
 Audiobook detail metadata and section navigation are served from soundspan's
-local cache. Scheduled or manual Audiobookshelf sync validates chapter coverage
-and backfills section data for rows that do not have it yet. Multi-file
+local cache. A scheduled sync keeps that cache in step with Audiobookshelf: it
+adds new books within a few minutes and removes books that were deleted in
+Audiobookshelf, together with their cached covers and listening progress.
+Removals are deliberately cautious: a book is only removed after it has been
+absent from two complete, verified library listings taken several minutes
+apart, and an unreachable server or an incomplete listing never triggers
+removals. Books without a recorded source library are never removed
+automatically. Scheduled or manual sync also validates chapter coverage and
+backfills section data for rows that do not have it yet. Multi-file
 part boundaries are playable because the stream proxy exposes all files as one
 byte-addressable audiobook resource.
 

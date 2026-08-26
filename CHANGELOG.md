@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The scheduled Audiobookshelf sync now also removes books that were deleted in Audiobookshelf — including cached covers and listening progress — instead of leaving that cleanup to the manual admin sync button; removals keep every safety guard from the manual path, only run against complete, verified library listings, and wait until a book has been absent from two consecutive verified listings taken several minutes apart (#864).
+
 ### Fixed
 
 - Native dropdown menus (sort, genre, and pagination on the Audiobooks and Podcasts pages, and other built-in selects) no longer render white text on a white popup; the app now declares its dark color scheme to the browser so native controls match the theme.
