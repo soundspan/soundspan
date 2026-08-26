@@ -12,8 +12,10 @@ const mockRename = jest.fn();
 const mockRm = jest.fn();
 const mockStat = jest.fn();
 const mockLogInfo = jest.fn();
+const mockLogDebug = jest.fn();
 const mockLogWarn = jest.fn();
 const mockLogError = jest.fn();
+const mockRecordSoulseekAlbumFolderDecision = jest.fn();
 
 jest.mock("slsk-client", () => ({
     __esModule: true,
@@ -33,11 +35,17 @@ jest.mock("../../utils/playlistLogger", () => ({
 jest.mock("../../utils/logger", () => ({
     logger: {
         child: () => ({
+            debug: (...args: unknown[]) => mockLogDebug(...args),
             info: (...args: unknown[]) => mockLogInfo(...args),
             warn: (...args: unknown[]) => mockLogWarn(...args),
             error: (...args: unknown[]) => mockLogError(...args),
         }),
     },
+}));
+
+jest.mock("../../metrics", () => ({
+    recordSoulseekAlbumFolderDecision: (...args: unknown[]) =>
+        mockRecordSoulseekAlbumFolderDecision(...args),
 }));
 
 jest.mock("fs", () => ({
@@ -1164,6 +1172,7 @@ describe("soulseek service", () => {
             ],
             "/music",
             1,
+            2,
         );
         const firstDestination = expectedDownloadDestination(
             "/music",
@@ -1200,6 +1209,86 @@ describe("soulseek service", () => {
             files: [secondDestination.finalPath],
             errors: ["Artist Two - Missing Track: No match found on Soulseek"],
         });
+    });
+
+    it("retries a failed coherent-folder track through the next per-track peer", async () => {
+        const openingFolderMatch = makeTrackMatch({
+            username: "album-peer",
+            filename: "01 - Opening.flac",
+            fullPath: "Music/Artist/Artist - Album/01 - Opening.flac",
+            quality: "FLAC",
+            slots: true,
+            speed: 1_500_000,
+        });
+        const middleFolderMatch = makeTrackMatch({
+            username: "album-peer",
+            filename: "02 - Middle.flac",
+            fullPath: "Music/Artist/Artist - Album/02 - Middle.flac",
+            quality: "FLAC",
+            slots: true,
+            speed: 1_500_000,
+        });
+        const nextPeer = makeTrackMatch({
+            username: "next-peer",
+            filename: "01 - Opening.flac",
+            fullPath: "Music/Elsewhere/01 - Opening.flac",
+            quality: "FLAC",
+        });
+        jest.spyOn(soulseekService, "searchTrack").mockImplementation(
+            async (_artist, title) => {
+                const allMatches =
+                    title === "Opening"
+                        ? [openingFolderMatch, nextPeer]
+                        : [middleFolderMatch];
+                return {
+                    found: true,
+                    bestMatch: allMatches[0],
+                    allMatches,
+                };
+            },
+        );
+        const downloadTrackSpy = jest
+            .spyOn(soulseekService, "downloadTrack")
+            .mockImplementation(async (match) =>
+                match === openingFolderMatch
+                    ? {
+                          success: false,
+                          error: "folder file failed verification",
+                      }
+                    : { success: true },
+            );
+
+        const result = await soulseekService.searchAndDownloadBatch(
+            [
+                { artist: "Artist", title: "Opening", album: "Album" },
+                { artist: "Artist", title: "Middle", album: "Album" },
+            ],
+            "/music",
+            1,
+        );
+
+        expect(result).toMatchObject({ successful: 2, failed: 0, errors: [] });
+        expect(downloadTrackSpy).toHaveBeenCalledWith(
+            nextPeer,
+            expect.stringContaining("01 - Opening.flac"),
+            1,
+            expect.stringContaining("01 - Opening.flac.part"),
+        );
+        expect(mockRecordSoulseekAlbumFolderDecision).toHaveBeenCalledWith(
+            "folder_selected",
+            expect.any(Number),
+        );
+        expect(mockLogDebug).toHaveBeenCalledWith(
+            "Album folder selection decision",
+            expect.objectContaining({
+                username: "album-peer",
+                folderName: "Artist - Album",
+                candidateCount: 2,
+            }),
+        );
+        expect(mockLogDebug.mock.calls.at(-1)?.[1]).not.toHaveProperty(
+            "folderPath",
+        );
     });
 
     it("searchAndDownloadBatch aggregates all attempts for a track before reporting failure", async () => {

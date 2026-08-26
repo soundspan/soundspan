@@ -68,6 +68,10 @@ import {
     type SchedulerMetricJob,
     type SchedulerTimeoutOperation,
 } from "./schedulerMetrics";
+import {
+    createSoulseekAlbumMetrics,
+    type SoulseekAlbumFolderOutcome,
+} from "./soulseekAlbumMetrics";
 
 export type {
     FederationAuthFailureReason,
@@ -98,6 +102,7 @@ const requestMetrics = createRequestMetrics(metricsRegistry);
 const albumDownloadMetrics = createAlbumDownloadMetrics(metricsRegistry);
 const catalogMetrics = createCatalogMetrics(metricsRegistry);
 const schedulerMetrics = createSchedulerMetrics(metricsRegistry);
+const soulseekAlbumMetrics = createSoulseekAlbumMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -160,6 +165,14 @@ export function recordAlbumDownloadOutcome(
     outcome: AlbumDownloadOutcome,
 ): void {
     albumDownloadMetrics.downloads.inc({ outcome });
+}
+
+/** Records one bounded Soulseek album folder decision and its coherence. */
+export function recordSoulseekAlbumFolderDecision(
+    outcome: SoulseekAlbumFolderOutcome,
+    coherenceScore: number,
+): void {
+    soulseekAlbumMetrics.record(outcome, coherenceScore);
 }
 
 /** Records one scheduler-owned operation timeout. */

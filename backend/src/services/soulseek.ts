@@ -6,12 +6,16 @@
 import slsk from "slsk-client";
 import path from "path";
 import { mkdir, rename, rm, stat } from "fs/promises";
-import PQueue from "p-queue";
 import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { stripDelimitedSegments } from "../utils/stripDelimitedSegments";
+import { recordSoulseekAlbumFolderDecision } from "../metrics";
+import {
+    downloadAlbumBatch,
+    type AlbumBatchTrack,
+} from "./soulseek/albumFolderDownload";
 
 const log = logger.child("Soulseek");
 
@@ -46,6 +50,8 @@ export interface TrackMatch {
     bitRate?: number;
     quality: string;
     score: number;
+    slots?: boolean;
+    speed?: number;
 }
 
 export interface SearchTrackResult {
@@ -854,6 +860,8 @@ class SoulseekService {
                 bitRate: file.bitrate,
                 quality,
                 score,
+                slots: file.slots,
+                speed: file.speed,
             };
         });
 
@@ -1244,28 +1252,16 @@ class SoulseekService {
      * - Downloads limited to concurrency of 4 to prevent network saturation
      */
     async searchAndDownloadBatch(
-        tracks: Array<{ artist: string; title: string; album: string }>,
+        tracks: AlbumBatchTrack[],
         musicPath: string,
         concurrency: number = 4,
+        _expectedTrackCount: number = tracks.length,
     ): Promise<{
         successful: number;
         failed: number;
         files: string[];
         errors: string[];
     }> {
-        const downloadQueue = new PQueue({ concurrency });
-        const results: {
-            successful: number;
-            failed: number;
-            files: string[];
-            errors: string[];
-        } = {
-            successful: 0,
-            failed: 0,
-            files: [],
-            errors: [],
-        };
-
         // Phase 1: Search all tracks in parallel (searches are fast)
         sessionLog(
             "SOULSEEK",
@@ -1288,42 +1284,32 @@ class SoulseekService {
             `Found matches for ${tracksWithMatches.length}/${tracks.length} tracks, downloading with concurrency ${concurrency}...`,
         );
 
-        // Count tracks with no search results as failed
-        const noMatchTracks = searchResults.filter(
-            (r) => !r.result.found || r.result.allMatches.length === 0,
-        );
-        for (const { track } of noMatchTracks) {
-            results.failed++;
-            results.errors.push(
-                `${track.artist} - ${track.title}: No match found on Soulseek`,
-            );
-        }
-
-        // Queue downloads for tracks with matches
-        const downloadPromises = tracksWithMatches.map(({ track, result }) =>
-            downloadQueue.add(async () => {
-                const downloadResult = await this.downloadWithRetry(
+        const results = await downloadAlbumBatch(searchResults, concurrency, {
+            downloadWithRetry: (track, matches) =>
+                this.downloadWithRetry(
                     track.artist,
                     track.title,
                     track.album,
-                    result.allMatches,
+                    matches,
                     musicPath,
+                ),
+            formatError: (track, result) =>
+                `${track.artist} - ${track.title}: ${result.error || "Unknown error"}`,
+            recordDecision: (decision) => {
+                recordSoulseekAlbumFolderDecision(
+                    decision.outcome,
+                    decision.coherenceScore,
                 );
-                if (downloadResult.success && downloadResult.filePath) {
-                    results.successful++;
-                    results.files.push(downloadResult.filePath);
-                } else {
-                    results.failed++;
-                    results.errors.push(
-                        `${track.artist} - ${track.title}: ${
-                            downloadResult.error || "Unknown error"
-                        }`,
-                    );
-                }
-            }),
-        );
-
-        await Promise.all(downloadPromises);
+                log.debug("Album folder selection decision", {
+                    outcome: decision.outcome,
+                    username: decision.username,
+                    folderName: decision.folderName,
+                    coherenceScore: decision.coherenceScore,
+                    compositeScore: decision.compositeScore,
+                    candidateCount: decision.candidateCount,
+                });
+            },
+        });
 
         sessionLog(
             "SOULSEEK",

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Soulseek album downloads now require one folder to cover at least 90% of requested tracks with at least 0.85 content coherence, then use bounded peer signals only to rank eligible folders before falling back to per-track assembly (#762).
 - Artists and albums you browse are now remembered locally, so repeat visits load instantly and survive MusicBrainz outages; a retention sweep clears entries untouched for 180 days (`CATALOG_RETENTION_DAYS`), and `CATALOG_PERSISTENCE=off` disables the feature (#760).
 - Search now shows one Songs section: songs you own and songs you don't sit together (external matches carry provider badges and skip anything already in your library) instead of being split across distant "Songs in Your Library" and "Songs to Discover" sections (#756).
 

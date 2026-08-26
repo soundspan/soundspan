@@ -319,6 +319,7 @@ async function runSoulseekDownload(
         })),
         musicPath,
         concurrency,
+        expectedTracks ?? tracks.length,
     );
     if (result.successful > 0) {
         return persistBatchOutcome(

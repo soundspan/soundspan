@@ -103,6 +103,7 @@ describe("processSoulseekDownload", () => {
             ],
             "/music",
             3,
+            2,
         );
         expect(mockUpdate).toHaveBeenLastCalledWith({
             where: { id: "303" },
