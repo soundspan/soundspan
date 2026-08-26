@@ -915,6 +915,11 @@ describe("listenTogetherManager runtime behavior", () => {
     it("preserves existing waiting deadline when stale external playback snapshots are ignored", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);
+        // Pin the clock so the recomputed deadline cannot drift from the
+        // original between setTrack and applyExternalSnapshot.
+        jest.spyOn(Date, "now").mockReturnValue(
+            Date.parse("2026-02-16T12:00:00.000Z"),
+        );
         groupManager.create("g-ready-preserve-deadline", {
             name: "Ready Preserve Deadline",
             joinCode: "RPD",
@@ -958,12 +963,7 @@ describe("listenTogetherManager runtime behavior", () => {
 
         const after = groupManager.snapshotById("g-ready-preserve-deadline");
         expect(after?.syncState).toBe("waiting");
-        expect(after?.readyDeadlineMs).toBeGreaterThanOrEqual(
-            existingDeadline!,
-        );
-        expect(after?.readyDeadlineMs).toBeLessThanOrEqual(
-            existingDeadline! + 2,
-        );
+        expect(after?.readyDeadlineMs).toBe(existingDeadline);
     });
 
     it("recomputes waiting deadline when stale external snapshots keep waiting state but local deadline is missing", () => {
