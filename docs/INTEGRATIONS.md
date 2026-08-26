@@ -266,6 +266,8 @@ LASTFM_SHARED_SECRET=your_shared_secret
 
 `LASTFM_API_KEY` may already be set for metadata enrichment; scrobbling additionally requires the shared secret. Helm users storing keys in an existing Secret must add `LASTFM_SHARED_SECRET` to it.
 
+These two values identify your soundspan server as an application to Last.fm — like an OAuth app credential. They are not a listener account and never receive scrobbles. Each user still connects their own Last.fm account, and each user's plays go to their own Last.fm profile.
+
 Then each user connects their own account:
 
 1. Open **Settings** -> **Scrobbling** and click **Connect Last.fm**
