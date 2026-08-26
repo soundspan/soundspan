@@ -49,18 +49,52 @@ Anything not listed: drop-in.
 
 ---
 
-## Unreleased: legacy discovery mode now serves the modern implementation
+## Unreleased: scrobbling, AcoustID, and database changes
 
-You only need to read this if you ever set the environment variable
-`DISCOVERY_MODE=legacy`. If you never set it (most installs), nothing changes.
+Most installs need no action: pull, restart, and the database migrations
+apply automatically. Read on if you run an external or managed PostgreSQL,
+use a Helm `existingSecret`, want the new integrations, or ever set
+`DISCOVERY_MODE=legacy`.
 
-The old "legacy" discovery implementation has been removed from the codebase.
-The `DISCOVERY_MODE` variable still works and `legacy` is still a valid value,
-so nothing breaks at startup — but setting it to `legacy` now serves the same
-modern discovery pages everyone else gets, and the server logs a one-line
-reminder when it starts. To stop the reminder, remove the variable (or set it
-to `modern`). Nothing else about discovery, downloads, or your library is
-affected.
+**External PostgreSQL: the `pg_trgm` extension.** A new search migration runs
+`CREATE EXTENSION IF NOT EXISTS pg_trgm`. The bundled Postgres image handles
+this automatically. If you point soundspan at your own PostgreSQL and the app
+role cannot create extensions, run this once as a superuser before upgrading,
+or the first start fails during migration:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+```
+
+**First start can take longer on large libraries.** One migration rebuilds
+database indexes to match how the app actually queries (and removes 14 unused
+ones). This is a one-time cost during the first startup after the upgrade.
+
+**Last.fm scrobbling needs two server values.** Users can connect Last.fm and
+ListenBrainz accounts under `Settings -> Scrobbling`. ListenBrainz works out
+of the box. Last.fm requires the operator to set `LASTFM_API_KEY` and
+`LASTFM_SHARED_SECRET` (get both from a free Last.fm API account). Helm users
+with `secrets.apiKeysInExistingSecret=true` must add `LASTFM_SHARED_SECRET`
+to their existing Secret.
+
+**AcoustID track identification is optional and off by default.** Set
+`ACOUSTID_API_KEY` (free from acoustid.org) and the analyzer resolves
+high-confidence MusicBrainz identities for your local tracks in the
+background. Without the key, fingerprints are still computed and stored, and
+nothing else changes.
+
+**Browsed-artist memory is on by default.** Artists and albums anyone browses
+are now cached in the database so repeat visits are instant and survive
+MusicBrainz outages. Entries untouched for 180 days are cleaned up
+(`CATALOG_RETENTION_DAYS` to tune). Set `CATALOG_PERSISTENCE=off` to turn the
+feature off.
+
+**`DISCOVERY_MODE=legacy` now serves the modern implementation.** The old
+"legacy" discovery implementation has been removed from the codebase. The
+variable still works and `legacy` is still a valid value, so nothing breaks
+at startup — but it now serves the same modern discovery pages everyone else
+gets, and the server logs a one-line reminder when it starts. To stop the
+reminder, remove the variable (or set it to `modern`).
 
 ## 2.5.0: sharing defaults, pairing codes, and the TIDAL sidecar rename
 

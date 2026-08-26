@@ -16,6 +16,7 @@ Start-here guide for `frontend/features/search`.
 | --- | --- |
 | `components/AliasResolutionBanner.tsx` | components |
 | `components/DiscoverPodcastsGrid.tsx` | components |
+| `components/DiscoverTracksList.tsx` | components |
 | `components/EmptyState.tsx` | components |
 | `components/LibraryAlbumsGrid.tsx` | components |
 | `components/LibraryAudiobooksGrid.tsx` | components |
@@ -26,10 +27,15 @@ Start-here guide for `frontend/features/search`.
 | `components/SoulseekSongsList.tsx` | components |
 | `components/TopResult.tsx` | components |
 | `components/TVSearchInput.tsx` | components |
+| `components/YouTubePlaylistPreviewCard.tsx` | components |
 | `components/YouTubePreviewCard.tsx` | components |
 | `hooks/useSearchData.ts` | hooks |
+| `hooks/useSearchTrackMatches.ts` | hooks |
 | `hooks/useSoulseekSearch.ts` | hooks |
+| `hooks/useYouTubePlaylist.ts` | hooks |
 | `hooks/useYouTubeUrl.ts` | hooks |
+| `discoverySelection.ts` | root |
+| `songDedup.ts` | root |
 | `types.ts` | root |
 
 ## Update Rule

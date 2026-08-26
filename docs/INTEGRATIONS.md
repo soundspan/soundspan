@@ -71,6 +71,7 @@ soundspan can connect directly to Soulseek for discovery/download flows.
 - Discovery results include filename, size, bitrate, and parsed metadata
 - Download progress appears in Activity Panel
 - Quality/availability depends on peer uptime and speed
+- Album downloads prefer one uploader's complete album folder: a folder is only chosen when it covers at least 90% of the requested tracks and its contents clearly belong to the same album. When no folder qualifies, tracks are assembled one by one from the best individual matches, as before.
 
 ## YouTube Music
 
@@ -242,6 +243,40 @@ If the album is not found on YouTube Music, the job follows your **When Primary 
 | ------------------------------- | -------- | ---------------------------------------- |
 | `MUSIC_PATH`                    | `/music` | Path for downloaded music                |
 | `YT_ALBUM_DOWNLOAD_CONCURRENCY` | `1`      | Album download jobs processed at once    |
+
+## Last.fm and ListenBrainz Scrobbling
+
+Each user can send their soundspan listening history to Last.fm and/or ListenBrainz. Connections are per user, under **Settings** -> **Scrobbling**. Plays from the web app and from connected Subsonic clients both forward.
+
+### ListenBrainz setup
+
+No server configuration is needed.
+
+1. Copy your user token from `listenbrainz.org/settings`
+2. Open **Settings** -> **Scrobbling**, paste the token, and click **Connect**
+
+### Last.fm setup
+
+The server operator must first create a free Last.fm API account (https://www.last.fm/api/account/create) and set two environment values:
+
+```bash
+LASTFM_API_KEY=your_api_key
+LASTFM_SHARED_SECRET=your_shared_secret
+```
+
+`LASTFM_API_KEY` may already be set for metadata enrichment; scrobbling additionally requires the shared secret. Helm users storing keys in an existing Secret must add `LASTFM_SHARED_SECRET` to it.
+
+Then each user connects their own account:
+
+1. Open **Settings** -> **Scrobbling** and click **Connect Last.fm**
+2. Approve the connection on the Last.fm page that opens
+3. Return and click **I've approved — finish connecting**
+
+### Notes
+
+- Each service has its own enable toggle; **Disconnect** removes the stored credential
+- Scrobbles and now-playing updates are delivered in the background and retried on failure; playback is never delayed
+- If a service rejects a stored credential, that connection is disabled and the user is asked to reconnect
 
 ## Podcasts
 

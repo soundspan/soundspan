@@ -15,10 +15,17 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 
 - Home surfaces continue listening, recently added artists, Made For You mixes, recommendations, popular artists, community playlists, podcasts, and audiobooks
 - Search includes tabs for library, peers, discovery, Soulseek, and podcasts; peer and Soulseek tabs appear when their integrations are enabled
-- Search results also surface external artists and songs to discover from Last.fm matches, linking into artist pages for preview and download
+- Search shows one **Songs** section: songs you own and songs you don't sit together in a single ranked list. External matches carry a provider badge (TIDAL or YouTube) and never duplicate something already in your library.
+- External songs with a streaming match play right from the results, and every row — owned or not — has the full menu with like/dislike, Go to artist, and Go to album
+- Search understands artist and album names, tolerates typos, and ranks near-misses by similarity instead of alphabetically
 - Discovery search supports preview/download/subscription actions
 - Explore and `/radio` station tiles (Quick Start, genres, decades) open a generated station playlist you can inspect before playing; Shuffle All still starts playback immediately
 - The Vibe Map in the main navigation plots your analyzed library as an explorable similarity map
+- Artists and albums you browse are remembered locally. Repeat visits load instantly, and the pages keep working during MusicBrainz outages. Entries untouched for 180 days are cleaned up automatically.
+
+### Sharing a song
+
+Every track's menu has `Copy link to song`. The link opens the album page with that song highlighted and starts playing it. On a brand-new device the browser may ask for one tap before audio starts.
 
 ## Artist Playback Order
 
@@ -40,6 +47,17 @@ Player quality badges show active source details (codec/bitrate or bit depth/sam
 
 Volume leveling evens out loudness differences between songs so you do not reach for the volume knob between a quiet 90s master and a modern loud one. It is on by default in `Automatic` mode: albums played front-to-back keep their intended dynamics, while shuffle, radio, and mixed queues are leveled per song. Set it to `By track`, `By album`, or `Off` under `Settings -> Playback -> Volume leveling`. Leveling only turns loud songs down and gives quiet songs a small, clip-safe boost; songs the analyzer has not measured yet play unchanged until the background measurement catches up.
 
+## Scrobbling
+
+Scrobbling sends the music you play in soundspan to your listening-history service. Each user connects their own accounts under `Settings -> Scrobbling`. Two services are supported:
+
+- **ListenBrainz.** Copy your user token from `listenbrainz.org/settings` and paste it into the Connect form. No server setup is needed.
+- **Last.fm.** Click `Connect Last.fm`. A Last.fm page opens asking you to approve the connection. Approve it, come back, and click `I've approved — finish connecting`. Last.fm requires the server operator to set `LASTFM_API_KEY` and `LASTFM_SHARED_SECRET` first; the settings page tells you if they are missing.
+
+Once connected, each service has its own on/off toggle, so you can pause forwarding without disconnecting. `Disconnect` removes the stored credential.
+
+What gets sent: finished tracks (scrobbles) and now-playing updates, for music you play in the app or through a connected Subsonic client. Scrobbling never delays or blocks playback — if a service is down, deliveries retry in the background and are dropped after repeated failures. If a service rejects your stored credential, the connection is switched off and you are asked to reconnect.
+
 ## Social and History
 
 - Activity panel `Social` tab lists users who are online and sharing presence.
@@ -53,7 +71,7 @@ Non-admin users cannot download music directly. Instead, they can ask for it:
 
 - Open an album that is not in the library. A `Request` button appears where admins see `Download`.
 - Click `Request`. The button changes to `Requested` and an admin is notified.
-- Admins review requests on the `Requests` page (avatar menu -> `Requests`): approve to start the download through the server's normal download path, or decline.
+- Admins review requests on the `Requests` page (avatar menu -> `Requests`): approve to send the album into the download queue, or decline.
 - You get a notification when your request is approved, declined, or when the album lands in the library.
 - Visit `/requests` to see your own requests and cancel pending ones.
 
@@ -91,6 +109,14 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 - Federation health panel with per-peer sync, stream, and error diagnostics
 - API keys and Swagger docs
 - Bull Board dashboard (`/api/admin/queues`)
+
+### Album downloads
+
+Album downloads run through a queue. One album downloads at a time across the whole server, and the queue survives restarts — queued albums resume where they left off.
+
+- `Download all missing albums` on an artist page queues each missing album and shows progress as the list is worked through. Promo releases, bootlegs, remix/live/demo/compilation groups, and albums where the artist is only featured are skipped.
+- A download that delivers only part of an album is reported as `Partial download: N/M tracks` instead of claiming success.
+- If the requested album cannot be found on the primary source, the job moves to your configured fallback source or fails with a clear reason. It never substitutes a different release.
 
 Technical admin configuration and security notes are in [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md).
 

@@ -23,6 +23,8 @@ soundspan is built for people who want streaming convenience without giving up o
 - Audiobookshelf integration with unified browsing/playback and progress sync
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
 - Synced lyrics, source/quality badges, and overhauled browser/PWA/overlay player flows
+- Per-user Last.fm and ListenBrainz scrobbling with now-playing updates, including plays from Subsonic clients
+- Unified song search that ranks owned and discoverable songs together, with shareable per-song links
 - Multiple users with isolated playlists, likes, history, and settings, plus admin roles, optional 2FA, and Listen Together group sessions
 - Federated library sharing between trusted soundspan instances, opt-in and disabled by default
 - OIDC/SSO login with explicit account linking and revocable app passwords for OpenSubsonic clients
@@ -102,6 +104,8 @@ soundspan supports optional integrations for discovery, downloads, and client co
 - Soulseek
 - YouTube Music
 - TIDAL (streaming + downloads)
+- Last.fm and ListenBrainz scrobbling
+- AcoustID track identification
 - OpenSubsonic-compatible `/rest` API
 
 Full setup guides are documented in [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
@@ -177,7 +181,7 @@ graph TD
 | Frontend            | Web interface (Next.js)                           | 3030                 |
 | Backend             | API server (Express.js)                           | 3006                 |
 | Backend Worker      | Background queues, processors, and scheduled jobs | 3010 health endpoint |
-| PostgreSQL          | Primary database (with pgvector)                  | 5432                 |
+| PostgreSQL          | Primary database (with pgvector and pg_trgm)      | 5432                 |
 | Redis               | Cache and queue backend                           | 6379                 |
 | TIDAL Sidecar       | TIDAL streaming/download proxy                    | 8585                 |
 | YT Music Streamer   | YouTube Music streaming proxy                     | 8586                 |
