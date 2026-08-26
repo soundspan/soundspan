@@ -238,13 +238,37 @@ describe("saveListenBrainzToken", () => {
         expect(upsert).not.toHaveBeenCalled();
     });
 
-    it("keeps the explicit error for an unexpected successful Last.fm body", async () => {
+    it("classifies an unexpected successful Last.fm token body as a provider request error", async () => {
         get.mockResolvedValue({ status: 200, data: {} });
 
-        await expect(startLastFmAuth("user-1")).rejects.toThrow(
-            "Last.fm did not return an authorization token",
+        await expect(startLastFmAuth("user-1")).rejects.toBeInstanceOf(
+            ScrobbleProviderRequestError,
         );
         expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it("classifies an empty successful Last.fm token body as a provider request error", async () => {
+        get.mockResolvedValue({ status: 200, data: "" });
+
+        await expect(startLastFmAuth("user-1")).rejects.toBeInstanceOf(
+            ScrobbleProviderRequestError,
+        );
+        expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it("classifies an HTML successful Last.fm session body as a provider request error", async () => {
+        findUnique.mockResolvedValue({
+            encryptedPendingToken: "encrypted:request-token",
+        });
+        post.mockResolvedValue({
+            status: 200,
+            data: "<!doctype html><title>Last.fm unavailable</title>",
+        });
+
+        await expect(completeLastFmAuth("user-1")).rejects.toBeInstanceOf(
+            ScrobbleProviderRequestError,
+        );
+        expect(updateMany).not.toHaveBeenCalled();
     });
 
     it("rejects completion when a newer pending Last.fm token wins the race", async () => {

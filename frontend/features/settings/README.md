@@ -68,6 +68,7 @@ Start-here guide for `frontend/features/settings`.
 | `hooks/useSettingsData.ts` | hooks |
 | `hooks/useSystemSettings.ts` | hooks |
 | `hooks/useTwoFactor.ts` | hooks |
+| `lastFmScrobblingCopy.ts` | root |
 | `types.ts` | root |
 
 ## Update Rule

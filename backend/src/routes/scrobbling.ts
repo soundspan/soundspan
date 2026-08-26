@@ -68,7 +68,27 @@ function sendLastFmKnownError(
  *     tags: [Scrobbling]
  *     security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
  *     responses:
- *       200: { description: Non-secret connection status }
+ *       200:
+ *         description: Non-secret Last.fm and ListenBrainz connection status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 lastfm:
+ *                   type: object
+ *                   properties:
+ *                     connected: { type: boolean }
+ *                     enabled: { type: boolean }
+ *                     username: { type: string, nullable: true }
+ *                     serverConfigured: { type: boolean }
+ *                     apiKeyConfigured: { type: boolean }
+ *                     sharedSecretConfigured: { type: boolean }
+ *                 listenbrainz:
+ *                   type: object
+ *                   properties:
+ *                     connected: { type: boolean }
+ *                     enabled: { type: boolean }
  *       401: { description: Not authenticated }
  */
 router.get(

@@ -199,7 +199,7 @@ export async function startLastFmAuth(userId: string): Promise<string> {
     );
     const tokenResult = lastFmTokenSchema.safeParse(responseData);
     if (!tokenResult.success) {
-        throw new Error("Last.fm did not return an authorization token");
+        throw new ScrobbleProviderRequestError("Last.fm");
     }
     const token = tokenResult.data.token;
     const encryptedPendingToken = encrypt(token);
@@ -252,7 +252,7 @@ export async function completeLastFmAuth(userId: string): Promise<string> {
     );
     const sessionResult = lastFmSessionSchema.safeParse(responseData);
     if (!sessionResult.success) {
-        throw new Error("Last.fm did not return a session key");
+        throw new ScrobbleProviderRequestError("Last.fm");
     }
     const { key: sessionKey, name: username } = sessionResult.data.session;
     const updateResult = await prisma.scrobbleConnection.updateMany({

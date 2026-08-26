@@ -104,7 +104,14 @@ describe("scrobbling routes", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         status.mockResolvedValue({
-            lastfm: { connected: true, enabled: true, username: "listener" },
+            lastfm: {
+                connected: true,
+                enabled: true,
+                username: "listener",
+                serverConfigured: true,
+                apiKeyConfigured: true,
+                sharedSecretConfigured: true,
+            },
             listenbrainz: { connected: true, enabled: false },
         });
         saveToken.mockResolvedValue(undefined);
@@ -127,11 +134,18 @@ describe("scrobbling routes", () => {
 
         expect(response.statusCode).toBe(200);
         expect(response.body).toEqual({
-            lastfm: { connected: true, enabled: true, username: "listener" },
+            lastfm: {
+                connected: true,
+                enabled: true,
+                username: "listener",
+                serverConfigured: true,
+                apiKeyConfigured: true,
+                sharedSecretConfigured: true,
+            },
             listenbrainz: { connected: true, enabled: false },
         });
         expect(JSON.stringify(response.body)).not.toMatch(
-            /token|credential|secret|signature/i,
+            /encryptedCredential|encryptedPendingToken|"(?:token|apiKey|sharedSecret|signature)":/i,
         );
     });
 
