@@ -8,7 +8,7 @@ import {
 } from "../utils/stringNormalization";
 import { BRAND_USER_AGENT } from "../config/brand";
 import { isValidMbid } from "../utils/musicIds";
-import { isPlainObject } from "../utils/plainObject";
+import { asPlainObject, isPlainObject } from "../utils/plainObject";
 
 export { isValidMbid } from "../utils/musicIds";
 
@@ -40,6 +40,28 @@ export interface MusicBrainzReleaseGroupSearchResult {
     "artist-credit"?: MusicBrainzArtistCredit[];
     score?: number | string;
 }
+
+interface MusicBrainzAlbumRelease {
+    id: string;
+    status?: string;
+    media?: unknown[];
+}
+
+interface MusicBrainzAlbumReleasePage {
+    releases: MusicBrainzAlbumRelease[];
+    total: number;
+}
+
+interface MusicBrainzAlbumTrack {
+    title: string;
+    position?: number;
+    duration?: number;
+}
+
+const MUSICBRAINZ_RELEASE_PAGE_SIZE = 100;
+const MAX_RELEASE_GROUP_PAGES = 100;
+const MAX_RELEASE_MEDIA = 100;
+const MAX_MEDIUM_TRACKS = 1_000;
 
 function hasReleaseGroupIdentity(
     value: unknown,
@@ -78,6 +100,103 @@ function validateMbid(value: unknown, entity: MbidEntity): string {
 
 function encodeMbidPathSegment(value: unknown, entity: MbidEntity): string {
     return encodeURIComponent(validateMbid(value, entity));
+}
+
+function parseAlbumReleases(value: unknown): MusicBrainzAlbumRelease[] {
+    if (!Array.isArray(value) || value.length > MUSICBRAINZ_RELEASE_PAGE_SIZE) {
+        throw new TypeError("Invalid MusicBrainz album releases response");
+    }
+    return value.flatMap((item) => {
+        if (!isPlainObject(item) || !isValidMbid(item.id)) return [];
+        return [
+            {
+                id: item.id,
+                status:
+                    typeof item.status === "string" ? item.status : undefined,
+                media: Array.isArray(item.media) ? item.media : undefined,
+            },
+        ];
+    });
+}
+
+function parseAlbumReleasePage(value: unknown): MusicBrainzAlbumReleasePage {
+    const page = asPlainObject(value);
+    const releases = parseAlbumReleases(page.releases);
+    const reportedTotal = page["release-count"];
+    const total =
+        Number.isSafeInteger(reportedTotal) &&
+        (reportedTotal as number) >= releases.length
+            ? (reportedTotal as number)
+            : releases.length;
+    return { releases, total };
+}
+
+function releaseTrackCount(release: MusicBrainzAlbumRelease): number | null {
+    const media = release.media;
+    if (!media || media.length === 0 || media.length > MAX_RELEASE_MEDIA) {
+        return null;
+    }
+    let total = 0;
+    for (const item of media) {
+        const medium = asPlainObject(item);
+        const count = medium["track-count"];
+        if (!Number.isSafeInteger(count) || (count as number) < 0) return null;
+        total += count as number;
+        if (!Number.isSafeInteger(total)) return null;
+    }
+    return total;
+}
+
+function expectedTrackCount(releases: MusicBrainzAlbumRelease[]): number {
+    const official = releases.filter(
+        (release) => release.status === "Official",
+    );
+    const eligible = official.length > 0 ? official : releases;
+    const counts = eligible.flatMap((release) => {
+        const count = releaseTrackCount(release);
+        return count === null ? [] : [count];
+    });
+    return counts.length === 0 ? 0 : Math.min(...counts);
+}
+
+function flattenAlbumTracks(value: unknown): MusicBrainzAlbumTrack[] {
+    if (!Array.isArray(value) || value.length > MAX_RELEASE_MEDIA) {
+        throw new TypeError("Invalid MusicBrainz release media response");
+    }
+    const tracks: MusicBrainzAlbumTrack[] = [];
+    for (const item of value) {
+        const mediumTracks = asPlainObject(item).tracks;
+        if (
+            !Array.isArray(mediumTracks) ||
+            mediumTracks.length > MAX_MEDIUM_TRACKS
+        ) {
+            throw new TypeError("Invalid MusicBrainz medium tracks response");
+        }
+        for (const itemTrack of mediumTracks) {
+            const track = asPlainObject(itemTrack);
+            const recording = asPlainObject(track.recording);
+            const title =
+                typeof track.title === "string"
+                    ? track.title
+                    : typeof recording.title === "string"
+                      ? recording.title
+                      : "";
+            tracks.push({
+                title,
+                position:
+                    typeof track.position === "number"
+                        ? track.position
+                        : undefined,
+                duration:
+                    typeof track.length === "number"
+                        ? track.length
+                        : typeof recording.length === "number"
+                          ? recording.length
+                          : undefined,
+            });
+        }
+    }
+    return tracks;
 }
 
 class MusicBrainzService {
@@ -916,85 +1035,94 @@ class MusicBrainzService {
         }
     }
 
-    /**
-     * Get track list for an album by release group MBID
-     * Uses the first official release from the release group
-     */
-    async getAlbumTracks(
-        rgMbid: string,
-    ): Promise<Array<{ title: string; position?: number; duration?: number }>> {
+    private getAlbumReleasePage(
+        releaseGroupMbid: string,
+        offset: number,
+    ): Promise<MusicBrainzAlbumReleasePage | null> {
+        const cacheKey = `mb:album-releases:${releaseGroupMbid}:${offset}`;
+        return this.cachedRequest(
+            cacheKey,
+            async () => {
+                const response = await this.client.get("/release", {
+                    params: {
+                        "release-group": releaseGroupMbid,
+                        inc: "media",
+                        limit: MUSICBRAINZ_RELEASE_PAGE_SIZE,
+                        offset,
+                        fmt: "json",
+                    },
+                });
+                return parseAlbumReleasePage(response.data);
+            },
+            2592000,
+            // The 120s fallback TTL bounds MB retries without 30-day poisoning.
+            null,
+        );
+    }
+
+    private async getAlbumReleases(
+        releaseGroupMbid: string,
+    ): Promise<MusicBrainzAlbumRelease[]> {
+        const releases: MusicBrainzAlbumRelease[] = [];
+        for (
+            let pageIndex = 0;
+            pageIndex < MAX_RELEASE_GROUP_PAGES;
+            pageIndex++
+        ) {
+            const page = await this.getAlbumReleasePage(
+                releaseGroupMbid,
+                releases.length,
+            );
+            if (!page) return [];
+            releases.push(...page.releases);
+            if (releases.length >= page.total) return releases;
+            if (page.releases.length === 0) return [];
+        }
+        logger.warn("MusicBrainz release-group paging exceeded its bound", {
+            releaseGroupMbid,
+            pageLimit: MAX_RELEASE_GROUP_PAGES,
+        });
+        return [];
+    }
+
+    /** Return the minimum total for official editions, or all editions. */
+    async getExpectedTrackCount(rgMbid: string): Promise<number> {
         const releaseGroupMbid = encodeMbidPathSegment(rgMbid, "release group");
-        const cacheKey = `mb:albumtracks:${releaseGroupMbid}`;
+        const releases = await this.getAlbumReleases(releaseGroupMbid);
+        return expectedTrackCount(releases);
+    }
 
-        return this.cachedRequest(cacheKey, async () => {
-            try {
-                // Step 1: Get releases from the release group
-                const rgResponse = await this.client.get(
-                    `/release-group/${releaseGroupMbid}`,
-                    {
-                        params: {
-                            inc: "releases",
-                            fmt: "json",
-                        },
-                    },
-                );
-
-                const releases = rgResponse.data?.releases || [];
-                if (releases.length === 0) {
-                    logger.debug(
-                        `[MusicBrainz] No releases found for release group ${releaseGroupMbid}`,
-                    );
-                    return [];
-                }
-
-                // Prefer official releases
-                const release =
-                    releases.find((r: any) => r.status === "Official") ||
-                    releases[0];
-                const releaseMbid = encodeMbidPathSegment(
-                    release.id,
-                    "release",
-                );
-
-                // Step 2: Get full release details with recordings
-                const releaseResponse = await this.client.get(
+    /** Get tracks from the first official release, or the first release. */
+    async getAlbumTracks(rgMbid: string): Promise<MusicBrainzAlbumTrack[]> {
+        const releaseGroupMbid = encodeMbidPathSegment(rgMbid, "release group");
+        const releases = await this.getAlbumReleases(releaseGroupMbid);
+        if (releases.length === 0) {
+            logger.debug(
+                `[MusicBrainz] No releases found for release group ${releaseGroupMbid}`,
+            );
+            return [];
+        }
+        const release =
+            releases.find((candidate) => candidate.status === "Official") ??
+            releases[0];
+        const releaseMbid = encodeMbidPathSegment(release.id, "release");
+        const cacheKey = `mb:albumtracks:v2:${releaseGroupMbid}:${releaseMbid}`;
+        return this.cachedRequest(
+            cacheKey,
+            async () => {
+                const response = await this.client.get(
                     `/release/${releaseMbid}`,
-                    {
-                        params: {
-                            inc: "recordings",
-                            fmt: "json",
-                        },
-                    },
+                    { params: { inc: "recordings", fmt: "json" } },
                 );
-
-                const media = releaseResponse.data?.media || [];
-                const tracks: Array<{
-                    title: string;
-                    position?: number;
-                    duration?: number;
-                }> = [];
-
-                for (const medium of media) {
-                    for (const track of medium.tracks || []) {
-                        tracks.push({
-                            title: track.title || track.recording?.title,
-                            position: track.position,
-                            duration: track.length || track.recording?.length,
-                        });
-                    }
-                }
-
+                const tracks = flattenAlbumTracks(response.data?.media);
                 logger.debug(
                     `[MusicBrainz] Found ${tracks.length} tracks for release group ${releaseGroupMbid}`,
                 );
                 return tracks;
-            } catch (error: any) {
-                logger.error(
-                    `MusicBrainz getAlbumTracks error: ${error.message}`,
-                );
-                return [];
-            }
-        });
+            },
+            2592000,
+            [],
+        );
     }
 }
 

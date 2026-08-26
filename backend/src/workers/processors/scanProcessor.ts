@@ -1,9 +1,14 @@
 import { Job } from "bull";
+import type { Prisma } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { MusicScannerService } from "../../services/musicScanner";
 import { config } from "../../config";
 import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";
-import { reconcileDownloadJobsWithScan } from "./scanReconcileQuery";
+import { asPlainObject } from "../../utils/plainObject";
+import {
+    loadActiveLocalTrackCounts,
+    reconcileDownloadJobsWithScan,
+} from "./scanReconcileQuery";
 import * as path from "path";
 
 const log = logger.child("ScanProcessor");
@@ -25,6 +30,69 @@ export interface ScanJobResult {
     tracksRemoved: number;
     errors: Array<{ file: string; error: string }>;
     duration: number;
+}
+
+interface AlbumCompletionJob {
+    id: string;
+    metadata: unknown;
+}
+
+function expectedTracksFrom(metadata: unknown): number | null {
+    const expectedTracks = asPlainObject(metadata).expectedTracks;
+    return typeof expectedTracks === "number" &&
+        Number.isSafeInteger(expectedTracks) &&
+        expectedTracks > 0
+        ? expectedTracks
+        : null;
+}
+
+async function eligibleAlbumJobIds(
+    jobs: AlbumCompletionJob[],
+    albumId: string | undefined,
+): Promise<string[]> {
+    const expectedTracks = jobs.map((job) => ({
+        id: job.id,
+        count: expectedTracksFrom(job.metadata),
+    }));
+    if (expectedTracks.every((job) => job.count === null)) {
+        return expectedTracks.map((job) => job.id);
+    }
+    if (!albumId) {
+        return expectedTracks.flatMap((job) =>
+            job.count === null ? [job.id] : [],
+        );
+    }
+    const counts = await loadActiveLocalTrackCounts([albumId]);
+    const activeLocalTracks = counts.get(albumId) ?? 0;
+    return expectedTracks.flatMap((job) =>
+        job.count === null || activeLocalTracks >= job.count ? [job.id] : [],
+    );
+}
+
+async function completeAlbumJobs(
+    matchWhere: Prisma.DownloadJobWhereInput,
+    albumId: string | undefined,
+): Promise<{ count: number }> {
+    const { prisma } = await import("../../utils/db");
+    const jobs = await prisma.downloadJob.findMany({
+        where: {
+            ...matchWhere,
+            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
+        },
+        select: { id: true, metadata: true },
+    });
+    const eligibleIds = await eligibleAlbumJobIds(jobs, albumId);
+    if (eligibleIds.length === 0) return { count: 0 };
+    return prisma.downloadJob.updateMany({
+        where: {
+            id: { in: eligibleIds },
+            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
+        },
+        data: {
+            status: "completed",
+            completedAt: new Date(),
+        },
+    });
 }
 
 /**
@@ -101,6 +169,12 @@ export async function processScan(
                 `Marking download jobs as completed after successful scan`,
             );
             const { prisma } = await import("../../utils/db");
+            const album = albumMbid
+                ? await prisma.album.findFirst({
+                      where: { rgMbid: albumMbid },
+                      include: { artist: true },
+                  })
+                : null;
 
             if (artistMbid) {
                 await prisma.downloadJob.updateMany({
@@ -143,17 +217,13 @@ export async function processScan(
             }
 
             if (albumMbid) {
-                const updatedByMbid = await prisma.downloadJob.updateMany({
-                    where: {
+                const updatedByMbid = await completeAlbumJobs(
+                    {
                         targetMbid: albumMbid,
                         type: "album",
-                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
-                    data: {
-                        status: "completed",
-                        completedAt: new Date(),
-                    },
-                });
+                    album?.id,
+                );
 
                 if (updatedByMbid.count > 0) {
                     jobLog.debug(
@@ -165,29 +235,17 @@ export async function processScan(
                         `No downloads matched by MBID, trying artist+title match...`,
                     );
 
-                    const album = await prisma.album.findFirst({
-                        where: { rgMbid: albumMbid },
-                        include: { artist: true },
-                    });
-
                     if (album) {
-                        const updatedByName =
-                            await prisma.downloadJob.updateMany({
-                                where: {
-                                    type: "album",
-                                    status: {
-                                        in: ACTIVE_DOWNLOAD_JOB_STATUSES,
-                                    },
-                                    metadata: {
-                                        path: ["albumTitle"],
-                                        equals: album.title,
-                                    },
+                        const updatedByName = await completeAlbumJobs(
+                            {
+                                type: "album",
+                                metadata: {
+                                    path: ["albumTitle"],
+                                    equals: album.title,
                                 },
-                                data: {
-                                    status: "completed",
-                                    completedAt: new Date(),
-                                },
-                            });
+                            },
+                            album.id,
+                        );
 
                         if (updatedByName.count > 0) {
                             jobLog.debug(
@@ -203,10 +261,6 @@ export async function processScan(
 
                 // Trigger enrichment for the artist of the newly imported album
                 try {
-                    const album = await prisma.album.findFirst({
-                        where: { rgMbid: albumMbid },
-                        include: { artist: true },
-                    });
                     if (
                         album?.artist &&
                         album.artist.enrichmentStatus === "pending"
@@ -230,16 +284,12 @@ export async function processScan(
             }
 
             if (downloadId) {
-                const updated = await prisma.downloadJob.updateMany({
-                    where: {
+                const updated = await completeAlbumJobs(
+                    {
                         lidarrRef: downloadId,
-                        status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
                     },
-                    data: {
-                        status: "completed",
-                        completedAt: new Date(),
-                    },
-                });
+                    album?.id,
+                );
                 if (updated.count > 0) {
                     jobLog.debug(
                         `Linked Lidarr download ${downloadId} to ${updated.count} job(s)`,

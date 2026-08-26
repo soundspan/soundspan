@@ -12,6 +12,7 @@ import {
 import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
 import { soulseekService } from "./soulseek";
+import { classifyDownloadCompleteness } from "./albumDownloadCompleteness";
 
 const logger = rootLogger.child("SoulseekLibraryDownload");
 const SOULSEEK_DOWNLOAD_FAILED = "Soulseek download failed";
@@ -19,6 +20,12 @@ const SOULSEEK_DOWNLOAD_FAILED = "Soulseek download failed";
 interface AlbumTrack {
     title: string;
     position?: number;
+}
+
+interface SoulseekBatchOutcome {
+    success: boolean;
+    partial: boolean;
+    failureMessage: string | undefined;
 }
 
 /** Result returned to compatibility acquisition callers. */
@@ -43,6 +50,15 @@ function requestedTracksFrom(metadata: unknown): AlbumTrack[] | null {
             typeof (track as Record<string, unknown>).title === "string",
     );
     return tracks.length === requestedTracks.length ? tracks : null;
+}
+
+function expectedTracksFrom(metadata: unknown): number | null {
+    const expectedTracks = asPlainObject(metadata).expectedTracks;
+    return typeof expectedTracks === "number" &&
+        Number.isSafeInteger(expectedTracks) &&
+        expectedTracks > 0
+        ? expectedTracks
+        : null;
 }
 
 async function lastFmTracks(
@@ -75,15 +91,13 @@ function asLastFmTrack(value: unknown): AlbumTrack | null {
 }
 
 async function resolveAlbumTracks(
-    albumMbid: string,
     artistName: string,
     albumTitle: string,
     requestedTracks: AlbumTrack[] | null,
+    musicBrainzTracks: AlbumTrack[] | null,
 ): Promise<AlbumTrack[]> {
     if (requestedTracks) return requestedTracks;
-    const musicBrainzTracks =
-        await musicBrainzService.getAlbumTracks(albumMbid);
-    if (musicBrainzTracks.length > 0) return musicBrainzTracks;
+    if (musicBrainzTracks) return musicBrainzTracks;
     logger.debug("MusicBrainz has no tracks; trying Last.fm", {
         artistName,
         albumTitle,
@@ -93,6 +107,51 @@ async function resolveAlbumTracks(
     } catch (error) {
         logger.warn("Last.fm track-list fallback failed", { error });
         return [];
+    }
+}
+
+async function resolveExpectedTrackCount(
+    jobId: string,
+    albumMbid: string,
+): Promise<number | null> {
+    let expectedTracks: number;
+    try {
+        expectedTracks =
+            await musicBrainzService.getExpectedTrackCount(albumMbid);
+    } catch (error) {
+        logger.warn("Album completeness verification skipped", {
+            jobId,
+            source: "soulseek",
+            albumMbid,
+            reason: "MusicBrainz expected-count lookup failed",
+            error,
+        });
+        return null;
+    }
+    if (!Number.isSafeInteger(expectedTracks) || expectedTracks <= 0) {
+        logger.warn("Album completeness verification skipped", {
+            jobId,
+            source: "soulseek",
+            albumMbid,
+            reason: "MusicBrainz returned no expected track count",
+        });
+        return null;
+    }
+    await patchDownloadJobMetadata(jobId, {
+        expectedTracks,
+    });
+    return expectedTracks;
+}
+
+async function resolveMusicBrainzTracks(
+    albumMbid: string,
+): Promise<AlbumTrack[] | null> {
+    try {
+        const tracks = await musicBrainzService.getAlbumTracks(albumMbid);
+        return tracks.length > 0 ? tracks : null;
+    } catch (error) {
+        logger.warn("MusicBrainz track-list lookup failed", { error });
+        return null;
     }
 }
 
@@ -129,27 +188,80 @@ async function persistBatchOutcome(
     jobId: string,
     successful: number,
     total: number,
+    expectedTracks: number | null,
 ): Promise<SoulseekAlbumDownloadResult> {
-    const success = successful >= Math.ceil(total * 0.5);
-    const failureMessage = success
-        ? undefined
-        : `Only ${successful}/${total} tracks found`;
+    const outcome = classifyBatchOutcome(successful, total, expectedTracks);
     await patchDownloadJobMetadata(
         jobId,
-        { tracksDownloaded: successful, tracksTotal: total },
+        (current) =>
+            batchOutcomeMetadata(
+                current,
+                successful,
+                total,
+                expectedTracks,
+                outcome,
+            ),
         {
-            status: success ? "completed" : "failed",
-            error: failureMessage ?? null,
+            status: outcome.success ? "completed" : "failed",
+            error: outcome.failureMessage ?? null,
             completedAt: new Date(),
         },
     );
+    if (outcome.partial) {
+        logger.warn("Album download is incomplete", {
+            jobId,
+            source: "soulseek",
+            downloadedTracks: successful,
+            expectedTracks,
+        });
+    }
     return {
-        success,
+        success: outcome.success,
         source: "soulseek",
         downloadJobId: Number.parseInt(jobId, 10),
         tracksDownloaded: successful,
         tracksTotal: total,
-        error: failureMessage,
+        error: outcome.failureMessage,
+    };
+}
+
+function classifyBatchOutcome(
+    successful: number,
+    total: number,
+    expectedTracks: number | null,
+): SoulseekBatchOutcome {
+    const partial =
+        classifyDownloadCompleteness(successful, expectedTracks) === "partial";
+    const success = !partial && successful >= Math.ceil(total * 0.5);
+    const failureMessage = partial
+        ? `Partial download: ${successful}/${expectedTracks} tracks`
+        : success
+          ? undefined
+          : `Only ${successful}/${total} tracks found`;
+    return { success, partial, failureMessage };
+}
+
+function batchOutcomeMetadata(
+    current: Record<string, unknown>,
+    successful: number,
+    total: number,
+    expectedTracks: number | null,
+    outcome: SoulseekBatchOutcome,
+): Record<string, unknown> {
+    const { failedAt: _failedAt, partial: _partial, ...retained } = current;
+    const base = {
+        ...retained,
+        tracksDownloaded: successful,
+        tracksTotal: total,
+        ...(expectedTracks === null ? {} : { expectedTracks }),
+    };
+    if (!outcome.partial) return base;
+    return {
+        ...base,
+        currentSource: "soulseek",
+        statusText: outcome.failureMessage,
+        partial: true,
+        failedAt: new Date().toISOString(),
     };
 }
 
@@ -179,11 +291,19 @@ async function runSoulseekDownload(
     concurrency: number,
 ): Promise<SoulseekAlbumDownloadResult> {
     await updateAttempt(jobId, metadata);
+    const requestedTracks = requestedTracksFrom(metadata);
+    const persistedExpectedTracks = expectedTracksFrom(metadata);
+    const expectedTracks =
+        persistedExpectedTracks ??
+        (await resolveExpectedTrackCount(jobId, albumMbid));
+    const musicBrainzTracks = requestedTracks
+        ? null
+        : await resolveMusicBrainzTracks(albumMbid);
     const tracks = await resolveAlbumTracks(
-        albumMbid,
         artistName,
         albumTitle,
-        requestedTracksFrom(metadata),
+        requestedTracks,
+        musicBrainzTracks,
     );
     if (tracks.length === 0) {
         return markFailed(
@@ -201,7 +321,12 @@ async function runSoulseekDownload(
         concurrency,
     );
     if (result.successful > 0) {
-        return persistBatchOutcome(jobId, result.successful, tracks.length);
+        return persistBatchOutcome(
+            jobId,
+            result.successful,
+            tracks.length,
+            expectedTracks,
+        );
     }
     const failureMessage = `No tracks found on Soulseek (searched ${tracks.length} tracks)`;
     return markFailed(jobId, failureMessage, {

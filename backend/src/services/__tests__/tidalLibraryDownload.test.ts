@@ -1,13 +1,15 @@
 const mockLoggerWarn = jest.fn();
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: mockLoggerWarn,
-        error: jest.fn(),
-    },
-}));
+const mockLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: mockLoggerWarn,
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
+
+jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -45,6 +47,14 @@ jest.mock("../coalescedLibraryScan", () => ({
     requestCoalescedLibraryScan: jest.fn(),
 }));
 
+const mockGetExpectedTrackCount = jest.fn();
+jest.mock("../musicbrainz", () => ({
+    musicBrainzService: {
+        getExpectedTrackCount: (...args: unknown[]) =>
+            mockGetExpectedTrackCount(...args),
+    },
+}));
+
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { simpleDownloadManager } from "../simpleDownloadManager";
@@ -68,7 +78,8 @@ describe("tidalLibraryDownload", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockFindUnique.mockResolvedValue({
-            metadata: { albumMbid: "rg-1", retained: true },
+            targetMbid: "rg-1",
+            metadata: { retained: true },
         });
         mockUpdate.mockResolvedValue({});
         mockSettings.mockResolvedValue({ primaryFailureFallback: "none" });
@@ -91,6 +102,27 @@ describe("tidalLibraryDownload", () => {
         mockFallback.mockResolvedValue({ success: true });
         mockProcessYoutubeDownload.mockResolvedValue(undefined);
         mockScan.mockResolvedValue(undefined);
+        mockGetExpectedTrackCount.mockResolvedValue(9);
+    });
+
+    it("uses the provider result count to fail an incomplete album", async () => {
+        mockGetExpectedTrackCount.mockResolvedValueOnce(10);
+
+        await processTidalDownload("job-1", "Artist", "Album", "user-1");
+
+        expect(mockUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    status: "failed",
+                    error: "Partial download: 9/10 tracks",
+                    metadata: expect.objectContaining({
+                        statusText: "Partial download: 9/10 tracks",
+                        partial: true,
+                        expectedTracks: 10,
+                    }),
+                }),
+            }),
+        );
     });
 
     it("completes the job and queues a tidal-download library scan", async () => {
@@ -114,8 +146,8 @@ describe("tidalLibraryDownload", () => {
 
     it("clears the first-attempt failure state after a successful retry", async () => {
         mockFindUnique.mockResolvedValueOnce({
+            targetMbid: "rg-1",
             metadata: {
-                albumMbid: "rg-1",
                 retained: true,
                 failedAt: "2026-08-24T10:00:00.000Z",
             },
@@ -150,7 +182,7 @@ describe("tidalLibraryDownload", () => {
             ),
         ).toBe(false);
         expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "TIDAL library scan enqueue failed; download remains completed",
+            "TIDAL library scan enqueue failed; download status remains unchanged",
             { jobId: "job-1", error: scanError },
         );
     });

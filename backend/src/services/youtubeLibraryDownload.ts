@@ -162,6 +162,7 @@ const youtubeLibraryDownloadConfig = {
             },
         },
     }),
+    readDownloadedCount: (result) => result.downloaded,
     fallbackPeer: {
         sourceKey: "tidal",
         run: async (jobId, artistName, albumTitle, userId, options) => {

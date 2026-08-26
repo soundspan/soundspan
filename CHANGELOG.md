@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Album downloads that deliver only part of the requested album now fail with a "Partial download: N/M tracks" status instead of reporting success, and library reconciliation no longer marks a multi-track request complete off a single-track album (#826).
 - TIDAL downloads now tag ALBUMARTIST with the album artist instead of the per-track artist, preventing multi-artist album tracks from splitting into phantom single-track albums.
 - Artist "Download all missing albums" now skips promotion-, bootleg-, or pseudo-release-only groups, remix/live/demo/compilation groups, and releases where the artist is only a featured credit; MusicBrainz enumeration failures now fail the expansion instead of reporting no missing albums (#824).
 - TIDAL and YouTube Music album matching no longer downloads an unrelated release when the requested album is missing; the job now fails over to the configured provider or fails honestly instead (#825).

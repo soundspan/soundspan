@@ -1,4 +1,5 @@
 import type { Client } from "pg";
+import type { AlbumLocation, TrackOrigin } from "@prisma/client";
 import { prisma } from "../src/utils/db";
 import {
     loadScanReconcileCandidates,
@@ -24,7 +25,12 @@ async function seedAlbum(
     id: string,
     artistName: string,
     title: string,
-    hasTracks = true,
+    trackCount = 1,
+    options: {
+        location?: AlbumLocation;
+        origin?: TrackOrigin;
+        removedTrackIndexes?: number[];
+    } = {},
 ): Promise<void> {
     const artistId = `${id}-artist`;
     await prisma.artist.create({
@@ -37,20 +43,25 @@ async function seedAlbum(
             artistId,
             title,
             primaryType: "Album",
+            location: options.location,
             updatedAt: FIXED_TIME,
         },
     });
-    if (hasTracks) {
-        await prisma.track.create({
-            data: {
-                id: `${id}-track`,
+    if (trackCount > 0) {
+        await prisma.track.createMany({
+            data: Array.from({ length: trackCount }, (_unused, index) => ({
+                id: `${id}-track-${index + 1}`,
                 albumId: id,
-                title: `${title} Track`,
-                trackNo: 1,
+                title: `${title} Track ${index + 1}`,
+                trackNo: index + 1,
                 duration: 180,
                 fileModified: FIXED_TIME,
                 fileSize: 1_000,
-            },
+                origin: options.origin,
+                removedAt: options.removedTrackIndexes?.includes(index)
+                    ? FIXED_TIME
+                    : null,
+            })),
         });
     }
 }
@@ -60,6 +71,7 @@ async function seedJob(
     artistName: string,
     albumTitle: string,
     createdAt = FIXED_TIME,
+    expectedTracks?: number,
 ): Promise<void> {
     await prisma.downloadJob.create({
         data: {
@@ -69,7 +81,11 @@ async function seedJob(
             type: "album",
             targetMbid: `${id}-target`,
             status: "pending",
-            metadata: { artistName, albumTitle },
+            metadata: {
+                artistName,
+                albumTitle,
+                ...(expectedTracks === undefined ? {} : { expectedTracks }),
+            },
             createdAt,
         },
     });
@@ -114,12 +130,7 @@ describeWithPostgres("scan reconciliation PostgreSQL behavior", () => {
             "The Beatles",
             "Abbey Road (Remastered)",
         );
-        await seedAlbum(
-            "no-track-album",
-            "Silent Artist",
-            "Silent Album",
-            false,
-        );
+        await seedAlbum("no-track-album", "Silent Artist", "Silent Album", 0);
         await seedJob("exact-job", "The National", "Boxer");
         await seedJob("fuzzy-job", "Beatles", "Abbey Road");
         await seedJob("no-track-job", "Silent Artist", "Silent Album");
@@ -137,6 +148,86 @@ describeWithPostgres("scan reconciliation PostgreSQL behavior", () => {
             { id: "no-track-job", status: "pending" },
             { id: "unmatched-job", status: "pending" },
         ]);
+    });
+
+    it("reconciles only candidates that satisfy the persisted expected count", async () => {
+        await seedAlbum("partial-album", "Partial Artist", "Partial Album", 1);
+        await seedAlbum("legacy-album", "Legacy Artist", "Legacy Album", 1);
+        await seedAlbum(
+            "complete-album",
+            "Complete Artist",
+            "Complete Album",
+            14,
+        );
+        await seedJob(
+            "partial-job",
+            "Partial Artist",
+            "Partial Album",
+            FIXED_TIME,
+            14,
+        );
+        await seedJob("legacy-job", "Legacy Artist", "Legacy Album");
+        await seedJob(
+            "complete-job",
+            "Complete Artist",
+            "Complete Album",
+            FIXED_TIME,
+            14,
+        );
+
+        await expect(reconcileDownloadJobsWithScan()).resolves.toBe(2);
+
+        const jobs = await prisma.downloadJob.findMany({
+            orderBy: { id: "asc" },
+            select: { id: true, status: true },
+        });
+        expect(jobs).toEqual([
+            { id: "complete-job", status: "completed" },
+            { id: "legacy-job", status: "completed" },
+            { id: "partial-job", status: "pending" },
+        ]);
+    });
+
+    it("counts only active local tracks on local scan albums", async () => {
+        await seedAlbum("removed-album", "Removed Artist", "Removed Album", 2, {
+            removedTrackIndexes: [1],
+        });
+        await seedAlbum("remote-album", "Remote Artist", "Remote Album", 2, {
+            location: "REMOTE",
+        });
+        await seedAlbum(
+            "federated-album",
+            "Federated Artist",
+            "Federated Album",
+            2,
+            { location: "FEDERATED", origin: "FEDERATED" },
+        );
+        await seedJob(
+            "removed-job",
+            "Removed Artist",
+            "Removed Album",
+            FIXED_TIME,
+            2,
+        );
+        await seedJob(
+            "remote-job",
+            "Remote Artist",
+            "Remote Album",
+            FIXED_TIME,
+            2,
+        );
+        await seedJob(
+            "federated-job",
+            "Federated Artist",
+            "Federated Album",
+            FIXED_TIME,
+            2,
+        );
+
+        await expect(reconcileDownloadJobsWithScan()).resolves.toBe(0);
+        await expect(
+            prisma.downloadJob.count({ where: { status: "completed" } }),
+        ).resolves.toBe(0);
     });
 
     it("treats percent, underscore, and backslash in artist prefixes literally", async () => {

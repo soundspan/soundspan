@@ -18,6 +18,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/albumDownloadJobs.ts` | Shared locked album download-job creation and active-job deduplication |
 | `backend/src/services/albumDownloadQueueOwnership.ts` | Persisted album-download queue ownership marker and metadata predicate |
 | `backend/src/services/albumDownloadQueueService.ts` | Durable album download queue admission and observed background enqueue failures |
+| `backend/src/services/albumDownloadCompleteness.ts` | Pure downloaded-versus-expected album track-count classification |
 | `backend/src/services/artistDownloadExpansionJobs.ts` | Locked creation and active-job deduplication for durable artist discography expansion |
 | `backend/src/services/albumTitleGuards.ts` | Shared remote-album placeholder-title classification |
 | `backend/src/services/albumLoudness.ts` | Transactional active-track loudness rollups and per-album serialization |

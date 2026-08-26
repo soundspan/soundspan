@@ -1049,13 +1049,161 @@ describe("musicBrainzService", () => {
         );
     });
 
+    it("returns the minimum summed track count across official releases", async () => {
+        mockHttpGet.mockResolvedValueOnce({
+            data: {
+                releases: [
+                    {
+                        id: VALID_RELEASE_MBID,
+                        status: "Official",
+                        media: [{ "track-count": 7 }, { "track-count": 7 }],
+                    },
+                    {
+                        id: "f76a9ff8-b3f7-421e-a209-7551c3d249fa",
+                        status: "Official",
+                        media: [{ "track-count": 20 }],
+                    },
+                    {
+                        id: "b1bca73f-238f-4d95-849c-31ca7a4f4991",
+                        status: "Bootleg",
+                        media: [{ "track-count": 5 }],
+                    },
+                ],
+            },
+        });
+
+        await expect(
+            musicBrainzService.getExpectedTrackCount(VALID_RELEASE_GROUP_MBID),
+        ).resolves.toBe(14);
+        expect(mockHttpGet).toHaveBeenCalledWith("/release", {
+            params: {
+                "release-group": VALID_RELEASE_GROUP_MBID,
+                inc: "media",
+                limit: 100,
+                offset: 0,
+                fmt: "json",
+            },
+        });
+    });
+
+    it.each([
+        {
+            name: "standard release before deluxe release",
+            releases: [
+                {
+                    id: VALID_RELEASE_MBID,
+                    status: "Official",
+                    media: [{ "track-count": 10 }],
+                },
+                {
+                    id: "f76a9ff8-b3f7-421e-a209-7551c3d249fa",
+                    status: "Official",
+                    media: [{ "track-count": 16 }],
+                },
+            ],
+        },
+        {
+            name: "deluxe release before standard release",
+            releases: [
+                {
+                    id: "f76a9ff8-b3f7-421e-a209-7551c3d249fa",
+                    status: "Official",
+                    media: [{ "track-count": 16 }],
+                },
+                {
+                    id: VALID_RELEASE_MBID,
+                    status: "Official",
+                    media: [{ "track-count": 10 }],
+                },
+            ],
+        },
+    ])("uses the standard-edition minimum with $name", async ({ releases }) => {
+        mockHttpGet.mockResolvedValueOnce({ data: { releases } });
+
+        await expect(
+            musicBrainzService.getExpectedTrackCount(VALID_RELEASE_GROUP_MBID),
+        ).resolves.toBe(10);
+    });
+
+    it("falls back to the minimum across all releases when none are official", async () => {
+        mockHttpGet.mockResolvedValueOnce({
+            data: {
+                releases: [
+                    {
+                        id: VALID_RELEASE_MBID,
+                        status: "Promotion",
+                        media: [{ "track-count": 12 }],
+                    },
+                    {
+                        id: "f76a9ff8-b3f7-421e-a209-7551c3d249fa",
+                        status: "Bootleg",
+                        media: [{ "track-count": 9 }],
+                    },
+                ],
+            },
+        });
+
+        await expect(
+            musicBrainzService.getExpectedTrackCount(VALID_RELEASE_GROUP_MBID),
+        ).resolves.toBe(9);
+    });
+
+    it("pages every release using the returned page length as the offset", async () => {
+        mockHttpGet
+            .mockResolvedValueOnce({
+                data: {
+                    "release-count": 2,
+                    releases: [
+                        {
+                            id: VALID_RELEASE_MBID,
+                            status: "Official",
+                            media: [{ "track-count": 16 }],
+                        },
+                    ],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    "release-count": 2,
+                    releases: [
+                        {
+                            id: "f76a9ff8-b3f7-421e-a209-7551c3d249fa",
+                            status: "Official",
+                            media: [{ "track-count": 10 }],
+                        },
+                    ],
+                },
+            });
+
+        await expect(
+            musicBrainzService.getExpectedTrackCount(VALID_RELEASE_GROUP_MBID),
+        ).resolves.toBe(10);
+        expect(mockHttpGet).toHaveBeenNthCalledWith(2, "/release", {
+            params: {
+                "release-group": VALID_RELEASE_GROUP_MBID,
+                inc: "media",
+                limit: 100,
+                offset: 1,
+                fmt: "json",
+            },
+        });
+    });
+
     it("collects album tracks from the first official release", async () => {
         mockHttpGet
             .mockResolvedValueOnce({
                 data: {
                     releases: [
-                        { id: "bootleg-1", status: "Bootleg" },
-                        { id: VALID_RELEASE_MBID, status: "Official" },
+                        {
+                            id: "f76a9ff8-b3f7-421e-a209-7551c3d249fa",
+                            status: "Bootleg",
+                            media: [{ "track-count": 2 }],
+                        },
+                        {
+                            id: VALID_RELEASE_MBID,
+                            status: "Official",
+                            media: [{ "track-count": 2 }],
+                        },
                     ],
                 },
             })
@@ -1090,16 +1238,15 @@ describe("musicBrainzService", () => {
             { title: "Track 1", position: 1, duration: 180000 },
             { title: "Track 2", position: 2, duration: 200000 },
         ]);
-        expect(mockHttpGet).toHaveBeenNthCalledWith(
-            1,
-            `/release-group/${VALID_RELEASE_GROUP_MBID}`,
-            {
-                params: {
-                    inc: "releases",
-                    fmt: "json",
-                },
+        expect(mockHttpGet).toHaveBeenNthCalledWith(1, "/release", {
+            params: {
+                "release-group": VALID_RELEASE_GROUP_MBID,
+                inc: "media",
+                limit: 100,
+                offset: 0,
+                fmt: "json",
             },
-        );
+        });
         expect(mockHttpGet).toHaveBeenNthCalledWith(
             2,
             `/release/${VALID_RELEASE_MBID}`,
@@ -1112,7 +1259,52 @@ describe("musicBrainzService", () => {
         );
     });
 
-    it("returns [] for albums with no releases and on getAlbumTracks errors", async () => {
+    it("reuses cached release pages between expected-count and track-list reads", async () => {
+        const cache = new Map<string, string>();
+        mockRedisGet.mockImplementation(async (key: string) => cache.get(key));
+        mockRedisSetEx.mockImplementation(
+            async (key: string, _ttl: number, value: string) => {
+                cache.set(key, value);
+                return "OK";
+            },
+        );
+        mockHttpGet
+            .mockResolvedValueOnce({
+                data: {
+                    "release-count": 1,
+                    releases: [
+                        {
+                            id: VALID_RELEASE_MBID,
+                            status: "Official",
+                            media: [{ "track-count": 1 }],
+                        },
+                    ],
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    media: [{ tracks: [{ title: "Track 1", position: 1 }] }],
+                },
+            });
+
+        await expect(
+            musicBrainzService.getExpectedTrackCount(VALID_RELEASE_GROUP_MBID),
+        ).resolves.toBe(1);
+        await expect(
+            musicBrainzService.getAlbumTracks(VALID_RELEASE_GROUP_MBID),
+        ).resolves.toEqual([
+            {
+                title: "Track 1",
+                position: 1,
+                duration: undefined,
+            },
+        ]);
+        expect(
+            mockHttpGet.mock.calls.filter(([path]) => path === "/release"),
+        ).toHaveLength(1);
+    });
+
+    it("returns [] for albums with no releases and short-caches transient errors", async () => {
         mockHttpGet.mockResolvedValueOnce({ data: { releases: [] } });
 
         const noReleaseTracks = await musicBrainzService.getAlbumTracks(
@@ -1120,13 +1312,21 @@ describe("musicBrainzService", () => {
         );
         expect(noReleaseTracks).toEqual([]);
 
+        mockRedisSetEx.mockClear();
         mockHttpGet.mockRejectedValueOnce(new Error("album tracks failed"));
         const errorTracks = await musicBrainzService.getAlbumTracks(
             VALID_RELEASE_GROUP_MBID,
         );
         expect(errorTracks).toEqual([]);
-        expect(mockLoggerError).toHaveBeenCalledWith(
-            "MusicBrainz getAlbumTracks error: album tracks failed",
+        expect(mockRedisSetEx).toHaveBeenLastCalledWith(
+            `mb:album-releases:${VALID_RELEASE_GROUP_MBID}:0`,
+            120,
+            JSON.stringify(null),
+        );
+        expect(mockRedisSetEx).not.toHaveBeenCalledWith(
+            `mb:album-releases:${VALID_RELEASE_GROUP_MBID}:0`,
+            2592000,
+            JSON.stringify([]),
         );
     });
 

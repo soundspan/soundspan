@@ -8,6 +8,7 @@ import { resolveDownloadJobMetadata } from "../../utils/downloadJobMetadata";
 
 const log = logger.child("ScanReconcileQuery");
 const ARTIST_PREFIX_LENGTH = 5;
+const SCAN_RECONCILE_ALBUM_LOCATIONS = ["LIBRARY", "DISCOVER"] as const;
 
 /** Maximum active download jobs reconciled after one scan. */
 export const SCAN_RECONCILE_ACTIVE_JOB_LIMIT = 500;
@@ -24,14 +25,18 @@ export interface ScanReconcileCandidate {
     id: string;
     title: string;
     artistName: string;
-    hasTracks: boolean;
+    trackCount: number;
 }
 
-interface ReconcileJob {
+type ScanReconcileAlbumRow = Omit<ScanReconcileCandidate, "trackCount">;
+
+/** Active download-job fields used by the pure reconciliation matcher. */
+export interface ReconcileJob {
     id: string;
     discoveryBatchId: string | null;
     artistName: string;
     albumTitle: string;
+    expectedTracks: number | null;
 }
 
 /** Convert literal artist prefixes into case-insensitive contains patterns. */
@@ -69,18 +74,34 @@ export function buildScanReconcileCandidateQuery(
         SELECT
             al.id,
             al.title,
-            ar.name AS "artistName",
-            EXISTS (
-                SELECT 1
-                FROM "Track" AS tr
-                WHERE tr."albumId" = al.id
-            ) AS "hasTracks"
+            ar.name AS "artistName"
         FROM "Album" AS al
         INNER JOIN "Artist" AS ar ON ar.id = al."artistId"
         WHERE ar.name ILIKE ANY(${patterns}::text[])
+          AND al.location IN ('LIBRARY', 'DISCOVER')
         ORDER BY al."updatedAt" DESC, al.id ASC
         LIMIT ${SCAN_RECONCILE_CANDIDATE_FETCH_LIMIT}
     `;
+}
+
+/** Count active local tracks for eligible library album IDs. */
+export async function loadActiveLocalTrackCounts(
+    albumIds: string[],
+): Promise<Map<string, number>> {
+    if (albumIds.length === 0) return new Map();
+    const counts = await prisma.track.groupBy({
+        by: ["albumId"],
+        where: {
+            albumId: { in: albumIds },
+            origin: "LOCAL",
+            removedAt: null,
+            album: {
+                location: { in: [...SCAN_RECONCILE_ALBUM_LOCATIONS] },
+            },
+        },
+        _count: { _all: true },
+    });
+    return new Map(counts.map((count) => [count.albumId, count._count._all]));
 }
 
 /** Load bounded, deduplicated album candidates for literal artist prefixes. */
@@ -93,10 +114,10 @@ export async function loadScanReconcileCandidates(
     const chunks = chunkScanReconcilePatterns(
         buildScanReconcilePatterns(prefixes),
     );
-    const candidates = new Map<string, ScanReconcileCandidate>();
+    const candidates = new Map<string, ScanReconcileAlbumRow>();
 
     for (const [chunkIndex, patterns] of chunks.entries()) {
-        const rows = await prisma.$queryRaw<ScanReconcileCandidate[]>(
+        const rows = await prisma.$queryRaw<ScanReconcileAlbumRow[]>(
             buildScanReconcileCandidateQuery(patterns),
         );
         if (rows.length > SCAN_RECONCILE_CANDIDATE_LIMIT) {
@@ -111,7 +132,14 @@ export async function loadScanReconcileCandidates(
         }
     }
 
-    return [...candidates.values()];
+    const candidateRows = [...candidates.values()];
+    const trackCounts = await loadActiveLocalTrackCounts(
+        candidateRows.map((candidate) => candidate.id),
+    );
+    return candidateRows.map((candidate) => ({
+        ...candidate,
+        trackCount: trackCounts.get(candidate.id) ?? 0,
+    }));
 }
 
 function resolveReconcileJobs(
@@ -122,15 +150,38 @@ function resolveReconcileJobs(
     }>,
 ): ReconcileJob[] {
     return activeJobs.flatMap((job) => {
-        const { artistName, albumTitle } = resolveDownloadJobMetadata(
+        const { artistName, albumTitle, metadata } = resolveDownloadJobMetadata(
             job.metadata,
         );
         if (!artistName || !albumTitle) return [];
-        return [{ ...job, artistName, albumTitle }];
+        const expectedTracks = metadata.expectedTracks;
+        return [
+            {
+                ...job,
+                artistName,
+                albumTitle,
+                expectedTracks:
+                    typeof expectedTracks === "number" &&
+                    Number.isSafeInteger(expectedTracks) &&
+                    expectedTracks > 0
+                        ? expectedTracks
+                        : null,
+            },
+        ];
     });
 }
 
-function candidateMatchesJob(
+function candidateHasEnoughTracks(
+    candidate: ScanReconcileCandidate,
+    expectedTracks: number | null,
+): boolean {
+    return expectedTracks === null
+        ? candidate.trackCount > 0
+        : candidate.trackCount >= expectedTracks;
+}
+
+/** Return whether any eligible album candidate matches one active job. */
+export function candidateMatchesJob(
     job: ReconcileJob,
     candidates: ScanReconcileCandidate[],
 ): boolean {
@@ -138,7 +189,7 @@ function candidateMatchesJob(
     const albumTitle = job.albumTitle.toLowerCase();
     const exactMatch = candidates.some(
         (candidate) =>
-            candidate.hasTracks &&
+            candidateHasEnoughTracks(candidate, job.expectedTracks) &&
             candidate.artistName.toLowerCase().includes(artistName) &&
             candidate.title.toLowerCase().includes(albumTitle),
     );
@@ -146,7 +197,7 @@ function candidateMatchesJob(
 
     return candidates.some(
         (candidate) =>
-            candidate.hasTracks &&
+            candidateHasEnoughTracks(candidate, job.expectedTracks) &&
             matchAlbum(
                 job.artistName,
                 job.albumTitle,

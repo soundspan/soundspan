@@ -26,9 +26,12 @@ jest.mock("../../utils/systemSettings", () => ({
 }));
 
 const mockGetAlbumTracks = jest.fn();
+const mockGetExpectedTrackCount = jest.fn();
 jest.mock("../musicbrainz", () => ({
     musicBrainzService: {
         getAlbumTracks: (...args: unknown[]) => mockGetAlbumTracks(...args),
+        getExpectedTrackCount: (...args: unknown[]) =>
+            mockGetExpectedTrackCount(...args),
     },
 }));
 
@@ -65,6 +68,7 @@ describe("processSoulseekDownload", () => {
             { title: "Track A", position: 1 },
             { title: "Track B", position: 2 },
         ]);
+        mockGetExpectedTrackCount.mockResolvedValue(2);
         mockGetAlbumInfo.mockResolvedValue(null);
         mockSearchAndDownloadBatch.mockResolvedValue({
             successful: 2,
@@ -90,6 +94,7 @@ describe("processSoulseekDownload", () => {
             error: undefined,
         });
 
+        expect(mockGetExpectedTrackCount).toHaveBeenCalledWith("rg-1");
         expect(mockGetAlbumTracks).not.toHaveBeenCalled();
         expect(mockSearchAndDownloadBatch).toHaveBeenCalledWith(
             [
@@ -108,6 +113,7 @@ describe("processSoulseekDownload", () => {
                 metadata: {
                     requestedTracks,
                     soulseekAttempts: 1,
+                    expectedTracks: 2,
                     tracksDownloaded: 2,
                     tracksTotal: 2,
                 },
@@ -116,6 +122,7 @@ describe("processSoulseekDownload", () => {
     });
 
     it("uses Last.fm when MusicBrainz has no tracks and persists no-match failure", async () => {
+        mockGetExpectedTrackCount.mockResolvedValueOnce(0);
         mockGetAlbumTracks.mockResolvedValueOnce([]);
         mockGetAlbumInfo.mockResolvedValueOnce({
             tracks: {
@@ -177,7 +184,10 @@ describe("processSoulseekDownload", () => {
         });
     });
 
-    it("persists empty track lists and below-threshold partial downloads", async () => {
+    it("persists empty track lists and partial downloads", async () => {
+        mockGetExpectedTrackCount
+            .mockResolvedValueOnce(0)
+            .mockResolvedValueOnce(4);
         mockGetAlbumTracks.mockResolvedValueOnce([]);
         mockGetAlbumInfo.mockResolvedValueOnce({ tracks: { track: [] } });
         await expect(
@@ -194,8 +204,8 @@ describe("processSoulseekDownload", () => {
             { title: "Track 4" },
         ]);
         mockSearchAndDownloadBatch.mockResolvedValueOnce({
-            successful: 1,
-            errors: ["three unavailable tracks"],
+            successful: 2,
+            errors: ["two unavailable tracks"],
         });
         await expect(
             processSoulseekDownload("405", "Artist", "Album", "user-1"),
@@ -203,18 +213,23 @@ describe("processSoulseekDownload", () => {
             success: false,
             source: "soulseek",
             downloadJobId: 405,
-            tracksDownloaded: 1,
+            tracksDownloaded: 2,
             tracksTotal: 4,
-            error: "Only 1/4 tracks found",
+            error: "Partial download: 2/4 tracks",
         });
         expect(mockUpdate).toHaveBeenLastCalledWith({
             where: { id: "405" },
             data: {
                 status: "failed",
-                error: "Only 1/4 tracks found",
+                error: "Partial download: 2/4 tracks",
                 completedAt: expect.any(Date),
                 metadata: {
-                    tracksDownloaded: 1,
+                    currentSource: "soulseek",
+                    expectedTracks: 4,
+                    failedAt: expect.any(String),
+                    partial: true,
+                    statusText: "Partial download: 2/4 tracks",
+                    tracksDownloaded: 2,
                     tracksTotal: 4,
                 },
             },

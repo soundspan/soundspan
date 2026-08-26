@@ -21,6 +21,10 @@ describe("scanProcessor runtime behavior", () => {
         progressEvents?: ProgressEvent[];
         activeJobs?: Array<{
             id: string;
+            targetMbid?: string;
+            type?: string;
+            status?: string;
+            lidarrRef?: string | null;
             discoveryBatchId?: string | null;
             metadata?: Record<string, unknown> | null;
         }>;
@@ -28,7 +32,7 @@ describe("scanProcessor runtime behavior", () => {
             id?: string;
             title: string;
             artistName?: string;
-            hasTracks?: boolean;
+            trackCount?: number;
             tracks?: Array<{ id: string }>;
             artist?: { name: string; enrichmentStatus?: string };
         }>;
@@ -45,12 +49,12 @@ describe("scanProcessor runtime behavior", () => {
             enrichmentStatus: string;
         } | null;
         albumByRgMbid?: {
+            id?: string;
             rgMbid: string;
             title: string;
+            trackCount?: number;
             artist: { name: string; enrichmentStatus: string };
         } | null;
-        albumDownloadUpdateCount?: number;
-        metadataMatchUpdateCount?: number;
         tracksNeedingTags?: number;
     };
 
@@ -86,51 +90,104 @@ describe("scanProcessor runtime behavior", () => {
             },
         };
 
+        const downloadJobs = (options.activeJobs ?? []).map((job) => ({
+            targetMbid: "",
+            type: "album",
+            status: "pending",
+            lidarrRef: null,
+            discoveryBatchId: null,
+            metadata: null,
+            ...job,
+        }));
+        const albumByRgMbid = options.albumByRgMbid
+            ? { id: "album-by-rg-mbid", ...options.albumByRgMbid }
+            : null;
+        const candidateAlbums = (options.candidateAlbums ?? []).map(
+            (album, index) => ({
+                id: album.id ?? `candidate-${index}`,
+                title: album.title,
+                artistName: album.artistName ?? album.artist?.name ?? "",
+                trackCount: album.trackCount ?? album.tracks?.length ?? 0,
+            }),
+        );
+
+        function matchesDownloadJob(job: any, where: any): boolean {
+            if (where?.status?.in && !where.status.in.includes(job.status)) {
+                return false;
+            }
+            if (where?.targetMbid && job.targetMbid !== where.targetMbid) {
+                return false;
+            }
+            if (where?.type && job.type !== where.type) return false;
+            if (where?.lidarrRef && job.lidarrRef !== where.lidarrRef) {
+                return false;
+            }
+            if (where?.id?.in && !where.id.in.includes(job.id)) return false;
+            if (where?.metadata?.path?.[0]) {
+                const metadata = job.metadata ?? {};
+                if (
+                    metadata[where.metadata.path[0]] !== where.metadata.equals
+                ) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         const prisma = {
             $queryRaw: jest.fn(async () =>
-                (options.candidateAlbums ?? []).map((album, index) => ({
-                    id: album.id ?? `candidate-${index}`,
+                candidateAlbums.map((album) => ({
+                    id: album.id,
                     title: album.title,
-                    artistName: album.artistName ?? album.artist?.name ?? "",
-                    hasTracks:
-                        album.hasTracks ?? (album.tracks?.length ?? 0) > 0,
+                    artistName: album.artistName,
                 })),
             ),
             downloadJob: {
-                findMany: jest.fn(async () => options.activeJobs ?? []),
+                findMany: jest.fn(async (args: any) =>
+                    downloadJobs.filter((job) =>
+                        matchesDownloadJob(job, args?.where),
+                    ),
+                ),
                 updateMany: jest.fn(async (args: any) => {
-                    if (
-                        args?.where?.targetMbid &&
-                        args?.where?.type === "artist"
-                    ) {
-                        return { count: 1 };
+                    const matchedJobs = downloadJobs.filter((job) =>
+                        matchesDownloadJob(job, args?.where),
+                    );
+                    for (const matchedJob of matchedJobs) {
+                        Object.assign(matchedJob, args.data);
                     }
-                    if (
-                        args?.where?.targetMbid &&
-                        args?.where?.type === "album"
-                    ) {
-                        return { count: options.albumDownloadUpdateCount ?? 1 };
-                    }
-                    if (args?.where?.lidarrRef) {
-                        return { count: 1 };
-                    }
-                    if (args?.where?.metadata) {
-                        return { count: options.metadataMatchUpdateCount ?? 0 };
-                    }
-                    if (args?.where?.id?.in) {
-                        return { count: args.where.id.in.length };
-                    }
-                    return { count: 0 };
+                    return { count: matchedJobs.length };
                 }),
             },
             album: {
-                findFirst: jest.fn(async () => options.albumByRgMbid ?? null),
+                findFirst: jest.fn(async () => albumByRgMbid),
             },
             artist: {
                 findUnique: jest.fn(async () => options.artistByMbid ?? null),
             },
             track: {
                 count: jest.fn(async () => options.tracksNeedingTags ?? 0),
+                groupBy: jest.fn(async (args: any) => {
+                    const counts = new Map(
+                        candidateAlbums.map((album) => [
+                            album.id,
+                            album.trackCount,
+                        ]),
+                    );
+                    if (albumByRgMbid) {
+                        counts.set(
+                            albumByRgMbid.id,
+                            albumByRgMbid.trackCount ?? 0,
+                        );
+                    }
+                    return (args?.where?.albumId?.in ?? []).flatMap(
+                        (albumId: string) => {
+                            const count = counts.get(albumId) ?? 0;
+                            return count > 0
+                                ? [{ albumId, _count: { _all: count } }]
+                                : [];
+                        },
+                    );
+                }),
             },
         };
 
@@ -228,6 +285,7 @@ describe("scanProcessor runtime behavior", () => {
             logger,
             config,
             prisma,
+            downloadJobs,
             scannerInstances,
             MusicScannerService,
             matchAlbum,
@@ -390,7 +448,7 @@ describe("scanProcessor runtime behavior", () => {
     });
 
     it("reconcile path completes exact and fuzzy matches and checks unique discovery batches", async () => {
-        const { module, prisma, discoverWeeklyService } = loadScanProcessor({
+        const rig = loadScanProcessor({
             scanResult: {
                 tracksAdded: 4,
                 tracksUpdated: 0,
@@ -457,6 +515,7 @@ describe("scanProcessor runtime behavior", () => {
                 );
             },
         });
+        const { module, prisma, logger, discoverWeeklyService } = rig;
 
         await module.processScan(createJob());
 
@@ -480,6 +539,13 @@ describe("scanProcessor runtime behavior", () => {
             ["batch-1"],
             ["batch-2"],
         ]);
+        expect(logger.debug).toHaveBeenCalledWith(
+            "✓ Reconciled 3 download job(s) with scanned albums",
+        );
+        expect(logger.error).not.toHaveBeenCalledWith(
+            "Failed to reconcile download jobs:",
+            expect.anything(),
+        );
     });
 
     it("bounds active jobs and candidate queries for a large queue", async () => {
@@ -596,7 +662,7 @@ describe("scanProcessor runtime behavior", () => {
     });
 
     it("updates artist, album, and lidarr-ref jobs for lidarr-triggered scans", async () => {
-        const { module, prisma, enrichSimilarArtist } = loadScanProcessor({
+        const rig = loadScanProcessor({
             scanResult: {
                 tracksAdded: 1,
                 tracksUpdated: 0,
@@ -610,16 +676,36 @@ describe("scanProcessor runtime behavior", () => {
                 enrichmentStatus: "pending",
             },
             albumByRgMbid: {
+                id: "album-local-1",
                 rgMbid: "album-mbid-1",
                 title: "Imported Album",
+                trackCount: 1,
                 artist: {
                     name: "Album Artist",
                     enrichmentStatus: "pending",
                 },
             },
-            activeJobs: [],
-            albumDownloadUpdateCount: 1,
+            activeJobs: [
+                {
+                    id: "artist-job",
+                    targetMbid: "artist-mbid-1",
+                    type: "artist",
+                },
+                {
+                    id: "album-job",
+                    targetMbid: "album-mbid-1",
+                    type: "album",
+                },
+                {
+                    id: "lidarr-job",
+                    targetMbid: "other-album-mbid",
+                    type: "album",
+                    lidarrRef: "lidarr-download-42",
+                    metadata: { albumTitle: "Other Album" },
+                },
+            ],
         });
+        const { module, prisma, downloadJobs, enrichSimilarArtist } = rig;
         const job = createJob({
             source: "lidarr-webhook",
             artistMbid: "artist-mbid-1",
@@ -640,27 +726,33 @@ describe("scanProcessor runtime behavior", () => {
                 }),
             }),
         );
-        expect(prisma.downloadJob.updateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    targetMbid: "album-mbid-1",
-                    type: "album",
-                }),
-                data: expect.objectContaining({
+        expect(downloadJobs).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "album-job",
                     status: "completed",
                 }),
-            }),
-        );
-        expect(prisma.downloadJob.updateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    lidarrRef: "lidarr-download-42",
-                }),
-                data: expect.objectContaining({
+                expect.objectContaining({
+                    id: "lidarr-job",
                     status: "completed",
                 }),
-            }),
+            ]),
         );
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: {
+                targetMbid: "album-mbid-1",
+                type: "album",
+                status: { in: ["pending", "processing"] },
+            },
+            select: { id: true, metadata: true },
+        });
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: {
+                lidarrRef: "lidarr-download-42",
+                status: { in: ["pending", "processing"] },
+            },
+            select: { id: true, metadata: true },
+        });
         expect(prisma.artist.findUnique).toHaveBeenCalledWith({
             where: { mbid: "artist-mbid-1" },
         });
@@ -681,8 +773,126 @@ describe("scanProcessor runtime behavior", () => {
         );
     });
 
+    const completenessPaths = [
+        {
+            name: "MBID",
+            job: {
+                id: "mbid-job",
+                targetMbid: "album-mbid-1",
+                metadata: {
+                    albumTitle: "Different Title",
+                    expectedTracks: 10,
+                },
+            },
+            scanData: {},
+        },
+        {
+            name: "title fallback",
+            job: {
+                id: "title-job",
+                targetMbid: "different-mbid",
+                metadata: {
+                    albumTitle: "Imported Album",
+                    expectedTracks: 10,
+                },
+            },
+            scanData: {},
+        },
+        {
+            name: "lidarrRef",
+            job: {
+                id: "lidarr-job",
+                targetMbid: "different-mbid",
+                lidarrRef: "lidarr-download-42",
+                metadata: {
+                    albumTitle: "Different Title",
+                    expectedTracks: 10,
+                },
+            },
+            scanData: { downloadId: "lidarr-download-42" },
+        },
+    ];
+
+    it.each(completenessPaths)(
+        "leaves a partial expected-track job active through the $name path",
+        async ({ job: activeJob, scanData }) => {
+            const { module, prisma, downloadJobs } = loadScanProcessor({
+                activeJobs: [{ ...activeJob, status: "processing" }],
+                albumByRgMbid: {
+                    id: "album-local-1",
+                    rgMbid: "album-mbid-1",
+                    title: "Imported Album",
+                    trackCount: 9,
+                    artist: {
+                        name: "Album Artist",
+                        enrichmentStatus: "complete",
+                    },
+                },
+            });
+
+            await module.processScan(
+                createJob({
+                    source: "lidarr-webhook",
+                    albumMbid: "album-mbid-1",
+                    ...scanData,
+                }),
+            );
+
+            expect(downloadJobs).toEqual([
+                expect.objectContaining({
+                    id: activeJob.id,
+                    status: "processing",
+                }),
+            ]);
+            expect(prisma.track.groupBy).toHaveBeenCalledWith({
+                by: ["albumId"],
+                where: {
+                    albumId: { in: ["album-local-1"] },
+                    origin: "LOCAL",
+                    removedAt: null,
+                    album: { location: { in: ["LIBRARY", "DISCOVER"] } },
+                },
+                _count: { _all: true },
+            });
+        },
+    );
+
+    it.each(completenessPaths)(
+        "completes an expected-track job through the $name path when the album is complete",
+        async ({ job: activeJob, scanData }) => {
+            const { module, downloadJobs } = loadScanProcessor({
+                activeJobs: [{ ...activeJob, status: "processing" }],
+                albumByRgMbid: {
+                    id: "album-local-1",
+                    rgMbid: "album-mbid-1",
+                    title: "Imported Album",
+                    trackCount: 10,
+                    artist: {
+                        name: "Album Artist",
+                        enrichmentStatus: "complete",
+                    },
+                },
+            });
+
+            await module.processScan(
+                createJob({
+                    source: "lidarr-webhook",
+                    albumMbid: "album-mbid-1",
+                    ...scanData,
+                }),
+            );
+
+            expect(downloadJobs).toEqual([
+                expect.objectContaining({
+                    id: activeJob.id,
+                    status: "completed",
+                }),
+            ]);
+        },
+    );
+
     it("falls back to album title matching when MBID-based album job updates match 0 rows", async () => {
-        const { module, prisma } = loadScanProcessor({
+        const { module, prisma, downloadJobs } = loadScanProcessor({
             scanResult: {
                 tracksAdded: 1,
                 tracksUpdated: 0,
@@ -690,8 +900,13 @@ describe("scanProcessor runtime behavior", () => {
                 errors: [],
                 duration: 5,
             },
-            albumDownloadUpdateCount: 0,
-            metadataMatchUpdateCount: 1,
+            activeJobs: [
+                {
+                    id: "title-match-job",
+                    targetMbid: "different-mbid",
+                    metadata: { albumTitle: "Imported Album" },
+                },
+            ],
             albumByRgMbid: {
                 rgMbid: "album-mbid-1",
                 title: "Imported Album",
@@ -709,30 +924,35 @@ describe("scanProcessor runtime behavior", () => {
 
         await module.processScan(job);
 
-        expect(prisma.downloadJob.updateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    targetMbid: "album-mbid-1",
-                    type: "album",
-                }),
-            }),
-        );
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: {
+                targetMbid: "album-mbid-1",
+                type: "album",
+                status: { in: ["pending", "processing"] },
+            },
+            select: { id: true, metadata: true },
+        });
         expect(prisma.album.findFirst).toHaveBeenCalledWith({
             where: { rgMbid: "album-mbid-1" },
             include: { artist: true },
         });
-        expect(prisma.downloadJob.updateMany).toHaveBeenCalledWith(
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: {
+                type: "album",
+                metadata: {
+                    path: ["albumTitle"],
+                    equals: "Imported Album",
+                },
+                status: { in: ["pending", "processing"] },
+            },
+            select: { id: true, metadata: true },
+        });
+        expect(downloadJobs).toEqual([
             expect.objectContaining({
-                where: expect.objectContaining({
-                    type: "album",
-                    status: { in: ["pending", "processing"] },
-                    metadata: {
-                        path: ["albumTitle"],
-                        equals: "Imported Album",
-                    },
-                }),
+                id: "title-match-job",
+                status: "completed",
             }),
-        );
+        ]);
     });
 
     it("logs when album title fallback still does not find pending downloads", async () => {
@@ -744,8 +964,6 @@ describe("scanProcessor runtime behavior", () => {
                 errors: [],
                 duration: 5,
             },
-            albumDownloadUpdateCount: 0,
-            metadataMatchUpdateCount: 0,
             albumByRgMbid: {
                 rgMbid: "album-mbid-1",
                 title: "Imported Album",
