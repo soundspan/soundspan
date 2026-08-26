@@ -20,6 +20,14 @@ const lastFmTokenSchema = z.object({ token: z.string().min(1) });
 const lastFmSessionSchema = z.object({
     session: z.object({ key: z.string().min(1), name: z.string().optional() }),
 });
+const lastFmErrorSchema = z.object({
+    error: z.number().int(),
+    message: z.string().optional(),
+});
+const LASTFM_APPROVAL_REQUIRED_MESSAGE =
+    "Approve access in the Last.fm tab, then try again";
+const LASTFM_CREDENTIALS_REJECTED_MESSAGE =
+    "The server's Last.fm API key or shared secret was rejected by Last.fm";
 
 export class InvalidListenBrainzTokenError extends Error {
     constructor() {
@@ -36,14 +44,22 @@ export class LastFmServerConfigurationError extends Error {
 }
 
 export class LastFmAuthStateError extends Error {
-    constructor() {
-        super("No pending Last.fm authorization was found");
+    constructor(message = "No pending Last.fm authorization was found") {
+        super(message);
         this.name = "LastFmAuthStateError";
     }
 }
 
+/** Indicates that Last.fm rejected the operator-managed server credentials. */
+export class LastFmCredentialsRejectedError extends Error {
+    constructor() {
+        super(LASTFM_CREDENTIALS_REJECTED_MESSAGE);
+        this.name = "LastFmCredentialsRejectedError";
+    }
+}
+
 export class ScrobbleProviderRequestError extends Error {
-    constructor(service: "Last.fm" | "ListenBrainz") {
+    constructor(public readonly service: "Last.fm" | "ListenBrainz") {
         super(`${service} request failed`);
         this.name = "ScrobbleProviderRequestError";
     }
@@ -54,20 +70,71 @@ interface LastFmCredentials {
     sharedSecret: string;
 }
 
-/** Resolves the operator API key plus the environment-only shared secret. */
-export async function resolveLastFmCredentials(): Promise<LastFmCredentials> {
+interface LastFmConfigurationState extends LastFmCredentials {
+    apiKeyConfigured: boolean;
+    sharedSecretConfigured: boolean;
+    serverConfigured: boolean;
+}
+
+async function getLastFmConfigurationState(): Promise<LastFmConfigurationState> {
     const settings = await getSystemSettings();
     const apiKey = settings?.lastfmApiKey || config.lastfm.apiKey;
     const sharedSecret = config.lastfm.sharedSecret;
-    if (!apiKey || !sharedSecret) throw new LastFmServerConfigurationError();
-    return { apiKey, sharedSecret };
+    const apiKeyConfigured = Boolean(apiKey);
+    const sharedSecretConfigured = Boolean(sharedSecret);
+    return {
+        apiKey,
+        sharedSecret,
+        apiKeyConfigured,
+        sharedSecretConfigured,
+        serverConfigured: apiKeyConfigured && sharedSecretConfigured,
+    };
+}
+
+function createLastFmResponseError(code: number): Error {
+    if (code === 14 || code === 15) {
+        return new LastFmAuthStateError(LASTFM_APPROVAL_REQUIRED_MESSAGE);
+    }
+    if (code === 4 || code === 10 || code === 13 || code === 26) {
+        return new LastFmCredentialsRejectedError();
+    }
+    return new ScrobbleProviderRequestError("Last.fm");
+}
+
+async function callLastFm(
+    request: () => Promise<{ data: unknown; status: number }>,
+): Promise<unknown> {
+    let response: { data: unknown; status: number };
+    try {
+        response = await request();
+    } catch {
+        throw new ScrobbleProviderRequestError("Last.fm");
+    }
+    const lastFmError = lastFmErrorSchema.safeParse(response.data);
+    if (lastFmError.success) {
+        throw createLastFmResponseError(lastFmError.data.error);
+    }
+    if (response.status < 200 || response.status >= 300) {
+        throw new ScrobbleProviderRequestError("Last.fm");
+    }
+    return response.data;
+}
+
+/** Resolves the operator API key plus the environment-only shared secret. */
+export async function resolveLastFmCredentials(): Promise<LastFmCredentials> {
+    const configuration = await getLastFmConfigurationState();
+    if (!configuration.serverConfigured) {
+        throw new LastFmServerConfigurationError();
+    }
+    return {
+        apiKey: configuration.apiKey,
+        sharedSecret: configuration.sharedSecret,
+    };
 }
 
 /** Whether the operator has configured the Last.fm key pair. */
 export async function isLastFmServerConfigured(): Promise<boolean> {
-    const settings = await getSystemSettings();
-    const apiKey = settings?.lastfmApiKey || config.lastfm.apiKey;
-    return Boolean(apiKey && config.lastfm.sharedSecret);
+    return (await getLastFmConfigurationState()).serverConfigured;
 }
 
 /** Validates and encrypts a user's ListenBrainz token before persistence. */
@@ -116,9 +183,8 @@ export async function startLastFmAuth(userId: string): Promise<string> {
         method: "auth.getToken",
         api_key: credentials.apiKey,
     };
-    let response;
-    try {
-        response = await axios.get(LASTFM_API_URL, {
+    const responseData = await callLastFm(() =>
+        axios.get(LASTFM_API_URL, {
             params: {
                 ...parameters,
                 api_sig: createLastFmApiSignature(
@@ -128,11 +194,10 @@ export async function startLastFmAuth(userId: string): Promise<string> {
                 format: "json",
             },
             timeout: SCROBBLE_HTTP_TIMEOUT_MS,
-        });
-    } catch {
-        throw new ScrobbleProviderRequestError("Last.fm");
-    }
-    const tokenResult = lastFmTokenSchema.safeParse(response.data);
+            validateStatus: () => true,
+        }),
+    );
+    const tokenResult = lastFmTokenSchema.safeParse(responseData);
     if (!tokenResult.success) {
         throw new Error("Last.fm did not return an authorization token");
     }
@@ -168,9 +233,8 @@ export async function completeLastFmAuth(userId: string): Promise<string> {
         api_key: credentials.apiKey,
         token,
     };
-    let response;
-    try {
-        response = await axios.post(
+    const responseData = await callLastFm(() =>
+        axios.post(
             LASTFM_API_URL,
             new URLSearchParams({
                 ...parameters,
@@ -180,12 +244,13 @@ export async function completeLastFmAuth(userId: string): Promise<string> {
                 ),
                 format: "json",
             }),
-            { timeout: SCROBBLE_HTTP_TIMEOUT_MS },
-        );
-    } catch {
-        throw new ScrobbleProviderRequestError("Last.fm");
-    }
-    const sessionResult = lastFmSessionSchema.safeParse(response.data);
+            {
+                timeout: SCROBBLE_HTTP_TIMEOUT_MS,
+                validateStatus: () => true,
+            },
+        ),
+    );
+    const sessionResult = lastFmSessionSchema.safeParse(responseData);
     if (!sessionResult.success) {
         throw new Error("Last.fm did not return a session key");
     }
@@ -209,17 +274,20 @@ export async function completeLastFmAuth(userId: string): Promise<string> {
 
 /** Returns only non-secret connection state for one user. */
 export async function getScrobblingStatus(userId: string) {
-    const connections = await prisma.scrobbleConnection.findMany({
-        where: { userId },
-        select: {
-            service: true,
-            encryptedCredential: true,
-            enabled: true,
-            username: true,
-        },
-        take: 2,
-        orderBy: { service: "asc" },
-    });
+    const [connections, lastFmConfiguration] = await Promise.all([
+        prisma.scrobbleConnection.findMany({
+            where: { userId },
+            select: {
+                service: true,
+                encryptedCredential: true,
+                enabled: true,
+                username: true,
+            },
+            take: 2,
+            orderBy: { service: "asc" },
+        }),
+        getLastFmConfigurationState(),
+    ]);
     const byService = new Map(connections.map((row) => [row.service, row]));
     const lastfm = byService.get("lastfm");
     const listenbrainz = byService.get("listenbrainz");
@@ -228,7 +296,9 @@ export async function getScrobblingStatus(userId: string) {
             connected: Boolean(lastfm?.encryptedCredential),
             enabled: Boolean(lastfm?.encryptedCredential && lastfm.enabled),
             username: lastfm?.username ?? null,
-            serverConfigured: await isLastFmServerConfigured(),
+            serverConfigured: lastFmConfiguration.serverConfigured,
+            apiKeyConfigured: lastFmConfiguration.apiKeyConfigured,
+            sharedSecretConfigured: lastFmConfiguration.sharedSecretConfigured,
         },
         listenbrainz: {
             connected: Boolean(listenbrainz?.encryptedCredential),

@@ -10,8 +10,10 @@ import {
     getScrobblingStatus,
     InvalidListenBrainzTokenError,
     LastFmAuthStateError,
+    LastFmCredentialsRejectedError,
     LastFmServerConfigurationError,
     saveListenBrainzToken,
+    ScrobbleProviderRequestError,
     setScrobblerEnabled,
     startLastFmAuth,
 } from "../services/scrobbleConnections";
@@ -26,6 +28,19 @@ const enabledBody = z.strictObject({ enabled: z.boolean() });
 type TokenRequest = ValidatedRequest<{ body: typeof tokenBody }>;
 type EnabledRequest = ValidatedRequest<{ body: typeof enabledBody }>;
 
+function sendProviderUnavailable(
+    error: unknown,
+    res: Parameters<typeof sendRouteError>[0],
+): boolean {
+    if (!(error instanceof ScrobbleProviderRequestError)) return false;
+    sendRouteError(
+        res,
+        502,
+        `${error.service} did not respond. Try again in a moment.`,
+    );
+    return true;
+}
+
 function sendLastFmKnownError(
     error: unknown,
     res: Parameters<typeof sendRouteError>[0],
@@ -38,7 +53,11 @@ function sendLastFmKnownError(
         sendRouteError(res, 409, error.message);
         return true;
     }
-    return false;
+    if (error instanceof LastFmCredentialsRejectedError) {
+        sendRouteError(res, 409, error.message);
+        return true;
+    }
+    return sendProviderUnavailable(error, res);
 }
 
 /**
@@ -70,6 +89,7 @@ router.get(
  *       200: { description: ListenBrainz connected }
  *       400: { description: Invalid request }
  *       422: { description: ListenBrainz rejected the token }
+ *       502: { description: ListenBrainz did not respond }
  *       401: { description: Not authenticated }
  *   delete:
  *     summary: Disconnect ListenBrainz
@@ -95,6 +115,7 @@ router.put(
                 sendRouteError(res, 422, "ListenBrainz rejected the token");
                 return;
             }
+            if (sendProviderUnavailable(error, res)) return;
             throw error;
         }
     }),
@@ -145,7 +166,8 @@ router.patch(
  *     security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
  *     responses:
  *       200: { description: Last.fm approval URL }
- *       409: { description: Server credentials are missing }
+ *       409: { description: Server credentials are missing or rejected }
+ *       502: { description: Last.fm did not respond }
  *       401: { description: Not authenticated }
  */
 router.post(
@@ -169,7 +191,8 @@ router.post(
  *     security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
  *     responses:
  *       200: { description: Last.fm connected }
- *       409: { description: Server credentials or pending authorization are missing }
+ *       409: { description: Server credentials or pending authorization are invalid }
+ *       502: { description: Last.fm did not respond }
  *       401: { description: Not authenticated }
  */
 router.post(

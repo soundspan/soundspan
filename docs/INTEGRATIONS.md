@@ -268,6 +268,8 @@ LASTFM_SHARED_SECRET=your_shared_secret
 
 These two values identify your soundspan server as an application to Last.fm — like an OAuth app credential. They are not a listener account and never receive scrobbles. Each user still connects their own Last.fm account, and each user's plays go to their own Last.fm profile.
 
+The shared secret is intentionally never displayed in any admin screen. The Scrobbling settings page reports which of the two values is missing when Last.fm is unavailable.
+
 Then each user connects their own account:
 
 1. Open **Settings** -> **Scrobbling** and click **Connect Last.fm**

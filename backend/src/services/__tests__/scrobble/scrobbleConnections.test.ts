@@ -6,6 +6,8 @@ const findUnique = jest.fn();
 const updateMany = jest.fn();
 const encrypt = jest.fn((value: string) => `encrypted:${value}`);
 const decrypt = jest.fn((value: string) => value.replace("encrypted:", ""));
+const getSystemSettings = jest.fn();
+const lastFmConfig = { apiKey: "api-key", sharedSecret: "shared-secret" };
 
 jest.mock("axios", () => ({
     __esModule: true,
@@ -18,24 +20,31 @@ jest.mock("../../../utils/db", () => ({
 }));
 jest.mock("../../../utils/encryption", () => ({ encrypt, decrypt }));
 jest.mock("../../../config", () => ({
-    config: { lastfm: { apiKey: "api-key", sharedSecret: "shared-secret" } },
+    config: { lastfm: lastFmConfig },
 }));
 jest.mock("../../../utils/systemSettings", () => ({
-    getSystemSettings: jest.fn().mockResolvedValue(null),
+    getSystemSettings,
 }));
 
 import {
     InvalidListenBrainzTokenError,
     LastFmAuthStateError,
+    LastFmCredentialsRejectedError,
+    ScrobbleProviderRequestError,
     completeLastFmAuth,
     getScrobblingStatus,
     saveListenBrainzToken,
     startLastFmAuth,
 } from "../../scrobbleConnections";
 
-describe("saveListenBrainzToken", () => {
-    beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+    jest.clearAllMocks();
+    getSystemSettings.mockResolvedValue(null);
+    lastFmConfig.apiKey = "api-key";
+    lastFmConfig.sharedSecret = "shared-secret";
+});
 
+describe("saveListenBrainzToken", () => {
     it("validates the token before storing an encrypted value", async () => {
         get.mockResolvedValue({ data: { valid: true, user_name: "listener" } });
         upsert.mockResolvedValue({ id: "connection-1" });
@@ -102,14 +111,36 @@ describe("saveListenBrainzToken", () => {
                 enabled: true,
                 username: "listener",
                 serverConfigured: true,
+                apiKeyConfigured: true,
+                sharedSecretConfigured: true,
             },
             listenbrainz: { connected: true, enabled: false },
         });
         expect(JSON.stringify(result)).not.toMatch(/encrypted|token|session/i);
     });
 
+    it("reports each missing Last.fm server credential separately", async () => {
+        findMany.mockResolvedValue([]);
+        lastFmConfig.apiKey = "";
+        lastFmConfig.sharedSecret = "";
+
+        const result = await getScrobblingStatus("user-1");
+
+        expect(result.lastfm).toEqual({
+            connected: false,
+            enabled: false,
+            username: null,
+            serverConfigured: false,
+            apiKeyConfigured: false,
+            sharedSecretConfigured: false,
+        });
+    });
+
     it("signs Last.fm token requests and stores the pending token encrypted", async () => {
-        get.mockResolvedValue({ data: { token: "request-token" } });
+        get.mockResolvedValue({
+            status: 200,
+            data: { token: "request-token" },
+        });
         upsert.mockResolvedValue({ id: "connection-1" });
 
         const approvalUrl = await startLastFmAuth("user-1");
@@ -122,6 +153,7 @@ describe("saveListenBrainzToken", () => {
                 format: "json",
             },
             timeout: 8_000,
+            validateStatus: expect.any(Function),
         });
         expect(upsert).toHaveBeenCalledWith({
             where: {
@@ -142,6 +174,79 @@ describe("saveListenBrainzToken", () => {
         );
     });
 
+    it.each([4, 10, 13, 26])(
+        "classifies Last.fm credential error %i during start-auth",
+        async (errorCode) => {
+            get.mockResolvedValue({
+                status: 403,
+                data: { error: errorCode, message: "Credentials rejected" },
+            });
+
+            await expect(startLastFmAuth("user-1")).rejects.toEqual(
+                new LastFmCredentialsRejectedError(),
+            );
+            expect(upsert).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each([14, 15])(
+        "keeps the pending token for Last.fm auth-state error %i",
+        async (errorCode) => {
+            findUnique.mockResolvedValue({
+                encryptedPendingToken: "encrypted:request-token",
+            });
+            post.mockResolvedValue({
+                status: 403,
+                data: { error: errorCode, message: "Token is not usable" },
+            });
+
+            await expect(completeLastFmAuth("user-1")).rejects.toEqual(
+                new LastFmAuthStateError(
+                    "Approve access in the Last.fm tab, then try again",
+                ),
+            );
+            expect(updateMany).not.toHaveBeenCalled();
+            expect(post).toHaveBeenCalledWith(
+                "https://ws.audioscrobbler.com/2.0/",
+                expect.any(URLSearchParams),
+                {
+                    timeout: 8_000,
+                    validateStatus: expect.any(Function),
+                },
+            );
+        },
+    );
+
+    it("classifies Last.fm network failures as provider request errors", async () => {
+        get.mockRejectedValue(new Error("network unavailable"));
+
+        await expect(startLastFmAuth("user-1")).rejects.toBeInstanceOf(
+            ScrobbleProviderRequestError,
+        );
+        expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it("classifies unknown Last.fm error codes as provider request errors", async () => {
+        get.mockResolvedValue({
+            status: 403,
+            data: { error: 99, message: "Unexpected provider error" },
+        });
+
+        await expect(startLastFmAuth("user-1")).rejects.toBeInstanceOf(
+            ScrobbleProviderRequestError,
+        );
+        expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it("keeps the explicit error for an unexpected successful Last.fm body", async () => {
+        get.mockResolvedValue({ status: 200, data: {} });
+
+        await expect(startLastFmAuth("user-1")).rejects.toThrow(
+            "Last.fm did not return an authorization token",
+        );
+        expect(upsert).not.toHaveBeenCalled();
+    });
+
     it("rejects completion when a newer pending Last.fm token wins the race", async () => {
         let pendingToken: string | null = null;
         let releaseExchange!: () => void;
@@ -152,8 +257,14 @@ describe("saveListenBrainzToken", () => {
         const exchangeReleased = new Promise<void>((resolve) => {
             releaseExchange = resolve;
         });
-        get.mockResolvedValueOnce({ data: { token: "request-token-a" } });
-        get.mockResolvedValueOnce({ data: { token: "request-token-b" } });
+        get.mockResolvedValueOnce({
+            status: 200,
+            data: { token: "request-token-a" },
+        });
+        get.mockResolvedValueOnce({
+            status: 200,
+            data: { token: "request-token-b" },
+        });
         upsert.mockImplementation(async (operation) => {
             pendingToken = operation.create.encryptedPendingToken;
             return { id: "connection-1" };
@@ -164,7 +275,10 @@ describe("saveListenBrainzToken", () => {
         post.mockImplementation(async () => {
             markExchangeStarted();
             await exchangeReleased;
-            return { data: { session: { key: "session-a", name: "alice" } } };
+            return {
+                status: 200,
+                data: { session: { key: "session-a", name: "alice" } },
+            };
         });
         updateMany.mockImplementation(async (operation) => {
             if (pendingToken !== operation.where.encryptedPendingToken) {

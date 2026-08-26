@@ -13,6 +13,10 @@ export interface ScrobblingStatus {
         username: string | null;
         /** False when the server has no Last.fm API key + shared secret. */
         serverConfigured: boolean;
+        /** Whether LASTFM_API_KEY (or a stored key) is present on the server. */
+        apiKeyConfigured: boolean;
+        /** Whether LASTFM_SHARED_SECRET is present on the server. */
+        sharedSecretConfigured: boolean;
     };
     listenbrainz: {
         connected: boolean;

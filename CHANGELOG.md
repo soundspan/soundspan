@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Docker Compose and all-in-one deployments can now set every documented optional tuning and integration variable; previously, about 40 documented variables were not forwarded into the containers.
+- Connecting Last.fm before approving access no longer shows a generic internal error, and credential or availability problems report clearly.
 
 ## [2.6.0] - 2026-08-26
 
