@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native dropdown menus (sort, genre, and pagination on the Audiobooks and Podcasts pages, and other built-in selects) no longer render white text on a white popup; the app now declares its dark color scheme to the browser so native controls match the theme.
+
 ## [2.6.1] - 2026-08-26
 
 ### Added

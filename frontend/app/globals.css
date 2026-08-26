@@ -43,6 +43,11 @@
 :root {
     /* soundspan Design System - Dark Theme Only */
 
+    /* Render native widgets (select popups, scrollbars, pickers) in the
+       browser's dark scheme; without this the OS light scheme paints
+       white popup menus behind our white text. */
+    color-scheme: dark;
+
     /* Background Layers */
     --bg-primary: #0a0a0a; /* Primary canvas */
     --bg-secondary: #0f0f0f; /* Cards, panels */
