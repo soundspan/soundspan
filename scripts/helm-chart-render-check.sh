@@ -101,6 +101,24 @@ assert_deployment_env_absent() {
   fi
 }
 
+assert_deployment_env_secret_ref() {
+  local deployment_name="$1"
+  local env_name="$2"
+  local secret_name="$3"
+  local manifest_file="$4"
+
+  if ! DEPLOYMENT_NAME="$deployment_name" ENV_NAME="$env_name" SECRET_NAME="$secret_name" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          exit 0 if $doc =~ /name:\s+\Q$ENV{ENV_NAME}\E\s+valueFrom:\s+secretKeyRef:\s+name:\s+\Q$ENV{SECRET_NAME}\E\s+key:\s+\Q$ENV{ENV_NAME}\E\s+optional:\s+true/s;
+      }
+      exit 1' "$manifest_file"; then
+    echo "[ERROR] ${deployment_name} missing ${env_name} reference to ${secret_name}" >&2
+    exit 1
+  fi
+}
+
 assert_deployment_termination_grace() {
   local deployment_name="$1"
   local expected_seconds="$2"
@@ -206,13 +224,43 @@ tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
 tmp_metrics="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_dclap_scaled" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
+tmp_acoustid_value="$(mktemp)"
+tmp_acoustid_existing="$(mktemp)"
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_dclap_scaled" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics" "$tmp_acoustid_value" "$tmp_acoustid_existing"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
 
 echo "[CHECK] render default AIO mode"
 helm template "$RELEASE_NAME" "$CHART_PATH" >"$tmp_aio"
+
+echo "[CHECK] render AcoustID value in AIO and individual analyzer deployments"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set secrets.existingSecret=external-secret \
+  --set-string config.acoustidApiKey=configured-key \
+  >"$tmp_acoustid_value"
+assert_deployment_env_value "$RELEASE_NAME" "ACOUSTID_API_KEY" "configured-key" "$tmp_acoustid_value"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set audioAnalyzer.enabled=true \
+  --set secrets.existingSecret=external-secret \
+  --set-string config.acoustidApiKey=configured-key \
+  >"$tmp_acoustid_value"
+assert_deployment_env_value "${RELEASE_NAME}-audio-analyzer" "ACOUSTID_API_KEY" "configured-key" "$tmp_acoustid_value"
+
+echo "[CHECK] render AcoustID existingSecret reference without a chart value"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set secrets.existingSecret=external-secret \
+  --set secrets.apiKeysInExistingSecret=true \
+  >"$tmp_acoustid_existing"
+assert_deployment_env_secret_ref "$RELEASE_NAME" "ACOUSTID_API_KEY" "external-secret" "$tmp_acoustid_existing"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set audioAnalyzer.enabled=true \
+  --set secrets.existingSecret=external-secret \
+  --set secrets.apiKeysInExistingSecret=true \
+  >"$tmp_acoustid_existing"
+assert_deployment_env_secret_ref "${RELEASE_NAME}-audio-analyzer" "ACOUSTID_API_KEY" "external-secret" "$tmp_acoustid_existing"
 if ! line_match '^kind: Deployment$' "$tmp_aio"; then
   echo "[ERROR] AIO render missing Deployment resource" >&2
   exit 1

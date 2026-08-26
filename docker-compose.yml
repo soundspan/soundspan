@@ -485,6 +485,7 @@ services:
             POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}"
             POSTGRES_DB: ${POSTGRES_DB:-soundspan}
             MUSIC_PATH: /music
+            ACOUSTID_API_KEY: "${ACOUSTID_API_KEY:-}"
             BATCH_SIZE: ${AUDIO_ANALYSIS_BATCH_SIZE:-10}
             SLEEP_INTERVAL: ${AUDIO_ANALYSIS_INTERVAL:-5}
             # BRPOP timeout for blocking wait (seconds). Also controls DB reconciliation interval.

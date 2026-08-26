@@ -13,7 +13,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType
 
+import acoustid_backfill
 import pytest
+from acoustid_backfill import AcoustIDBackfill
+from fingerprint_persistence import persist_fingerprint
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
@@ -91,6 +94,27 @@ def _create_test_schema(schema_name: str) -> list[str]:
                     ("claim-track-d", "/music/d.flac", 4),
                 ],
             )
+            cursor.execute(
+                sql.SQL(
+                    """
+                    CREATE TABLE {}."TrackFingerprint" (
+                        "trackId" TEXT PRIMARY KEY,
+                        fingerprint TEXT NOT NULL,
+                        duration INTEGER NOT NULL,
+                        "fingerprintedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        "lookupStatus" TEXT NOT NULL DEFAULT 'pending',
+                        "lookupStartedAt" TIMESTAMPTZ,
+                        "lookupRetryCount" INTEGER NOT NULL DEFAULT 0,
+                        "lookupError" TEXT,
+                        "recordingMbid" TEXT,
+                        "releaseGroupMbid" TEXT,
+                        score DOUBLE PRECISION,
+                        "lookedUpAt" TIMESTAMPTZ,
+                        "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                ).format(sql.Identifier(schema_name))
+            )
     finally:
         connection.close()
     return track_ids
@@ -106,6 +130,18 @@ def _drop_test_schema(schema_name: str) -> None:
             cursor.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema_name)))
     finally:
         connection.close()
+
+
+def _configure_database(module: ModuleType, schema_name: str):
+    """Connect one analyzer database manager to the isolated test schema."""
+    assert TEST_DATABASE_URL is not None
+    database = module.DatabaseConnection(TEST_DATABASE_URL)
+    database.connect()
+    cursor = database.get_cursor()
+    cursor.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema_name)))
+    database.commit()
+    cursor.close()
+    return database
 
 
 def test_reconciliation_claims_are_disjoint_across_transactions(
@@ -141,4 +177,179 @@ def test_reconciliation_claims_are_disjoint_across_transactions(
         assert sorted(first_claim + second_claim) == sorted(expected_ids)
         assert len(first_claim + second_claim) == len(set(first_claim + second_claim))
     finally:
+        _drop_test_schema(schema_name)
+
+
+def test_fingerprint_upsert_and_lookup_claim_round_trip(loaded_analyzer: ModuleType) -> None:
+    """Prove fingerprint and claim SQL behavior against real PostgreSQL."""
+    assert TEST_DATABASE_URL is not None
+    schema_name = f"fingerprint_claim_{uuid.uuid4().hex}"
+    _create_test_schema(schema_name)
+    database = loaded_analyzer.DatabaseConnection(TEST_DATABASE_URL)
+    database.connect()
+
+    class Client:
+        def lookup(self, fingerprint: str, duration: int) -> dict[str, object]:
+            assert (fingerprint, duration) == ("chromaprint-value", 247)
+            return {
+                "recordingMbid": "recording-mbid",
+                "releaseGroupMbid": "release-group-mbid",
+                "score": 0.91,
+            }
+
+    try:
+        cursor = database.get_cursor()
+        cursor.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema_name)))
+        persist_fingerprint(
+            cursor,
+            "claim-track-a",
+            {"fingerprint": "chromaprint-value", "duration": 247},
+        )
+        database.commit()
+        cursor.close()
+
+        worker = AcoustIDBackfill(database, "configured", client=Client())
+        assert worker.run_once() is True
+
+        cursor = database.get_cursor()
+        cursor.execute(
+            'SELECT "lookupStatus", "recordingMbid", "releaseGroupMbid", score '
+            'FROM "TrackFingerprint" WHERE "trackId" = %s',
+            ("claim-track-a",),
+        )
+        row = cursor.fetchone()
+        database.commit()
+        cursor.close()
+        assert row == {
+            "lookupStatus": "completed",
+            "recordingMbid": "recording-mbid",
+            "releaseGroupMbid": "release-group-mbid",
+            "score": 0.91,
+        }
+    finally:
+        database.close()
+        _drop_test_schema(schema_name)
+
+
+@pytest.mark.parametrize("lookup_fails", [False, True])
+def test_lookup_compare_and_set_discards_refingerprinted_claim(
+    loaded_analyzer: ModuleType,
+    lookup_fails: bool,
+) -> None:
+    """Preserve a new pending fingerprint across stale lookup success and failure writes."""
+    schema_name = f"fingerprint_race_{uuid.uuid4().hex}"
+    _create_test_schema(schema_name)
+    database = _configure_database(loaded_analyzer, schema_name)
+
+    class RefingerprintingClient:
+        called = False
+
+        def lookup(self, fingerprint: str, duration: int) -> dict[str, object]:
+            assert (fingerprint, duration) == ("old-fingerprint", 247)
+            cursor = database.get_cursor()
+            persist_fingerprint(
+                cursor,
+                "claim-track-a",
+                {"fingerprint": "new-fingerprint", "duration": 248},
+            )
+            database.commit()
+            cursor.close()
+            self.called = True
+            if lookup_fails:
+                raise acoustid_backfill.AcoustIDLookupError("timeout")
+            return {
+                "recordingMbid": "stale-recording",
+                "releaseGroupMbid": "stale-release-group",
+                "score": 0.99,
+            }
+
+    client = RefingerprintingClient()
+    try:
+        cursor = database.get_cursor()
+        persist_fingerprint(
+            cursor,
+            "claim-track-a",
+            {"fingerprint": "old-fingerprint", "duration": 247},
+        )
+        database.commit()
+        cursor.close()
+
+        worker = AcoustIDBackfill(database, "configured", client=client)
+        assert worker.run_once(lambda: client.called) is True
+
+        cursor = database.get_cursor()
+        cursor.execute(
+            'SELECT fingerprint, duration, "lookupStatus", "lookupRetryCount", '
+            '"recordingMbid", "releaseGroupMbid", score '
+            'FROM "TrackFingerprint" WHERE "trackId" = %s',
+            ("claim-track-a",),
+        )
+        row = cursor.fetchone()
+        database.commit()
+        cursor.close()
+        assert row == {
+            "fingerprint": "new-fingerprint",
+            "duration": 248,
+            "lookupStatus": "pending",
+            "lookupRetryCount": 0,
+            "recordingMbid": None,
+            "releaseGroupMbid": None,
+            "score": None,
+        }
+    finally:
+        database.close()
+        _drop_test_schema(schema_name)
+
+
+def test_lookup_owner_lock_excludes_second_replica_for_whole_pass(
+    loaded_analyzer: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exclude another database session while the leader drains multiple batches."""
+    schema_name = f"lookup_owner_{uuid.uuid4().hex}"
+    _create_test_schema(schema_name)
+    first_database = _configure_database(loaded_analyzer, schema_name)
+    second_database = _configure_database(loaded_analyzer, schema_name)
+    owner_key = f"soundspan:test:acoustid:{uuid.uuid4().hex}"
+    monkeypatch.setattr(acoustid_backfill, "LOOKUP_OWNER_KEY", owner_key)
+
+    class SecondClient:
+        calls = 0
+
+        def lookup(self, _fingerprint: str, _duration: int) -> None:
+            self.calls += 1
+
+    second_client = SecondClient()
+    second_worker = AcoustIDBackfill(second_database, "configured", client=second_client)
+
+    class LeaderClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int]] = []
+            self.handoffs: list[bool] = []
+
+        def lookup(self, fingerprint: str, duration: int) -> None:
+            self.calls.append((fingerprint, duration))
+            self.handoffs.append(second_worker.run_once())
+
+    leader_client = LeaderClient()
+    try:
+        cursor = first_database.get_cursor()
+        persist_fingerprint(cursor, "claim-track-a", {"fingerprint": "fp-a", "duration": 247})
+        persist_fingerprint(cursor, "claim-track-b", {"fingerprint": "fp-b", "duration": 248})
+        first_database.commit()
+        cursor.close()
+
+        leader = AcoustIDBackfill(
+            first_database,
+            "configured",
+            client=leader_client,
+            batch_size=1,
+        )
+        assert leader.run_once() is True
+        assert leader_client.calls == [("fp-a", 247), ("fp-b", 248)]
+        assert leader_client.handoffs == [False, False]
+        assert second_client.calls == 0
+    finally:
+        first_database.close()
+        second_database.close()
         _drop_test_schema(schema_name)

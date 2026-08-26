@@ -60,6 +60,7 @@ spec:
             "REDIS_URL" true
             "MUSIC_PATH" true
             "TZ" true
+            "ACOUSTID_API_KEY" true
           }}
           env:
             {{- if hasKey $audioAnalyzerEnv "POSTGRES_USER" }}
@@ -126,6 +127,7 @@ spec:
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
             {{- end }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "ACOUSTID_API_KEY" "secretKey" "ACOUSTID_API_KEY" "value" .Values.config.acoustidApiKey "enabled" (or .Values.config.acoustidApiKey (and .Values.secrets.existingSecret .Values.secrets.apiKeysInExistingSecret)) "envMap" $audioAnalyzerEnv) | nindent 12 }}
             {{- range $key := keys $audioAnalyzerEnv | sortAlpha }}
             {{- if not (hasKey $audioAnalyzerExplicitEnvKeys $key) }}
             - name: {{ $key }}

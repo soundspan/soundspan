@@ -6,6 +6,7 @@ from types import ModuleType
 from typing import Any
 
 from conftest import FakeDatabaseConnection
+from fingerprint_persistence import SAVE_FINGERPRINT_SQL, fingerprint_values
 from loudness import ALBUM_LOUDNESS_LOCK_SQL, ALBUM_LOUDNESS_ROLLUP_SQL
 
 
@@ -30,6 +31,7 @@ def analysis_features(loudness_lufs: float | None = -18.4) -> dict[str, Any]:
         "speechiness": 0.2,
         "moodTags": ["happy"],
         "essentiaGenres": ["rock"],
+        "fingerprint": {"fingerprint": "chromaprint-value", "duration": 247},
     }
 
 
@@ -49,6 +51,16 @@ def test_save_sql_placeholder_count_matches_result_tuple_arity(
     assert loaded_analyzer._SAVE_ANALYSIS_RESULTS_SQL.count("%s") == len(values)
 
 
+def test_fingerprint_save_sql_placeholder_count_matches_tuple_arity() -> None:
+    """Keep fingerprint upsert SQL and positional values in lockstep."""
+    values = fingerprint_values(
+        "track-1",
+        {"fingerprint": "chromaprint-value", "duration": 247},
+    )
+
+    assert SAVE_FINGERPRINT_SQL.count("%s") == len(values)
+
+
 def test_save_serializes_album_rollup_before_resolving_failures(
     loaded_analyzer: ModuleType,
 ) -> None:
@@ -61,6 +73,7 @@ def test_save_serializes_album_rollup_before_resolving_failures(
     statements = [sql for sql, _params in database.cursor.executions]
     assert statements == [
         loaded_analyzer._SAVE_ANALYSIS_RESULTS_SQL,
+        SAVE_FINGERPRINT_SQL,
         ALBUM_LOUDNESS_LOCK_SQL,
         ALBUM_LOUDNESS_ROLLUP_SQL,
         loaded_analyzer._RESOLVE_AUDIO_FAILURES_SQL,

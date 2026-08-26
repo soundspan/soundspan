@@ -482,6 +482,7 @@ model Track {
   transcodedFiles             TranscodedFile[]
   ratings                     TrackRating[]
   embeddings                  TrackEmbedding[]
+  fingerprint                 TrackFingerprint?
   lyrics                      TrackLyrics?
   syncGroups                  SyncGroup[]          @relation("SyncGroupTrack")
 
@@ -503,6 +504,27 @@ model Track {
   @@index([removedAt])
   @@index([origin])
   @@index([dedupOfTrackId])
+}
+
+model TrackFingerprint {
+  trackId           String    @id
+  fingerprint       String    @db.Text
+  duration          Int
+  fingerprintedAt   DateTime  @default(now()) @db.Timestamptz
+  lookupStatus      String    @default("pending")
+  lookupStartedAt   DateTime? @db.Timestamptz
+  lookupRetryCount  Int       @default(0)
+  lookupError       String?
+  recordingMbid     String?
+  releaseGroupMbid  String?
+  score             Float?
+  lookedUpAt        DateTime? @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @db.Timestamptz
+  track             Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@index([lookupStatus, lookupRetryCount, fingerprintedAt])
+  @@index([recordingMbid])
+  @@index([releaseGroupMbid])
 }
 
 model FederationPeer {

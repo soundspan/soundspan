@@ -181,7 +181,7 @@ graph TD
 | Redis               | Cache and queue backend                           | 6379                 |
 | TIDAL Sidecar       | TIDAL streaming/download proxy                    | 8585                 |
 | YT Music Streamer   | YouTube Music streaming proxy                     | 8586                 |
-| Audio Analyzer      | MusiCNN analyzer service                          | —                    |
+| Audio Analyzer      | MusiCNN analysis and local Chromaprint fingerprints; optional AcoustID lookup | —                    |
 | DCLAP Vibe Provider | ONNX text/audio embedding service                 | 8092 (internal)      |
 
 ---

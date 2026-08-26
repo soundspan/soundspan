@@ -257,13 +257,15 @@ Keep `localLoginEnabled: true` until SSO works. Set `webBaseUrl` to the web orig
 #### Third-party API keys
 
 Optional integration keys (`config.lidarrApiKey`, `config.audiobookshelfToken`,
-`config.lastfmApiKey`, `config.lastfmSharedSecret`, `config.fanartApiKey`, `config.openaiApiKey`) are **not**
+`config.lastfmApiKey`, `config.lastfmSharedSecret`, `config.fanartApiKey`,
+`config.openaiApiKey`, `config.acoustidApiKey`) are **not**
 rendered as plaintext env in pod specs. When the chart manages its own Secret
 (default), they are stored in that Secret and injected via `secretKeyRef`.
 
 If you use `existingSecret`, these keys stay plaintext (legacy behavior) unless
 you add them to your Secret (`LIDARR_API_KEY`, `AUDIOBOOKSHELF_TOKEN`,
-`LASTFM_API_KEY`, `LASTFM_SHARED_SECRET`, `FANART_API_KEY`, `OPENAI_API_KEY`) and set:
+`LASTFM_API_KEY`, `LASTFM_SHARED_SECRET`, `FANART_API_KEY`, `OPENAI_API_KEY`,
+`ACOUSTID_API_KEY`) and set:
 
 ```yaml
 secrets:
@@ -341,6 +343,10 @@ audioAnalyzer:
 
 > Unlike the sidecars above, this analyzer Deployment is only used in Individual mode.
 > In AIO mode, audio analysis is built into the single AIO container.
+
+The analyzer always computes local Chromaprint fingerprints. Set
+`config.acoustidApiKey` to enable rate-limited AcoustID identity lookups. Leave
+it empty to keep lookup silently disabled.
 
 ### Vibe Similarity with DCLAP (Individual Mode Only)
 
@@ -652,6 +658,7 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `LASTFM_SHARED_SECRET` | `config.lastfmSharedSecret` | For Last.fm scrobbling | unset |
 | `FANART_API_KEY` | `config.fanartApiKey` | No | unset |
 | `OPENAI_API_KEY` | `config.openaiApiKey` | No | unset |
+| `ACOUSTID_API_KEY` | `config.acoustidApiKey` | No | unset; local fingerprinting remains enabled |
 | `AUDIOBOOKSHELF_URL` | `config.audiobookshelfUrl` | No | unset |
 | `AUDIOBOOKSHELF_TOKEN` | `config.audiobookshelfToken` | If URL set | unset |
 | `AUDIOBOOKSHELF_API_KEY` | `backendWorker.env.AUDIOBOOKSHELF_API_KEY` or `backendWorker.envFrom` | If using env-based Audiobookshelf fallback | unset |

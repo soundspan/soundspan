@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Audio analyzer service - Essentia-based analysis with TensorFlow ML models"""
 
-# CRITICAL: TensorFlow threading MUST be configured before any imports.
-# Environment variables are read by TensorFlow C++ runtime before initialization.
+# TensorFlow threading must be configured before importing the runtime.
+# TensorFlow's C++ runtime reads these environment variables during initialization.
 import os
 import sys
 
@@ -18,7 +18,10 @@ for _root in _POTENTIAL_PROJECT_ROOTS:
             sys.path.insert(0, _root)
         break
 
+from acoustid_worker import AcoustIDLookupWorker
 from audio_paths import resolve_music_path
+from fingerprint_persistence import persist_fingerprint
+from fingerprinting import compute_fingerprint
 from loudness import (
     ALBUM_LOUDNESS_LOCK_SQL,
     ALBUM_LOUDNESS_ROLLUP_SQL,
@@ -40,15 +43,11 @@ from services.common.database_url import resolve_database_url
 from services.common.environment import env_float, env_int
 from services.common.logging_utils import configure_service_logger
 
-# Get thread configuration from environment (default to 1 for safety)
 THREADS_PER_WORKER = env_int("THREADS_PER_WORKER", 1)
-
-# Configure TensorFlow and BLAS/OpenMP threading before TensorFlow/Essentia imports.
 configure_thread_env(THREADS_PER_WORKER, configure_tensorflow=True)
 
 logger = configure_service_logger("audio-analyzer")
 
-# Log thread configuration on startup
 logger.info("=" * 80)
 logger.info("AUDIO ANALYZER THREAD CONFIGURATION")
 logger.info("=" * 80)
@@ -80,7 +79,6 @@ Two analysis modes:
 It connects to Redis for job queue and PostgreSQL for storing results.
 """
 
-# NOW safe to import other dependencies
 import gc
 import json
 import multiprocessing
@@ -95,7 +93,6 @@ from typing import Any
 
 import numpy as np
 
-# Force spawn mode for TensorFlow compatibility (must be called before any multiprocessing)
 try:  # noqa: SIM105 -- the process start method may already be initialized
     multiprocessing.set_start_method("spawn", force=True)
 except RuntimeError:
@@ -107,7 +104,6 @@ from database_connection import DatabaseConnection
 from psycopg2.extras import Json
 from reconciliation_claims import claim_reconciliation_tracks
 
-# Essentia imports (will fail gracefully if not installed for testing)
 ESSENTIA_AVAILABLE = False
 try:
     import essentia
@@ -130,14 +126,13 @@ TF_GPU_AVAILABLE = False  # Detected in worker processes
 TF_GPU_NAME = None
 TensorflowPredictMusiCNN = None  # Loaded in worker processes
 
-# Configuration from environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 DATABASE_URL = resolve_database_url(os.environ)
 MUSIC_PATH = os.getenv("MUSIC_PATH", "/music")
+ACOUSTID_API_KEY = os.getenv("ACOUSTID_API_KEY", "").strip()
 BATCH_SIZE = env_int("BATCH_SIZE", 10)
 SLEEP_INTERVAL = env_int("SLEEP_INTERVAL", 5)
 
-# BRPOP timeout: how long to block waiting for work (seconds)
 # Also serves as the DB reconciliation interval
 # Uses SLEEP_INTERVAL for backward compatibility, minimum 5s
 BRPOP_TIMEOUT = max(5, env_int("BRPOP_TIMEOUT", SLEEP_INTERVAL))
@@ -596,7 +591,7 @@ class AudioAnalyzer:
         )
         if loudness_measurement is not None:
             result.update(loudness_measurement)
-
+        result["fingerprint"] = compute_fingerprint(file_path)
         if not ESSENTIA_AVAILABLE:
             logger.error("Essentia not available - cannot analyze audio files")
             result["_error"] = "Essentia library not installed"
@@ -1220,6 +1215,7 @@ class AnalysisWorker:
         self.redis = redis.from_url(REDIS_URL, socket_timeout=REDIS_SOCKET_TIMEOUT)
         self.loudness_backfill_bookkeeping = RedisLoudnessBackfillBookkeeping(self.redis)
         self.db = DatabaseConnection(DATABASE_URL)
+        self.acoustid_worker = AcoustIDLookupWorker(DATABASE_URL, ACOUSTID_API_KEY)
         self.running = False
         self.executor = None
         self.pool_active = False
@@ -1753,6 +1749,7 @@ class AnalysisWorker:
         logger.info(f"  Batch timeout: {BATCH_ANALYSIS_TIMEOUT_SECONDS}s")
         logger.info(f"  Essentia available: {ESSENTIA_AVAILABLE}")
         logger.info(f"  ML models on disk: {TF_MODELS_AVAILABLE}")
+        logger.info("  AcoustID lookups: %s", "enabled" if ACOUSTID_API_KEY else "disabled")
         logger.info("  Worker pool: LAZY (starts on first job)")
 
         self.db.connect()
@@ -1766,6 +1763,7 @@ class AnalysisWorker:
         # Check for any already-queued work before entering BRPOP loop
         initial_found_work = self._run_db_reconciliation()
         self._schedule_next_reconciliation(initial_found_work)
+        self.acoustid_worker.start()
 
         try:
             while self.running:
@@ -1834,6 +1832,7 @@ class AnalysisWorker:
                 except Exception as e:
                     self._handle_worker_error(e)
         finally:
+            self.acoustid_worker.stop()
             self._shutdown_pool()
             if self.pubsub:
                 self.pubsub.close()
@@ -2101,6 +2100,7 @@ class AnalysisWorker:
                 _SAVE_ANALYSIS_RESULTS_SQL,
                 _analysis_result_values(track_id, features),
             )
+            persist_fingerprint(cursor, track_id, features.get("fingerprint"))
             cursor.execute(ALBUM_LOUDNESS_LOCK_SQL, (track_id,))
             cursor.execute(ALBUM_LOUDNESS_ROLLUP_SQL, (track_id,))
             # Successful analysis should clear stale unresolved audio failures

@@ -64,6 +64,7 @@ services:
       - REDIS_FLUSH_ON_STARTUP=${REDIS_FLUSH_ON_STARTUP:-false}
       # Coarse feature flags for ML/recommendation subsystems (default: true)
       - AUDIO_ANALYSIS_ENABLED=${AUDIO_ANALYSIS_ENABLED:-true}
+      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY:-}
       - DISCOVERY_ENABLED=${DISCOVERY_ENABLED:-true}
       - AUTO_PLAYLISTS_ENABLED=${AUTO_PLAYLISTS_ENABLED:-true}
       - FEDERATION_ENABLED=${FEDERATION_ENABLED:-false}

@@ -16,6 +16,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     redis-server \
     supervisor \
     ffmpeg \
+    libchromaprint-tools \
     libgomp1 \
     libsndfile1 \
     tini \
