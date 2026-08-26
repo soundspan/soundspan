@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docker Compose and all-in-one deployments can now set every documented optional tuning and integration variable; previously, about 40 documented variables were not forwarded into the containers.
+
 ## [2.6.0] - 2026-08-26
 
 ### Added

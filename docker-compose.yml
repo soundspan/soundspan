@@ -42,6 +42,10 @@ services:
             BACKEND_PROCESS_ROLE: ${BACKEND_PROCESS_ROLE:-all}
             SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET is required - generate one with: openssl rand -base64 32}"
             SETTINGS_ENCRYPTION_KEY: "${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required - generate one with: openssl rand -base64 32}"
+            API_KEY_PEPPER: "${API_KEY_PEPPER:-}"
+            JWT_SECRET: "${JWT_SECRET:-}"
+            SETTINGS_DECRYPT_FAIL_CLOSED: ${SETTINGS_DECRYPT_FAIL_CLOSED:-false}
+            SECRETS_DB_ONLY: ${SECRETS_DB_ONLY:-false}
             # To reset admin password, uncomment and set, then restart:
             # ADMIN_RESET_PASSWORD: your-new-password
 
@@ -68,6 +72,9 @@ services:
             MUSIC_PATH: /music
             TRANSCODE_CACHE_PATH: /app/cache/transcodes
             TRANSCODE_CACHE_MAX_GB: ${TRANSCODE_CACHE_MAX_GB:-10}
+            TRANSCODE_CONCURRENCY: ${TRANSCODE_CONCURRENCY:-3}
+            TRANSCODE_TIMEOUT_MS: ${TRANSCODE_TIMEOUT_MS:-300000}
+            FFMPEG_PATH: ${FFMPEG_PATH:-/usr/bin/ffmpeg}
             SCAN_FILE_CONCURRENCY: ${SCAN_FILE_CONCURRENCY:-3}
             BROWSE_IMAGE_CACHE_MAX_BYTES: ${BROWSE_IMAGE_CACHE_MAX_BYTES:-268435456}
             BROWSE_IMAGE_CACHE_MAX_ENTRIES: ${BROWSE_IMAGE_CACHE_MAX_ENTRIES:-2048}
@@ -81,11 +88,26 @@ services:
             METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
             LASTFM_API_KEY: "${LASTFM_API_KEY:-}"
             LASTFM_SHARED_SECRET: "${LASTFM_SHARED_SECRET:-}"
+            FANART_API_KEY: "${FANART_API_KEY:-}"
+            OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+            DEEZER_API_KEY: "${DEEZER_API_KEY:-}"
+            AUDIOBOOKSHELF_URL: "${AUDIOBOOKSHELF_URL:-}"
+            AUDIOBOOKSHELF_API_KEY: "${AUDIOBOOKSHELF_API_KEY:-}"
+            YTMUSIC_REGION: ${YTMUSIC_REGION:-US}
+
+            # Optional Lidarr integration fallback
+            LIDARR_ENABLED: ${LIDARR_ENABLED:-false}
+            LIDARR_URL: "${LIDARR_URL:-}"
+            LIDARR_API_KEY: "${LIDARR_API_KEY:-}"
 
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
             DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-true}
+            DISCOVERY_MODE: ${DISCOVERY_MODE:-recommendation}
             AUTO_PLAYLISTS_ENABLED: ${AUTO_PLAYLISTS_ENABLED:-true}
+            GENERATION_ARTIST_WEIGHT_ALPHA: ${GENERATION_ARTIST_WEIGHT_ALPHA:-0.5}
+            GENERATION_ARTIST_SHARE_CEILING: ${GENERATION_ARTIST_SHARE_CEILING:-0.3}
+            VIBE_MAP_WORKER_MEMORY_MB: ${VIBE_MAP_WORKER_MEMORY_MB:-512}
             VIBE_PROVIDER_URL: ${VIBE_PROVIDER_URL:-http://vibe-provider-dclap:${DCLAP_HTTP_PORT:-8092}}
             FEDERATION_ENABLED: ${FEDERATION_ENABLED:-false}
             FEATURE_REQUESTS: ${FEATURE_REQUESTS:-true}
@@ -112,6 +134,7 @@ services:
             # Keep these enabled for cross-replica Listen Together behavior
             LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: ${LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED:-true}
             LISTEN_TOGETHER_STATE_SYNC_ENABLED: ${LISTEN_TOGETHER_STATE_SYNC_ENABLED:-true}
+            LISTEN_TOGETHER_STATE_SYNC_CHANNEL: ${LISTEN_TOGETHER_STATE_SYNC_CHANNEL:-listen-together:state-sync}
             LISTEN_TOGETHER_STATE_STORE_ENABLED: ${LISTEN_TOGETHER_STATE_STORE_ENABLED:-true}
             LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS: ${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS:-21600}
             LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX: ${LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX:-listen-together:state}
@@ -126,12 +149,19 @@ services:
             READINESS_REQUIRE_DEPENDENCIES: ${READINESS_REQUIRE_DEPENDENCIES:-true}
             READINESS_DEPENDENCY_CHECK_INTERVAL_MS: ${READINESS_DEPENDENCY_CHECK_INTERVAL_MS:-5000}
             READINESS_DEPENDENCY_CHECK_TIMEOUT_MS: ${READINESS_DEPENDENCY_CHECK_TIMEOUT_MS:-2000}
+            IVFFLAT_PROBES: ${IVFFLAT_PROBES:-32}
+            LOUDNESS_TARGET_LUFS: ${LOUDNESS_TARGET_LUFS:--18}
 
             # Lidarr webhook callback URL - how Lidarr can reach soundspan
             # Use backend:3006 for same-network communication, or external IP:3030 for external Lidarr
             SOUNDSPAN_CALLBACK_URL: ${SOUNDSPAN_CALLBACK_URL:-http://backend:3006}
             # Debug: enable extra podcast stream/cache logging
             PODCAST_DEBUG: ${PODCAST_DEBUG:-0}
+            DEBUG_WEBHOOKS: ${DEBUG_WEBHOOKS:-false}
+            STREAMING_TRACE_LOGS: ${STREAMING_TRACE_LOGS:-false}
+            SUBSONIC_TRACE_LOGS: ${SUBSONIC_TRACE_LOGS:-false}
+            LOG_QUERIES: ${LOG_QUERIES:-false}
+            PLAYLIST_LOG_DIR: "${PLAYLIST_LOG_DIR:-}"
 
             # Streaming sidecars (both optional — features hidden when unavailable)
             # Backend code defaults to 127.0.0.1; docker-compose overrides with
@@ -230,7 +260,11 @@ services:
             NODE_ENV: ${NODE_ENV:-production}
             SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET is required - generate one with: openssl rand -base64 32}"
             SETTINGS_ENCRYPTION_KEY: "${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required - generate one with: openssl rand -base64 32}"
+            API_KEY_PEPPER: "${API_KEY_PEPPER:-}"
+            SETTINGS_DECRYPT_FAIL_CLOSED: ${SETTINGS_DECRYPT_FAIL_CLOSED:-false}
+            SECRETS_DB_ONLY: ${SECRETS_DB_ONLY:-false}
             LOG_LEVEL: ${LOG_LEVEL:-warn}
+            LOG_QUERIES: ${LOG_QUERIES:-false}
             MUSIC_PATH: /music
             SCAN_FILE_CONCURRENCY: ${SCAN_FILE_CONCURRENCY:-3}
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
@@ -238,9 +272,17 @@ services:
             METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
             LASTFM_API_KEY: "${LASTFM_API_KEY:-}"
             LASTFM_SHARED_SECRET: "${LASTFM_SHARED_SECRET:-}"
+            OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+            DEEZER_API_KEY: "${DEEZER_API_KEY:-}"
+            AUDIOBOOKSHELF_URL: "${AUDIOBOOKSHELF_URL:-}"
+            AUDIOBOOKSHELF_API_KEY: "${AUDIOBOOKSHELF_API_KEY:-}"
+            LIDARR_ENABLED: ${LIDARR_ENABLED:-false}
+            LIDARR_URL: "${LIDARR_URL:-}"
+            LIDARR_API_KEY: "${LIDARR_API_KEY:-}"
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
             DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-true}
+            DISCOVERY_MODE: ${DISCOVERY_MODE:-recommendation}
             AUTO_PLAYLISTS_ENABLED: ${AUTO_PLAYLISTS_ENABLED:-true}
             VIBE_PROVIDER_URL: ${VIBE_PROVIDER_URL:-http://vibe-provider-dclap:${DCLAP_HTTP_PORT:-8092}}
             FEDERATION_ENABLED: ${FEDERATION_ENABLED:-false}
@@ -266,6 +308,12 @@ services:
             FEDERATION_SYNC_INTERVAL_MINUTES: ${FEDERATION_SYNC_INTERVAL_MINUTES:-15}
             BACKEND_PROCESS_ROLE: worker
             WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-3010}
+            WORKER_EVENT_LOOP_WARN_MS: ${WORKER_EVENT_LOOP_WARN_MS:-1000}
+            WORKER_EVENT_LOOP_SAMPLE_MS: ${WORKER_EVENT_LOOP_SAMPLE_MS:-5000}
+            TRACK_MAPPING_STALENESS_INTERVAL_MS: ${TRACK_MAPPING_STALENESS_INTERVAL_MS:-21600000}
+            LOUDNESS_BACKFILL_BATCH_SIZE: ${LOUDNESS_BACKFILL_BATCH_SIZE:-25}
+            VIBE_SPACE_CUTOVER_ALLOW_FAILED: ${VIBE_SPACE_CUTOVER_ALLOW_FAILED:-false}
+            IVFFLAT_PROBES: ${IVFFLAT_PROBES:-32}
             SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD: ${SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD:-3}
             READINESS_REQUIRE_DEPENDENCIES: ${READINESS_REQUIRE_DEPENDENCIES:-true}
             READINESS_DEPENDENCY_CHECK_INTERVAL_MS: ${READINESS_DEPENDENCY_CHECK_INTERVAL_MS:-5000}
@@ -453,6 +501,7 @@ services:
             # Shared secret authenticating backend→sidecar calls (F31). Must match
             # the backend's INTERNAL_API_SECRET or the sidecar rejects with 403.
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
+            YTMUSIC_SPOOL_DIR: "${YTMUSIC_SPOOL_DIR:-}"
         volumes:
             - ytmusic_data:/data
             # Shared with the backend (read-write) so YouTube URL downloads
@@ -507,6 +556,7 @@ services:
             NUM_WORKERS: ${AUDIO_ANALYSIS_WORKERS:-2}
             # CPU thread limiting per worker (default 1 for conservative CPU usage)
             THREADS_PER_WORKER: ${AUDIO_ANALYSIS_THREADS_PER_WORKER:-1}
+            LOUDNESS_MEASURE_TIMEOUT_SECONDS: ${LOUDNESS_MEASURE_TIMEOUT_SECONDS:-120}
         volumes:
             # Music library (read-only)
             - ${MUSIC_PATH:-./music}:/music:ro
@@ -556,6 +606,8 @@ services:
             DCLAP_ONNX_INTRA_OP_THREADS: ${DCLAP_ONNX_INTRA_OP_THREADS:-1}
             DCLAP_HTTP_PORT: ${DCLAP_HTTP_PORT:-8092}
             DCLAP_IMAGE_VERSION: ${VERSION:-latest}
+            DCLAP_MODEL_PATH: ${DCLAP_MODEL_PATH:-/app/models}
+            DCLAP_TOKENIZER_PATH: ${DCLAP_TOKENIZER_PATH:-/app/tokenizer}
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
         volumes:
             - ${MUSIC_PATH:-./music}:/music:ro

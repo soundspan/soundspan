@@ -28,11 +28,15 @@ services:
       # Empty values generate and persist stable values on first boot.
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+      - API_KEY_PEPPER=${API_KEY_PEPPER:-}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - METRICS_PUBLIC=${METRICS_PUBLIC:-false}
       - LASTFM_API_KEY=${LASTFM_API_KEY:-}
       - LASTFM_SHARED_SECRET=${LASTFM_SHARED_SECRET:-}
+      # Settings-driven .env synchronization controls for the bundled backend.
+      - ENABLE_ENV_FILE_SYNC=${ENABLE_ENV_FILE_SYNC:-}
+      - ENV_FILE_PATH=${ENV_FILE_PATH:-}
       # Optional OIDC / SSO authentication
       - LOCAL_LOGIN_ENABLED=${LOCAL_LOGIN_ENABLED:-true}
       - OIDC_ENABLED=${OIDC_ENABLED:-false}
@@ -67,6 +71,8 @@ services:
       # Coarse feature flags for ML/recommendation subsystems (default: true)
       - AUDIO_ANALYSIS_ENABLED=${AUDIO_ANALYSIS_ENABLED:-true}
       - ACOUSTID_API_KEY=${ACOUSTID_API_KEY:-}
+      - LOUDNESS_TARGET_LUFS=${LOUDNESS_TARGET_LUFS:--18}
+      - LOUDNESS_MEASURE_TIMEOUT_SECONDS=${LOUDNESS_MEASURE_TIMEOUT_SECONDS:-120}
       - DISCOVERY_ENABLED=${DISCOVERY_ENABLED:-true}
       - AUTO_PLAYLISTS_ENABLED=${AUTO_PLAYLISTS_ENABLED:-true}
       - FEDERATION_ENABLED=${FEDERATION_ENABLED:-false}
@@ -94,6 +100,8 @@ services:
       - VIBE_PROVIDER_URL=${VIBE_PROVIDER_URL:-http://localhost:8092}
       - MODEL_IDLE_TIMEOUT=${MODEL_IDLE_TIMEOUT:-300}
       - DCLAP_ONNX_INTRA_OP_THREADS=${DCLAP_ONNX_INTRA_OP_THREADS:-1}
+      - DCLAP_MODEL_PATH=${DCLAP_MODEL_PATH:-/app/vibe-provider-dclap/models}
+      - DCLAP_TOKENIZER_PATH=${DCLAP_TOKENIZER_PATH:-/app/vibe-provider-dclap/tokenizer}
       # MusicCNN queue socket timeout; runtime enforces at least BRPOP timeout + 5s
       - AUDIO_REDIS_SOCKET_TIMEOUT=${AUDIO_REDIS_SOCKET_TIMEOUT:-35}
       # Lidarr webhook callback URL - how Lidarr reaches soundspan when downloads complete
