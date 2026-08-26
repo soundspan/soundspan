@@ -93,6 +93,7 @@ const mockExtractCoverArt = jest.fn();
 const mockCreateMapping = jest.fn();
 const mockRecomputeAlbumLoudness = jest.fn();
 const mockBumpSearchCacheVersion = jest.fn();
+const mockDeduplicateScannerAlbums = jest.fn();
 const mockConfig = {
     music: { transcodeCachePath: "/cache/transcodes" },
     scanFileConcurrency: 2,
@@ -248,12 +249,18 @@ jest.mock("../searchCacheVersion", () => ({
     bumpSearchCacheVersion: mockBumpSearchCacheVersion,
 }));
 
+jest.mock("../scannerAlbumDedup", () => ({
+    deduplicateScannerAlbums: mockDeduplicateScannerAlbums,
+}));
+
 jest.mock("../../config", () => ({
     config: mockConfig,
 }));
 
 const { MusicScannerService } =
     require("../musicScanner") as typeof import("../musicScanner");
+const { resolveScannerAlbum } =
+    require("../musicScannerIdentity") as typeof import("../musicScannerIdentity");
 const { persistScannedTrack } =
     require("../scannedTrackPersistence") as typeof import("../scannedTrackPersistence");
 const { isLossyAudioCodec } =
@@ -419,7 +426,20 @@ beforeEach(() => {
         location: "LIBRARY",
         rgMbid: "rg-album-1",
     });
-    mockPrisma.album.findMany.mockResolvedValue([]);
+    mockPrisma.album.findMany.mockImplementation(async (query) =>
+        query?.where?.artistId === "artist-1" && query?.select?.rgMbid
+            ? [
+                  {
+                      id: "album-1",
+                      title: "Test Album",
+                      coverUrl: null,
+                      location: "LIBRARY",
+                      rgMbid: "rg-album-1",
+                      _count: { tracks: 1 },
+                  },
+              ]
+            : [],
+    );
     mockPrisma.album.findUnique.mockResolvedValue(null);
     mockPrisma.album.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.album.create.mockResolvedValue({
@@ -445,6 +465,22 @@ beforeEach(() => {
     mockComputeAudioStreamHash.mockResolvedValue("sha256:" + "ab".repeat(32));
     mockCreateMapping.mockResolvedValue({ id: "mapping-1" });
     mockBumpSearchCacheVersion.mockResolvedValue(undefined);
+    mockDeduplicateScannerAlbums.mockResolvedValue({
+        affectedArtistIds: [],
+        albumsDeferredByBatchCap: 0,
+        failed: 0,
+        groupsDeferredByCap: 0,
+        groupsFound: 0,
+        merged: 0,
+        skippedBothReal: 0,
+        skippedNoActiveLocalTracks: 0,
+        skippedNoDirOverlap: 0,
+        skippedNullActiveLocalPath: 0,
+        skippedRevalidation: 0,
+        skippedTrackLimit: 0,
+        skippedUnsafeReferences: 0,
+        skippedUserOverrides: 0,
+    });
 });
 
 export {
@@ -468,8 +504,10 @@ export {
     mockCreateMapping,
     mockRecomputeAlbumLoudness,
     mockBumpSearchCacheVersion,
+    mockDeduplicateScannerAlbums,
     mockConfig,
     MusicScannerService,
+    resolveScannerAlbum,
     persistScannedTrack,
     isLossyAudioCodec,
     albumOrphanRetentionGuardWhere,

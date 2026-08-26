@@ -2,9 +2,11 @@ import type { Prisma } from "@prisma/client";
 import {
     areArtistNamesSimilar,
     normalizeArtistName,
+    normalizeForExactKey,
 } from "../utils/artistNormalization";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { selectPreferredScannerAlbumCandidate } from "./scannerAlbumIdentityPolicy";
 
 type ScannerArtist = Pick<
     Prisma.ArtistGetPayload<object>,
@@ -15,6 +17,10 @@ type ScannerAlbum = Pick<
     Prisma.AlbumGetPayload<object>,
     "coverUrl" | "id" | "location" | "rgMbid" | "title"
 >;
+
+type ScannerAlbumMatchCandidate = ScannerAlbum & {
+    activeTrackCount: number;
+};
 
 interface ArtistResolution {
     artist: ScannerArtist;
@@ -225,11 +231,73 @@ async function findAlbum(
         ? await prisma.album.findFirst({
               where: { artistId, rgMbid: albumMbid },
           })
-        : await prisma.album.findFirst({
-              where: { artistId, title: albumTitle },
-          });
+        : await findUntaggedAlbum(artistId, albumTitle);
     if (scopedAlbum || !albumMbid) return scopedAlbum;
     return prisma.album.findUnique({ where: { rgMbid: albumMbid } });
+}
+
+async function findUntaggedAlbum(
+    artistId: string,
+    albumTitle: string,
+): Promise<ScannerAlbum | null> {
+    // The resolution ladder intentionally has no directory evidence, matching
+    // albumResolutionService. Real-rgMbid preference and the post-scan dedup
+    // pass bound the known same-title edition risk.
+    const insensitiveMatches = await prisma.album.findMany({
+        where: {
+            artistId,
+            title: { equals: albumTitle, mode: "insensitive" },
+        },
+        orderBy: { id: "asc" },
+        take: 100,
+        select: {
+            coverUrl: true,
+            id: true,
+            location: true,
+            rgMbid: true,
+            title: true,
+            _count: { select: { tracks: { where: { removedAt: null } } } },
+        },
+    });
+    const normalizedTitle = normalizeForExactKey(albumTitle);
+    // This deterministic scan is capped until normalized identity is stored;
+    // the bounded post-scan dedup pass self-heals deferred duplicates.
+    const candidates = await prisma.album.findMany({
+        where: { artistId },
+        orderBy: { id: "asc" },
+        select: {
+            coverUrl: true,
+            id: true,
+            location: true,
+            rgMbid: true,
+            title: true,
+            _count: { select: { tracks: { where: { removedAt: null } } } },
+        },
+        take: 100,
+    });
+    const matches = new Map<string, ScannerAlbumMatchCandidate>();
+    for (const candidate of [...insensitiveMatches, ...candidates]) {
+        if (normalizeForExactKey(candidate.title) !== normalizedTitle) continue;
+        matches.set(candidate.id, {
+            coverUrl: candidate.coverUrl,
+            id: candidate.id,
+            location: candidate.location,
+            rgMbid: candidate.rgMbid,
+            title: candidate.title,
+            activeTrackCount: candidate._count.tracks,
+        });
+    }
+    const preferred = selectPreferredScannerAlbumCandidate([
+        ...matches.values(),
+    ]);
+    if (!preferred) return null;
+    return {
+        coverUrl: preferred.coverUrl,
+        id: preferred.id,
+        location: preferred.location,
+        rgMbid: preferred.rgMbid,
+        title: preferred.title,
+    };
 }
 
 async function createAlbum(

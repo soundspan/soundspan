@@ -19,6 +19,7 @@ import {
     mockCreateMapping,
     mockRecomputeAlbumLoudness,
     mockBumpSearchCacheVersion,
+    mockDeduplicateScannerAlbums,
     mockConfig,
     MusicScannerService,
     persistScannedTrack,
@@ -352,11 +353,65 @@ describe("MusicScannerService helper methods", () => {
             expect.any(Object),
         );
     });
+
+    it("continues orphan maintenance when scanner album deduplication fails", async () => {
+        const scanner = new MusicScannerService();
+        const dedupError = new Error("dedup failed");
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([]);
+        mockDeduplicateScannerAlbums.mockRejectedValueOnce(dedupError);
+
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({ errors: [] }),
+        );
+
+        expect(mockDeduplicateScannerAlbums).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ tracks: { none: {} } }),
+            }),
+        );
+        expect(mockLogger.error).toHaveBeenCalledWith(
+            "Scanner album deduplication failed; continuing orphan cleanup",
+            { error: dedupError },
+        );
+    });
+
+    it("refreshes artist counts for album merges when no files changed", async () => {
+        const scanner = new MusicScannerService();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([]);
+        mockDeduplicateScannerAlbums.mockResolvedValueOnce({
+            affectedArtistIds: ["artist-from-dedup"],
+            albumsDeferredByBatchCap: 0,
+            failed: 0,
+            groupsDeferredByCap: 0,
+            groupsFound: 1,
+            merged: 1,
+            skippedBothReal: 0,
+            skippedNoActiveLocalTracks: 0,
+            skippedNoDirOverlap: 0,
+            skippedNullActiveLocalPath: 0,
+            skippedRevalidation: 0,
+            skippedTrackLimit: 0,
+            skippedUnsafeReferences: 0,
+            skippedUserOverrides: 0,
+        });
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockUpdateArtistCountsInBatches).toHaveBeenCalledWith([
+            "artist-from-dedup",
+        ]);
+    });
 });
 
 describe("MusicScannerService.processAudioFile artist fallbacks", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrisma.album.findFirst.mockReset();
+        mockPrisma.album.findMany.mockReset();
+        mockPrisma.album.findUnique.mockReset();
+        mockPrisma.album.create.mockReset();
+        mockPrisma.album.update.mockReset();
 
         mockStat.mockResolvedValue({
             mtime: new Date("2026-02-01T00:00:00.000Z"),
@@ -1116,16 +1171,16 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             normalizedName: "john williams",
             mbid: "artist-mbid-hook",
         });
-        mockPrisma.album.findMany.mockResolvedValueOnce([
-            { location: "REMOTE" },
-        ] as any[]);
-        mockPrisma.album.findFirst.mockResolvedValueOnce({
-            id: "album-hook",
-            title: "Hook (Original Motion Picture Soundtrack)",
-            coverUrl: null,
-            location: "REMOTE",
-            rgMbid: "remote:hook",
-        });
+        mockPrisma.album.findMany.mockResolvedValue([
+            {
+                id: "album-hook",
+                title: "Hook (Original Motion Picture Soundtrack)",
+                coverUrl: null,
+                location: "REMOTE",
+                rgMbid: "remote:hook",
+                _count: { tracks: 1 },
+            },
+        ]);
         mockPrisma.album.update.mockResolvedValueOnce({
             id: "album-hook",
             title: "Hook (Original Motion Picture Soundtrack)",
@@ -1275,6 +1330,11 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
 describe("MusicScannerService.processAudioFile album resolution (PR #5 regressions)", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrisma.album.findFirst.mockReset();
+        mockPrisma.album.findMany.mockReset();
+        mockPrisma.album.findUnique.mockReset();
+        mockPrisma.album.create.mockReset();
+        mockPrisma.album.update.mockReset();
 
         mockStat.mockResolvedValue({
             mtime: new Date("2026-02-01T00:00:00.000Z"),
@@ -1452,13 +1512,16 @@ describe("MusicScannerService.processAudioFile album resolution (PR #5 regressio
                 codec: "audio/flac",
             },
         } as any);
-        mockPrisma.album.findFirst.mockResolvedValueOnce({
-            id: "album-real",
-            title: "Mixed Album",
-            coverUrl: null,
-            location: "LIBRARY",
-            rgMbid: "rg-real",
-        });
+        mockPrisma.album.findMany.mockResolvedValue([
+            {
+                id: "album-real",
+                title: "Mixed Album",
+                coverUrl: null,
+                location: "LIBRARY",
+                rgMbid: "rg-real",
+                _count: { tracks: 1 },
+            },
+        ]);
 
         await scanner.processAudioFile(
             "/music/Artist B/Mixed Album/02 Untagged Track.flac",
@@ -1466,11 +1529,17 @@ describe("MusicScannerService.processAudioFile album resolution (PR #5 regressio
             "/music",
         );
 
-        // Exact-title match within the artist across ALL albums — not just
-        // temp- ones — so no duplicate same-titled album is created.
-        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
-            where: { artistId: "artist-b", title: "Mixed Album" },
-        });
+        // Case-insensitive title matching spans all of the artist's albums,
+        // not only temp identities, so no duplicate album is created.
+        expect(mockPrisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    artistId: "artist-b",
+                    title: { equals: "Mixed Album", mode: "insensitive" },
+                },
+                orderBy: { id: "asc" },
+            }),
+        );
         expect(mockPrisma.album.create).not.toHaveBeenCalled();
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
             expect.objectContaining({

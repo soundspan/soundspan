@@ -9,6 +9,7 @@ import { CoverArtExtractor } from "./coverArtExtractor";
 import { resolveAlbumCover } from "./metadata/albumCoverResolver";
 import {
     normalizeArtistName,
+    normalizeForExactKey,
     canonicalizeVariousArtists,
     extractPrimaryArtist,
     parseArtistFromPath,
@@ -35,6 +36,7 @@ import {
     resolveScannerArtist,
 } from "./musicScannerIdentity";
 import { bumpSearchCacheVersion } from "./searchCacheVersion";
+import { deduplicateScannerAlbums } from "./scannerAlbumDedup";
 
 const scanLogger = logger.child("MusicScannerService");
 const TRACK_IDENTITY_SELECT = {
@@ -671,6 +673,18 @@ export class MusicScannerService {
 
         // Soft-removed tracks preserve parents because they retain Track rows.
         if (shouldCleanOrphans) {
+            // Scan-maintenance admission serializes this pass against scans.
+            try {
+                const dedupResult = await deduplicateScannerAlbums();
+                for (const artistId of dedupResult.affectedArtistIds) {
+                    this.touchedArtistIds.add(artistId);
+                }
+            } catch (error: unknown) {
+                scanLogger.error(
+                    "Scanner album deduplication failed; continuing orphan cleanup",
+                    { error },
+                );
+            }
             await cleanupOrphanedLibraryEntities();
         }
 
@@ -696,6 +710,8 @@ export class MusicScannerService {
             });
         }
 
+        // This unconditional bump covers dedup merges even when orphan cleanup
+        // finds nothing to delete and therefore performs no cache bump itself.
         await bumpSearchCacheVersion();
 
         return result;
@@ -1279,7 +1295,7 @@ export class MusicScannerService {
 
         const albumResolutionKey = albumMbid
             ? `mbid:${albumMbid}`
-            : `title:${artist.id}:${albumTitle}`;
+            : `title:${artist.id}:${normalizeForExactKey(albumTitle)}`;
         const albumResolution = await this.resolveOnce(
             this.albumResolutions,
             albumResolutionKey,

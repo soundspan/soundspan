@@ -35,6 +35,11 @@ import type { TestIdentityTrack } from "./musicScannerService.helpers";
 describe("MusicScannerService.scanLibrary", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrisma.album.findFirst.mockReset();
+        mockPrisma.album.findMany.mockReset();
+        mockPrisma.album.findUnique.mockReset();
+        mockPrisma.album.create.mockReset();
+        mockPrisma.album.update.mockReset();
         queueInstances.length = 0;
         mockConfig.scanFileConcurrency = 2;
         mockConfig.workers.trackRemovalRetentionDays = 90;
@@ -250,7 +255,7 @@ describe("MusicScannerService.scanLibrary", () => {
         );
     });
 
-    it("serializes artist creation but preserves exact untagged album titles", async () => {
+    it("serializes artist creation and normalized untagged album identity", async () => {
         const scanner = new MusicScannerService();
         const audioFiles = [
             "/music/New Artist/New Album/01.flac",
@@ -317,20 +322,27 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(artistLookupCalls).toBe(2);
         expect(mockPrisma.artist.findFirst).toHaveBeenCalledTimes(4);
         expect(mockPrisma.artist.create).toHaveBeenCalledTimes(1);
-        expect(mockPrisma.album.findFirst).toHaveBeenCalledTimes(2);
-        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
-            where: { artistId: "artist-new", title: "New Album" },
-        });
-        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
-            where: { artistId: "artist-new", title: "  NEW   ALBUM " },
-        });
-        expect(mockPrisma.album.create).toHaveBeenCalledTimes(2);
+        const albumIdentityLookups =
+            mockPrisma.album.findMany.mock.calls.filter(
+                ([query]) => query?.select?._count,
+            );
+        expect(albumIdentityLookups).toHaveLength(2);
+        expect(albumIdentityLookups[0]?.[0]).toEqual(
+            expect.objectContaining({
+                where: {
+                    artistId: "artist-new",
+                    title: { equals: "New Album", mode: "insensitive" },
+                },
+                orderBy: { id: "asc" },
+            }),
+        );
+        expect(mockPrisma.album.create).toHaveBeenCalledTimes(1);
         expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(2);
         expect(
             mockPrisma.track.upsert.mock.calls.map(
                 ([args]) => args.create.albumId,
             ),
-        ).toEqual(expect.arrayContaining(["album-exact", "album-spaced"]));
+        ).toEqual(["album-exact", "album-exact"]);
     });
 
     it("resolves concurrent raw artist fallbacks independently", async () => {
@@ -386,14 +398,17 @@ describe("MusicScannerService.scanLibrary", () => {
                 );
             },
         );
-        mockPrisma.album.findFirst.mockImplementation(
-            async ({ where }: { where: { artistId: string } }) => ({
-                id: `album-${where.artistId}`,
-                title: "Shared Album",
-                coverUrl: null,
-                location: "LIBRARY",
-                rgMbid: `rg-${where.artistId}`,
-            }),
+        mockPrisma.album.findMany.mockImplementation(
+            async ({ where }: { where: { artistId: string } }) => [
+                {
+                    id: `album-${where.artistId}`,
+                    title: "Shared Album",
+                    coverUrl: null,
+                    location: "LIBRARY",
+                    rgMbid: `rg-${where.artistId}`,
+                    _count: { tracks: 1 },
+                },
+            ],
         );
 
         const scan = scanner.scanLibrary("/music");
@@ -490,10 +505,31 @@ describe("MusicScannerService.scanLibrary", () => {
                 return createdArtist;
             },
         );
-        mockPrisma.album.findFirst.mockImplementation(
-            async ({ where }: { where: { artistId: string; title: string } }) =>
-                albumsByIdentity.get(`${where.artistId}:${where.title}`) ??
-                null,
+        mockPrisma.album.findMany.mockImplementation(
+            async ({
+                where,
+                select,
+            }: {
+                where: {
+                    artistId: string;
+                    title?: { equals: string; mode: "insensitive" };
+                };
+                select: { _count?: unknown };
+            }) => {
+                if (!select._count) return [];
+                const albums = [...albumsByIdentity.entries()]
+                    .filter(([key]) => key.startsWith(`${where.artistId}:`))
+                    .map(([, value]) => ({
+                        ...value,
+                        _count: { tracks: 1 },
+                    }));
+                if (!where.title) return albums;
+                return albums.filter(
+                    (album) =>
+                        album.title.toLowerCase() ===
+                        where.title?.equals.toLowerCase(),
+                );
+            },
         );
         mockPrisma.album.create.mockImplementation(
             async ({ data }: { data: { artistId: string; title: string } }) => {

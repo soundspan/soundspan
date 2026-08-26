@@ -184,6 +184,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/remoteProviders/adapters.ts` | Shared remote playback, playlist-import, and playlist-row provider routing |
 | `backend/src/services/remoteProviders/types.ts` | Canonical remote-provider identities and mapping/streaming translators |
 | `backend/src/services/rssParser.ts` | Core |
+| `backend/src/services/scannerAlbumDedup.ts` | Bounded normalized scanner-album duplicate merging before orphan cleanup |
+| `backend/src/services/scannerAlbumIdentityPolicy.ts` | Shared deterministic scanner-album keeper preference |
 | `backend/src/services/search.ts` | Core |
 | `backend/src/services/simpleDownloadManager.ts` | Core |
 | `backend/src/services/soulseekLibraryDownload.ts` | Soulseek album track-list resolution, batch download, and download-job persistence |
