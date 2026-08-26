@@ -332,6 +332,12 @@ jobs:
       - name: Test source file-size gate
         run: npm run check:file-size:test
 
+      - name: Check environment-variable documentation
+        run: node scripts/ci/check-env-docs.mjs
+
+      - name: Test environment-variable documentation gate
+        run: npm run check:env-docs:test
+
       - name: Check deprecated source-scraping tests
         run: node scripts/ci/check-source-scrape.mjs
 
