@@ -85,6 +85,9 @@ spec:
             "DISCOVERY_ENABLED" true
             "AUTO_PLAYLISTS_ENABLED" true
             "FEDERATION_ENABLED" true
+            "SCAN_FILE_CONCURRENCY" true
+            "CATALOG_PERSISTENCE" true
+            "CATALOG_RETENTION_DAYS" true
             "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
             "PROVIDER_TRACK_RETENTION_DAYS" true
             "FEDERATION_SYNC_INTERVAL_MINUTES" true
@@ -198,6 +201,27 @@ spec:
             {{- else }}
             - name: FEDERATION_ENABLED
               value: {{ .Values.config.features.federation | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "SCAN_FILE_CONCURRENCY" }}
+            - name: SCAN_FILE_CONCURRENCY
+              value: {{ index $aioEnv "SCAN_FILE_CONCURRENCY" | quote }}
+            {{- else }}
+            - name: SCAN_FILE_CONCURRENCY
+              value: {{ .Values.config.scanFileConcurrency | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "CATALOG_PERSISTENCE" }}
+            - name: CATALOG_PERSISTENCE
+              value: {{ index $aioEnv "CATALOG_PERSISTENCE" | quote }}
+            {{- else }}
+            - name: CATALOG_PERSISTENCE
+              value: {{ .Values.config.catalogPersistence | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "CATALOG_RETENTION_DAYS" }}
+            - name: CATALOG_RETENTION_DAYS
+              value: {{ index $aioEnv "CATALOG_RETENTION_DAYS" | quote }}
+            {{- else }}
+            - name: CATALOG_RETENTION_DAYS
+              value: {{ .Values.config.catalogRetentionDays | quote }}
             {{- end }}
             {{- if hasKey $aioEnv "FEDERATION_TOMBSTONE_RETENTION_DAYS" }}
             - name: FEDERATION_TOMBSTONE_RETENTION_DAYS

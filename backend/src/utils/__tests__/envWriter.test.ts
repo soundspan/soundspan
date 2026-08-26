@@ -230,6 +230,24 @@ describe("envWriter", () => {
         expect(written).toContain("OPENAI_API_KEY=env-openai-key-456");
     });
 
+    it("groups both Last.fm credentials in the Last.fm category", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        mockReadFileSync.mockImplementation(() => {
+            throw createFsError("ENOENT");
+        });
+
+        await writeEnvFile({
+            LASTFM_API_KEY: "lastfm-api-key",
+            LASTFM_SHARED_SECRET: "lastfm-shared-secret",
+        });
+
+        const written = String(mockWriteFileSync.mock.calls[0][1]);
+        expect(written).toContain(
+            "# Last.fm\nLASTFM_API_KEY=lastfm-api-key\nLASTFM_SHARED_SECRET=lastfm-shared-secret",
+        );
+        expect(written).not.toContain("# Other Variables");
+    });
+
     it("omits incoming integration secret keys in DB-only mode", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         process.env.SECRETS_DB_ONLY = "true";

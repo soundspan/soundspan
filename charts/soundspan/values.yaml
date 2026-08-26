@@ -760,6 +760,13 @@ config:
   deezerApiKey: ""
   # -- Set to true to expose API docs publicly
   docsPublic: false
+  # -- Maximum number of music files processed concurrently during a library scan.
+  #    Range 1 through 10.
+  scanFileConcurrency: 3
+  # -- Keep externally browsed artists and albums in the local catalog.
+  catalogPersistence: true
+  # -- Retention window in days for catalog entries that have not been accessed.
+  catalogRetentionDays: 180
   # -- Federation tombstone retention in days. Minimum 3 preserves the stale
   #    cursor safety margin before a consumer must perform a full resync.
   federationTombstoneRetentionDays: 90

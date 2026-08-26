@@ -79,6 +79,8 @@ services:
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
             METRICS_TOKEN: "${METRICS_TOKEN:-}"
             METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
+            LASTFM_API_KEY: "${LASTFM_API_KEY:-}"
+            LASTFM_SHARED_SECRET: "${LASTFM_SHARED_SECRET:-}"
 
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
@@ -103,6 +105,8 @@ services:
             no_proxy:
             FEDERATION_TOMBSTONE_RETENTION_DAYS: ${FEDERATION_TOMBSTONE_RETENTION_DAYS:-90}
             PROVIDER_TRACK_RETENTION_DAYS: ${PROVIDER_TRACK_RETENTION_DAYS:-30}
+            CATALOG_PERSISTENCE: ${CATALOG_PERSISTENCE:-true}
+            CATALOG_RETENTION_DAYS: ${CATALOG_RETENTION_DAYS:-180}
             FEDERATION_SYNC_INTERVAL_MINUTES: ${FEDERATION_SYNC_INTERVAL_MINUTES:-15}
 
             # Keep these enabled for cross-replica Listen Together behavior
@@ -232,6 +236,8 @@ services:
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
             METRICS_TOKEN: "${METRICS_TOKEN:-}"
             METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
+            LASTFM_API_KEY: "${LASTFM_API_KEY:-}"
+            LASTFM_SHARED_SECRET: "${LASTFM_SHARED_SECRET:-}"
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
             DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-true}
@@ -255,6 +261,8 @@ services:
             no_proxy:
             FEDERATION_TOMBSTONE_RETENTION_DAYS: ${FEDERATION_TOMBSTONE_RETENTION_DAYS:-90}
             PROVIDER_TRACK_RETENTION_DAYS: ${PROVIDER_TRACK_RETENTION_DAYS:-30}
+            CATALOG_PERSISTENCE: ${CATALOG_PERSISTENCE:-true}
+            CATALOG_RETENTION_DAYS: ${CATALOG_RETENTION_DAYS:-180}
             FEDERATION_SYNC_INTERVAL_MINUTES: ${FEDERATION_SYNC_INTERVAL_MINUTES:-15}
             BACKEND_PROCESS_ROLE: worker
             WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-3010}

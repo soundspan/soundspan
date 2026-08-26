@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Helm deployments can now configure library scan concurrency and catalog persistence retention through chart values.
 - Audio analysis now stores Chromaprint fingerprints for local tracks and optionally resolves high-confidence MusicBrainz identities through AcoustID when `ACOUSTID_API_KEY` is configured (#763).
 - Soulseek album downloads now require one folder to cover at least 90% of requested tracks with at least 0.85 content coherence, then use bounded peer signals only to rank eligible folders before falling back to per-track assembly (#762).
 - Per-user Last.fm and ListenBrainz connections can now forward music scrobbles and now-playing updates through documented backend endpoints (#761).
@@ -59,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docker Compose and all-in-one deployments now pass Last.fm scrobbling and catalog-persistence settings through to the app instead of silently ignoring them.
 - Scrobble forwarding now preserves OpenSubsonic millisecond timestamps, disables provider connections after invalid authentication, rate-limits credential validation and Last.fm authorization on the distributed auth tier, rejects stale Last.fm authorization completions, and mounts both Last.fm secret values from a configured Helm existing Secret (#761).
 - TIDAL and YouTube Music sidecar containers no longer crash at startup after the `app.py` decomposition when the repository-root path probe runs outside the repository directory layout.
 - Album downloads that deliver only part of the requested album now fail with a "Partial download: N/M tracks" status instead of reporting success, and library reconciliation no longer marks a multi-track request complete off a single-track album (#826).

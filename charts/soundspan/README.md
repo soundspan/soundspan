@@ -414,6 +414,9 @@ config:
   federationTombstoneRetentionDays: 90
   federationSyncIntervalMinutes: 15
   providerTrackRetentionDays: 30
+  scanFileConcurrency: 3
+  catalogPersistence: true
+  catalogRetentionDays: 180
 ```
 
 When a flag is `false`, the backend does not mount the corresponding API
@@ -648,6 +651,9 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `DISCOVERY_ENABLED` | `config.features.discovery` | No | `true` |
 | `AUTO_PLAYLISTS_ENABLED` | `config.features.autoPlaylists` | No | `true` |
 | `FEDERATION_ENABLED` | `config.features.federation` | No | `false` |
+| `SCAN_FILE_CONCURRENCY` | `config.scanFileConcurrency` | No | `3` |
+| `CATALOG_PERSISTENCE` | `config.catalogPersistence` | No | `true` |
+| `CATALOG_RETENTION_DAYS` | `config.catalogRetentionDays` | No | `180` |
 | `FEDERATION_TOMBSTONE_RETENTION_DAYS` | `config.federationTombstoneRetentionDays` | No | `90` |
 | `PROVIDER_TRACK_RETENTION_DAYS` | `config.providerTrackRetentionDays` | No | `30` |
 | `FEDERATION_SYNC_INTERVAL_MINUTES` | `config.federationSyncIntervalMinutes` | No | `15` |
