@@ -10,9 +10,15 @@ import types
 from pathlib import Path
 from typing import Any
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if (REPOSITORY_ROOT / "services").is_dir() and str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.append(str(REPOSITORY_ROOT))
+_MODULE_PATH = Path(__file__).resolve()
+if len(_MODULE_PATH.parents) >= 3:
+    REPOSITORY_ROOT = _MODULE_PATH.parents[2]
+    if (REPOSITORY_ROOT / "services").is_dir() and str(REPOSITORY_ROOT) not in sys.path:
+        sys.path.append(str(REPOSITORY_ROOT))
+
+from services.common.sidecar_runtime_utils import ensure_repository_root_on_path
+
+ensure_repository_root_on_path(__file__)
 
 import tidal_auth as _auth
 import tidal_browse as _browse

@@ -8,17 +8,22 @@ from typing import Any
 
 from fastapi import Depends, FastAPI
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if (REPOSITORY_ROOT / "services").is_dir() and str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.append(str(REPOSITORY_ROOT))
+_MODULE_PATH = Path(__file__).resolve()
+if len(_MODULE_PATH.parents) >= 3:
+    REPOSITORY_ROOT = _MODULE_PATH.parents[2]
+    if (REPOSITORY_ROOT / "services").is_dir() and str(REPOSITORY_ROOT) not in sys.path:
+        sys.path.append(str(REPOSITORY_ROOT))
 
 from services.common.logging_utils import configure_service_logger
 from services.common.sidecar_runtime_utils import (
+    ensure_repository_root_on_path,
     install_urllib3_pool_warning_throttle,
     register_error_handlers,
     require_internal_secret,
     sanitized_http_error,
 )
+
+ensure_repository_root_on_path(__file__)
 
 JsonObject = dict[str, Any]
 JsonList = list[JsonObject]

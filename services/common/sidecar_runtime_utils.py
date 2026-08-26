@@ -7,9 +7,11 @@ import logging
 import os
 import random
 import re
+import sys
 import threading
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -33,6 +35,24 @@ _POOL_WARNING_REPLACEMENT = (
     "urllib3 connection pool saturated; suppressing repeated pool-full "
     "warnings for 300s. Increase upstream pool size if this persists."
 )
+
+
+def ensure_repository_root_on_path(module_file: str) -> None:
+    """Append the repo root to sys.path for in-tree runs; no-op in containers."""
+    try:
+        module_path = Path(module_file).resolve()
+    except (OSError, RuntimeError):
+        return
+
+    if len(module_path.parents) < 3:
+        return
+
+    repository_root = module_path.parents[2]
+    repository_root_string = str(repository_root)
+    if not (repository_root / "services").is_dir() or repository_root_string in sys.path:
+        return
+
+    sys.path.append(repository_root_string)
 
 
 class _ThrottlePoolFullWarning(logging.Filter):
