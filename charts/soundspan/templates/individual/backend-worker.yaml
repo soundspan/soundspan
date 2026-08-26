@@ -128,6 +128,7 @@ spec:
             "AUDIOBOOKSHELF_URL" true
             "AUDIOBOOKSHELF_TOKEN" true
             "LASTFM_API_KEY" true
+            "LASTFM_SHARED_SECRET" true
             "FANART_API_KEY" true
             "OPENAI_API_KEY" true
           }}
@@ -436,7 +437,8 @@ spec:
               value: {{ .Values.config.audiobookshelfUrl | quote }}
             {{- end }}
             {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "AUDIOBOOKSHELF_TOKEN" "secretKey" "AUDIOBOOKSHELF_TOKEN" "value" .Values.config.audiobookshelfToken "enabled" .Values.config.audiobookshelfUrl "envMap" $backendWorkerEnv) | nindent 12 }}
-            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LASTFM_API_KEY" "secretKey" "LASTFM_API_KEY" "value" .Values.config.lastfmApiKey "enabled" .Values.config.lastfmApiKey "envMap" $backendWorkerEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LASTFM_API_KEY" "secretKey" "LASTFM_API_KEY" "value" .Values.config.lastfmApiKey "enabled" (or .Values.config.lastfmApiKey .Values.secrets.apiKeysInExistingSecret) "envMap" $backendWorkerEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LASTFM_SHARED_SECRET" "secretKey" "LASTFM_SHARED_SECRET" "value" .Values.config.lastfmSharedSecret "enabled" (or .Values.config.lastfmSharedSecret .Values.secrets.apiKeysInExistingSecret) "envMap" $backendWorkerEnv) | nindent 12 }}
             {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "FANART_API_KEY" "secretKey" "FANART_API_KEY" "value" .Values.config.fanartApiKey "enabled" .Values.config.fanartApiKey "envMap" $backendWorkerEnv) | nindent 12 }}
             {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "OPENAI_API_KEY" "secretKey" "OPENAI_API_KEY" "value" .Values.config.openaiApiKey "enabled" .Values.config.openaiApiKey "envMap" $backendWorkerEnv) | nindent 12 }}
             {{- range $key := keys $backendWorkerEnv | sortAlpha }}

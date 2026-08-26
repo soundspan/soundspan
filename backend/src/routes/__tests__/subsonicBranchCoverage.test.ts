@@ -5,6 +5,11 @@ const mockGetStreamFilePath = jest.fn();
 const mockStreamFileWithRangeSupport = jest.fn();
 const mockDestroyStreamingService = jest.fn();
 const mockLookup = jest.fn();
+const mockForwardTrackReferenceIsolated = jest.fn();
+
+jest.mock("../../services/scrobbleForwarder", () => ({
+    forwardTrackReferenceIsolated: mockForwardTrackReferenceIsolated,
+}));
 
 jest.mock("dns/promises", () => ({
     lookup: (...args: unknown[]) => mockLookup(...args),
@@ -391,6 +396,11 @@ describe("subsonic branch coverage focused handlers", () => {
         );
 
         expect(mockPlayCreateMany).not.toHaveBeenCalled();
+        expect(mockForwardTrackReferenceIsolated).toHaveBeenCalledTimes(2);
+        expect(mockForwardTrackReferenceIsolated).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({ kind: "now_playing" }),
+        );
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             {},

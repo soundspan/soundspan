@@ -166,7 +166,10 @@ describe("config module", () => {
             apiKey: "lidarr-key",
             enabled: true,
         });
-        expect(config.lastfm).toEqual({ apiKey: "lastfm-key" });
+        expect(config.lastfm).toEqual({
+            apiKey: "lastfm-key",
+            sharedSecret: "",
+        });
         expect(config.openai).toEqual({ apiKey: "openai-key" });
         expect(config.deezer).toEqual({ apiKey: "deezer-key" });
         expect(config.discover).toEqual({ mode: "legacy" });
@@ -601,7 +604,10 @@ describe("config module", () => {
             ALLOWED_ORIGINS: undefined,
         });
         expect(prodModule.config.allowedOrigins).toEqual([]);
-        expect(prodModule.config.lastfm).toEqual({ apiKey: "" });
+        expect(prodModule.config.lastfm).toEqual({
+            apiKey: "",
+            sharedSecret: "",
+        });
     });
 
     it("defaults secureCookies to true in production and false otherwise", async () => {

@@ -5,6 +5,8 @@ const AUTH_HEADER = "x-test-auth";
 const AUTH_VALUE = "ok";
 
 const mockLoggerError = jest.fn();
+const mockForwardTrackReferenceIsolated = jest.fn();
+const mockForwardScrobbleIsolated = jest.fn();
 
 const prisma = {
     track: {
@@ -54,6 +56,11 @@ jest.mock("../../services/trackMappingService", () => ({
 
 jest.mock("../../services/remoteTrackMetadataResolver", () => ({
     resolveRemoteTrackMetadataForRequest: jest.fn(),
+}));
+
+jest.mock("../../services/scrobbleForwarder", () => ({
+    forwardTrackReferenceIsolated: mockForwardTrackReferenceIsolated,
+    forwardScrobbleIsolated: mockForwardScrobbleIsolated,
 }));
 
 import { prisma as prismaClient } from "../../utils/db";
@@ -130,7 +137,15 @@ describe("plays routes integration", () => {
                 userId: "user-1",
                 trackId: "track-1",
                 source: "LIBRARY",
+                playedAt: expect.any(Date),
             },
+        });
+        expect(mockForwardTrackReferenceIsolated).toHaveBeenCalledWith({
+            userId: "user-1",
+            mediaType: "music",
+            kind: "scrobble",
+            listenedAt: expect.any(Date),
+            reference: { source: "local", id: "track-1" },
         });
     });
 

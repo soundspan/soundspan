@@ -13,6 +13,10 @@ import {
     normalizeTidalTrack,
     normalizeYtMusicTrack,
 } from "../services/unifiedTrackResponse";
+import {
+    forwardScrobbleIsolated,
+    forwardTrackReferenceIsolated,
+} from "../services/scrobbleForwarder";
 
 const router = Router();
 
@@ -323,12 +327,22 @@ router.post("/", async (req, res) => {
                 return res.status(404).json({ error: "Track not found" });
             }
 
+            const playedAt = new Date();
             const play = await prisma.play.create({
                 data: {
                     userId,
                     trackId: payload.trackId,
                     source: "LIBRARY",
+                    playedAt,
                 },
+            });
+
+            forwardTrackReferenceIsolated({
+                userId,
+                mediaType: "music",
+                kind: "scrobble",
+                listenedAt: playedAt,
+                reference: { source: "local", id: payload.trackId },
             });
 
             return res.json(play);
@@ -358,11 +372,25 @@ router.post("/", async (req, res) => {
                 isrc: resolvedMetadata.isrc,
                 explicit: resolvedMetadata.explicit,
             });
+            const playedAt = new Date();
             const play = await prisma.play.create({
                 data: {
                     userId,
                     trackTidalId: ensured.id,
                     source: "TIDAL",
+                    playedAt,
+                },
+            });
+            forwardScrobbleIsolated({
+                userId,
+                mediaType: "music",
+                kind: "scrobble",
+                listenedAt: playedAt,
+                track: {
+                    title: resolvedMetadata.title,
+                    artist: resolvedMetadata.artist,
+                    album: resolvedMetadata.album,
+                    durationSeconds: resolvedMetadata.duration,
                 },
             });
             return res.json(play);
@@ -389,11 +417,26 @@ router.post("/", async (req, res) => {
             duration: resolvedMetadata.duration,
             thumbnailUrl: resolvedMetadata.thumbnailUrl,
         });
+        const playedAt = new Date();
         const play = await prisma.play.create({
             data: {
                 userId,
                 trackYtMusicId: ensured.id,
                 source: "YOUTUBE_MUSIC",
+                playedAt,
+            },
+        });
+
+        forwardScrobbleIsolated({
+            userId,
+            mediaType: "music",
+            kind: "scrobble",
+            listenedAt: playedAt,
+            track: {
+                title: resolvedMetadata.title,
+                artist: resolvedMetadata.artist,
+                album: resolvedMetadata.album,
+                durationSeconds: resolvedMetadata.duration,
             },
         });
 

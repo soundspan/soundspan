@@ -30,6 +30,7 @@ import { WithNotifications } from "./api/notifications";
 import { WithPlaylists } from "./api/playlists";
 import { WithPodcasts } from "./api/podcasts";
 import { WithPlays } from "./api/plays";
+import { WithScrobbling } from "./api/scrobbling";
 import { WithRecommendations } from "./api/recommendations";
 import { WithRequests } from "./api/requests";
 import { WithSettings } from "./api/settings";
@@ -476,12 +477,14 @@ class ApiClient extends WithRequests(
                                                                         WithAuth(
                                                                             WithConnectors(
                                                                                 WithSettings(
-                                                                                    WithPlays(
-                                                                                        WithRecommendations(
-                                                                                            WithMedia(
-                                                                                                WithPlaylists(
-                                                                                                    WithLibrary(
-                                                                                                        ApiClientCore,
+                                                                                    WithScrobbling(
+                                                                                        WithPlays(
+                                                                                            WithRecommendations(
+                                                                                                WithMedia(
+                                                                                                    WithPlaylists(
+                                                                                                        WithLibrary(
+                                                                                                            ApiClientCore,
+                                                                                                        ),
                                                                                                     ),
                                                                                                 ),
                                                                                             ),

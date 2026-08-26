@@ -824,6 +824,7 @@ export const config = {
     // Last.fm - operator-provided via env or system settings
     lastfm: {
         apiKey: secretsDbOnly ? "" : process.env.LASTFM_API_KEY || "",
+        sharedSecret: process.env.LASTFM_SHARED_SECRET?.trim() || "",
     },
 
     // OpenAI - reads from database

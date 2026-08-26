@@ -693,7 +693,8 @@ secrets:
   postgresDatabase: soundspan
   # -- When using existingSecret, set true if that Secret ALSO carries the
   #    optional third-party API keys (LIDARR_API_KEY, AUDIOBOOKSHELF_TOKEN,
-  #    LASTFM_API_KEY, FANART_API_KEY, OPENAI_API_KEY). Default false keeps the
+  #    LASTFM_API_KEY, LASTFM_SHARED_SECRET, FANART_API_KEY, OPENAI_API_KEY).
+  #    Default false keeps the
   #    legacy behavior of injecting config.* API keys as plaintext env.
   apiKeysInExistingSecret: false
 
@@ -751,6 +752,8 @@ config:
   # the keys below are injected via secretKeyRef, not plaintext pod-spec env.
   # With an existingSecret, they stay plaintext unless secrets.apiKeysInExistingSecret=true.
   lastfmApiKey: ""
+  # -- Last.fm application shared secret for signed per-user scrobbling calls.
+  lastfmSharedSecret: ""
   fanartApiKey: ""
   openaiApiKey: ""
   deezerApiKey: ""

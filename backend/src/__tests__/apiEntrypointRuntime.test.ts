@@ -268,6 +268,7 @@ describe("api entrypoint runtime behavior", () => {
             federationQueue: { name: "federation" },
             albumDownloadQueue: { name: "album-download" },
             artistExpansionQueue: { name: "worker-artist-expansion" },
+            scrobbleQueue: { name: "scrobble-forwarding" },
         };
         const queueRegistry = Object.values(workersQueues);
         const registerQueueMetrics = jest.fn();
@@ -522,6 +523,9 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.queueRegistry).toContainEqual({
             name: "worker-artist-expansion",
         });
+        expect(mocks.queueRegistry).toContainEqual({
+            name: "scrobble-forwarding",
+        });
         expect(mocks.server.listen).toHaveBeenCalledWith(
             3006,
             "0.0.0.0",
@@ -556,7 +560,7 @@ describe("api entrypoint runtime behavior", () => {
         expect(socket.setKeepAlive).toHaveBeenCalledWith(true, 30_000);
         expect(mocks.startPersistLoop).toHaveBeenCalledTimes(1);
         expect(mocks.createBullBoard).toHaveBeenCalledTimes(1);
-        expect(mocks.BullAdapter).toHaveBeenCalledTimes(11);
+        expect(mocks.BullAdapter).toHaveBeenCalledTimes(12);
         expect(mocks.app.get).toHaveBeenCalledWith(
             "/api/docs.json",
             expect.any(Function),
@@ -758,6 +762,7 @@ describe("api entrypoint runtime behavior", () => {
             "/api/library": [route("../routes/library")],
             "/api/plays": ["api-limiter", route("../routes/plays")],
             "/api/settings": ["api-limiter", route("../routes/settings")],
+            "/api/scrobbling": ["api-limiter", route("../routes/scrobbling")],
             "/api/social": ["api-limiter", route("../routes/social")],
             "/api/system-settings": [
                 "admin-surface-limiter",

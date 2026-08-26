@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Soulseek album downloads now require one folder to cover at least 90% of requested tracks with at least 0.85 content coherence, then use bounded peer signals only to rank eligible folders before falling back to per-track assembly (#762).
+- Per-user Last.fm and ListenBrainz connections can now forward music scrobbles and now-playing updates through documented backend endpoints (#761).
 - Artists and albums you browse are now remembered locally, so repeat visits load instantly and survive MusicBrainz outages; a retention sweep clears entries untouched for 180 days (`CATALOG_RETENTION_DAYS`), and `CATALOG_PERSISTENCE=off` disables the feature (#760).
 - Search now shows one Songs section: songs you own and songs you don't sit together (external matches carry provider badges and skip anything already in your library) instead of being split across distant "Songs in Your Library" and "Songs to Discover" sections (#756).
 
@@ -57,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Scrobble forwarding now preserves OpenSubsonic millisecond timestamps, disables provider connections after invalid authentication, rate-limits credential validation and Last.fm authorization on the distributed auth tier, rejects stale Last.fm authorization completions, and mounts both Last.fm secret values from a configured Helm existing Secret (#761).
 - TIDAL and YouTube Music sidecar containers no longer crash at startup after the `app.py` decomposition when the repository-root path probe runs outside the repository directory layout.
 - Album downloads that deliver only part of the requested album now fail with a "Partial download: N/M tracks" status instead of reporting success, and library reconciliation no longer marks a multi-track request complete off a single-track album (#826).
 - TIDAL downloads now tag ALBUMARTIST with the album artist instead of the per-track artist, preventing multi-artist album tracks from splitting into phantom single-track albums.

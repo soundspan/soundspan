@@ -118,12 +118,14 @@ Never commit `.env` files or credentials.
 | `LIDARR_API_KEY`          | Lidarr integration                                                              | If using Lidarr                                    |
 | `OPENAI_API_KEY`          | AI features                                                                     | Optional                                           |
 | `LASTFM_API_KEY`          | Artist recommendations                                                          | Optional                                           |
+| `LASTFM_SHARED_SECRET`    | Signed Last.fm user authentication and scrobble forwarding                       | If using Last.fm scrobbling                        |
 | `FANART_API_KEY`          | Artist images                                                                   | Optional                                           |
 | `YTMUSIC_STREAMER_URL`    | YouTube Music sidecar URL                                                       | If using YouTube Music                             |
 | `TIDAL_SIDECAR_URL`       | TIDAL sidecar URL                                                               | If using TIDAL                                     |
 
 Soulseek credentials are configured via System Settings and stored encrypted in the database.
 Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
+Last.fm scrobble forwarding also requires `LASTFM_SHARED_SECRET` as a runtime secret. Per-user Last.fm session keys and ListenBrainz tokens are encrypted with `SETTINGS_ENCRYPTION_KEY` before database storage and are never returned by status endpoints.
 
 ### Metrics exposure
 

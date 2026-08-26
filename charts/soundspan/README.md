@@ -257,13 +257,13 @@ Keep `localLoginEnabled: true` until SSO works. Set `webBaseUrl` to the web orig
 #### Third-party API keys
 
 Optional integration keys (`config.lidarrApiKey`, `config.audiobookshelfToken`,
-`config.lastfmApiKey`, `config.fanartApiKey`, `config.openaiApiKey`) are **not**
+`config.lastfmApiKey`, `config.lastfmSharedSecret`, `config.fanartApiKey`, `config.openaiApiKey`) are **not**
 rendered as plaintext env in pod specs. When the chart manages its own Secret
 (default), they are stored in that Secret and injected via `secretKeyRef`.
 
 If you use `existingSecret`, these keys stay plaintext (legacy behavior) unless
 you add them to your Secret (`LIDARR_API_KEY`, `AUDIOBOOKSHELF_TOKEN`,
-`LASTFM_API_KEY`, `FANART_API_KEY`, `OPENAI_API_KEY`) and set:
+`LASTFM_API_KEY`, `LASTFM_SHARED_SECRET`, `FANART_API_KEY`, `OPENAI_API_KEY`) and set:
 
 ```yaml
 secrets:
@@ -648,7 +648,8 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `LIDARR_ENABLED` | `config.lidarrEnabled` | No | `false` |
 | `LIDARR_URL` | `config.lidarrUrl` | If Lidarr enabled | none |
 | `LIDARR_API_KEY` | `config.lidarrApiKey` | If Lidarr enabled | none |
-| `LASTFM_API_KEY` | `config.lastfmApiKey` | No | app built-in key if unset |
+| `LASTFM_API_KEY` | `config.lastfmApiKey` | No | unset |
+| `LASTFM_SHARED_SECRET` | `config.lastfmSharedSecret` | For Last.fm scrobbling | unset |
 | `FANART_API_KEY` | `config.fanartApiKey` | No | unset |
 | `OPENAI_API_KEY` | `config.openaiApiKey` | No | unset |
 | `AUDIOBOOKSHELF_URL` | `config.audiobookshelfUrl` | No | unset |

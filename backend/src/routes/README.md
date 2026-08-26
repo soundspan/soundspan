@@ -107,6 +107,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/audiobookRouteResponses.ts` | Audiobook response serializers; not a router                                                          |
 | `backend/src/routes/routeParamName.ts`     | Shared route-parameter name helper; not a router                                                      |
 | `backend/src/routes/search.ts`             | `/api/search`                                                                                         |
+| `backend/src/routes/scrobbling.ts`         | `/api/scrobbling` (per-user Last.fm and ListenBrainz connection lifecycle)                            |
 | `backend/src/routes/settings.ts`           | `/api/settings`                                                                                       |
 | `backend/src/routes/shareLinks.ts`         | `/api/share-links`                                                                                    |
 | `backend/src/routes/social.ts`             | `/api/social`                                                                                         |
@@ -205,6 +206,7 @@ single middleware and endpoint stack composed from these domain modules:
 | `backend/src/routes/subsonic/playlists.ts`               | Playlist reads and mutations                                          |
 | `backend/src/routes/subsonic/mediaRetrieval.ts`          | Audio, cover art, lyrics, and avatar retrieval                        |
 | `backend/src/routes/subsonic/mediaAnnotation.ts`         | Ratings, scrobbles, stars, and unstars                                |
+| `backend/src/routes/subsonic/scrobbleMapping.ts`         | Maps Subsonic scrobble params onto the scrobble forwarder             |
 | `backend/src/routes/subsonic/bookmarksQueue.ts`          | Bookmarks and play-queue state                                        |
 | `backend/src/routes/subsonic/usersMisc.ts`               | User profile and now-playing endpoints                                |
 | `backend/src/routes/subsonic/shared.ts`                  | Shared predicates, parsers, ID mapping, and response-formatting input |

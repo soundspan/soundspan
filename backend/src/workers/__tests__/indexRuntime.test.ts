@@ -51,6 +51,7 @@ describe("workers runtime behavior", () => {
         const federationQueue = createQueueMock();
         const albumDownloadQueue = createQueueMock();
         const artistExpansionQueue = createQueueMock();
+        const scrobbleQueue = createQueueMock();
 
         const logger = {
             debug: jest.fn(),
@@ -105,6 +106,7 @@ describe("workers runtime behavior", () => {
             async () => undefined,
         );
         const processArtistDownloadExpansion = jest.fn(async () => undefined);
+        const processScrobble = jest.fn(async () => "submitted");
         const finalizeAlbumDownloadQueueFailure = jest.fn(
             async () => undefined,
         );
@@ -219,6 +221,7 @@ describe("workers runtime behavior", () => {
             federationQueue,
             albumDownloadQueue,
             artistExpansionQueue,
+            scrobbleQueue,
         }));
         jest.doMock("../federationJobs", () => ({
             registerFederationProcessors,
@@ -262,6 +265,9 @@ describe("workers runtime behavior", () => {
         }));
         jest.doMock("../processors/artistDownloadExpansionProcessor", () => ({
             processArtistDownloadExpansion,
+        }));
+        jest.doMock("../processors/scrobbleProcessor", () => ({
+            processScrobble,
         }));
         jest.doMock("../../services/albumDownloadQueueService", () => ({
             ARTIST_DOWNLOAD_EXPANSION_JOB_NAME: "artist-download-expand",
@@ -377,6 +383,7 @@ describe("workers runtime behavior", () => {
             federationQueue,
             albumDownloadQueue,
             artistExpansionQueue,
+            scrobbleQueue,
             logger,
             startUnifiedEnrichmentWorker,
             stopUnifiedEnrichmentWorker,
@@ -395,6 +402,7 @@ describe("workers runtime behavior", () => {
             processAlbumDownload,
             requeueAlbumDownloadAfterContention,
             processArtistDownloadExpansion,
+            processScrobble,
             finalizeAlbumDownloadQueueFailure,
             recoverUnqueuedAlbumDownloads,
             recoverUnqueuedArtistDownloadExpansions,
@@ -504,6 +512,11 @@ describe("workers runtime behavior", () => {
         expect(mocks.artistExpansionQueue.process).toHaveBeenCalledWith(
             "artist-download-expand",
             mocks.processArtistDownloadExpansion,
+        );
+        expect(mocks.scrobbleQueue.process).toHaveBeenCalledWith(
+            "submit",
+            4,
+            mocks.processScrobble,
         );
         expect(mocks.registerRecoveryJobs).toHaveBeenCalledTimes(1);
         expect(mocks.registerFederationProcessors).not.toHaveBeenCalled();
@@ -1145,6 +1158,7 @@ describe("workers runtime behavior", () => {
         expect(workers.genericImportQueue).toBe(mocks.genericImportQueue);
         expect(workers.albumDownloadQueue).toBe(mocks.albumDownloadQueue);
         expect(workers.artistExpansionQueue).toBe(mocks.artistExpansionQueue);
+        expect(workers.scrobbleQueue).toBe(mocks.scrobbleQueue);
     });
 
     it("shuts down workers and queue resources cleanly", async () => {
@@ -1180,11 +1194,13 @@ describe("workers runtime behavior", () => {
         expect(
             mocks.artistExpansionQueue.removeAllListeners,
         ).toHaveBeenCalledTimes(1);
+        expect(mocks.scrobbleQueue.removeAllListeners).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerMaintenanceQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.genericImportQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.albumDownloadQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.artistExpansionQueue.close).toHaveBeenCalledTimes(1);
+        expect(mocks.scrobbleQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.scanQueue.close.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.scanQueue.removeAllListeners.mock.invocationCallOrder[0],
         );

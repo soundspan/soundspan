@@ -193,6 +193,10 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/remoteTrackBackfillService.ts` | Core |
 | `backend/src/services/remoteTrackMetadataRefresh.ts` | Core |
 | `backend/src/services/scannedTrackPersistence.ts` | Scanner track persistence, audio-change invalidation, and album loudness refresh |
+| `backend/src/services/scrobbleConnections.ts` | Encrypted per-user scrobbler connection and provider-auth lifecycle |
+| `backend/src/services/scrobbleForwarder.ts` | Failure-isolated music event fan-out to the durable scrobble queue |
+| `backend/src/services/scrobbleSigning.ts` | Last.fm API signature construction |
+| `backend/src/services/scrobbleSubmission.ts` | Timeout-bounded Last.fm and ListenBrainz queue submission adapters |
 | `backend/src/services/remoteTrackMetadataResolver.ts` | Core |
 | `backend/src/services/remoteProviders/adapters.ts` | Shared remote playback, playlist-import, and playlist-row provider routing |
 | `backend/src/services/remoteProviders/types.ts` | Canonical remote-provider identities and mapping/streaming translators |

@@ -24,6 +24,7 @@ const sidebarItems: SidebarItem[] = [
     { id: "social", label: "Social" },
     { id: "history", label: "History & Personalization" },
     { id: "playback", label: "Playback" },
+    { id: "scrobbling", label: "Scrobbling" },
     { id: "integrations", label: "Integrations" },
     { id: "api-keys", label: "API Keys" },
 ];
@@ -35,6 +36,14 @@ function renderSectionFallback() {
         </div>
     );
 }
+
+const ScrobblingSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/ScrobblingSection").then(
+            (mod) => mod.ScrobblingSection,
+        ),
+    { loading: renderSectionFallback },
+);
 
 const PlaybackHistorySection = dynamic(
     () =>
@@ -148,6 +157,9 @@ export default function SettingsPage() {
 
             {/* History & Personalization */}
             <PlaybackHistorySection />
+
+            {/* Scrobbling */}
+            <ScrobblingSection />
 
             {/* Playback */}
             <PlaybackSection

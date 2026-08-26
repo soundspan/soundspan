@@ -20,6 +20,11 @@ import {
     SUBSONIC_ALBUM_LOCATION_WHERE,
 } from "./shared";
 import { setSongUserRating } from "./songEnrichment";
+import {
+    mapSubsonicScrobbleEvents,
+    type SubsonicScrobbleEvent,
+} from "./scrobbleMapping";
+import { forwardTrackReferenceIsolated } from "../../services/scrobbleForwarder";
 
 async function resolveStarMutationTrackIds(input: {
     songTrackIds: string[];
@@ -73,6 +78,58 @@ async function resolveStarMutationTrackIds(input: {
 
     return Array.from(combinedIds);
 }
+
+function mapScrobbleRequest(
+    req: Request,
+    trackIds: string[],
+): SubsonicScrobbleEvent[] {
+    return mapSubsonicScrobbleEvents(
+        trackIds,
+        getQueryValues(req.query.submission),
+        getQueryValues(req.query.time),
+        new Date(),
+    );
+}
+
+function parseScrobbleTrackIds(rawIds: string[]): string[] | null {
+    try {
+        return rawIds.map((rawId) => parseSubsonicId(rawId, "track").id);
+    } catch {
+        return null;
+    }
+}
+
+async function recordScrobblePlays(
+    userId: string,
+    events: SubsonicScrobbleEvent[],
+): Promise<void> {
+    const data = events
+        .filter((event) => event.kind === "scrobble")
+        .map((event) => ({
+            userId,
+            trackId: event.trackId,
+            playedAt: event.listenedAt,
+        }));
+    if (data.length > 0) {
+        await prisma.play.createMany({ data });
+    }
+}
+
+function forwardSubsonicScrobbles(
+    userId: string,
+    events: SubsonicScrobbleEvent[],
+): void {
+    for (const event of events) {
+        forwardTrackReferenceIsolated({
+            userId,
+            mediaType: "music",
+            kind: event.kind,
+            listenedAt: event.listenedAt,
+            reference: { source: "local", id: event.trackId },
+        });
+    }
+}
+
 /**
  * Executes handleScrobble.
  */
@@ -93,15 +150,8 @@ export async function handleScrobble(
         return;
     }
 
-    const rawSubmissionValues = getQueryValues(req.query.submission);
-    const rawTimes = getQueryValues(req.query.time);
-
-    let parsedTrackIds: string[] = [];
-    try {
-        parsedTrackIds = rawIds.map(
-            (rawId) => parseSubsonicId(rawId, "track").id,
-        );
-    } catch {
+    const parsedTrackIds = parseScrobbleTrackIds(rawIds);
+    if (!parsedTrackIds) {
         sendSubsonicError(
             res,
             SubsonicErrorCode.NOT_FOUND,
@@ -126,47 +176,9 @@ export async function handleScrobble(
             return;
         }
 
-        const playRows = parsedTrackIds.flatMap((trackId, index) => {
-            const submissionValue =
-                rawSubmissionValues.length > 0
-                    ? rawSubmissionValues[
-                          Math.min(index, rawSubmissionValues.length - 1)
-                      ]
-                    : undefined;
-            const shouldSubmit = submissionValue
-                ? !["false", "0"].includes(submissionValue.toLowerCase())
-                : true;
-
-            if (!shouldSubmit) {
-                return [];
-            }
-
-            const rawTime =
-                rawTimes.length > 0
-                    ? rawTimes[Math.min(index, rawTimes.length - 1)]
-                    : undefined;
-            const parsedTime = rawTime
-                ? Number.parseInt(rawTime, 10)
-                : Number.NaN;
-            const playedAt =
-                Number.isFinite(parsedTime) && parsedTime > 0
-                    ? new Date(parsedTime * 1000)
-                    : new Date();
-
-            return [
-                {
-                    userId: req.user!.id,
-                    trackId,
-                    playedAt,
-                },
-            ];
-        });
-
-        if (playRows.length > 0) {
-            await prisma.play.createMany({
-                data: playRows,
-            });
-        }
+        const events = mapScrobbleRequest(req, parsedTrackIds);
+        await recordScrobblePlays(req.user!.id, events);
+        forwardSubsonicScrobbles(req.user!.id, events);
 
         sendSubsonicSuccess(res, {}, format, callback);
     } catch {

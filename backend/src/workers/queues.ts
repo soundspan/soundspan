@@ -176,6 +176,19 @@ export const artistExpansionQueue = new Bull("worker-artist-expansion", {
     settings: defaultQueueSettings,
 });
 
+/** Durable, per-user rate-limited queue for outbound music scrobbles. */
+export const scrobbleQueue = new Bull("scrobble-forwarding", {
+    redis: redisConfig,
+    limiter: { max: 30, duration: 1_000, groupKey: "userId" },
+    defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5_000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    },
+    settings: defaultQueueSettings,
+});
+
 // Export all queues for monitoring
 export const queues = [
     scanQueue,
@@ -189,6 +202,7 @@ export const queues = [
     federationQueue,
     albumDownloadQueue,
     artistExpansionQueue,
+    scrobbleQueue,
 ];
 
 // Add error handlers to all queues to prevent unhandled exceptions

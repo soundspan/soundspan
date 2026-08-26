@@ -742,6 +742,47 @@ if ! perl -0777 -ne '
   exit 1
 fi
 
+echo "[CHECK] existingSecret optional API keys include the Last.fm key pair"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set secrets.existingSecret=external-secret \
+  --set secrets.apiKeysInExistingSecret=true \
+  >"$tmp_secret_existing"
+for deployment in "$RELEASE_NAME"; do
+  for key in LASTFM_API_KEY LASTFM_SHARED_SECRET; do
+    if ! DEPLOYMENT_NAME="$deployment" ENV_NAME="$key" perl -0777 -ne '
+        for my $doc (split /^---/m, $_) {
+            next unless $doc =~ /kind:\s*Deployment/;
+            next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+            exit 0 if $doc =~ /name:\s+\Q$ENV{ENV_NAME}\E\s+valueFrom:\s+secretKeyRef:\s+name:\s+external-secret\s+key:\s+\Q$ENV{ENV_NAME}\E\s+optional:\s+true/s;
+        }
+        exit 1' "$tmp_secret_existing"; then
+      echo "[ERROR] ${deployment} missing ${key} from existingSecret" >&2
+      exit 1
+    fi
+  done
+done
+
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set secrets.existingSecret=external-secret \
+  --set secrets.apiKeysInExistingSecret=true \
+  >"$tmp_secret_existing"
+for deployment in "${RELEASE_NAME}-backend" "${RELEASE_NAME}-backend-worker"; do
+  for key in LASTFM_API_KEY LASTFM_SHARED_SECRET; do
+    if ! DEPLOYMENT_NAME="$deployment" ENV_NAME="$key" perl -0777 -ne '
+        for my $doc (split /^---/m, $_) {
+            next unless $doc =~ /kind:\s*Deployment/;
+            next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+            exit 0 if $doc =~ /name:\s+\Q$ENV{ENV_NAME}\E\s+valueFrom:\s+secretKeyRef:\s+name:\s+external-secret\s+key:\s+\Q$ENV{ENV_NAME}\E\s+optional:\s+true/s;
+        }
+        exit 1' "$tmp_secret_existing"; then
+      echo "[ERROR] ${deployment} missing ${key} from existingSecret" >&2
+      exit 1
+    fi
+  done
+done
+
 echo "[CHECK] render individual-mode frontend inherits global UID 1000 pod security context"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set deploymentMode=individual \

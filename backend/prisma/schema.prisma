@@ -66,6 +66,7 @@ model User {
   shareLinks                ShareLink[]
   federationPeersCreated    FederationPeer[]
   federationPlaylistFollows FederationPlaylistFollow[]
+  scrobbleConnections       ScrobbleConnection[]
 }
 
 model UserSettings {
@@ -86,6 +87,22 @@ model UserSettings {
   tidalOAuthJson        String? // Encrypted JSON with access_token, refresh_token, user_id, country_code
   tidalStreamingQuality String  @default("HIGH")
   user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ScrobbleConnection {
+  id                    String   @id @default(cuid())
+  userId                String
+  service               String
+  encryptedCredential   String?
+  encryptedPendingToken String?
+  username              String?
+  enabled               Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, service])
+  @@index([userId])
 }
 
 model InviteCode {

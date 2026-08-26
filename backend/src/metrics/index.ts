@@ -72,6 +72,8 @@ import {
     createSoulseekAlbumMetrics,
     type SoulseekAlbumFolderOutcome,
 } from "./soulseekAlbumMetrics";
+import { createScrobbleMetrics, type ScrobbleOutcome } from "./scrobbleMetrics";
+import type { ScrobbleService } from "../services/scrobbleTypes";
 
 export type {
     FederationAuthFailureReason,
@@ -103,6 +105,7 @@ const albumDownloadMetrics = createAlbumDownloadMetrics(metricsRegistry);
 const catalogMetrics = createCatalogMetrics(metricsRegistry);
 const schedulerMetrics = createSchedulerMetrics(metricsRegistry);
 const soulseekAlbumMetrics = createSoulseekAlbumMetrics(metricsRegistry);
+const scrobbleMetrics = createScrobbleMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -180,6 +183,14 @@ export function recordSchedulerTimeout(
     operation: SchedulerTimeoutOperation,
 ): void {
     schedulerMetrics.timeouts.inc({ operation });
+}
+
+/** Records one closed-vocabulary outbound scrobbling outcome. */
+export function recordScrobbleOutcome(
+    service: ScrobbleService,
+    outcome: ScrobbleOutcome,
+): void {
+    scrobbleMetrics.submissions.inc({ service, outcome });
 }
 
 /** Records one completed scheduler job duration. */

@@ -50,7 +50,7 @@ describe("workers/queues", () => {
             "rediss://user:pass@cache.example:6381/2",
         );
 
-        expect(bullCtor).toHaveBeenCalledTimes(11);
+        expect(bullCtor).toHaveBeenCalledTimes(12);
         const firstCallArgs = bullCtor.mock.calls[0];
         const firstQueueOptions = firstCallArgs[1];
 
@@ -65,7 +65,7 @@ describe("workers/queues", () => {
                 tls: {},
             }),
         );
-        expect(queuesModule.queues).toHaveLength(11);
+        expect(queuesModule.queues).toHaveLength(12);
         expect(bullCtor.mock.calls.map((call) => call[0])).toEqual([
             "library-scan",
             "discover-weekly",
@@ -78,6 +78,7 @@ describe("workers/queues", () => {
             "federation-sync",
             "album-download",
             "worker-artist-expansion",
+            "scrobble-forwarding",
         ]);
         expect(logger.debug).toHaveBeenCalledWith(
             expect.stringContaining("Redis config resolved"),

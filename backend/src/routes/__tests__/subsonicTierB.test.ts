@@ -1,5 +1,11 @@
 import { Request, Response } from "express";
 
+const mockForwardTrackReferenceIsolated = jest.fn();
+
+jest.mock("../../services/scrobbleForwarder", () => ({
+    forwardTrackReferenceIsolated: mockForwardTrackReferenceIsolated,
+}));
+
 jest.mock("../../middleware/subsonicAuth", () => ({
     requireSubsonicAuth: (_req: Request, _res: Response, next: () => void) =>
         next(),
@@ -747,7 +753,7 @@ describe("subsonic Tier B handlers", () => {
             buildReq({
                 id: ["tr-track-1", "tr-track-2"],
                 submission: ["false", "true"],
-                time: ["1700000000", "1700000060"],
+                time: ["1700000000000", "1700000060000"],
             }),
             buildRes(),
         );
@@ -760,6 +766,20 @@ describe("subsonic Tier B handlers", () => {
         expect(createManyArg.data[0].trackId).toBe("track-2");
         expect(createManyArg.data[0].userId).toBe("user-1");
         expect(createManyArg.data[0].playedAt).toBeInstanceOf(Date);
+        expect(mockForwardTrackReferenceIsolated).toHaveBeenNthCalledWith(1, {
+            userId: "user-1",
+            mediaType: "music",
+            kind: "now_playing",
+            listenedAt: new Date("2023-11-14T22:13:20.000Z"),
+            reference: { source: "local", id: "track-1" },
+        });
+        expect(mockForwardTrackReferenceIsolated).toHaveBeenNthCalledWith(2, {
+            userId: "user-1",
+            mediaType: "music",
+            kind: "scrobble",
+            listenedAt: new Date("2023-11-14T22:14:20.000Z"),
+            reference: { source: "local", id: "track-2" },
+        });
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             {},

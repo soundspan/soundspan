@@ -168,6 +168,7 @@ export const queryKeys = {
 
     // Settings
     userSettings: () => ["user-settings"] as const,
+    scrobblingStatus: () => ["scrobbling-status"] as const,
     tidalStreamingStatus: () => ["tidal-streaming-status"] as const,
 
     // Podcast discovery

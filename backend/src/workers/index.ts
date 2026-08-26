@@ -14,6 +14,7 @@ import {
     federationQueue,
     albumDownloadQueue,
     artistExpansionQueue,
+    scrobbleQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import {
@@ -36,6 +37,7 @@ import {
     requeueAlbumDownloadAfterContention,
 } from "./processors/albumDownloadProcessor";
 import { processArtistDownloadExpansion } from "./processors/artistDownloadExpansionProcessor";
+import { processScrobble } from "./processors/scrobbleProcessor";
 import {
     recordAlbumDownloadOutcome,
     recordSchedulerJobDuration,
@@ -908,6 +910,7 @@ function registerQueueProcessors(): void {
             "Federation disabled (FEDERATION_ENABLED=false); federation processors and schedules not registered",
         );
     }
+    scrobbleQueue.process("submit", 4, processScrobble);
 }
 async function processPrimarySchedulerJob(
     job: Bull.Job<any>,
@@ -1396,6 +1399,8 @@ export async function shutdownWorkers(): Promise<void> {
     // Drain expansion first because it can still admit new album jobs.
     await artistExpansionQueue.close();
 
+    await scrobbleQueue.close();
+
     // Drain the album processor while its finalizer listener is still active.
     await albumDownloadQueue.close();
 
@@ -1419,6 +1424,7 @@ export async function shutdownWorkers(): Promise<void> {
     federationQueue.removeAllListeners();
     albumDownloadQueue.removeAllListeners();
     artistExpansionQueue.removeAllListeners();
+    scrobbleQueue.removeAllListeners();
 
     // Close all queues gracefully
     await Promise.all([
@@ -1473,4 +1479,5 @@ export {
     federationQueue,
     albumDownloadQueue,
     artistExpansionQueue,
+    scrobbleQueue,
 };

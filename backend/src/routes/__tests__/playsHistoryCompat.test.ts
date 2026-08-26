@@ -50,6 +50,11 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({
     ),
 }));
 
+jest.mock("../../services/scrobbleForwarder", () => ({
+    forwardTrackReferenceIsolated: jest.fn(),
+    forwardScrobbleIsolated: jest.fn(),
+}));
+
 import router from "../plays";
 import { prisma } from "../../utils/db";
 import { resolveRemoteTrackMetadataForRequest } from "../../services/remoteTrackMetadataResolver";
@@ -303,7 +308,12 @@ describe("plays history compatibility", () => {
         await createPlayHandler(okReq, okRes);
         expect(okRes.statusCode).toBe(200);
         expect(mockPlayCreate).toHaveBeenCalledWith({
-            data: { userId: "user-1", trackId: "track-1", source: "LIBRARY" },
+            data: {
+                userId: "user-1",
+                trackId: "track-1",
+                source: "LIBRARY",
+                playedAt: expect.any(Date),
+            },
         });
 
         mockTrackFindUnique.mockRejectedValueOnce(new Error("create failed"));
@@ -325,12 +335,14 @@ describe("plays history compatibility", () => {
                 userId: "user-1",
                 trackTidalId: "tt-1",
                 source: "TIDAL",
+                playedAt: expect.any(Date),
             })
             .mockResolvedValueOnce({
                 id: "play-yt",
                 userId: "user-1",
                 trackYtMusicId: "yt-1",
                 source: "YOUTUBE_MUSIC",
+                playedAt: expect.any(Date),
             });
 
         const tidalReq = {
@@ -352,6 +364,7 @@ describe("plays history compatibility", () => {
                 userId: "user-1",
                 trackTidalId: "tt-1",
                 source: "TIDAL",
+                playedAt: expect.any(Date),
             },
         });
 
@@ -375,6 +388,7 @@ describe("plays history compatibility", () => {
                 userId: "user-1",
                 trackYtMusicId: "yt-1",
                 source: "YOUTUBE_MUSIC",
+                playedAt: expect.any(Date),
             },
         });
     });
