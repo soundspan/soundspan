@@ -89,7 +89,7 @@ haMode:
 aio:
   image:
     repository: ghcr.io/soundspan/soundspan
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: IfNotPresent
@@ -148,7 +148,7 @@ aio:
 backend:
   image:
     repository: ghcr.io/soundspan/soundspan-backend
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -228,7 +228,7 @@ backendWorker:
   vibeEmbedConcurrency: null
   image:
     repository: ghcr.io/soundspan/soundspan-backend-worker
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -283,7 +283,7 @@ backendWorker:
 frontend:
   image:
     repository: ghcr.io/soundspan/soundspan-frontend
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -410,7 +410,7 @@ tidalSidecar:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-tidal-streamer
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -439,7 +439,7 @@ ytmusicStreamer:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-ytmusic-streamer
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -514,7 +514,7 @@ audioAnalyzer:
   replicas: 1
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -579,7 +579,7 @@ vibeProviderDclap:
   replicas: 1
   image:
     repository: ghcr.io/soundspan/soundspan-vibe-provider-dclap
-    tag: 2.6.0
+    tag: 2.6.1
     # -- Immutable sha256 digest. When set, takes precedence over tag.
     digest: ""
     pullPolicy: Always
@@ -877,3 +877,4 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
+

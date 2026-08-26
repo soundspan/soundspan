@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [2.6.1] - 2026-08-26
+
+### Added
+
 - Helm deployments can configure the music-requests feature flag through `config.features.requests`.
 
 ### Changed
