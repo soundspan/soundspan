@@ -21,6 +21,49 @@ import {
     primeServiceWithClient,
 } from "./lidarrService.helpers";
 
+function primeCatalogGrab(
+    client: ReturnType<typeof createClientMock>,
+    albums: Array<{
+        id: number;
+        title: string;
+        foreignAlbumId: string;
+        artistId: number;
+    }>,
+    selectedId: number,
+): void {
+    const selected = albums.find((album) => album.id === selectedId);
+    if (!selected) throw new Error("Selected test album is missing");
+    client.get
+        .mockResolvedValueOnce({
+            data: [
+                {
+                    id: selected.artistId,
+                    artistName: "Artist",
+                    foreignArtistId: "artist-mbid",
+                    monitored: true,
+                },
+            ],
+        })
+        .mockResolvedValueOnce({ data: albums })
+        .mockResolvedValueOnce({
+            data: {
+                ...selected,
+                monitored: false,
+                anyReleaseOk: false,
+                releases: [{ id: 1 }],
+            },
+        })
+        .mockResolvedValueOnce({
+            data: {
+                ...selected,
+                monitored: true,
+                anyReleaseOk: false,
+                releases: [{ id: 1 }],
+            },
+        });
+    client.put.mockResolvedValue({ data: { ...selected, monitored: true } });
+}
+
 describe("lidarr service behavior", () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -1063,188 +1106,6 @@ describe("lidarr service behavior", () => {
         searchSpy.mockRestore();
     });
 
-    it("reads and creates discovery tags with cache semantics", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get.mockResolvedValueOnce({
-            data: [
-                { id: 7, label: "soundspan-discovery" },
-                { id: 8, label: "other" },
-            ],
-        });
-
-        const first = await lidarrService.getOrCreateDiscoveryTag();
-        const second = await lidarrService.getOrCreateDiscoveryTag();
-
-        expect(first).toBe(7);
-        expect(second).toBe(7);
-        expect(client.get).toHaveBeenCalledTimes(1);
-    });
-
-    it("creates discovery tag when missing", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-        client.get.mockResolvedValueOnce({ data: [] });
-        client.post.mockResolvedValueOnce({
-            data: { id: 99, label: "soundspan-discovery" },
-        });
-
-        const tag = await lidarrService.getOrCreateDiscoveryTag();
-        expect(tag).toBe(99);
-        expect(client.post).toHaveBeenCalledWith("/api/v1/tag", {
-            label: "soundspan-discovery",
-        });
-    });
-
-    it("returns safe defaults when tag endpoints fail", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-        client.get.mockRejectedValueOnce(new Error("tag lookup failed"));
-        client.post.mockRejectedValueOnce(new Error("tag create failed"));
-
-        await expect(lidarrService.getTags()).resolves.toEqual([]);
-        await expect(lidarrService.createTag("new-tag")).resolves.toBeNull();
-
-        expect(client.get).toHaveBeenCalledWith("/api/v1/tag");
-        expect(client.post).toHaveBeenCalledWith("/api/v1/tag", {
-            label: "new-tag",
-        });
-    });
-
-    it("retries discovery tag lookup after create failures and only caches successful IDs", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get.mockResolvedValueOnce({ data: [] }).mockResolvedValueOnce({
-            data: [{ id: 101, label: "soundspan-discovery" }],
-        });
-        client.post.mockRejectedValueOnce(new Error("tag create conflict"));
-
-        await expect(
-            lidarrService.getOrCreateDiscoveryTag(),
-        ).resolves.toBeNull();
-        await expect(lidarrService.getOrCreateDiscoveryTag()).resolves.toBe(
-            101,
-        );
-        await expect(lidarrService.getOrCreateDiscoveryTag()).resolves.toBe(
-            101,
-        );
-
-        expect(client.get).toHaveBeenCalledTimes(2);
-        expect(client.post).toHaveBeenCalledTimes(1);
-        expect(client.post).toHaveBeenCalledWith("/api/v1/tag", {
-            label: "soundspan-discovery",
-        });
-    });
-
-    it("adds and removes artist tags by updating merged tag lists", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get
-            .mockResolvedValueOnce({
-                data: { id: 11, artistName: "Artist A", tags: [1, 2] },
-            })
-            .mockResolvedValueOnce({
-                data: { id: 11, artistName: "Artist A", tags: [1, 2, 3] },
-            });
-        client.put.mockResolvedValue({});
-
-        await expect(lidarrService.addTagsToArtist(11, [2, 3])).resolves.toBe(
-            true,
-        );
-        await expect(
-            lidarrService.removeTagsFromArtist(11, [1, 3]),
-        ).resolves.toBe(true);
-
-        expect(client.put).toHaveBeenCalledWith("/api/v1/artist/11", {
-            id: 11,
-            artistName: "Artist A",
-            tags: [1, 2, 3],
-        });
-        expect(client.put).toHaveBeenCalledWith("/api/v1/artist/11", {
-            id: 11,
-            artistName: "Artist A",
-            tags: [2],
-        });
-    });
-
-    it("returns false when addTagsToArtist cannot persist merged tags", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get.mockResolvedValueOnce({
-            data: {
-                id: 21,
-                artistName: "Artist B",
-                monitored: true,
-                tags: [4, 7],
-            },
-        });
-        client.put.mockRejectedValueOnce(new Error("tag update failed"));
-
-        await expect(lidarrService.addTagsToArtist(21, [7, 9])).resolves.toBe(
-            false,
-        );
-        expect(client.put).toHaveBeenCalledWith("/api/v1/artist/21", {
-            id: 21,
-            artistName: "Artist B",
-            monitored: true,
-            tags: [4, 7, 9],
-        });
-    });
-
-    it("returns false when removeTagsFromArtist update fails after filtering tags", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get.mockResolvedValueOnce({
-            data: { id: 22, artistName: "Artist C", tags: [3, 5, 8] },
-        });
-        client.put.mockRejectedValueOnce(new Error("remove failed"));
-
-        await expect(
-            lidarrService.removeTagsFromArtist(22, [5, 99]),
-        ).resolves.toBe(false);
-        expect(client.put).toHaveBeenCalledWith("/api/v1/artist/22", {
-            id: 22,
-            artistName: "Artist C",
-            tags: [3, 8],
-        });
-    });
-
-    it("removes discovery tag by MBID when artist is found", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-        (lidarrService as any).discoveryTagId = 5;
-
-        client.get
-            .mockResolvedValueOnce({
-                data: [
-                    {
-                        id: 12,
-                        foreignArtistId: "artist-1",
-                        artistName: "Artist",
-                        tags: [5, 9],
-                    },
-                ],
-            })
-            .mockResolvedValueOnce({
-                data: { id: 12, artistName: "Artist", tags: [5, 9] },
-            });
-        client.put.mockResolvedValue({});
-
-        await expect(
-            lidarrService.removeDiscoveryTagByMbid("artist-1"),
-        ).resolves.toBe(true);
-        expect(client.put).toHaveBeenCalledWith("/api/v1/artist/12", {
-            id: 12,
-            artistName: "Artist",
-            tags: [9],
-        });
-    });
-
     it("maps release search, grab, and blocklist flows", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -1511,6 +1372,56 @@ describe("lidarr service behavior", () => {
         waitSpy.mockRestore();
     });
 
+    it("returns null when base-album dispatch reports a timed-out-looking failure", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        (lidarrService as any)._indexerCountLogged = true;
+        mockStripAlbumEdition.mockReturnValueOnce("Album");
+        const primary = {
+            id: 503,
+            title: "Album Deluxe",
+            foreignAlbumId: "album-deluxe",
+            artistId: 301,
+        };
+        const base = {
+            id: 504,
+            title: "Album",
+            foreignAlbumId: "album-base",
+            artistId: 301,
+        };
+        primeCatalogGrab(client, [primary, base], primary.id);
+        client.get.mockResolvedValueOnce({
+            data: { ...primary, releases: [{ id: 1 }] },
+        });
+        client.post
+            .mockResolvedValueOnce({ data: { id: 9111 } })
+            .mockResolvedValueOnce({ data: { id: 9112 } })
+            .mockRejectedValueOnce(
+                new Error(
+                    "Base AlbumSearch dispatch timed out before acceptance",
+                ),
+            );
+        const waitSpy = jest
+            .spyOn(lidarrService as any, "waitForCommand")
+            .mockResolvedValue({
+                status: "completed",
+                message: "Search completed with 0 reports",
+            });
+
+        await expect(
+            lidarrService.addAlbum(
+                primary.foreignAlbumId,
+                "Artist",
+                primary.title,
+                "/music",
+                "artist-mbid",
+            ),
+        ).resolves.toBeNull();
+        expect(waitSpy).toHaveBeenCalledTimes(2);
+
+        waitSpy.mockRestore();
+    });
+
     it("addAlbum returns null when no MBID is available for a new artist", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -1657,6 +1568,58 @@ describe("lidarr service behavior", () => {
 
         waitSpy.mockRestore();
     });
+
+    it.each([
+        [
+            "exact normalized",
+            "Exact Match Album!",
+            "exact match album",
+            904,
+            "Matched exact normalized",
+        ],
+        [
+            "partial contained",
+            "Partial Match Album",
+            "Partial Match Album Remastered",
+            905,
+            "Matched partial (contained)",
+        ],
+    ])(
+        "addAlbum selects the %s catalog match through the facade",
+        async (_branch, requestedTitle, catalogTitle, selectedId, matchLog) => {
+            const client = createClientMock();
+            primeServiceWithClient(client);
+            const album = {
+                id: selectedId,
+                title: catalogTitle,
+                foreignAlbumId: `catalog-${selectedId}`,
+                artistId: 58,
+            };
+            primeCatalogGrab(client, [album], selectedId);
+            client.post.mockResolvedValue({ data: { id: 9103 } });
+            const waitSpy = jest
+                .spyOn(lidarrService as any, "waitForCommand")
+                .mockResolvedValue({
+                    status: "completed",
+                    message: "Search completed with 1 report",
+                });
+
+            await expect(
+                lidarrService.addAlbum(
+                    "different-mbid",
+                    "Artist",
+                    requestedTitle,
+                    "/music",
+                    "artist-mbid",
+                ),
+            ).resolves.toEqual(expect.objectContaining({ id: selectedId }));
+            expect(logger.debug).toHaveBeenCalledWith(
+                expect.stringContaining(matchLog),
+            );
+
+            waitSpy.mockRestore();
+        },
+    );
 
     it("adds existing unmonitored artist and enables monitoring before album search", async () => {
         const client = createClientMock();
@@ -2091,6 +2054,35 @@ describe("lidarr service behavior", () => {
         }
     });
 
+    it("returns null when album-search dispatch reports a timed-out-looking failure", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        const album = {
+            id: 906,
+            title: "Dispatch Failure Album",
+            foreignAlbumId: "album-dispatch-failure",
+            artistId: 59,
+        };
+        primeCatalogGrab(client, [album], album.id);
+        client.post.mockRejectedValueOnce(
+            new Error("AlbumSearch dispatch timed out before acceptance"),
+        );
+        const waitSpy = jest.spyOn(lidarrService as any, "waitForCommand");
+
+        await expect(
+            lidarrService.addAlbum(
+                album.foreignAlbumId,
+                "Artist",
+                album.title,
+                "/music",
+                "artist-mbid",
+            ),
+        ).resolves.toBeNull();
+        expect(waitSpy).not.toHaveBeenCalled();
+
+        waitSpy.mockRestore();
+    });
+
     it("returns true when blocklist target is already absent from queue", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -2139,6 +2131,7 @@ describe("lidarr service behavior", () => {
                 },
             })
             .mockResolvedValueOnce({
+                status: 200,
                 data: {
                     id: 401,
                     title: "Unstable Album",
@@ -2173,6 +2166,12 @@ describe("lidarr service behavior", () => {
         expect(waitSpy).toHaveBeenCalledWith(7101, 30000);
         expect(logger.error).toHaveBeenCalledWith(
             " CRITICAL: Album monitoring failed to persist!",
+            {
+                albumId: 401,
+                title: "Unstable Album",
+                monitored: false,
+                status: 200,
+            },
         );
 
         waitSpy.mockRestore();

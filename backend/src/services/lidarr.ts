@@ -1,23 +1,38 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { BRAND_SLUG } from "../config/brand";
 import { getSystemSettings } from "../utils/systemSettings";
 import {
     normalizeForExactKey,
-    normalizeForFuzzyMatch,
     stripAlbumEdition,
 } from "../utils/artistNormalization";
-import { fetchReconciliationAlbumMaps } from "./lidarr/reconciliationAlbumStream";
 import {
     getLidarrErrorMessage,
+    lidarrErrorLogFields,
     LidarrHttpClient,
-    LidarrHttpError,
 } from "./lidarr/lidarrHttpClient";
-import { toErrorMessage } from "../utils/errors";
 import {
     blocklistQueueDownload,
     clearFailedQueue as clearFailedLidarrQueue,
 } from "./lidarr/lidarrQueue";
+import {
+    awaitArtistCatalog,
+    ensureArtistPresent,
+    type LidarrCatalogClock,
+} from "./lidarr/lidarrArtistCatalog";
+import { selectAlbumInCatalogMatch } from "./lidarr/lidarrAlbumSelection";
+import { grabRelease as grabCatalogRelease } from "./lidarr/lidarrReleaseGrab";
+import {
+    getReconciliationSnapshot as fetchReconciliationSnapshot,
+    isAlbumAvailableInSnapshot as snapshotHasAlbum,
+    isDownloadActiveInSnapshot as snapshotHasActiveDownload,
+    type ReconciliationSnapshot,
+} from "./lidarr/lidarrReconciliation";
+import { LidarrTagService } from "./lidarr/lidarrTagService";
+import type {
+    LidarrAlbum,
+    LidarrArtist,
+    LidarrTag,
+} from "./lidarr/lidarrTypes";
 
 /**
  * Error types for music acquisition failures
@@ -62,69 +77,29 @@ export class AcquisitionError extends Error {
     }
 }
 
-interface LidarrArtist {
-    id: number;
-    artistName: string;
-    foreignArtistId: string; // MusicBrainz ID
-    monitored: boolean;
-    tags?: number[]; // Tag IDs
-    artistType?: string;
-    qualityProfileId?: number;
-    metadataProfileId?: number;
-    rootFolderPath?: string;
-    statistics?: {
-        albumCount?: number;
-        trackFileCount?: number;
-        trackCount?: number;
-        totalTrackCount?: number;
-        sizeOnDisk?: number;
-        percentOfTracks?: number;
-    };
-    ratings?: {
-        votes?: number;
-        value?: number;
-    };
-}
-
-interface LidarrTag {
-    id: number;
-    label: string;
-}
-
-// Discovery tag labels
-const DISCOVERY_TAG_LABEL = `${BRAND_SLUG}-discovery`;
-const DISCOVERY_TAG_LABEL_ALIASES = [DISCOVERY_TAG_LABEL];
-
-interface LidarrAlbum {
-    id: number;
-    title: string;
-    foreignAlbumId: string; // MusicBrainz release group ID
-    artistId: number;
-    monitored: boolean;
-    artist?: {
-        foreignArtistId: string; // MusicBrainz artist ID
-        artistName: string;
-    };
-}
-
-function lidarrErrorLogFields(error: unknown) {
-    return {
-        message: error instanceof Error ? toErrorMessage(error) : undefined,
-        status: error instanceof LidarrHttpError ? error.status : undefined,
-        path: error instanceof LidarrHttpError ? error.path : undefined,
-    };
-}
-
-function normalizeAlbumTitleForMatch(title: string): string {
-    return normalizeForFuzzyMatch(stripAlbumEdition(title));
-}
-
 class LidarrService {
     private client: LidarrHttpClient | null = null;
     private enabled: boolean;
     private initialized: boolean = false;
+    private _indexerCountLogged: boolean = false;
+    private readonly clock: LidarrCatalogClock = {
+        sleep: (delayMs) =>
+            new Promise((resolve) => setTimeout(resolve, delayMs)),
+    };
+    private readonly tagService: LidarrTagService;
 
     constructor() {
+        this.tagService = new LidarrTagService({
+            getClient: () => this.client,
+            isEnabled: () => this.enabled,
+            getTags: () => this.getTags(),
+            createTag: (label) => this.createTag(label),
+            getArtists: () => this.getArtists(),
+            getArtistsByTag: (tagId) => this.getArtistsByTag(tagId),
+            getDiscoveryTagId: () => this.getOrCreateDiscoveryTag(),
+            removeTagsFromArtist: (artistId, tagIds) =>
+                this.removeTagsFromArtist(artistId, tagIds),
+        });
         // Initial check from .env (for backwards compatibility)
         this.enabled = config.lidarr?.enabled || false;
 
@@ -699,7 +674,7 @@ class LidarrService {
             // Trigger metadata refresh to ensure album catalog is populated
             if (!searchForMissingAlbums) {
                 // Add a small delay to let Lidarr's internal state settle
-                await new Promise((resolve) => setTimeout(resolve, 2000));
+                await this.clock.sleep(2000);
 
                 logger.debug(
                     `   Triggering metadata refresh for new artist...`,
@@ -868,7 +843,7 @@ class LidarrService {
                 };
             }
 
-            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+            await this.clock.sleep(pollIntervalMs);
         }
 
         throw new Error(`Command ${commandId} timed out after ${timeoutMs}ms`);
@@ -883,678 +858,35 @@ class LidarrService {
         isDiscovery: boolean = false,
     ): Promise<LidarrAlbum | null> {
         await this.ensureInitialized();
-
         if (!this.enabled || !this.client) {
             throw new Error("Lidarr not enabled");
         }
-
         try {
-            logger.debug(
-                `   Adding album: ${albumTitle} by ${artistName}${
-                    isDiscovery ? " (discovery)" : ""
-                }`,
+            logger.debug(`   Adding album: ${albumTitle} by ${artistName}`);
+            const presence = await this.ensureAlbumArtist(
+                artistName,
+                rootFolderPath,
+                artistMbid,
+                isDiscovery,
             );
-            logger.debug(`   Album MBID: ${rgMbid}`);
-            logger.debug(`   Artist MBID: ${artistMbid || "none"}`);
-
-            // NEW APPROACH: Add artist first, then find album in their catalog
-            // This avoids the broken external album search API
-
-            // Check if artist exists
-            const existingArtists = await this.client.get("/api/v1/artist");
-            let artist = existingArtists.data.find(
-                (a: LidarrArtist) =>
-                    artistMbid && a.foreignArtistId === artistMbid,
-            );
-
-            let justAddedArtist = false;
-
-            // If discovery and artist exists, ensure they have the discovery tag
-            if (isDiscovery && artist) {
-                const discoveryTagId = await this.getOrCreateDiscoveryTag();
-                if (discoveryTagId) {
-                    const existingTags = artist.tags || [];
-                    if (!existingTags.includes(discoveryTagId)) {
-                        logger.debug(
-                            `   Adding discovery tag to existing artist...`,
-                        );
-                        await this.addTagsToArtist(artist.id, [discoveryTagId]);
-                    }
-                }
-            }
-
-            if (!artist && artistMbid) {
-                logger.debug(`   Adding artist first: ${artistName}`);
-
-                // Add artist WITHOUT searching for all albums
-                // Pass isDiscovery to tag the artist appropriately
-                artist = await this.addArtist(
-                    artistMbid,
-                    artistName,
-                    rootFolderPath,
-                    false, // Don't auto-download all albums
-                    false, // Don't monitor all albums
-                    isDiscovery, // Tag as discovery if this is a discovery download
-                );
-
-                if (!artist) {
-                    logger.error(` Failed to add artist`);
-                    return null;
-                }
-
-                justAddedArtist = true;
-                logger.debug(
-                    `   Artist added: ${artist.artistName} (ID: ${artist.id})`,
-                );
-                logger.debug(
-                    `   Waiting for Lidarr to populate album catalog...`,
-                );
-            } else if (!artist) {
-                logger.error(` Artist not found and no MBID provided`);
+            if (!presence.artist) {
+                logger.error(" Artist not found and could not be added");
                 return null;
-            } else {
-                logger.debug(
-                    `   Artist already exists: ${artist.artistName} (ID: ${artist.id})`,
-                );
             }
-
-            // Get artist's albums from Lidarr
-            let artistAlbums: LidarrAlbum[] = [];
-
-            // First check - get current album list
-            const artistAlbumsResponse = await this.client.get(
-                `/api/v1/album?artistId=${artist.id}`,
+            const catalog = await this.selectAlbumForAdd(
+                presence.artist,
+                presence.justAddedArtist,
+                rgMbid,
+                albumTitle,
+                artistName,
             );
-            artistAlbums = artistAlbumsResponse.data;
-
-            // If we just added the artist and no albums yet, wait for metadata to populate
-            if (artistAlbums.length === 0 && justAddedArtist) {
-                logger.debug(
-                    `   Waiting for Lidarr to fetch album metadata...`,
-                );
-
-                // Increased timeout: 20 attempts * 3 seconds = 60 seconds total
-                // Large artist catalogs (e.g., prolific bands) need more time
-                const maxAttempts = 20;
-                const retryDelay = 3000; // 3 seconds between retries
-
-                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    await new Promise((resolve) =>
-                        setTimeout(resolve, retryDelay),
-                    );
-
-                    const retryResponse = await this.client.get(
-                        `/api/v1/album?artistId=${artist.id}`,
-                    );
-                    artistAlbums = retryResponse.data;
-
-                    if (artistAlbums.length > 0) {
-                        logger.debug(`   Albums loaded after ${attempt * 3}s`);
-                        break;
-                    }
-
-                    if (attempt < maxAttempts) {
-                        logger.debug(
-                            `   Attempt ${attempt}/${maxAttempts}: Still waiting...`,
-                        );
-                    } else {
-                        logger.warn(
-                            ` Timeout reached after ${
-                                maxAttempts * 3
-                            }s - artist catalog may still be populating`,
-                        );
-                    }
-                }
-            } else if (artistAlbums.length === 0 && !justAddedArtist) {
-                // Artist exists but has 0 albums - try refreshing metadata once
-                logger.debug(
-                    `   Artist exists but has 0 albums - refreshing metadata...`,
-                );
-                try {
-                    await this.client.post("/api/v1/command", {
-                        name: "RefreshArtist",
-                        artistId: artist.id,
-                    });
-                    // Wait for refresh to complete
-                    await new Promise((resolve) => setTimeout(resolve, 5000));
-
-                    const retryResponse = await this.client.get(
-                        `/api/v1/album?artistId=${artist.id}`,
-                    );
-                    artistAlbums = retryResponse.data;
-                } catch (refreshError) {
-                    logger.warn(`   Metadata refresh failed`);
-                }
-            }
-
-            logger.debug(
-                `   Found ${artistAlbums.length} albums for ${artist.artistName}`,
+            return await this.grabCatalogAlbum(
+                presence.artist,
+                catalog.album,
+                catalog.artistAlbums,
+                albumTitle,
             );
-
-            // Find the specific album by MBID first
-            let albumData = artistAlbums.find(
-                (a: LidarrAlbum) => a.foreignAlbumId === rgMbid,
-            );
-
-            // If MBID doesn't match, try STRICT name matching
-            // IMPORTANT: We removed loose matching (base name, first word) because it caused
-            // wrong albums to be downloaded (e.g., "A Trip To The Mystery Planet" matching "A Funk Odyssey")
-            if (!albumData) {
-                logger.debug(
-                    `   Album MBID not found, trying STRICT name match for: ${albumTitle}`,
-                );
-
-                const targetTitle = normalizeAlbumTitleForMatch(albumTitle);
-                logger.debug(`   Normalized target: "${targetTitle}"`);
-
-                // Try exact normalized match first
-                albumData = artistAlbums.find(
-                    (a: LidarrAlbum) =>
-                        normalizeAlbumTitleForMatch(a.title) === targetTitle,
-                );
-                if (albumData) {
-                    logger.debug(
-                        ` Matched exact normalized: "${albumData.title}"`,
-                    );
-                }
-
-                // Try partial match ONLY if one contains the other completely
-                // This handles "Album Name" matching "Album Name (Deluxe Edition)"
-                if (!albumData) {
-                    albumData = artistAlbums.find((a: LidarrAlbum) => {
-                        const normalized = normalizeAlbumTitleForMatch(a.title);
-                        // Only match if one is a substring of the other AND they share significant content
-                        // The shorter one must be at least 60% of the longer one's length
-                        const shorter =
-                            normalized.length < targetTitle.length
-                                ? normalized
-                                : targetTitle;
-                        const longer =
-                            normalized.length >= targetTitle.length
-                                ? normalized
-                                : targetTitle;
-                        if (
-                            longer.includes(shorter) &&
-                            shorter.length >= longer.length * 0.6
-                        ) {
-                            return true;
-                        }
-                        return false;
-                    });
-                    if (albumData) {
-                        logger.debug(
-                            ` Matched partial (contained): "${albumData.title}"`,
-                        );
-                    }
-                }
-
-                // NO base name matching - this caused wrong albums to be matched
-                // NO first word matching - this caused wrong albums to be matched
-                // If we don't have an exact or contained match, we should FAIL
-                // and let the discovery system find a different album
-
-                if (albumData) {
-                    logger.debug(
-                        `   Final match: "${albumData.title}" (MBID: ${albumData.foreignAlbumId})`,
-                    );
-                } else {
-                    logger.debug(
-                        ` No strict match found - will NOT use loose matching to avoid wrong albums`,
-                    );
-                }
-            }
-
-            if (!albumData) {
-                logger.error(
-                    `   ✗ Album "${albumTitle}" not found in artist's ${artistAlbums.length} albums`,
-                );
-                if (artistAlbums.length > 0) {
-                    logger.debug(
-                        `   Looking for: "${albumTitle}" (MBID: ${rgMbid})`,
-                    );
-                    logger.debug(
-                        `   Available albums in Lidarr (showing up to 10):`,
-                    );
-                    artistAlbums.slice(0, 10).forEach((a: LidarrAlbum) => {
-                        logger.debug(
-                            `     - "${a.title}" (${a.foreignAlbumId})`,
-                        );
-                    });
-                }
-                // Throw structured error - allows fallback to Soulseek
-                throw new AcquisitionError(
-                    `Album "${albumTitle}" not found in Lidarr catalog for ${artistName}`,
-                    AcquisitionErrorType.ALBUM_NOT_FOUND,
-                    true, // isRecoverable - Soulseek can try
-                );
-            }
-
-            logger.debug(
-                `   Found album in catalog: ${albumData.title} (ID: ${albumData.id})`,
-            );
-
-            // Ensure artist is monitored (might have been added with monitoring disabled)
-            if (!artist.monitored) {
-                logger.debug(`   Enabling artist monitoring...`);
-                await this.client.put(`/api/v1/artist/${artist.id}`, {
-                    ...artist,
-                    monitored: true,
-                });
-                logger.debug(`   Artist monitoring enabled`);
-            } else {
-                logger.debug(`   Artist already monitored`);
-            }
-
-            // CRITICAL: Fetch the FULL album data from Lidarr
-            // The album list endpoint may return incomplete data
-            logger.debug(`   Fetching full album data from Lidarr...`);
-            const fullAlbumResponse = await this.client.get(
-                `/api/v1/album/${albumData.id}`,
-            );
-            const fullAlbumData = fullAlbumResponse.data;
-
-            logger.debug(
-                `   Full album data retrieved:`,
-                JSON.stringify(
-                    {
-                        id: fullAlbumData.id,
-                        title: fullAlbumData.title,
-                        monitored: fullAlbumData.monitored,
-                        foreignAlbumId: fullAlbumData.foreignAlbumId,
-                        anyReleaseOk: fullAlbumData.anyReleaseOk,
-                        profileId: fullAlbumData.profileId,
-                        releases: fullAlbumData.releases?.length || 0,
-                    },
-                    null,
-                    2,
-                ),
-            );
-
-            // ALWAYS monitor and search for the album, even if already monitored
-            // This ensures Lidarr picks up the request
-            // Preserve user's anyReleaseOk setting - we'll only change it if search fails later
-            logger.debug(`   Setting album monitoring to true...`);
-
-            const updateResponse = await this.client.put(
-                `/api/v1/album/${fullAlbumData.id}`,
-                {
-                    ...fullAlbumData,
-                    monitored: true,
-                },
-            );
-
-            logger.debug(
-                `   PUT response monitored: ${updateResponse.data.monitored}`,
-            );
-
-            // CRITICAL: Re-fetch the album to verify the change actually persisted
-            const verifyResponse = await this.client.get(
-                `/api/v1/album/${fullAlbumData.id}`,
-            );
-            const verifiedMonitored = verifyResponse.data.monitored;
-
-            logger.debug(
-                `   Album monitoring VERIFIED after re-fetch: ${verifiedMonitored}`,
-            );
-
-            if (!verifiedMonitored) {
-                logger.error(` CRITICAL: Album monitoring failed to persist!`);
-                logger.error(
-                    `   Full album data we sent:`,
-                    JSON.stringify(fullAlbumData, null, 2).slice(0, 500),
-                );
-                logger.error(
-                    `   Response from GET after PUT:`,
-                    JSON.stringify(verifyResponse.data, null, 2).slice(0, 500),
-                );
-            }
-
-            // Use the verified album data
-            const updatedAlbum = verifyResponse.data;
-
-            const editionPatterns = [
-                /\(remaster/i,
-                /\(deluxe/i,
-                /\(expanded/i,
-                /\(anniversary/i,
-                /\(bonus/i,
-                /\(special/i,
-                /\(limited/i,
-                /\(collector/i,
-                /\(super deluxe/i,
-                /\(platinum/i,
-                /\(japan/i,
-                /\(uk/i,
-                /\(us/i,
-                /\(import/i,
-                /\[remaster/i,
-                /\[deluxe/i,
-            ];
-            const isEditionVariant = editionPatterns.some((p) =>
-                p.test(albumTitle),
-            );
-            const foundAlbumIsEdition = editionPatterns.some((p) =>
-                p.test(updatedAlbum.title || ""),
-            );
-            const needsAnyReleaseOk = isEditionVariant || foundAlbumIsEdition;
-
-            if (needsAnyReleaseOk && !updatedAlbum.anyReleaseOk) {
-                logger.debug(
-                    `   Edition variant detected ("${albumTitle}") - enabling anyReleaseOk proactively`,
-                );
-
-                await this.client.put(`/api/v1/album/${updatedAlbum.id}`, {
-                    ...updatedAlbum,
-                    anyReleaseOk: true,
-                });
-
-                updatedAlbum.anyReleaseOk = true;
-                logger.debug(
-                    `   anyReleaseOk enabled - Lidarr will accept any release of this album`,
-                );
-            }
-
-            // Check if album has releases - if not, refresh artist metadata from MusicBrainz
-            const releaseCount = updatedAlbum.releases?.length || 0;
-            if (releaseCount === 0) {
-                logger.warn(
-                    ` Album has 0 releases - refreshing artist metadata from MusicBrainz...`,
-                );
-
-                // Trigger artist refresh to fetch latest metadata
-                await this.client.post("/api/v1/command", {
-                    name: "RefreshArtist",
-                    artistId: artist.id,
-                });
-
-                logger.debug(`   Waiting for metadata refresh to complete...`);
-                // Wait for refresh to complete (Lidarr processes this asynchronously)
-                await new Promise((resolve) => setTimeout(resolve, 5000));
-
-                // Re-fetch the album to see if releases were populated
-                const refreshedAlbumResponse = await this.client.get(
-                    `/api/v1/album/${updatedAlbum.id}`,
-                );
-                const refreshedAlbum = refreshedAlbumResponse.data;
-                const newReleaseCount = refreshedAlbum.releases?.length || 0;
-
-                logger.debug(
-                    `   After refresh: ${newReleaseCount} releases found`,
-                );
-
-                if (newReleaseCount === 0) {
-                    logger.warn(` Still no releases after refresh!`);
-                    logger.warn(
-                        `   This album may not be properly indexed in MusicBrainz yet.`,
-                    );
-                    logger.warn(`   Download will be attempted but may fail.`);
-                }
-            }
-
-            // ALWAYS trigger search to download the album
-            logger.debug(
-                `   Triggering album search command for album ID ${updatedAlbum.id}...`,
-            );
-            const searchResponse = await this.client.post("/api/v1/command", {
-                name: "AlbumSearch",
-                albumIds: [updatedAlbum.id],
-            });
-            logger.debug(
-                `   Search command sent (Command ID: ${searchResponse.data.id})`,
-            );
-
-            // Wait for search to complete (with 30s timeout)
-            try {
-                const result = await this.waitForCommand(
-                    searchResponse.data.id,
-                    30000,
-                );
-
-                if (result.message?.includes("0 reports")) {
-                    try {
-                        const albumDetails = await this.client.get(
-                            `/api/v1/album/${updatedAlbum.id}`,
-                        );
-                        const releaseCount =
-                            albumDetails.data.releases?.length || 0;
-                        const anyReleaseOkStatus =
-                            albumDetails.data.anyReleaseOk;
-
-                        logger.debug(
-                            `   [DIAGNOSTIC] Initial search returned 0 reports`,
-                        );
-                        logger.debug(
-                            `   [DIAGNOSTIC] Album "${updatedAlbum.title}" has ${releaseCount} releases defined in Lidarr`,
-                        );
-                        logger.debug(
-                            `   [DIAGNOSTIC] anyReleaseOk: ${anyReleaseOkStatus}`,
-                        );
-                        logger.debug(
-                            `   [DIAGNOSTIC] Album MBID: ${updatedAlbum.foreignAlbumId}`,
-                        );
-
-                        if (releaseCount === 0) {
-                            logger.warn(
-                                `   [DIAGNOSTIC] ⚠️ Album has 0 releases in Lidarr - metadata may be incomplete`,
-                            );
-                        }
-
-                        if (!this._indexerCountLogged) {
-                            try {
-                                const indexers =
-                                    await this.client.get("/api/v1/indexer");
-                                const enabledIndexers = indexers.data.filter(
-                                    (i: any) =>
-                                        i.enableRss || i.enableAutomaticSearch,
-                                );
-                                logger.debug(
-                                    `   [DIAGNOSTIC] ${enabledIndexers.length} enabled indexers configured in Lidarr`,
-                                );
-
-                                if (enabledIndexers.length === 0) {
-                                    logger.error(
-                                        `   [DIAGNOSTIC] ❌ No enabled indexers - Lidarr cannot search for releases`,
-                                    );
-                                }
-                                this._indexerCountLogged = true;
-                            } catch (indexerError) {
-                                // Ignore indexer check errors
-                            }
-                        }
-                    } catch (diagError) {
-                        // Ignore diagnostic errors
-                    }
-
-                    // No sources found - try anyReleaseOk if not already enabled
-                    if (!updatedAlbum.anyReleaseOk) {
-                        logger.debug(
-                            `   No results with strict matching. Trying anyReleaseOk=true...`,
-                        );
-
-                        // Enable anyReleaseOk and retry
-                        await this.client.put(
-                            `/api/v1/album/${updatedAlbum.id}`,
-                            {
-                                ...updatedAlbum,
-                                anyReleaseOk: true,
-                            },
-                        );
-
-                        const retryResponse = await this.client.post(
-                            "/api/v1/command",
-                            {
-                                name: "AlbumSearch",
-                                albumIds: [updatedAlbum.id],
-                            },
-                        );
-
-                        const retryResult = await this.waitForCommand(
-                            retryResponse.data.id,
-                            30000,
-                        );
-
-                        if (retryResult.message?.includes("0 reports")) {
-                            const baseAlbumTitle =
-                                this.extractBaseTitle(albumTitle);
-
-                            if (
-                                baseAlbumTitle !== albumTitle &&
-                                baseAlbumTitle.length > 2
-                            ) {
-                                logger.debug(
-                                    `   Trying base album title fallback: "${albumTitle}" → "${baseAlbumTitle}"`,
-                                );
-
-                                const normalizedBase =
-                                    normalizeForFuzzyMatch(baseAlbumTitle);
-
-                                const baseMatch = artistAlbums.find(
-                                    (a: LidarrAlbum) => {
-                                        const normalizedAlbumTitle =
-                                            normalizeForFuzzyMatch(a.title);
-
-                                        if (
-                                            normalizedAlbumTitle ===
-                                            normalizedBase
-                                        )
-                                            return true;
-
-                                        const shorter =
-                                            normalizedAlbumTitle.length <
-                                            normalizedBase.length
-                                                ? normalizedAlbumTitle
-                                                : normalizedBase;
-                                        const longer =
-                                            normalizedAlbumTitle.length >=
-                                            normalizedBase.length
-                                                ? normalizedAlbumTitle
-                                                : normalizedBase;
-                                        if (
-                                            longer.includes(shorter) &&
-                                            shorter.length >=
-                                                longer.length * 0.7
-                                        ) {
-                                            return true;
-                                        }
-
-                                        return false;
-                                    },
-                                );
-
-                                if (
-                                    baseMatch &&
-                                    baseMatch.id !== updatedAlbum.id
-                                ) {
-                                    logger.debug(
-                                        `   Found base album: "${baseMatch.title}" (ID: ${baseMatch.id})`,
-                                    );
-                                    logger.debug(
-                                        `   Attempting download of base album instead...`,
-                                    );
-
-                                    await this.client.put(
-                                        `/api/v1/album/${baseMatch.id}`,
-                                        {
-                                            ...baseMatch,
-                                            monitored: true,
-                                            anyReleaseOk: true,
-                                        },
-                                    );
-
-                                    const baseSearchResponse =
-                                        await this.client.post(
-                                            "/api/v1/command",
-                                            {
-                                                name: "AlbumSearch",
-                                                albumIds: [baseMatch.id],
-                                            },
-                                        );
-
-                                    try {
-                                        const baseResult =
-                                            await this.waitForCommand(
-                                                baseSearchResponse.data.id,
-                                                30000,
-                                            );
-
-                                        if (
-                                            baseResult.message?.includes(
-                                                "0 reports",
-                                            )
-                                        ) {
-                                            logger.warn(
-                                                `   Base album "${baseMatch.title}" also has no releases`,
-                                            );
-                                            throw new Error(
-                                                `No releases available for "${albumTitle}" or base album "${baseMatch.title}" - ` +
-                                                    `check indexer configuration and album availability`,
-                                            );
-                                        }
-
-                                        logger.debug(
-                                            `   Base album download started: ${baseMatch.title}`,
-                                        );
-                                        return baseMatch;
-                                    } catch (baseError: any) {
-                                        if (
-                                            baseError.message?.includes(
-                                                "No releases",
-                                            )
-                                        ) {
-                                            throw baseError;
-                                        }
-                                        if (
-                                            baseError.message?.includes(
-                                                "timed out",
-                                            )
-                                        ) {
-                                            logger.warn(
-                                                `   Base album search timed out, may still be searching`,
-                                            );
-                                            return baseMatch;
-                                        }
-                                        throw baseError;
-                                    }
-                                } else {
-                                    logger.debug(
-                                        `   No base album match found in artist catalog (${artistAlbums.length} albums)`,
-                                    );
-                                }
-                            }
-
-                            throw new AcquisitionError(
-                                `No releases available for "${albumTitle}" - indexers found no matching downloads. ` +
-                                    `Album may not be available on configured indexers, or MBID mismatch between Lidarr and indexers.`,
-                                AcquisitionErrorType.NO_RELEASES_AVAILABLE,
-                                true,
-                            );
-                        }
-                    } else {
-                        throw new Error(
-                            "No releases available - indexers found no matching downloads",
-                        );
-                    }
-                }
-
-                logger.debug(
-                    `   Album download started: ${updatedAlbum.title}`,
-                );
-                return updatedAlbum;
-            } catch (error: any) {
-                if (error.message?.includes("No releases available")) {
-                    throw error; // Re-throw for startDownload to handle
-                }
-                if (error.message?.includes("timed out")) {
-                    // Command timed out - album might still be searching
-                    logger.warn(
-                        `   Search command timed out, album may still be searching`,
-                    );
-                    return updatedAlbum; // Return album, let timeout handling catch it later
-                }
-                throw error;
-            }
         } catch (error: unknown) {
-            // Re-throw our own errors (like "No releases available")
             if (
                 error instanceof Error &&
                 error.message.includes("No releases available")
@@ -1566,6 +898,101 @@ class LidarrService {
                 lidarrErrorLogFields(error),
             );
             return null;
+        }
+    }
+
+    private async ensureAlbumArtist(
+        artistName: string,
+        rootFolderPath: string,
+        artistMbid: string | undefined,
+        isDiscovery: boolean,
+    ): Promise<{ artist: LidarrArtist | null; justAddedArtist: boolean }> {
+        const response =
+            await this.client!.get<LidarrArtist[]>("/api/v1/artist");
+        return ensureArtistPresent({
+            artists: response.data,
+            artistMbid,
+            artistName,
+            rootFolderPath,
+            isDiscovery,
+            addArtist: (...args) => this.addArtist(...args),
+            ensureDiscoveryTag: (artist) =>
+                this.ensureDiscoveryTagForArtist(artist),
+        });
+    }
+
+    private async selectAlbumForAdd(
+        artist: LidarrArtist,
+        justAddedArtist: boolean,
+        rgMbid: string,
+        albumTitle: string,
+        artistName: string,
+    ): Promise<{ album: LidarrAlbum; artistAlbums: LidarrAlbum[] }> {
+        const artistAlbums = await awaitArtistCatalog({
+            client: this.client!,
+            artist,
+            justAddedArtist,
+            clock: this.clock,
+        });
+        const selection = selectAlbumInCatalogMatch(
+            artistAlbums,
+            rgMbid,
+            albumTitle,
+        );
+        if (!selection.album) {
+            throw new AcquisitionError(
+                `Album "${albumTitle}" not found in Lidarr catalog for ${artistName}`,
+                AcquisitionErrorType.ALBUM_NOT_FOUND,
+                true,
+            );
+        }
+        if (selection.matchType === "exact") {
+            logger.debug(
+                ` Matched exact normalized: "${selection.album.title}"`,
+            );
+        } else if (selection.matchType === "partial") {
+            logger.debug(
+                ` Matched partial (contained): "${selection.album.title}"`,
+            );
+        }
+        return { album: selection.album, artistAlbums };
+    }
+
+    private grabCatalogAlbum(
+        artist: LidarrArtist,
+        album: LidarrAlbum,
+        artistAlbums: LidarrAlbum[],
+        albumTitle: string,
+    ): Promise<LidarrAlbum> {
+        return grabCatalogRelease({
+            client: this.client!,
+            artist,
+            album,
+            artistAlbums,
+            requestedTitle: albumTitle,
+            sleep: (delayMs) => this.clock.sleep(delayMs),
+            waitForCommand: (id, timeoutMs) =>
+                this.waitForCommand(id, timeoutMs),
+            createNoReleasesError: () =>
+                new AcquisitionError(
+                    `No releases available for "${albumTitle}" - indexers found no matching downloads. Album may not be available on configured indexers, or MBID mismatch between Lidarr and indexers.`,
+                    AcquisitionErrorType.NO_RELEASES_AVAILABLE,
+                    true,
+                ),
+            indexerCountLogged: () => this._indexerCountLogged,
+            markIndexerCountLogged: () => {
+                this._indexerCountLogged = true;
+            },
+            extractBaseTitle: (title) => this.extractBaseTitle(title),
+        });
+    }
+
+    private async ensureDiscoveryTagForArtist(
+        artist: LidarrArtist,
+    ): Promise<void> {
+        const tagId = await this.getOrCreateDiscoveryTag();
+        if (tagId && !artist.tags?.includes(tagId)) {
+            await this.addTagsToArtist(artist.id, [tagId]);
         }
     }
 
@@ -1882,270 +1309,68 @@ class LidarrService {
     /**
      * Get all tags from Lidarr
      */
+    private get discoveryTagId(): number | null {
+        return this.tagService.cachedDiscoveryTagId;
+    }
+
+    private set discoveryTagId(value: number | null) {
+        this.tagService.cachedDiscoveryTagId = value;
+    }
+
+    /** Get all tags from Lidarr. */
     async getTags(): Promise<LidarrTag[]> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return [];
-        }
-
-        try {
-            const response = await this.client.get("/api/v1/tag");
-            return response.data || [];
-        } catch (error: any) {
-            logger.error("[LIDARR] Failed to get tags:", error.message);
-            return [];
-        }
+        return this.tagService.getTags();
     }
 
-    /**
-     * Create a new tag in Lidarr
-     */
+    /** Create a tag in Lidarr. */
     async createTag(label: string): Promise<LidarrTag | null> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return null;
-        }
-
-        try {
-            const response = await this.client.post("/api/v1/tag", { label });
-            logger.debug(
-                `[LIDARR] Created tag: ${label} (ID: ${response.data.id})`,
-            );
-            return response.data;
-        } catch (error: any) {
-            logger.error("[LIDARR] Failed to create tag:", error.message);
-            return null;
-        }
+        return this.tagService.createTag(label);
     }
 
-    /**
-     * Get or create the discovery tag
-     * Returns the tag ID, caching it for subsequent calls
-     */
-    private discoveryTagId: number | null = null;
-    private _indexerCountLogged: boolean = false;
-
+    /** Get or create the discovery tag. */
     async getOrCreateDiscoveryTag(): Promise<number | null> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return null;
-        }
-
-        // Return cached tag ID if available
-        if (this.discoveryTagId !== null) {
-            return this.discoveryTagId;
-        }
-
-        try {
-            // Check if tag already exists
-            const tags = await this.getTags();
-            const existingTag = tags.find((t) =>
-                DISCOVERY_TAG_LABEL_ALIASES.includes(t.label),
-            );
-
-            if (existingTag) {
-                logger.debug(
-                    `[LIDARR] Found existing discovery tag "${existingTag.label}" (ID: ${existingTag.id})`,
-                );
-                this.discoveryTagId = existingTag.id;
-                return existingTag.id;
-            }
-
-            // Create the tag
-            const newTag = await this.createTag(DISCOVERY_TAG_LABEL);
-            if (newTag) {
-                this.discoveryTagId = newTag.id;
-                return newTag.id;
-            }
-
-            return null;
-        } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to get/create discovery tag:",
-                error.message,
-            );
-            return null;
-        }
+        return this.tagService.getOrCreateDiscoveryTag();
     }
 
-    /**
-     * Add tags to an artist
-     */
+    /** Add tags to an artist. */
     async addTagsToArtist(
         artistId: number,
         tagIds: number[],
     ): Promise<boolean> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return false;
-        }
-
-        try {
-            // Get current artist data
-            const response = await this.client.get(
-                `/api/v1/artist/${artistId}`,
-            );
-            const artist = response.data;
-
-            // Merge new tags with existing (avoid duplicates)
-            const existingTags = artist.tags || [];
-            const mergedTags = [...new Set([...existingTags, ...tagIds])];
-
-            // Update artist with new tags
-            await this.client.put(`/api/v1/artist/${artistId}`, {
-                ...artist,
-                tags: mergedTags,
-            });
-
-            logger.debug(
-                `[LIDARR] Added tags ${tagIds} to artist ${artist.artistName}`,
-            );
-            return true;
-        } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to add tags to artist:",
-                error.message,
-            );
-            return false;
-        }
+        return this.tagService.addTagsToArtist(artistId, tagIds);
     }
 
-    /**
-     * Remove tags from an artist
-     */
+    /** Remove tags from an artist. */
     async removeTagsFromArtist(
         artistId: number,
         tagIds: number[],
     ): Promise<boolean> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return false;
-        }
-
-        try {
-            // Get current artist data
-            const response = await this.client.get(
-                `/api/v1/artist/${artistId}`,
-            );
-            const artist = response.data;
-
-            // Remove specified tags
-            const existingTags = artist.tags || [];
-            const filteredTags = existingTags.filter(
-                (t: number) => !tagIds.includes(t),
-            );
-
-            // Update artist with filtered tags
-            await this.client.put(`/api/v1/artist/${artistId}`, {
-                ...artist,
-                tags: filteredTags,
-            });
-
-            logger.debug(
-                `[LIDARR] Removed tags ${tagIds} from artist ${artist.artistName}`,
-            );
-            return true;
-        } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to remove tags from artist:",
-                error.message,
-            );
-            return false;
-        }
+        return this.tagService.removeTagsFromArtist(artistId, tagIds);
     }
 
-    /**
-     * Get all artists that have a specific tag
-     */
+    /** Get artists carrying one Lidarr tag. */
     async getArtistsByTag(tagId: number): Promise<LidarrArtist[]> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return [];
-        }
-
-        try {
-            const response = await this.client.get("/api/v1/artist");
-            const artists: LidarrArtist[] = response.data;
-
-            // Filter artists that have the specified tag
-            return artists.filter((artist) => artist.tags?.includes(tagId));
-        } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to get artists by tag:",
-                error.message,
-            );
-            return [];
-        }
+        return this.tagService.getArtistsByTag(tagId);
     }
 
-    /**
-     * Get all discovery-tagged artists (convenience method)
-     */
+    /** Get all discovery-tagged artists. */
     async getDiscoveryArtists(): Promise<LidarrArtist[]> {
-        const tagId = await this.getOrCreateDiscoveryTag();
-        if (!tagId) {
-            return [];
-        }
-        return this.getArtistsByTag(tagId);
+        await this.ensureInitialized();
+        return this.tagService.getDiscoveryArtists();
     }
 
-    /**
-     * Remove discovery tag from an artist by MBID
-     * Used when user likes an album (artist becomes "owned")
-     */
+    /** Remove the discovery tag from an artist by MBID. */
     async removeDiscoveryTagByMbid(artistMbid: string): Promise<boolean> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return false;
-        }
-
-        try {
-            const tagId = await this.getOrCreateDiscoveryTag();
-            if (!tagId) {
-                return false;
-            }
-
-            // Find artist by MBID
-            const artists = await this.getArtists();
-            const artist = artists.find(
-                (a) => a.foreignArtistId === artistMbid,
-            );
-
-            if (!artist) {
-                logger.debug(
-                    `[LIDARR] Artist ${artistMbid} not found in Lidarr`,
-                );
-                return true; // Not an error - artist might not be in Lidarr
-            }
-
-            // Check if artist has the discovery tag
-            if (!artist.tags?.includes(tagId)) {
-                logger.debug(
-                    `[LIDARR] Artist ${artist.artistName} doesn't have discovery tag`,
-                );
-                return true; // Already doesn't have tag
-            }
-
-            return await this.removeTagsFromArtist(artist.id, [tagId]);
-        } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to remove discovery tag:",
-                error.message,
-            );
-            return false;
-        }
+        return this.tagService.removeDiscoveryTagByMbid(artistMbid);
     }
 
-    /**
-     * Delete artist by Lidarr ID (used for cleanup)
-     */
     async deleteArtistById(
         lidarrId: number,
         deleteFiles: boolean = true,
@@ -2387,161 +1612,38 @@ class LidarrService {
      *
      * This replaces multiple per-job API calls with a single snapshot fetch.
      */
+    /** Fetch all data needed for reconciliation in minimal API calls. */
     async getReconciliationSnapshot(
         signal?: AbortSignal,
     ): Promise<ReconciliationSnapshot> {
         await this.ensureInitialized();
-
-        const snapshot: ReconciliationSnapshot = {
-            queue: new Map(),
-            albumsByMbid: new Map(),
-            albumsByTitle: new Map(),
-            fetchedAt: new Date(),
-        };
-
-        if (!this.enabled || !this.client) {
-            return snapshot;
-        }
-
-        const ownedController = new AbortController();
-        const requestSignal = signal
-            ? AbortSignal.any([signal, ownedController.signal])
-            : ownedController.signal;
-        try {
-            const [queueResponse] = await Promise.all([
-                this.client.get("/api/v1/queue", {
-                    params: {
-                        page: 1,
-                        pageSize: 1000,
-                        includeUnknownArtistItems: true,
-                    },
-                    signal: requestSignal,
-                }),
-                fetchReconciliationAlbumMaps(
-                    this.client,
-                    snapshot,
-                    requestSignal,
-                ),
-            ]);
-
-            // Index queue items by downloadId
-            const queueItems = queueResponse.data.records || [];
-            for (const item of queueItems) {
-                if (item.downloadId) {
-                    snapshot.queue.set(item.downloadId, {
-                        id: item.id,
-                        downloadId: item.downloadId,
-                        status: item.status,
-                        progress:
-                            item.sizeleft && item.size
-                                ? Math.round(
-                                      ((item.size - item.sizeleft) /
-                                          item.size) *
-                                          100,
-                                  )
-                                : undefined,
-                        title: item.title,
-                    });
-                }
-            }
-
-            logger.debug(
-                `[LIDARR] Snapshot fetched: ${snapshot.queue.size} queue items, ${snapshot.albumsByMbid.size} albums with files`,
-            );
-
-            return snapshot;
-        } catch (error: any) {
-            ownedController.abort(error);
-            logger.error(
-                "[LIDARR] Failed to create reconciliation snapshot:",
-                error.message,
-            );
-            throw error;
-        }
+        return fetchReconciliationSnapshot(this.client, this.enabled, signal);
     }
 
-    /**
-     * Check if an album is available using a pre-fetched snapshot.
-     * Returns true if the album exists with files.
-     */
+    /** Check album availability against a pre-fetched snapshot. */
     isAlbumAvailableInSnapshot(
         snapshot: ReconciliationSnapshot,
         mbid?: string,
         artistName?: string,
         albumTitle?: string,
     ): boolean {
-        // Strategy 1: Check by MBID
-        if (mbid && snapshot.albumsByMbid.has(mbid)) {
-            return true;
-        }
-
-        // Strategy 2: Check by normalized artist|title
-        if (artistName && albumTitle) {
-            const normalizedArtist = normalizeForExactKey(artistName);
-            const normalizedAlbum = normalizeForExactKey(albumTitle);
-            const key = `${normalizedArtist}|${normalizedAlbum}`;
-            if (snapshot.albumsByTitle.has(key)) {
-                return true;
-            }
-
-            // Strategy 3: Partial title match (handles edition differences)
-            for (const titleKey of snapshot.albumsByTitle.keys()) {
-                const [keyArtist, keyAlbum] = titleKey.split("|");
-                if (
-                    keyArtist === normalizedArtist &&
-                    (keyAlbum.includes(normalizedAlbum) ||
-                        normalizedAlbum.includes(keyAlbum))
-                ) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return snapshotHasAlbum(snapshot, mbid, artistName, albumTitle);
     }
 
-    /**
-     * Check if a download is active using a pre-fetched snapshot.
-     */
+    /** Check download activity against a pre-fetched snapshot. */
     isDownloadActiveInSnapshot(
         snapshot: ReconciliationSnapshot,
         downloadId: string,
     ): { active: boolean; progress?: number } {
-        const item = snapshot.queue.get(downloadId);
-        if (!item) {
-            return { active: false };
-        }
-        // Consider it active unless explicitly failed
-        const isActive = item.status !== "failed" && item.status !== "warning";
-        return { active: isActive, progress: item.progress };
+        return snapshotHasActiveDownload(snapshot, downloadId);
     }
 }
 
-/**
- * Snapshot of Lidarr state for efficient batch reconciliation
- */
-export interface ReconciliationSnapshot {
-    queue: Map<string, QueueSnapshotItem>;
-    albumsByMbid: Map<string, AlbumSnapshotInfo>;
-    albumsByTitle: Map<string, AlbumSnapshotInfo>;
-    fetchedAt: Date;
-}
-
-export interface QueueSnapshotItem {
-    id: number;
-    downloadId: string;
-    status: string;
-    progress?: number;
-    title: string;
-}
-
-export interface AlbumSnapshotInfo {
-    id: number;
-    title: string;
-    foreignAlbumId: string;
-    artistName: string;
-    hasFiles: boolean;
-}
+export type {
+    AlbumSnapshotInfo,
+    QueueSnapshotItem,
+    ReconciliationSnapshot,
+} from "./lidarr/lidarrReconciliation";
 
 // Interface for calendar release data
 export interface CalendarRelease {

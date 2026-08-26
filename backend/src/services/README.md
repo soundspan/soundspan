@@ -103,6 +103,13 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/libraryHealthDashboard/storageAnalytics.ts` | MIME, storage, bitrate, and artist analytics |
 | `backend/src/services/libraryTrackPreferences.ts` | Core |
 | `backend/src/services/lidarr.ts` | Core |
+| `backend/src/services/lidarr/lidarrAlbumSelection.ts` | Pure Lidarr album catalog matching and edition fallback selection |
+| `backend/src/services/lidarr/lidarrArtistCatalog.ts` | Artist presence and bounded album-catalog polling |
+| `backend/src/services/lidarr/lidarrHttpClient.ts` | Bounded Lidarr HTTP transport |
+| `backend/src/services/lidarr/lidarrQueue.ts` | Lidarr queue inspection and cleanup |
+| `backend/src/services/lidarr/lidarrReconciliation.ts` | Queue and downloaded-album reconciliation snapshots |
+| `backend/src/services/lidarr/lidarrReleaseGrab.ts` | Lidarr album monitoring, search, and edition fallback acquisition |
+| `backend/src/services/lidarr/lidarrTagService.ts` | Lidarr discovery-tag lifecycle and artist tagging |
 | `backend/src/services/listenTogether.ts` | Core |
 | `backend/src/services/listenTogetherAvailability.ts` | Queue identity checks for late availability resolution |
 | `backend/src/services/listenTogetherAvailabilityPublication.ts` | Resolve, revalidate, and publish per-user queue availability |

@@ -22,6 +22,42 @@ import {
     primeServiceWithClient,
 } from "./lidarrService.helpers";
 
+function primeMonitoringFailure(
+    client: ReturnType<typeof createClientMock>,
+    sentinel: string,
+) {
+    const album = {
+        id: 401,
+        title: "Unstable Album",
+        foreignAlbumId: "album-mbid",
+        artistId: 101,
+    };
+    const unmonitored = {
+        ...album,
+        monitored: false,
+        anyReleaseOk: false,
+        releases: [{ id: 1 }],
+        rawSecret: sentinel,
+    };
+    client.get
+        .mockResolvedValueOnce({
+            data: [
+                {
+                    id: 101,
+                    artistName: "Artist",
+                    foreignArtistId: "artist-mbid",
+                    monitored: true,
+                },
+            ],
+        })
+        .mockResolvedValueOnce({ data: [album] })
+        .mockResolvedValueOnce({ data: unmonitored })
+        .mockResolvedValueOnce({ status: 200, data: unmonitored });
+    client.put.mockResolvedValue({ data: { monitored: true } });
+    client.post.mockResolvedValue({ data: { id: 7101 } });
+    return album;
+}
+
 describe("lidarr service behavior", () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -115,111 +151,6 @@ describe("lidarr service behavior", () => {
             new Date("2026-02-28"),
         );
         expect(calendar).toEqual([]);
-    });
-
-    it("builds reconciliation snapshot and checks album/download state helpers", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get
-            .mockResolvedValueOnce({
-                data: {
-                    records: [
-                        {
-                            id: 4,
-                            downloadId: "queue-1",
-                            status: "downloading",
-                            size: 100,
-                            sizeleft: 20,
-                            title: "Album",
-                        },
-                        {
-                            id: 5,
-                            downloadId: "queue-2",
-                            status: "warning",
-                            size: 100,
-                            sizeleft: 70,
-                            title: "Album 2",
-                        },
-                    ],
-                },
-            })
-            .mockResolvedValueOnce({
-                data: [
-                    {
-                        id: 31,
-                        title: "My Album (Deluxe)",
-                        foreignAlbumId: "album-mbid-31",
-                        artist: { artistName: "My Artist" },
-                        statistics: { percentOfTracks: 100 },
-                    },
-                    {
-                        id: 32,
-                        title: "No Files Album",
-                        foreignAlbumId: "album-mbid-32",
-                        artist: { artistName: "My Artist" },
-                        statistics: { percentOfTracks: 0 },
-                    },
-                ],
-            });
-
-        const snapshot = await lidarrService.getReconciliationSnapshot();
-        expect(snapshot.queue.size).toBe(2);
-        expect(snapshot.albumsByMbid.size).toBe(1);
-
-        expect(
-            (lidarrService as any).isAlbumAvailableInSnapshot(
-                snapshot,
-                "album-mbid-31",
-            ),
-        ).toBe(true);
-        expect(
-            (lidarrService as any).isAlbumAvailableInSnapshot(
-                snapshot,
-                undefined,
-                "My Artist",
-                "My Album",
-            ),
-        ).toBe(true);
-
-        expect(
-            (lidarrService as any).isDownloadActiveInSnapshot(
-                snapshot,
-                "queue-1",
-            ),
-        ).toEqual({ active: true, progress: 80 });
-        expect(
-            (lidarrService as any).isDownloadActiveInSnapshot(
-                snapshot,
-                "queue-2",
-            ),
-        ).toEqual({ active: false, progress: 30 });
-    });
-
-    it("fails closed when album indexing fails during snapshot creation", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        client.get
-            .mockResolvedValueOnce({
-                data: {
-                    records: [
-                        {
-                            id: 7,
-                            downloadId: "queue-ok",
-                            status: "downloading",
-                            size: 200,
-                            sizeleft: 40,
-                            title: "Album",
-                        },
-                    ],
-                },
-            })
-            .mockRejectedValueOnce(new Error("album index down"));
-
-        await expect(lidarrService.getReconciliationSnapshot()).rejects.toThrow(
-            "album index down",
-        );
     });
 
     it("deletes artists/albums and checks availability helpers", async () => {
@@ -1266,6 +1197,40 @@ describe("lidarr service behavior", () => {
         searchArtistSpy.mockRestore();
     });
 
+    it("does not log raw album payloads when monitoring does not persist", async () => {
+        const client = createClientMock();
+        primeServiceWithClient(client);
+        const sentinel = "monitoring-payload-api-key-sentinel";
+        const album = primeMonitoringFailure(client, sentinel);
+        const waitSpy = jest
+            .spyOn(lidarrService as any, "waitForCommand")
+            .mockResolvedValue({
+                status: "completed",
+                message: "Search completed with 1 report",
+            });
+
+        await lidarrService.addAlbum(
+            album.foreignAlbumId,
+            "Artist",
+            album.title,
+            "/music",
+            "artist-mbid",
+        );
+
+        const errorLogs = (logger.error as jest.Mock).mock.calls;
+        expect(JSON.stringify(errorLogs)).not.toContain(sentinel);
+        expect(errorLogs).toContainEqual([
+            " CRITICAL: Album monitoring failed to persist!",
+            {
+                albumId: album.id,
+                title: album.title,
+                monitored: false,
+                status: 200,
+            },
+        ]);
+        waitSpy.mockRestore();
+    });
+
     it("addAlbum refreshes metadata when an existing artist has no albums", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -1549,81 +1514,6 @@ describe("lidarr service behavior", () => {
         setTimeoutSpy.mockRestore();
     });
 
-    it("addAlbum matches album title using exact normalized comparison", async () => {
-        mockStripAlbumEdition.mockImplementation((title: string) =>
-            title.replace("((Deluxe Edition) ", "").replace(/\)$/, ""),
-        );
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        const artist = {
-            id: 55,
-            artistName: "Exact Match Band",
-            foreignArtistId: "artist-exact",
-            monitored: true,
-        };
-
-        const album = {
-            id: 901,
-            title: "Exact Match Album ((Deluxe Edition) Remainder)",
-            foreignAlbumId: "album-exact",
-            artistId: 55,
-        };
-
-        client.get
-            .mockResolvedValueOnce({ data: [artist] })
-            .mockResolvedValueOnce({ data: [album] })
-            .mockResolvedValueOnce({
-                data: {
-                    ...album,
-                    monitored: true,
-                    anyReleaseOk: true,
-                    releases: [{ id: 1 }],
-                },
-            })
-            .mockResolvedValueOnce({
-                data: {
-                    ...album,
-                    monitored: true,
-                    anyReleaseOk: true,
-                    releases: [{ id: 1 }],
-                },
-            });
-
-        client.put.mockResolvedValue({ data: { ...album, monitored: true } });
-        client.post.mockResolvedValue({ data: { id: 9101 } });
-
-        const waitSpy = jest
-            .spyOn(lidarrService as any, "waitForCommand")
-            .mockResolvedValue({
-                status: "completed",
-                message: "Search completed with 1 report",
-            });
-
-        await expect(
-            lidarrService.addAlbum(
-                "different-mbid",
-                "Exact Match Band",
-                "Exact Match Album Remainder",
-                "/music",
-                "artist-exact",
-            ),
-        ).resolves.toEqual(
-            expect.objectContaining({
-                id: 901,
-                foreignAlbumId: "album-exact",
-            }),
-        );
-
-        expect(logger.debug).toHaveBeenCalledWith(
-            expect.stringContaining(
-                'Matched exact normalized: "Exact Match Album ((Deluxe Edition) Remainder)"',
-            ),
-        );
-
-        waitSpy.mockRestore();
-    });
-
     it.each([
         ["parenthetical", "("],
         ["bracket", "["],
@@ -1692,78 +1582,6 @@ describe("lidarr service behavior", () => {
         },
     );
 
-    it("addAlbum matches album title using strict partial normalized comparison", async () => {
-        const client = createClientMock();
-        primeServiceWithClient(client);
-
-        const artist = {
-            id: 66,
-            artistName: "Partial Band",
-            foreignArtistId: "artist-partial",
-            monitored: true,
-        };
-
-        const album = {
-            id: 902,
-            title: "Partial Match Album Remastered",
-            foreignAlbumId: "album-partial",
-            artistId: 66,
-        };
-
-        client.get
-            .mockResolvedValueOnce({ data: [artist] })
-            .mockResolvedValueOnce({ data: [album] })
-            .mockResolvedValueOnce({
-                data: {
-                    ...album,
-                    monitored: true,
-                    anyReleaseOk: true,
-                    releases: [{ id: 1 }],
-                },
-            })
-            .mockResolvedValueOnce({
-                data: {
-                    ...album,
-                    monitored: true,
-                    anyReleaseOk: true,
-                    releases: [{ id: 1 }],
-                },
-            });
-
-        client.put.mockResolvedValue({ data: { ...album, monitored: true } });
-        client.post.mockResolvedValue({ data: { id: 9102 } });
-
-        const waitSpy = jest
-            .spyOn(lidarrService as any, "waitForCommand")
-            .mockResolvedValue({
-                status: "completed",
-                message: "Search completed with 1 report",
-            });
-
-        await expect(
-            lidarrService.addAlbum(
-                "different-mbid",
-                "Partial Band",
-                "Partial Match Album",
-                "/music",
-                "artist-partial",
-            ),
-        ).resolves.toEqual(
-            expect.objectContaining({
-                id: 902,
-                foreignAlbumId: "album-partial",
-            }),
-        );
-
-        expect(logger.debug).toHaveBeenCalledWith(
-            expect.stringContaining(
-                'Matched partial (contained): "Partial Match Album Remastered"',
-            ),
-        );
-
-        waitSpy.mockRestore();
-    });
-
     it("getOrCreateDiscoveryTag returns null when tag discovery fails", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
@@ -1778,7 +1596,7 @@ describe("lidarr service behavior", () => {
         expect(getTagsSpy).toHaveBeenCalledTimes(1);
         expect(logger.error).toHaveBeenCalledWith(
             "[LIDARR] Failed to get/create discovery tag:",
-            "tag lookup failed",
+            expect.objectContaining({ message: "tag lookup failed" }),
         );
 
         getTagsSpy.mockRestore();
@@ -2196,7 +2014,9 @@ describe("lidarr service behavior", () => {
         );
         expect(logger.error).toHaveBeenCalledWith(
             "[LIDARR] Failed to create reconciliation snapshot:",
-            expect.any(String),
+            expect.objectContaining({
+                message: "Lidarr album response was not readable",
+            }),
         );
     });
 

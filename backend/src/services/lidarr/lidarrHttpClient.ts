@@ -69,6 +69,15 @@ export function getLidarrErrorMessage(error: unknown): string {
     return typeof message === "string" ? message : toErrorMessage(error);
 }
 
+/** Returns safe structured fields for logging a Lidarr failure. */
+export function lidarrErrorLogFields(error: unknown) {
+    return {
+        message: error instanceof Error ? toErrorMessage(error) : undefined,
+        status: error instanceof LidarrHttpError ? error.status : undefined,
+        path: error instanceof LidarrHttpError ? error.path : undefined,
+    };
+}
+
 /** Runtime bounds and injectable delay behavior for a Lidarr client. */
 export interface LidarrHttpClientOptions {
     timeoutMs?: number;

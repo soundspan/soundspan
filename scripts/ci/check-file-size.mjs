@@ -61,7 +61,7 @@ const BASELINE = Object.freeze({
     "backend/src/routes/podcasts.ts": 2541,
     "backend/src/routes/systemSettings.ts": 1506,
     "backend/src/routes/youtubeMusic.ts": 1604,
-    "backend/src/services/lidarr.ts": 2587,
+    "backend/src/services/lidarr.ts": 1689,
     "backend/src/services/simpleDownloadManager.ts": 2104,
     "backend/src/services/spotify.ts": 1624,
     "backend/src/workers/unifiedEnrichment.ts": 1825,
@@ -71,7 +71,7 @@ const BASELINE = Object.freeze({
     "frontend/components/player/OverlayPlayer.tsx": 1352,
     "frontend/hooks/useQueries.ts": 1453,
     "frontend/lib/audio-controls-context.tsx": 2305,
-    "frontend/lib/listen-together-context.tsx": 1954,
+    "frontend/lib/listen-together-context.tsx": 1949,
     "services/audio-analyzer/analyzer.py": 2248,
 });
 
