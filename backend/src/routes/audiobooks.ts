@@ -40,10 +40,12 @@ import {
     federatedSource,
     type AudiobookRow,
 } from "./audiobookRouteResponses";
+import { isForeignKeyViolationOn } from "../utils/prismaErrors";
 
 const router = Router();
 const audiobookSyncAuth = [requireAuthOrToken, requireAdmin] as const;
 const SYNC_RUNNING_ERROR = "audiobook sync already running";
+const AUDIOBOOK_PROGRESS_FK = "AudiobookProgress_audiobookshelfId_fkey";
 
 const federationPeerInclude = {
     federationPeer: {
@@ -1232,10 +1234,8 @@ router.get<{ id: string }>(
  *         description: Progress updated successfully
  *       401:
  *         description: Not authenticated
- */
-/**
- * POST /audiobooks/:id/progress
- * Update playback progress for an audiobook
+ *       404:
+ *         description: Audiobook not found
  */
 router.post<{ id: string }>(
     "/:id/progress",
@@ -1311,7 +1311,6 @@ router.post<{ id: string }>(
             }
             logger.debug(`   Finished: ${!!isFinished}`);
 
-            // Pull cached metadata to avoid hitting Audiobookshelf for every update
             const existingProgress = await prisma.audiobookProgress.findUnique({
                 where: {
                     userId_audiobookshelfId: {
@@ -1399,6 +1398,9 @@ router.post<{ id: string }>(
                 },
             });
         } catch (error: any) {
+            if (isForeignKeyViolationOn(error, AUDIOBOOK_PROGRESS_FK)) {
+                return res.status(404).json({ error: "Audiobook not found" });
+            }
             logger.error("Error updating progress:", error);
             res.status(500).json({
                 error: "Failed to update progress",

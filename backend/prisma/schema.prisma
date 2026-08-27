@@ -166,22 +166,24 @@ model AppPassword {
 
 model PlaybackState {
   userId       String
-  deviceId     String   @default("legacy")
+  deviceId     String     @default("legacy")
   playbackType String
   trackId      String?
   audiobookId  String?
   podcastId    String?
   queue        Json?
-  currentIndex Int      @default(0)
-  isShuffle    Boolean  @default(false)
-  isPlaying    Boolean  @default(false)
-  currentTime  Float    @default(0)
-  updatedAt    DateTime @updatedAt
-  createdAt    DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentIndex Int        @default(0)
+  isShuffle    Boolean    @default(false)
+  isPlaying    Boolean    @default(false)
+  currentTime  Float      @default(0)
+  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime   @default(now())
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audiobook    Audiobook? @relation(fields: [audiobookId], references: [id], onDelete: SetNull)
 
   @@id([userId, deviceId])
   @@index([userId, updatedAt])
+  @@index([audiobookId])
 }
 
 model SyncGroup {
@@ -507,20 +509,20 @@ model Track {
 }
 
 model TrackFingerprint {
-  trackId           String    @id
-  fingerprint       String    @db.Text
-  duration          Int
-  fingerprintedAt   DateTime  @default(now()) @db.Timestamptz
-  lookupStatus      String    @default("pending")
-  lookupStartedAt   DateTime? @db.Timestamptz
-  lookupRetryCount  Int       @default(0)
-  lookupError       String?
-  recordingMbid     String?
-  releaseGroupMbid  String?
-  score             Float?
-  lookedUpAt        DateTime? @db.Timestamptz
-  updatedAt         DateTime  @updatedAt @db.Timestamptz
-  track             Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  trackId          String    @id
+  fingerprint      String    @db.Text
+  duration         Int
+  fingerprintedAt  DateTime  @default(now()) @db.Timestamptz
+  lookupStatus     String    @default("pending")
+  lookupStartedAt  DateTime? @db.Timestamptz
+  lookupRetryCount Int       @default(0)
+  lookupError      String?
+  recordingMbid    String?
+  releaseGroupMbid String?
+  score            Float?
+  lookedUpAt       DateTime? @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @db.Timestamptz
+  track            Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
   @@index([lookupStatus, lookupRetryCount, fingerprintedAt])
   @@index([recordingMbid])
@@ -1037,22 +1039,24 @@ model CachedTrack {
 }
 
 model AudiobookProgress {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   userId           String
   audiobookshelfId String
   title            String
   author           String?
   coverUrl         String?
-  currentTime      Float    @default(0)
-  duration         Float    @default(0)
-  isFinished       Boolean  @default(false)
-  lastPlayedAt     DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  createdAt        DateTime @default(now())
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentTime      Float     @default(0)
+  duration         Float     @default(0)
+  isFinished       Boolean   @default(false)
+  lastPlayedAt     DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  audiobook        Audiobook @relation(fields: [audiobookshelfId], references: [id], onDelete: Cascade)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, audiobookshelfId])
   @@index([userId, lastPlayedAt])
+  @@index([audiobookshelfId])
 }
 
 model Audiobook {
@@ -1086,6 +1090,8 @@ model Audiobook {
   peerId         String?
   remoteId       String?
   federationPeer FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
+  progress       AudiobookProgress[]
+  playbackStates PlaybackState[]
 
   @@unique([peerId, remoteId])
   @@index([title])

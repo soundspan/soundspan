@@ -1,5 +1,6 @@
 import cors from "cors";
 import express, { type Request, type Response } from "express";
+import { Prisma } from "@prisma/client";
 import request from "supertest";
 import { isOriginAllowed } from "../../utils/cors";
 
@@ -191,6 +192,14 @@ function createMockStream() {
         },
     };
     return stream;
+}
+
+function createPrismaForeignKeyError(constraint?: string) {
+    return new Prisma.PrismaClientKnownRequestError("constraint", {
+        code: "P2003",
+        clientVersion: "test",
+        ...(constraint ? { meta: { constraint } } : {}),
+    });
 }
 
 describe("audiobooks advanced runtime", () => {
@@ -1316,6 +1325,52 @@ describe("audiobooks advanced runtime", () => {
         await progressHandler(
             {
                 params: { id: "book-4" },
+                body: { currentTime: 10, duration: 100 },
+                user: { id: "u1", username: "user1" },
+            } as any,
+            errorRes,
+        );
+
+        expect(errorRes.statusCode).toBe(500);
+        expect(errorRes.body).toEqual({
+            error: "Failed to update progress",
+        });
+    });
+
+    it("maps only a named audiobook progress foreign key violation to 404", async () => {
+        prisma.audiobook.findUnique.mockResolvedValue({
+            title: "Cached Title",
+            author: "Cached Author",
+            coverUrl: null,
+            duration: 360,
+            libraryId: "lib-1",
+            localCoverPath: null,
+        });
+        prisma.audiobookProgress.upsert
+            .mockRejectedValueOnce(
+                createPrismaForeignKeyError(
+                    "AudiobookProgress_audiobookshelfId_fkey",
+                ),
+            )
+            .mockRejectedValueOnce(createPrismaForeignKeyError());
+
+        const missingRes = createRes();
+        await progressHandler(
+            {
+                params: { id: "deleted-book" },
+                body: { currentTime: 10, duration: 100 },
+                user: { id: "u1", username: "user1" },
+            } as any,
+            missingRes,
+        );
+
+        expect(missingRes.statusCode).toBe(404);
+        expect(missingRes.body).toEqual({ error: "Audiobook not found" });
+
+        const errorRes = createRes();
+        await progressHandler(
+            {
+                params: { id: "book-write-error" },
                 body: { currentTime: 10, duration: 100 },
                 user: { id: "u1", username: "user1" },
             } as any,

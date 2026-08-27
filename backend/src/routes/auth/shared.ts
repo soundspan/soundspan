@@ -8,6 +8,7 @@ import { generateToken, generateRefreshToken } from "../../middleware/auth";
 import { encrypt, decrypt } from "../../utils/encryption";
 import { timingSafeCompare } from "../../utils/timingSafe";
 import type { LoginUser } from "../../services/oidcAccountResolution";
+import { hasErrorCode } from "../../utils/prismaErrors";
 
 async function verifyTotpToken(
     secret: string,
@@ -116,11 +117,6 @@ const resourceIdParamsSchema = z
             .regex(/^[a-z0-9]+$/),
     })
     .strict();
-
-function hasErrorCode(error: unknown, code: string): boolean {
-    if (typeof error !== "object" || error === null) return false;
-    return "code" in error && error.code === code;
-}
 
 /** Shared primitives used across auth concern modules. */
 export {

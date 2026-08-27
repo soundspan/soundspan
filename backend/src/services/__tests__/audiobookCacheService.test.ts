@@ -566,15 +566,10 @@ describe("audiobook cache service behavior", () => {
         });
         expect(
             transactionClient.audiobookProgress.deleteMany,
-        ).toHaveBeenCalledWith({
-            where: { audiobookshelfId: { in: ["stale-book"] } },
-        });
-        expect(transactionClient.playbackState.updateMany).toHaveBeenCalledWith(
-            {
-                where: { audiobookId: { in: ["stale-book"] } },
-                data: { audiobookId: null },
-            },
-        );
+        ).not.toHaveBeenCalled();
+        expect(
+            transactionClient.playbackState.updateMany,
+        ).not.toHaveBeenCalled();
         expect(
             transactionClient.federationTombstone.createMany,
         ).not.toHaveBeenCalled();
@@ -864,10 +859,10 @@ describe("audiobook cache service behavior", () => {
         expect(transactionClient.audiobook.deleteMany).toHaveBeenCalledTimes(1);
         expect(
             transactionClient.audiobookProgress.deleteMany,
-        ).toHaveBeenCalledTimes(1);
+        ).not.toHaveBeenCalled();
         expect(
             transactionClient.playbackState.updateMany,
-        ).toHaveBeenCalledTimes(1);
+        ).not.toHaveBeenCalled();
         expect(prisma.audiobook.deleteMany).not.toHaveBeenCalled();
         expect(prisma.audiobookProgress.deleteMany).not.toHaveBeenCalled();
         expect(prisma.playbackState.updateMany).not.toHaveBeenCalled();
@@ -1291,15 +1286,10 @@ describe("audiobook cache service behavior", () => {
         });
         expect(
             transactionClient.audiobookProgress.deleteMany,
-        ).toHaveBeenCalledWith({
-            where: { audiobookshelfId: { in: ["stale-book"] } },
-        });
-        expect(transactionClient.playbackState.updateMany).toHaveBeenCalledWith(
-            {
-                where: { audiobookId: { in: ["stale-book"] } },
-                data: { audiobookId: null },
-            },
-        );
+        ).not.toHaveBeenCalled();
+        expect(
+            transactionClient.playbackState.updateMany,
+        ).not.toHaveBeenCalled();
         expect(
             transactionClient.federationTombstone.createMany,
         ).not.toHaveBeenCalled();

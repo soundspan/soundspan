@@ -596,7 +596,6 @@ export class AudiobookCacheService {
                 result.count,
             );
             const deletedIds = deletedRows.map((row) => row.id);
-            await this.deleteAudiobookUserState(transaction, deletedIds);
             await this.writeAudiobookTombstones(transaction, deletedIds);
             return deletedRows;
         });
@@ -620,20 +619,6 @@ export class AudiobookCacheService {
             );
         }
         return deletedRows;
-    }
-
-    private async deleteAudiobookUserState(
-        transaction: Prisma.TransactionClient,
-        audiobookIds: string[],
-    ): Promise<void> {
-        if (audiobookIds.length === 0) return;
-        await transaction.audiobookProgress.deleteMany({
-            where: { audiobookshelfId: { in: audiobookIds } },
-        });
-        await transaction.playbackState.updateMany({
-            where: { audiobookId: { in: audiobookIds } },
-            data: { audiobookId: null },
-        });
     }
 
     private async writeAudiobookTombstones(

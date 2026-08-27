@@ -67,6 +67,12 @@ a source library are never removed automatically and are only flagged in the
 logs; running the manual sync once refreshes their library record so future
 cleanup can reach them.
 
+Also in this release, a database migration ties audiobook listening progress
+and playback state to their audiobook rows. It runs automatically at startup
+and removes any orphaned progress entries left behind by earlier book
+removals, so stale "Continue Listening" items from long-deleted books
+disappear after the upgrade. No action is needed.
+
 ---
 
 ## 2.6.0: scrobbling, AcoustID, and database changes

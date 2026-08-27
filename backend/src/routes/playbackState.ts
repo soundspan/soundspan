@@ -8,8 +8,33 @@ import {
     normalizeCanonicalMediaProviderIdentity,
     toLegacyStreamFields,
 } from "@soundspan/media-metadata-contract";
+import { isForeignKeyViolationOn } from "../utils/prismaErrors";
 
 const router = express.Router();
+const PLAYBACK_STATE_AUDIOBOOK_FK = "PlaybackState_audiobookId_fkey";
+
+type PlaybackStateUpsertArgs = {
+    where: Prisma.PlaybackStateWhereUniqueInput;
+    update: Prisma.PlaybackStateUncheckedUpdateInput;
+    create: Prisma.PlaybackStateUncheckedCreateInput;
+};
+
+async function upsertPlaybackStateWithAudiobookRetry(
+    args: PlaybackStateUpsertArgs,
+) {
+    try {
+        return await prisma.playbackState.upsert(args);
+    } catch (error: unknown) {
+        if (!isForeignKeyViolationOn(error, PLAYBACK_STATE_AUDIOBOOK_FK)) {
+            throw error;
+        }
+        return prisma.playbackState.upsert({
+            ...args,
+            update: { ...args.update, audiobookId: null },
+            create: { ...args.create, audiobookId: null },
+        });
+    }
+}
 
 function getPlaybackDeviceId(req: express.Request): string {
     const raw = req.header("X-Playback-Device-Id") || "legacy";
@@ -180,7 +205,7 @@ router.get("/", playbackStateLimiter, requireAuth, async (req, res) => {
         // Opportunistically migrate legacy state to this device without removing legacy.
         // Multiple active devices can copy once and then diverge independently.
         if (deviceId !== "legacy") {
-            await prisma.playbackState.upsert({
+            await upsertPlaybackStateWithAudiobookRetry({
                 where: { userId_deviceId: { userId, deviceId } },
                 update: {
                     playbackType: legacyState.playbackType,
@@ -407,7 +432,7 @@ router.post("/", playbackStateLimiter, requireAuth, async (req, res) => {
             currentTime: hasExplicitCurrentTime ? safeCurrentTime : 0,
         };
 
-        const playbackState = await prisma.playbackState.upsert({
+        const playbackState = await upsertPlaybackStateWithAudiobookRetry({
             where: { userId_deviceId: { userId, deviceId } },
             update: updatePayload,
             create: createPayload,

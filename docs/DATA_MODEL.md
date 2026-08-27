@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (68 models, 1547 lines)
+Schema source: `backend/prisma/schema.prisma` (68 models, 1553 lines)
 
 ## Entity Relationship Overview
 
@@ -69,6 +69,9 @@ erDiagram
     Podcast ||--o{ PodcastSubscription : "subscribed to"
     PodcastEpisode ||--o{ PodcastProgress : tracked
     PodcastEpisode ||--o{ PodcastDownload : downloaded
+
+    Audiobook ||--o{ AudiobookProgress : tracked
+    Audiobook |o--o{ PlaybackState : "playing in"
 ```
 
 ## Entity Classification
@@ -169,9 +172,12 @@ federated tracks have no consumer-side file.
 
 Mirrored `Audiobook` rows use the same nullable `peerId`/`remoteId` provenance
 and unique pair. Their primary IDs are consumer-minted `fed:<uuid>` strings, so
-they cannot collide with Audiobookshelf IDs. `AudiobookProgress` already stores
-the audiobook ID as a string without a foreign key, so federated progress uses
-the existing table and is never written back to Audiobookshelf. Podcast peers
+they cannot collide with Audiobookshelf IDs. `AudiobookProgress` references the
+audiobook through its `audiobookshelfId` field (a historic name — it holds
+`Audiobook.id`, including `fed:` ids) with a cascading foreign key, so deleting
+an audiobook removes its progress rows; `PlaybackState.audiobookId` is nulled
+by the same mechanism. Federated progress uses the existing table and is never
+written back to Audiobookshelf. Podcast peers
 use `FederationPodcastListing` instead of `Podcast`; matching `feedUrl` values
 drive native per-user subscription state without violating the global
 `Podcast.feedUrl` uniqueness contract.

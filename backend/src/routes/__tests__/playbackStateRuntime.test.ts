@@ -98,6 +98,13 @@ function createRes() {
     return res;
 }
 
+function createForeignKeyError(constraint?: string): Error {
+    return Object.assign(new Error("foreign key constraint failed"), {
+        code: "P2003",
+        ...(constraint ? { meta: { constraint } } : {}),
+    });
+}
+
 describe("playbackState routes runtime", () => {
     const getState = getHandler("get", "/");
     const postState = getHandler("post", "/");
@@ -239,6 +246,47 @@ describe("playbackState routes runtime", () => {
                 queue: (PrismaClient as any).DbNull,
             }),
         });
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toBe(legacyState);
+    });
+
+    it("retries legacy migration once without a concurrently deleted audiobook", async () => {
+        const legacyState = {
+            userId: "u1",
+            deviceId: "legacy",
+            playbackType: "audiobook",
+            trackId: null,
+            audiobookId: "deleted-book",
+            podcastId: null,
+            queue: null,
+            currentIndex: 1,
+            isShuffle: false,
+            isPlaying: true,
+            currentTime: 45,
+        };
+        mockFindUnique
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(legacyState);
+        mockUpsert
+            .mockRejectedValueOnce(
+                createForeignKeyError("PlaybackState_audiobookId_fkey"),
+            )
+            .mockResolvedValueOnce({ id: "migrated-without-book" });
+
+        const res = createRes();
+        await getState(
+            { user: { id: "u1" }, header: () => "mobile" } as any,
+            res,
+        );
+
+        expect(mockUpsert).toHaveBeenCalledTimes(2);
+        expect(mockUpsert).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                update: expect.objectContaining({ audiobookId: null }),
+                create: expect.objectContaining({ audiobookId: null }),
+            }),
+        );
         expect(res.statusCode).toBe(200);
         expect(res.body).toBe(legacyState);
     });
@@ -615,6 +663,119 @@ describe("playbackState routes runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to save playback state" });
         expect(JSON.stringify(res.body)).not.toContain("write failed");
+    });
+
+    it("retries a save once with null audiobook payloads after its FK fails", async () => {
+        mockUpsert
+            .mockRejectedValueOnce(
+                createForeignKeyError("PlaybackState_audiobookId_fkey"),
+            )
+            .mockResolvedValueOnce({
+                id: "state-without-deleted-book",
+                audiobookId: null,
+            });
+        const req = {
+            user: { id: "u1" },
+            header: () => "desktop",
+            body: {
+                playbackType: "audiobook",
+                audiobookId: "deleted-book",
+                currentTime: 25,
+            },
+        } as any;
+        const res = createRes();
+
+        await postState(req, res);
+
+        expect(mockUpsert).toHaveBeenCalledTimes(2);
+        expect(mockUpsert).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    playbackType: "audiobook",
+                    audiobookId: null,
+                    currentTime: 25,
+                }),
+                create: expect.objectContaining({
+                    playbackType: "audiobook",
+                    audiobookId: null,
+                    currentTime: 25,
+                }),
+            }),
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            id: "state-without-deleted-book",
+            audiobookId: null,
+        });
+    });
+
+    it("does not retry an audiobook FK violation more than once", async () => {
+        mockUpsert
+            .mockRejectedValueOnce(
+                createForeignKeyError("PlaybackState_audiobookId_fkey"),
+            )
+            .mockRejectedValueOnce(
+                createForeignKeyError("PlaybackState_audiobookId_fkey"),
+            );
+        const res = createRes();
+
+        await postState(
+            {
+                user: { id: "u1" },
+                header: () => "desktop",
+                body: {
+                    playbackType: "audiobook",
+                    audiobookId: "deleted-book",
+                },
+            } as any,
+            res,
+        );
+
+        expect(mockUpsert).toHaveBeenCalledTimes(2);
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to save playback state" });
+    });
+
+    it("does not retry a P2003 for a different playback-state constraint", async () => {
+        mockUpsert.mockRejectedValueOnce(
+            createForeignKeyError("PlaybackState_userId_fkey"),
+        );
+        const res = createRes();
+
+        await postState(
+            {
+                user: { id: "u1" },
+                header: () => "desktop",
+                body: { playbackType: "track", trackId: "track-1" },
+            } as any,
+            res,
+        );
+
+        expect(mockUpsert).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to save playback state" });
+    });
+
+    it("does not retry a nameless P2003", async () => {
+        mockUpsert.mockRejectedValueOnce(createForeignKeyError());
+        const res = createRes();
+
+        await postState(
+            {
+                user: { id: "u1" },
+                header: () => "desktop",
+                body: {
+                    playbackType: "audiobook",
+                    audiobookId: "deleted-book",
+                },
+            } as any,
+            res,
+        );
+
+        expect(mockUpsert).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to save playback state" });
     });
 
     it("deletes state for the current device and handles failures", async () => {
