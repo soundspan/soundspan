@@ -1,6 +1,6 @@
 # YouTube Music Streamer — FastAPI sidecar for soundspan
 # Streams audio from YouTube Music via ytmusicapi + yt-dlp with a bounded transient spool
-FROM denoland/deno:bin-2.9.5@sha256:0d1262facd139e815217c001945eb822c7a78584cf660142c34a6b53effec1aa AS deno
+FROM denoland/deno:bin-2.9.6@sha256:4cf0029b9aeeeed5efcbb71828737f0d7c8c8a20072df960e51a5679ef0d21ba AS deno
 
 FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 
