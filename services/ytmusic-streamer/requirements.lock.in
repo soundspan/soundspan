@@ -19,7 +19,7 @@
 fastapi>=0.141.1
 uvicorn>=0.52.4
 mutagen>=1.48.1
-pydantic>=2.13.4
+pydantic>=2.13.5
 httpx>=0.28.1
 requests>=2.34.2
 # yt-dlp[default] stable extras (see requirements-exempt.txt)
