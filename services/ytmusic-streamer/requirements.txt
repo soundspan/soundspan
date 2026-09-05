@@ -6,5 +6,5 @@ yt-dlp[default]>=2026.8.19
 # opus/mp3/m4a downloads; without it /yt/download fails in postprocessing
 # ("module mutagen was not found").
 mutagen>=1.48.1
-pydantic>=2.13.4
+pydantic>=2.13.5
 httpx>=0.28.1
