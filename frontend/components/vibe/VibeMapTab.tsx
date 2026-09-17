@@ -4,6 +4,7 @@
 
 import { AudioWaveform, Map } from "lucide-react";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { useAuth } from "@/lib/auth-context";
 import { MOBILE_PLAYER_CLEARANCE_PX, VibeMap } from "./VibeMap";
 
 /** Host inputs for the full-bleed map tab. */
@@ -19,7 +20,10 @@ export function VibeMapTab({
 }: VibeMapTabProps) {
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
+    const { user } = useAuth();
     const playerOverlapsMap = (isMobile || isTablet) && currentTrackPresent;
+    // UX gate only: the rebuild endpoint enforces the admin role server-side.
+    const canRebuildMap = user?.role === "admin";
     const header = (
         <div className="pointer-events-auto flex gap-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 p-1 shadow-lg">
             <button
@@ -46,6 +50,7 @@ export function VibeMapTab({
             <VibeMap
                 headerSlot={header}
                 bottomInset={playerOverlapsMap ? MOBILE_PLAYER_CLEARANCE_PX : 0}
+                canRebuildMap={canRebuildMap}
             />
         </div>
     );

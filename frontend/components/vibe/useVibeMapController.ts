@@ -32,6 +32,8 @@ import type { MapTrack } from "./types";
 interface VibeMapControllerProps {
     headerSlot?: ReactNode;
     bottomInset?: number;
+    /** Admin UX gate for the status chip's rebuild control. */
+    canRebuildMap?: boolean;
 }
 
 function mapTracksById(

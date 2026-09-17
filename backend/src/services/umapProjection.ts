@@ -2,6 +2,11 @@ import { existsSync } from "fs";
 import path from "path";
 import { Worker } from "worker_threads";
 import { config } from "../config";
+import {
+    recordVibeMapBuild,
+    recordVibeMapRebuildRequest,
+    type VibeMapRebuildOutcome,
+} from "../metrics";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import {
@@ -19,6 +24,8 @@ import {
     type VibeMapBuildFailure,
     type VibeMapBuildLease,
 } from "./vibeMapBuildState";
+
+export type { VibeMapRebuildOutcome } from "../metrics";
 
 const log = logger.child("VibeMapProjection");
 const MIN_TRACKS_FOR_UMAP = 5;
@@ -184,6 +191,14 @@ async function cacheResult(
         pipeline.expire(trackIdsKey, CACHE_TTL_SECONDS);
     }
     await pipeline.exec();
+}
+
+async function invalidateProjectionCache(spaceId: string): Promise<void> {
+    const pipeline = redisClient.multi();
+    pipeline.del(cacheKeyForSpace(spaceId));
+    pipeline.del(trackIdsKeyForSpace(spaceId));
+    await pipeline.exec();
+    await clearVibeMapBuildFailures(spaceId);
 }
 
 class UmapWorkerFailure extends Error {
@@ -472,8 +487,9 @@ function normalizeProjection(
     );
 }
 
-async function doCompute(spaceId: string): Promise<VibeMapResponse> {
-    const startedAt = Date.now();
+async function computeProjectionResult(
+    spaceId: string,
+): Promise<VibeMapResponse> {
     const { rows, projection, degraded } =
         await projectWithOomDegradation(spaceId);
     if (rows.length === 0) {
@@ -503,12 +519,33 @@ async function doCompute(spaceId: string): Promise<VibeMapResponse> {
         result,
         rows.map((row) => row.track_id),
     );
-    log.info("UMAP projection computed", {
-        elapsedMs: Date.now() - startedAt,
-        trackCount: tracks.length,
-        sampled: result.sampled ?? false,
-    });
     return result;
+}
+
+async function doCompute(spaceId: string): Promise<VibeMapResponse> {
+    const startedAt = Date.now();
+    try {
+        const result = await computeProjectionResult(spaceId);
+        if (!acceptingBuilds) return result;
+        const elapsedMs = Date.now() - startedAt;
+        recordVibeMapBuild(
+            "completed",
+            elapsedMs / 1000,
+            result.sampled ?? false,
+        );
+        log.info("UMAP projection computed", {
+            elapsedMs,
+            trackCount: result.trackCount,
+            sampled: result.sampled ?? false,
+        });
+        return result;
+    } catch (error) {
+        if (acceptingBuilds) {
+            const elapsedMs = Date.now() - startedAt;
+            recordVibeMapBuild("failed", elapsedMs / 1000, false);
+        }
+        throw error;
+    }
 }
 
 async function releaseLease(lease: VibeMapBuildLease): Promise<void> {
@@ -684,4 +721,29 @@ export async function computeMapProjection(): Promise<VibeMapProjectionState> {
     } finally {
         activeAdmissions.delete(admission);
     }
+}
+
+function recordRebuildOutcome(
+    outcome: VibeMapRebuildOutcome,
+    spaceId: string | null,
+): { outcome: VibeMapRebuildOutcome } {
+    log.info("Vibe map rebuild requested", { spaceId, outcome });
+    recordVibeMapRebuildRequest(outcome);
+    return { outcome };
+}
+
+/** Drop the cached projection for the active space and start a fresh leased build. */
+export async function rebuildMapProjection(): Promise<{
+    outcome: VibeMapRebuildOutcome;
+}> {
+    if (!acceptingBuilds) {
+        return recordRebuildOutcome("already_building", null);
+    }
+    const { id: spaceId } = await getActiveSpace();
+    if (activeBuilds.size > 0) {
+        return recordRebuildOutcome("already_building", spaceId);
+    }
+    await invalidateProjectionCache(spaceId);
+    await computeMapProjection();
+    return recordRebuildOutcome("started", spaceId);
 }

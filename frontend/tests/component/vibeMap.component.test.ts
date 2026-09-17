@@ -66,6 +66,14 @@ mock.module("@/lib/api", {
     },
 });
 
+// VibeMapTab reads the signed-in role to decide whether to offer the admin
+// rebuild control; the map itself never touches auth.
+mock.module("@/lib/auth-context", {
+    namedExports: {
+        useAuth: () => ({ user: { role: "user" } }),
+    },
+});
+
 mock.module("@/lib/audio-state-context", {
     namedExports: {
         useAudioState: () => ({

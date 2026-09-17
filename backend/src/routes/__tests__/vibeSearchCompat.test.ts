@@ -80,6 +80,7 @@ jest.mock("../../services/vibeProvider", () => {
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
+    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
 jest.mock("../../utils/logger", () => ({

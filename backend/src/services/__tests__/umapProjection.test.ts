@@ -73,6 +73,8 @@ const mockLoggerInfo = jest.fn<(...args: unknown[]) => void>();
 const mockLoggerWarn = jest.fn<(...args: unknown[]) => void>();
 const mockLoggerError = jest.fn<(...args: unknown[]) => void>();
 const mockGetActiveSpace = jest.fn<() => Promise<{ id: string }>>();
+const mockRecordVibeMapBuild = jest.fn();
+const mockRecordVibeMapRebuildRequest = jest.fn();
 
 let pipeline: MockPipeline;
 let workerBehavior: ((worker: MockWorker, index: number) => void) | null = null;
@@ -146,6 +148,11 @@ jest.mock("../../utils/logger", () => ({
 }));
 jest.mock("../embeddingSpaces", () => ({
     getActiveSpace: () => mockGetActiveSpace(),
+}));
+jest.mock("../../metrics", () => ({
+    recordVibeMapBuild: (...args: unknown[]) => mockRecordVibeMapBuild(...args),
+    recordVibeMapRebuildRequest: (...args: unknown[]) =>
+        mockRecordVibeMapRebuildRequest(...args),
 }));
 jest.mock("worker_threads", () => ({ Worker: MockWorker }));
 
@@ -482,6 +489,59 @@ describe("computeMapProjection", () => {
         );
     });
 
+    it("records and logs a completed build from one elapsed duration", async () => {
+        const rows = makeRows(5);
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
+        const now = jest
+            .spyOn(Date, "now")
+            .mockReturnValueOnce(1000)
+            .mockReturnValueOnce(2001);
+
+        await loadModule().computeMapProjection();
+        await flushMicrotasks();
+        const nowCallCount = now.mock.calls.length;
+        now.mockRestore();
+
+        expect(mockRecordVibeMapBuild).toHaveBeenCalledTimes(1);
+        expect(mockRecordVibeMapBuild).toHaveBeenCalledWith(
+            "completed",
+            1.001,
+            false,
+        );
+        expect(mockLoggerInfo).toHaveBeenCalledWith(
+            "UMAP projection computed",
+            expect.objectContaining({ elapsedMs: 1001 }),
+        );
+        expect(nowCallCount).toBe(2);
+    });
+
+    it("records a failed build from one elapsed duration", async () => {
+        workerBehavior = (worker) =>
+            worker.emit("error", new Error("deterministic failure"));
+        const now = jest
+            .spyOn(Date, "now")
+            .mockReturnValueOnce(1000)
+            .mockReturnValueOnce(2001);
+
+        await loadModule().computeMapProjection();
+        await flushMicrotasks();
+        const nowCallCount = now.mock.calls.length;
+        now.mockRestore();
+
+        expect(mockRecordVibeMapBuild).toHaveBeenCalledTimes(1);
+        expect(mockRecordVibeMapBuild).toHaveBeenCalledWith(
+            "failed",
+            1.001,
+            false,
+        );
+        expect(nowCallCount).toBe(2);
+    });
+
     it("caches an empty worker result for five minutes", async () => {
         workerBehavior = (worker) => emitResult(worker, [], null);
         await loadModule().computeMapProjection();
@@ -669,6 +729,11 @@ describe("computeMapProjection", () => {
             "UMAP worker memory limit reached; retrying with a smaller sample",
             expect.objectContaining({ sampleSize: 4000 }),
         );
+        expect(mockRecordVibeMapBuild).toHaveBeenCalledWith(
+            "completed",
+            expect.any(Number),
+            true,
+        );
     });
 
     it("releases its lease only after worker termination settles", async () => {
@@ -711,6 +776,7 @@ describe("computeMapProjection", () => {
         expect(leaseHeld).toBe(false);
         expect(releaseObservedAfterTermination).toEqual([true]);
         expect(mockLoggerError).not.toHaveBeenCalled();
+        expect(mockRecordVibeMapBuild).not.toHaveBeenCalled();
         mockRedisGet.mockClear();
         await expect(computeMapProjection()).resolves.toEqual({
             status: "building",
@@ -774,6 +840,104 @@ describe("computeMapProjection", () => {
         workers[0].emit("exit", 0);
         termination.resolve(0);
         await shutdown;
+    });
+});
+
+describe("rebuildMapProjection", () => {
+    beforeEach(() => {
+        jest.resetModules();
+        jest.clearAllMocks();
+        jest.useRealTimers();
+        workers = [];
+        workerOptions = [];
+        workerBehavior = null;
+        pipeline = {
+            setEx: jest.fn(() => pipeline),
+            del: jest.fn(() => pipeline),
+            sAdd: jest.fn(() => pipeline),
+            expire: jest.fn(() => pipeline),
+            exec: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+        };
+        mockRedisGet.mockResolvedValue(null);
+        mockRedisSet.mockResolvedValue("OK");
+        mockRedisSetEx.mockResolvedValue("OK");
+        mockRedisEval.mockResolvedValue(1);
+        mockRedisIncr.mockResolvedValue(1);
+        mockRedisExpire.mockResolvedValue(true);
+        mockRedisDel.mockResolvedValue(1);
+        mockRedisMulti.mockReturnValue(pipeline);
+        mockExistsSync.mockImplementation((candidate) =>
+            candidate.endsWith("umapWorker.ts"),
+        );
+        mockPathJoin.mockImplementation((...parts) => parts.join("/"));
+        mockGetActiveSpace.mockResolvedValue({ id: SPACE_ID });
+    });
+
+    it("invalidates both cache keys, clears failures, and starts a build", async () => {
+        const rows = makeRows(5);
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
+
+        await expect(loadModule().rebuildMapProjection()).resolves.toEqual({
+            outcome: "started",
+        });
+
+        expect(mockRedisMulti).toHaveBeenCalledTimes(1);
+        expect(pipeline.del).toHaveBeenNthCalledWith(1, PROJECTION_KEY);
+        expect(pipeline.del).toHaveBeenNthCalledWith(2, TRACK_IDS_KEY);
+        expect(pipeline.exec).toHaveBeenCalledTimes(1);
+        expect(mockRedisDel).toHaveBeenCalledWith([
+            FAILURE_KEY,
+            FAILURE_COUNT_KEY,
+        ]);
+        expect(workers).toHaveLength(1);
+        expect(mockRecordVibeMapRebuildRequest).toHaveBeenCalledWith("started");
+        await flushMicrotasks();
+    });
+
+    it("does not invalidate or start a second local build", async () => {
+        const module = loadModule();
+        await module.computeMapProjection();
+
+        await expect(module.rebuildMapProjection()).resolves.toEqual({
+            outcome: "already_building",
+        });
+
+        expect(pipeline.del).not.toHaveBeenCalled();
+        expect(mockRedisDel).not.toHaveBeenCalled();
+        expect(workers).toHaveLength(1);
+        expect(mockRecordVibeMapRebuildRequest).toHaveBeenCalledWith(
+            "already_building",
+        );
+
+        const rows = makeRows(5);
+        emitResult(
+            workers[0],
+            rows,
+            rows.map((_, index) => [index, index]),
+        );
+        await flushMicrotasks();
+    });
+
+    it("has no Redis side effects after shutdown", async () => {
+        const module = loadModule();
+        await module.shutdownUmapProjection();
+
+        await expect(module.rebuildMapProjection()).resolves.toEqual({
+            outcome: "already_building",
+        });
+
+        expect(mockRedisGet).not.toHaveBeenCalled();
+        expect(mockRedisMulti).not.toHaveBeenCalled();
+        expect(mockRedisDel).not.toHaveBeenCalled();
+        expect(mockGetActiveSpace).not.toHaveBeenCalled();
+        expect(mockRecordVibeMapRebuildRequest).toHaveBeenCalledWith(
+            "already_building",
+        );
     });
 });
 

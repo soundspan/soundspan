@@ -91,7 +91,8 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
             }>("/vibe/status");
         }
 
-        async getVibeMap() {
+        /** Fetch the cached map projection; `signal` aborts an in-flight poll. */
+        async getVibeMap(options: { signal?: AbortSignal } = {}) {
             return this.request<
                 | {
                       tracks: Array<{
@@ -111,10 +112,19 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
                       }>;
                       trackCount: number;
                       computedAt: string;
+                      sampled?: boolean;
                       building?: undefined;
                   }
-                | { building: true }
-            >("/vibe/map");
+                | { building: true; failed?: boolean; retryAt?: string }
+            >("/vibe/map", { signal: options.signal });
+        }
+
+        /** Drop the cached map and start a fresh build (admin only; 202). */
+        async rebuildVibeMap() {
+            return this.request<{
+                building: true;
+                outcome: "started" | "already_building";
+            }>("/vibe/map/rebuild", { method: "POST" });
         }
 
         async getVibePath(fromId: string, toId: string, steps = 5) {

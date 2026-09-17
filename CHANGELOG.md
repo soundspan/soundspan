@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Vibe Map now shows when it was last built and how many songs it covers, flags when it is showing a random sample of a very large library, and gives admins a Rebuild button that drops the cached map and builds a fresh one on the spot; a rebuild keeps the current map on screen until the new one is ready, and a failed build now says so instead of spinning for ten minutes (#887).
+- New Prometheus metrics for vibe map builds (`soundspan_vibe_map_builds_total`, `soundspan_vibe_map_build_seconds`, `soundspan_vibe_map_sampled`) and admin rebuild requests (`soundspan_vibe_map_rebuild_requests_total`), plus an admin-only `POST /api/vibe/map/rebuild` endpoint (#887).
+
 ### Changed
 
 - The Library, Audiobooks, and Podcasts pages now share one visual language for their header controls: filter pills, sort/genre/pagination dropdowns, and item counts use the same shared components and styling, and the Podcasts controls moved out of the "My Podcasts" heading into a left-aligned control row matching the sibling pages (#868).
