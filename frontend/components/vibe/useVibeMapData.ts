@@ -99,6 +99,7 @@ function rebuildHandlers(update: Patch): MapPollHandlers {
 function useMapTracks(): MapLoadState & { rebuild: () => void } {
     const [state, setState] = useState<MapLoadState>(INITIAL_STATE);
     const pollRef = useRef<MapPollHandle | null>(null);
+    const rebuildRequestRef = useRef<AbortController | null>(null);
     const update = useCallback<Patch>((patch) => {
         setState((previous) => ({ ...previous, ...patch }));
     }, []);
@@ -119,14 +120,27 @@ function useMapTracks(): MapLoadState & { rebuild: () => void } {
         return () => {
             pollRef.current?.cancel();
             pollRef.current = null;
+            rebuildRequestRef.current?.abort();
+            rebuildRequestRef.current = null;
         };
     }, [startPolling, update]);
 
+    // The request is owned by this hook: unmount aborts it and nothing
+    // that resolves afterwards may start a poller or touch state.
     const rebuild = useCallback(() => {
+        rebuildRequestRef.current?.abort();
+        const controller = new AbortController();
+        rebuildRequestRef.current = controller;
         update({ rebuildState: "requesting" });
-        void api.rebuildVibeMap().then(
-            () => startPolling(rebuildHandlers(update)),
-            () => update({ rebuildState: "error" }),
+        void api.rebuildVibeMap({ signal: controller.signal }).then(
+            () => {
+                if (controller.signal.aborted) return;
+                startPolling(rebuildHandlers(update));
+            },
+            () => {
+                if (controller.signal.aborted) return;
+                update({ rebuildState: "error" });
+            },
         );
     }, [startPolling, update]);
 

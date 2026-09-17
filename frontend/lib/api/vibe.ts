@@ -120,11 +120,14 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
         }
 
         /** Drop the cached map and start a fresh build (admin only; 202). */
-        async rebuildVibeMap() {
+        async rebuildVibeMap(options: { signal?: AbortSignal } = {}) {
             return this.request<{
                 building: true;
                 outcome: "started" | "already_building";
-            }>("/vibe/map/rebuild", { method: "POST" });
+            }>("/vibe/map/rebuild", {
+                method: "POST",
+                signal: options.signal,
+            });
         }
 
         async getVibePath(fromId: string, toId: string, steps = 5) {

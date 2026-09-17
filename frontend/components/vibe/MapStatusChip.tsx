@@ -84,11 +84,7 @@ export function MapStatusChip({
                 className="pointer-events-auto inline-flex items-center gap-2 h-10 pl-3 pr-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 shadow-lg text-xs text-gray-300"
                 title={status.detail}
             >
-                <span
-                    role="status"
-                    aria-live="polite"
-                    className="tabular-nums whitespace-nowrap"
-                >
+                <span role="status" className="tabular-nums whitespace-nowrap">
                     {status.summary}
                 </span>
                 {status.sampled && <SampleBadge />}

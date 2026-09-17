@@ -34,7 +34,6 @@ function render(props: Partial<React.ComponentProps<typeof MapStatusChip>>) {
 test("renders the live status text with its tooltip", () => {
     const html = render({});
     assert.match(html, /role="status"/);
-    assert.match(html, /aria-live="polite"/);
     assert.match(html, /Built 3h ago · 5,617 songs/);
     assert.match(
         html,
