@@ -27,7 +27,8 @@
             "library-health",
             "podcast",
             "search",
-            "settings"
+            "settings",
+            "social"
         ]
     },
     "features": [
@@ -901,6 +902,36 @@
             "tests": {
                 "backend_route": ["playlistsRuntime.test.ts"],
                 "backend_contract": []
+            }
+        },
+        {
+            "id": "social",
+            "name": "Social (Federation Phase 0)",
+            "description": "Cross-peer social surfaces: the \"From your peers\" shelf of public playlists shared by federated peers (frontend/features/social: usePeerPlaylists hook + PeerPlaylistsShelf on the home page), peer playlist detail at /peer-playlists/[peerId]/[remoteId], and the peer presence roster in the Activity panel's Social tab (frontend/components/activity/PeerPresenceSection.tsx fed by hooks/useSocialPresence.ts); API boundary frontend/lib/api/peerPlaylists.ts; the presence/listening toggles live in the settings domain",
+            "frontend": {
+                "feature_dirs": ["social"],
+                "routes": ["/", "/peer-playlists/[peerId]/[remoteId]"]
+            },
+            "backend": {
+                "routes": ["social.ts"],
+                "services": [
+                    "federationPeerPlaylists.ts",
+                    "federationPresence.ts",
+                    "socialPresenceEvents.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "socialCompat.test.ts",
+                    "socialPeerPlaylistsRoutes.test.ts"
+                ],
+                "backend_contract": [],
+                "frontend": [
+                    "peerPresenceSection.component.test.ts",
+                    "peerBadge.component.test.ts",
+                    "socialTab.component.test.ts",
+                    "socialNavigation.test.ts"
+                ]
             }
         },
         {
