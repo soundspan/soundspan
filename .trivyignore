@@ -63,5 +63,7 @@ CVE-2026-11816
 CVE-2026-12481
 # keras 2.15.0: fixes need keras 3.x/TF 2.16+, but TF 2.15.x is locked to Essentia's newest CPython 3.11 wheel; no first-party keras import, only image-bundled frozen .pb loads via Essentia (#671; defer #717).
 CVE-2026-12484
+# keras `.keras` model-load HDF5 shape-bomb DoS; images only run frozen `.pb` graphs and accept no model input; fix needs keras 3.15 / TF 2.16+ blocked by the Essentia CPython 3.11 wheel (#717).
+CVE-2026-12570
 # protobuf 4.25.9: the fix requires 5.29.6+, outside TF 2.15's protobuf<5 constraint; defer the companion dependency upgrade from #671 to #717.
 CVE-2026-0994
