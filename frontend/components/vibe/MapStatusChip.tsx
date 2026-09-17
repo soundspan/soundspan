@@ -11,7 +11,7 @@
  */
 
 import { Loader2, RefreshCw } from "lucide-react";
-import type { MapStatusView } from "./mapStatus";
+import type { MapMigrationNotice, MapStatusView } from "./mapStatus";
 
 export interface MapStatusChipProps {
     status: MapStatusView;
@@ -28,13 +28,22 @@ const BUTTON_CLASS =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 " +
     "disabled:opacity-40 disabled:hover:bg-transparent";
 
+const BADGE_CLASS =
+    "rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 " +
+    "text-[10px] uppercase tracking-wide text-amber-200 whitespace-nowrap";
+
 function SampleBadge() {
     return (
-        <span
-            className="rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-200"
-            title="Random sample of your library"
-        >
+        <span className={BADGE_CLASS} title="Random sample of your library">
             Sample
+        </span>
+    );
+}
+
+function MigrationBadge({ notice }: { notice: MapMigrationNotice }) {
+    return (
+        <span className={BADGE_CLASS} title={notice.detail}>
+            {notice.badge}
         </span>
     );
 }
@@ -88,6 +97,9 @@ export function MapStatusChip({
                     {status.summary}
                 </span>
                 {status.sampled && <SampleBadge />}
+                {status.migration && (
+                    <MigrationBadge notice={status.migration} />
+                )}
                 {canRebuild && (
                     <RebuildButton
                         busy={status.busy}

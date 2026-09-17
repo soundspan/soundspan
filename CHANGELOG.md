@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The Vibe Map now shows when it was last built and how many songs it covers, flags when it is showing a random sample of a very large library, and gives admins a Rebuild button that drops the cached map and builds a fresh one on the spot; a rebuild keeps the current map on screen until the new one is ready, and a failed build now says so instead of spinning for ten minutes (#887).
+- While a newer audio analysis is still filling its embedding space, the Vibe Map's status chip shows a `Re-analyzing` badge with the percentage done and explains that the map switches over automatically at the cutover threshold, so a map that seems stuck at the old song count is no longer a mystery (#887).
 - New Prometheus metrics for vibe map builds (`soundspan_vibe_map_builds_total`, `soundspan_vibe_map_build_seconds`, `soundspan_vibe_map_sampled`) and admin rebuild requests (`soundspan_vibe_map_rebuild_requests_total`), plus an admin-only `POST /api/vibe/map/rebuild` endpoint (#887).
 
 ### Changed

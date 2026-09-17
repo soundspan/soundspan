@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     describeMapStatus,
+    describeMigrationNotice,
     formatSongCount,
 } from "../../components/vibe/mapStatus";
 
@@ -64,6 +65,104 @@ test("a sampled map explains the sample in its detail", () => {
     });
     assert.equal(view.sampled, true);
     assert.match(view.detail, /random sample/);
+});
+
+test("a running re-analysis becomes a percentage badge with a plain explanation", () => {
+    const notice = describeMigrationNotice({
+        embedded: 5617,
+        pending: 21099,
+        failed: 0,
+        cutoverThreshold: 0.95,
+    });
+    assert.ok(notice);
+    assert.equal(notice.badge, "Re-analyzing · 21%");
+    assert.match(
+        notice.detail,
+        new RegExp(
+            `${formatSongCount(5617)} of ${formatSongCount(26716)} done`,
+        ),
+    );
+    assert.match(notice.detail, /automatically at 95%/);
+});
+
+test("migration notices fail closed on missing or unusable numbers", () => {
+    assert.equal(describeMigrationNotice(null), null);
+    assert.equal(describeMigrationNotice(undefined), null);
+    assert.equal(
+        describeMigrationNotice({
+            embedded: 0,
+            pending: 0,
+            failed: 0,
+            cutoverThreshold: 0.95,
+        }),
+        null,
+    );
+    assert.equal(
+        describeMigrationNotice({
+            embedded: -1,
+            pending: 5,
+            failed: 0,
+            cutoverThreshold: 0.95,
+        }),
+        null,
+    );
+    assert.equal(
+        describeMigrationNotice({
+            embedded: 1.5,
+            pending: 5,
+            failed: 0,
+            cutoverThreshold: 0.95,
+        }),
+        null,
+    );
+    assert.equal(
+        describeMigrationNotice({
+            embedded: 5,
+            pending: 5,
+            failed: 0,
+            cutoverThreshold: 0,
+        }),
+        null,
+    );
+    assert.equal(
+        describeMigrationNotice({
+            embedded: 5,
+            pending: 5,
+            failed: 0,
+            cutoverThreshold: Number.NaN,
+        }),
+        null,
+    );
+});
+
+test("describeMapStatus threads the migration notice into the tooltip", () => {
+    const view = describeMapStatus({
+        computedAt: builtHoursAgo(1),
+        trackCount: 92,
+        sampled: false,
+        rebuildState: "idle",
+        compact: false,
+        migration: {
+            embedded: 5617,
+            pending: 21099,
+            failed: 0,
+            cutoverThreshold: 0.95,
+        },
+    });
+    assert.ok(view.migration);
+    assert.equal(view.migration.badge, "Re-analyzing · 21%");
+    assert.match(view.detail, /once a day/);
+    assert.match(view.detail, /newer analysis is in progress/);
+
+    const none = describeMapStatus({
+        computedAt: builtHoursAgo(1),
+        trackCount: 92,
+        sampled: false,
+        rebuildState: "idle",
+        compact: false,
+    });
+    assert.equal(none.migration, null);
+    assert.doesNotMatch(none.detail, /newer analysis/);
 });
 
 test("rebuild states replace the summary and mark the chip busy while work runs", () => {
