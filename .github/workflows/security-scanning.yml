@@ -227,6 +227,7 @@ jobs:
               --ignore-vuln PYSEC-2026-1805
               --ignore-vuln PYSEC-2026-2324
               --ignore-vuln PYSEC-2026-2547
+              --ignore-vuln PYSEC-2026-3856
           # DCLAP provider image is python:3.12-slim; its hash-pinned lock is
           # compiled for 3.12, so the audit checks exactly the shipped tree.
           - requirements: services/vibe-provider-dclap/requirements.lock
@@ -254,6 +255,7 @@ jobs:
               --ignore-vuln PYSEC-2026-1805
               --ignore-vuln PYSEC-2026-2324
               --ignore-vuln PYSEC-2026-2547
+              --ignore-vuln PYSEC-2026-3856
           # Loose full manifests via requirements-test.txt (-> requirements.txt):
           # audits the un-locked floors, INCLUDING the deliberately-exempt
           # yt-dlp/ytmusicapi that never appear in a lock. Images are

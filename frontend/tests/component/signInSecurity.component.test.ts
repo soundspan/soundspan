@@ -3,7 +3,13 @@ import { after, beforeEach, mock, test } from "node:test";
 import React from "react";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-GlobalRegistrator.register();
+// Register with a real origin: the section reads window.location.search on
+// mount and the tests set that URL through history.replaceState with
+// relative paths. Against happy-dom's default about:blank a relative path
+// has no valid base; Node 24.19 happened to resolve it as "about:/settings…"
+// while Node 24.20 leaves the URL at about:blank, which made these tests
+// fail in CI while passing locally.
+GlobalRegistrator.register({ url: "http://localhost/settings" });
 (
     globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
