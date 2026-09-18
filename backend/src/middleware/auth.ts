@@ -4,6 +4,14 @@ import { prisma } from "../utils/db";
 import { findApiKeyRecord, isApiKeyExpired } from "../utils/apiKeyHash";
 import jwt from "jsonwebtoken";
 import { sendRouteError } from "../utils/routeErrorResponse";
+import { readCookie } from "../utils/cookies";
+import { queueDashboardCookieName } from "./queueDashboardCookie";
+
+/** Purpose claim required for queue-dashboard session tokens. */
+export const QUEUE_DASHBOARD_TOKEN_PURPOSE = "queue-dashboard";
+
+/** Queue-dashboard session lifetime in seconds. */
+export const QUEUE_DASHBOARD_TTL_SECONDS = 15 * 60;
 
 // JWT_SECRET is required - SESSION_SECRET (a required, stable deploy secret;
 // docker-entrypoint.sh fails fast when it is missing) is the fallback.
@@ -51,6 +59,7 @@ export interface JWTPayload {
     role?: string;
     tokenVersion?: number;
     type?: string;
+    purpose?: string;
 }
 
 function isJwtPayloadShape(value: unknown): value is { userId: string } {
@@ -78,6 +87,22 @@ export function generateToken(user: {
         },
         JWT_SECRET_VALIDATED,
         { expiresIn: "24h" },
+    );
+}
+
+/** Create a short-lived token accepted only by the queue-dashboard mount. */
+export function generateQueueDashboardToken(user: {
+    id: string;
+    tokenVersion: number;
+}): string {
+    return jwt.sign(
+        {
+            userId: user.id,
+            tokenVersion: user.tokenVersion,
+            purpose: QUEUE_DASHBOARD_TOKEN_PURPOSE,
+        },
+        JWT_SECRET_VALIDATED,
+        { expiresIn: QUEUE_DASHBOARD_TTL_SECONDS },
     );
 }
 
@@ -120,12 +145,12 @@ export function verifyAuthToken(token: string): JWTPayload {
  * Verify a credential presented for direct API/socket access as a short-lived
  * access token. Delegates to `verifyAuthToken` (HS256-pinned, single validated
  * secret) and rejects all non-access token types, including refresh tokens.
- * Only tokens minted without a `type` claim are accepted. Throws on an invalid,
- * expired, wrong-algorithm, malformed, or non-access token.
+ * Only tokens minted without a `type` or `purpose` claim are accepted. Throws
+ * on an invalid, expired, wrong-algorithm, malformed, or non-access token.
  */
 export function verifyAccessToken(token: string): JWTPayload {
     const payload = verifyAuthToken(token);
-    if (payload.type !== undefined) {
+    if (payload.type !== undefined || payload.purpose !== undefined) {
         throw new Error("Token is not an access token");
     }
     return payload;
@@ -138,10 +163,9 @@ export function verifyAccessToken(token: string): JWTPayload {
  * verification error for invalid credentials and a typed availability error
  * when the user lookup fails.
  */
-async function resolveAccessTokenUser(
-    token: string,
+async function resolveTokenUser(
+    decoded: JWTPayload,
 ): Promise<{ id: string; username: string; role: string } | null> {
-    const decoded = verifyAccessToken(token);
     let user;
     try {
         user = await prisma.user.findUnique({
@@ -167,6 +191,46 @@ async function resolveAccessTokenUser(
         return null;
     }
     return { id: user.id, username: user.username, role: user.role };
+}
+
+async function resolveAccessTokenUser(
+    token: string,
+): Promise<{ id: string; username: string; role: string } | null> {
+    return resolveTokenUser(verifyAccessToken(token));
+}
+
+async function resolveQueueDashboardTokenUser(
+    token: string,
+): Promise<{ id: string; username: string; role: string } | null> {
+    const payload = verifyAuthToken(token);
+    if (payload.purpose !== QUEUE_DASHBOARD_TOKEN_PURPOSE) {
+        throw new Error("Token is not a queue dashboard token");
+    }
+    return resolveTokenUser(payload);
+}
+
+async function authenticateQueueDashboardCookie(req: Request) {
+    const token = readCookie(req, queueDashboardCookieName());
+    if (!token) return null;
+    try {
+        return await resolveQueueDashboardTokenUser(token);
+    } catch (cause) {
+        if (cause instanceof AuthBackendUnavailableError) throw cause;
+        logger.debug("Queue dashboard token validation failed", cause);
+        return null;
+    }
+}
+
+async function authenticateQueueDashboardRequest(req: Request) {
+    const headerUser = await authenticateRequest(req);
+    return headerUser ?? authenticateQueueDashboardCookie(req);
+}
+
+function sendAuthBackendUnavailable(res: Response, cause: unknown): Response {
+    logger.warn("Authentication backend unavailable", cause);
+    return sendRouteError(res, 503, "Authentication service unavailable", {
+        code: "AUTH_BACKEND_UNAVAILABLE",
+    });
 }
 
 /**
@@ -343,4 +407,36 @@ export async function requireAuthOrToken(
     return res
         .status(401)
         .json({ error: "Not authenticated", code: "AUTH_REQUIRED" });
+}
+
+/**
+ * Authorize the Bull Board mount through normal header auth or its dedicated
+ * cookie. The cookie is path-scoped, SameSite=Strict, 15-minute,
+ * purpose-bound, and HttpOnly, so it reaches only Bull Board's same-origin UI
+ * and XHR rather than becoming a general application credential.
+ */
+export async function requireQueueDashboardAccess(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+) {
+    let user;
+    try {
+        user = await authenticateQueueDashboardRequest(req);
+    } catch (cause) {
+        if (cause instanceof AuthBackendUnavailableError) {
+            return sendAuthBackendUnavailable(res, cause);
+        }
+        throw cause;
+    }
+    if (!user) {
+        return sendRouteError(res, 401, "Not authenticated", {
+            code: "AUTH_REQUIRED",
+        });
+    }
+    if (user.role !== "admin") {
+        return sendRouteError(res, 403, "Admin access required");
+    }
+    req.user = user;
+    return next();
 }

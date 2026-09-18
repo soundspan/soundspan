@@ -24,6 +24,7 @@ const baseSidebarItems: SidebarItem[] = [
     { id: "library-health", label: "Library Health" },
     { id: "library-insights", label: "Library Insights" },
     { id: "cache", label: "Cache & Automation" },
+    { id: "queue-dashboard", label: "Queue Dashboard" },
     { id: "users", label: "Users" },
 ];
 
@@ -103,6 +104,14 @@ const LibraryHealthSection = dynamic(
     () =>
         import("@/features/settings/components/sections/LibraryHealthSection").then(
             (mod) => mod.LibraryHealthSection,
+        ),
+    { loading: renderSectionFallback },
+);
+
+const QueueDashboardSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/QueueDashboardSection").then(
+            (mod) => mod.QueueDashboardSection,
         ),
     { loading: renderSectionFallback },
 );
@@ -342,6 +351,8 @@ export default function AdminPage() {
                     settings={systemSettings}
                     onUpdate={updateSystemSettings}
                 />
+
+                <QueueDashboardSection />
 
                 <UserManagementSection />
 

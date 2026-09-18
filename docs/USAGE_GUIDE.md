@@ -109,7 +109,8 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 - Library Insights panels: metadata gaps, analysis coverage, duplicate clusters, storage breakdown, and low-bitrate albums
 - Federation health panel with per-peer sync, stream, and error diagnostics
 - API keys and Swagger docs
-- Bull Board dashboard (`/api/admin/queues`)
+- Queue dashboard (Bull Board): `Open queue dashboard` on the Admin page opens it in a new tab. Access lasts 15 minutes; reopen it from the Admin page when it expires, or end it early with `End dashboard access`. The dashboard cannot be opened by typing its address directly.
+- API keys: a key created under Settings is sent in an `X-API-Key` header (not as a Bearer token); the settings page shows an example
 
 ### Album downloads
 

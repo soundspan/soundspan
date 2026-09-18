@@ -1,5 +1,15 @@
-import { Router } from "express";
-import { requireAdmin, requireAuth } from "../middleware/auth";
+import { Request, Response, Router } from "express";
+import {
+    generateQueueDashboardToken,
+    QUEUE_DASHBOARD_TTL_SECONDS,
+    requireAdmin,
+    requireAuth,
+} from "../middleware/auth";
+import {
+    queueDashboardCookieName,
+    queueDashboardCookieOptions,
+} from "../middleware/queueDashboardCookie";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import {
@@ -10,6 +20,10 @@ import {
 import { getPepperFingerprint, isHashedApiKey } from "../utils/apiKeyHash";
 import { config } from "../config";
 import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
+import {
     handlePurgeRemovedStatus,
     handlePurgeRemovedTracksNow,
 } from "./adminLibraryHealthPurge";
@@ -17,6 +31,81 @@ import {
 const router = Router();
 
 router.use(requireAuth, requireAdmin);
+
+async function createQueueDashboardSession(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.user!.id },
+            select: { id: true, tokenVersion: true },
+        });
+        if (!user) {
+            return sendRouteError(res, 401, "Not authenticated", {
+                code: "AUTH_REQUIRED",
+            });
+        }
+        const token = generateQueueDashboardToken(user);
+        res.cookie(
+            queueDashboardCookieName(),
+            token,
+            queueDashboardCookieOptions(QUEUE_DASHBOARD_TTL_SECONDS),
+        );
+        return res.status(204).end();
+    } catch (error) {
+        logger.error("Create queue dashboard session error:", error);
+        return sendInternalRouteError(
+            res,
+            "Failed to create queue dashboard session",
+        );
+    }
+}
+
+function deleteQueueDashboardSession(res: Response): Response {
+    res.clearCookie(
+        queueDashboardCookieName(),
+        queueDashboardCookieOptions(QUEUE_DASHBOARD_TTL_SECONDS),
+    );
+    return res.status(204).end();
+}
+
+/**
+ * @openapi
+ * /api/admin/queues/session:
+ *   post:
+ *     summary: Create temporary queue dashboard access
+ *     description: Sets an HttpOnly, SameSite=Strict cookie scoped to /api/admin/queues. The purpose-bound credential expires after 15 minutes.
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+ *     responses:
+ *       204:
+ *         description: Queue dashboard access created
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Queue dashboard access could not be created
+ *   delete:
+ *     summary: Close temporary queue dashboard access
+ *     description: Clears the queue dashboard cookie with the same narrow path and browser-security attributes.
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+ *     responses:
+ *       204:
+ *         description: Queue dashboard access closed
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Queue dashboard access could not be closed
+ */
+router.post("/queues/session", asyncHandler(createQueueDashboardSession));
+router.delete("/queues/session", (_req, res) =>
+    deleteQueueDashboardSession(res),
+);
 
 // Per-model row fetchers for the secrets-status check. Keyed by the same model
 // names as ENCRYPTED_SETTINGS_COLUMNS so the column inventory stays the single

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Admin page has an `Open queue dashboard` button that opens Bull Board in a new tab. Because that dashboard is a plain web page that cannot carry the app's login token, the button first grants the browser a 15-minute cookie that works only for the dashboard, and `End dashboard access` revokes it early; typing the dashboard address directly still requires an API key (#897).
 - The Vibe Map now shows when it was last built and how many songs it covers, flags when it is showing a random sample of a very large library, and gives admins a Rebuild button that drops the cached map and builds a fresh one on the spot; a rebuild keeps the current map on screen until the new one is ready, and a failed build now says so instead of spinning for ten minutes (#887).
 - While a newer audio analysis is still filling its embedding space, the Vibe Map's status chip shows a `Re-analyzing` badge with the percentage done and explains that the map switches over automatically at the cutover threshold, so a map that seems stuck at the old song count is no longer a mystery (#887).
 - The Vibe Map now refreshes itself: when at least 50 songs and a tenth of the map's songs have been analyzed (or removed) since the last build, the server starts a fresh build in the background while the current map stays on screen, checked at most once every five minutes per library; a sampled map also says how many songs it was sampled from, and the new `soundspan_vibe_map_refresh_checks_total` metric reports those checks (#887).
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The API Keys settings page now says that a key is sent in an `X-API-Key` header and shows a copy-ready example; sending it as a Bearer token returned an unexplained 401 (#897).
 - Native dropdown menus (sort, genre, and pagination on the Audiobooks and Podcasts pages, and other built-in selects) no longer render white text on a white popup; the app now declares its dark color scheme to the browser so native controls match the theme.
 - Audiobook listening progress and playback state are now tied to their audiobook at the database level: removing a book — scheduled prune, manual sync, or federation cleanup — atomically deletes its progress rows and nulls the active-audiobook reference in playback state, closing a race where progress saved mid-removal could linger as a phantom entry in Continue Listening; the upgrade migration also removes any orphaned progress rows left behind by earlier removals (#866).
 
