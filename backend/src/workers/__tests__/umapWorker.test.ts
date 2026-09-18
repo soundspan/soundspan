@@ -51,6 +51,13 @@ describe("UMAP worker orchestration", () => {
             rows: [expectedRow],
             projection: null,
         });
+        const call = (database.$queryRaw as jest.Mock).mock.calls[0];
+        const query = call[0] as TemplateStringsArray;
+        const values = call.slice(1);
+        expect(query.join(" ")).toContain("ORDER BY t.random, te.track_id");
+        expect(query.join(" ")).not.toContain("RANDOM()");
+        expect(values).toContain("space-1");
+        expect(values).toContain(10);
         expect(database.$disconnect).toHaveBeenCalledTimes(1);
     });
 

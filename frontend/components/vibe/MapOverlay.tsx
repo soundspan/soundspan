@@ -32,6 +32,8 @@ export interface MapOverlayProps {
     height: number;
     /** Now-playing track in world (0..1) coords, or null when not on the map. */
     beacon?: Point | null;
+    /** The beacon marks an approximate spot for a track outside the sample. */
+    beaconApproximate?: boolean;
     /**
      * Ordered world points (oldest -> newest), already filtered to on-map ids.
      * `alpha` is an extra per-point opacity multiplier — the session trail's
@@ -69,6 +71,11 @@ const MAP_OVERLAY_STYLES = (
             0% { transform: scale(0.5); opacity: 0.9; }
             100% { transform: scale(2.6); opacity: 0; }
         }
+        .vibe-beacon-approx .vibe-beacon-ring {
+            border-style: dashed; animation: none; opacity: 0.85;
+            transform: scale(1.4);
+        }
+        .vibe-beacon-approx .vibe-beacon-core { opacity: 0.6; }
         .vibe-deco-in { animation: vibe-deco-in 200ms ease-out both; }
         @keyframes vibe-deco-in { from { opacity: 0; } }
         @media (prefers-reduced-motion: reduce) {
@@ -130,11 +137,20 @@ function buildFadeSegments(
     return segments;
 }
 
-function Beacon({ point }: { point: Point | null }) {
+function Beacon({
+    point,
+    approximate,
+}: {
+    point: Point | null;
+    approximate: boolean;
+}) {
     if (!point) return null;
     return (
         <div
-            className="vibe-beacon"
+            className={
+                approximate ? "vibe-beacon vibe-beacon-approx" : "vibe-beacon"
+            }
+            data-approximate={approximate ? "true" : undefined}
             style={{ transform: `translate(${point.x}px, ${point.y}px)` }}
         >
             <span className="vibe-beacon-ring" />
@@ -148,6 +164,7 @@ export function MapOverlay({
     width,
     height,
     beacon,
+    beaconApproximate = false,
     trail,
     plan,
     decorations,
@@ -194,7 +211,7 @@ export function MapOverlay({
                 {sweepStroke}
             </svg>
 
-            <Beacon point={beaconScreen} />
+            <Beacon point={beaconScreen} approximate={beaconApproximate} />
 
             {MAP_OVERLAY_STYLES}
         </div>

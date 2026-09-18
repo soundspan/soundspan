@@ -22,10 +22,12 @@ function NowPlaying({ model }: { model: VibeMapViewModel }) {
     const current = model.audio.currentTrack;
     if (!current) return null;
     const mapTrack = model.trackById.get(current.id);
+    const approximate = !mapTrack && model.offMapPlacement !== null;
     return (
         <NowPlayingConnected
             track={current}
-            onMapPresent={!!mapTrack}
+            onMapPresent={!!mapTrack || approximate}
+            approximate={approximate}
             moodColor={mapTrack ? getMoodColor(mapTrack.dominantMood) : null}
             onFlyTo={model.locateNowPlaying}
         />

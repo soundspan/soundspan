@@ -177,6 +177,8 @@ export const queryKeys = {
 
     // Vibe map
     vibeMap: () => ["vibe", "map"] as const,
+    vibeMapAnchors: (trackId: string) =>
+        ["vibe", "map", "anchors", trackId] as const,
     vibeCalibration: () => ["vibe", "calibration"] as const,
 
     // Player overlay related-content

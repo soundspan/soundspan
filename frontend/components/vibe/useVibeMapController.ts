@@ -22,6 +22,8 @@ import {
     useVibeMapLocations,
 } from "./useVibeMapCameraEffects";
 import { useMapDimensions, useVibeMapData } from "./useVibeMapData";
+import { useOffMapPlacement } from "./useOffMapPlacement";
+import type { Point } from "./mapViewport";
 import { useVibeMapEscape, useVibeMapShell } from "./useVibeMapShell";
 import {
     deriveVibeMapPresentation,
@@ -117,6 +119,7 @@ function useMapInteraction(
     dims: ReturnType<typeof useMapDimensions>,
     shell: ReturnType<typeof useVibeMapShell>,
     currentTrackId: string | null,
+    positionOf: (id: string) => Point | null,
 ) {
     const hitTest = useCallback(
         (clientX: number, clientY: number, radiusScale = 1) => {
@@ -169,7 +172,7 @@ function useMapInteraction(
     const locations = useVibeMapLocations({
         dims,
         viewportRef: core.camera.viewportRef,
-        positionOf: core.layout.posOf,
+        positionOf,
         animate: core.camera.animateCameraTo,
     });
     const locateNowPlaying = useCallback(() => {
@@ -194,12 +197,30 @@ export function useVibeMapController(props: VibeMapControllerProps) {
     const audioControls = useAudioControls();
     const together = useListenTogether();
     const core = useMapCore(data, dims, shell, audio, audioControls);
+    const currentTrackId = audio.currentTrack?.id ?? null;
+    // Only the playing track is placed off-map; everything else on the map
+    // keeps resolving through the layout alone.
+    const offMapPlacement = useOffMapPlacement(
+        currentTrackId,
+        currentTrackId === null || core.trackById.has(currentTrackId),
+        core.layout.posOf,
+    );
+    const { posOf } = core.layout;
+    const positionOf = useCallback(
+        (id: string): Point | null =>
+            posOf(id) ??
+            (offMapPlacement && id === currentTrackId
+                ? offMapPlacement.point
+                : null),
+        [posOf, offMapPlacement, currentTrackId],
+    );
     const interaction = useMapInteraction(
         core,
         data,
         dims,
         shell,
-        audio.currentTrack?.id ?? null,
+        currentTrackId,
+        positionOf,
     );
     useTravelCameraFollow({
         originId: core.vibe.travel?.currentId ?? null,
@@ -265,6 +286,9 @@ export function useVibeMapController(props: VibeMapControllerProps) {
             resetView: core.camera.resetView,
         },
         trackById: core.trackById,
+        /** Layout position, or the approximate spot for an off-map playing track. */
+        positionOf,
+        offMapPlacement,
         vibe: core.vibe,
         sweep: core.sweep,
         aux: core.aux,

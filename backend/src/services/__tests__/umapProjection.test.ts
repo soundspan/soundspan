@@ -65,6 +65,7 @@ const mockRedisIncr = jest.fn<(key: string) => Promise<number>>();
 const mockRedisExpire =
     jest.fn<(key: string, ttlSeconds: number) => Promise<boolean>>();
 const mockRedisDel = jest.fn<(keys: string | string[]) => Promise<number>>();
+const mockRedisSMembers = jest.fn<(key: string) => Promise<string[]>>();
 const mockRedisMulti = jest.fn<() => MockPipeline>();
 const mockExistsSync = jest.fn<(candidatePath: string) => boolean>();
 const mockPathJoin = jest.fn<(...parts: string[]) => string>();
@@ -136,6 +137,7 @@ jest.mock("../../utils/redis", () => ({
         expire: (key: string, ttlSeconds: number) =>
             mockRedisExpire(key, ttlSeconds),
         del: (keys: string | string[]) => mockRedisDel(keys),
+        sMembers: (key: string) => mockRedisSMembers(key),
         multi: () => mockRedisMulti(),
     },
 }));
@@ -252,6 +254,45 @@ function cachedPayload(): {
 function loadModule(): typeof import("../umapProjection") {
     return require("../umapProjection") as typeof import("../umapProjection");
 }
+
+describe("readMapTrackIds", () => {
+    beforeEach(() => {
+        jest.resetModules();
+        jest.clearAllMocks();
+        mockGetActiveSpace.mockResolvedValue({ id: SPACE_ID });
+        mockRedisSMembers.mockResolvedValue([]);
+    });
+
+    it("returns the current map track IDs", async () => {
+        mockRedisSMembers.mockResolvedValue(["track-1", "track-2"]);
+
+        await expect(loadModule().readMapTrackIds()).resolves.toEqual(
+            new Set(["track-1", "track-2"]),
+        );
+
+        expect(mockRedisSMembers).toHaveBeenCalledWith(TRACK_IDS_KEY);
+    });
+
+    it("returns an empty set when no map ID cache exists", async () => {
+        await expect(loadModule().readMapTrackIds()).resolves.toEqual(
+            new Set(),
+        );
+    });
+
+    it("rejects an oversized map ID cache", async () => {
+        mockRedisSMembers.mockResolvedValue(
+            Array.from({ length: 15_001 }, (_, index) => `track-${index}`),
+        );
+
+        await expect(loadModule().readMapTrackIds()).resolves.toEqual(
+            new Set(),
+        );
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Ignoring oversized vibe map track ID cache",
+            { spaceId: SPACE_ID, memberCount: 15_001 },
+        );
+    });
+});
 
 describe("computeMapProjection", () => {
     beforeEach(() => {

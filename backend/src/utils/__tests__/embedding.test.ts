@@ -1,4 +1,24 @@
-import { blendEmbeddings, lerpEmbedding, parseEmbedding } from "../embedding";
+import {
+    blendEmbeddings,
+    lerpEmbedding,
+    parseEmbedding,
+    toVectorLiteral,
+} from "../embedding";
+
+describe("toVectorLiteral", () => {
+    it("formats finite values as a bracketed pgvector literal", () => {
+        expect(toVectorLiteral([0.1, -2, 3e-7])).toBe("[0.1,-2,3e-7]");
+    });
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+        "rejects non-finite value %s",
+        (value) => {
+            expect(() => toVectorLiteral([0.1, value])).toThrow(
+                "Embedding must contain only finite values",
+            );
+        },
+    );
+});
 
 describe("lerpEmbedding", () => {
     it("returns the endpoints at t=0 and t=1", () => {

@@ -45,7 +45,7 @@ async function loadRows(
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
           AND te.space_id = ${data.spaceId}
-        ORDER BY RANDOM()
+        ORDER BY t.random, te.track_id
         LIMIT ${data.sampleSize}
     `;
 }

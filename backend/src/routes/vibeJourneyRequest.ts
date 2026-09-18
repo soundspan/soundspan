@@ -46,6 +46,17 @@ const stepsSchema = z
         Math.min(Math.max(MIN_JOURNEY_STEPS, value), MAX_JOURNEY_STEPS),
     )
     .default(DEFAULT_JOURNEY_STEPS);
+const DEFAULT_MAP_ANCHOR_LIMIT = 8;
+const mapAnchorTrackIdSchema = z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_-]+$/);
+const mapAnchorLimitSchema = z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(16));
 
 function reject(status: number, error: string): JourneyRequestResult {
     return { ok: false, status, error };
@@ -117,5 +128,42 @@ export function parseJourneyRequest(body: unknown): JourneyRequestResult {
             steps: steps.data,
             excludeTrackIds: excludeTrackIds.data,
         },
+    };
+}
+
+/** Validated request values for a vibe-map anchor lookup. */
+export type VibeMapAnchorRequestResult =
+    | { ok: true; value: { trackId: string; limit: number } }
+    | { ok: false; error: string };
+
+/** Validate the path ID and optional bounded anchor count. */
+export function parseVibeMapAnchorRequest(
+    params: unknown,
+    query: unknown,
+): VibeMapAnchorRequestResult {
+    const trackId = z
+        .object({ trackId: mapAnchorTrackIdSchema })
+        .safeParse(params);
+    if (!trackId.success) return { ok: false, error: "Invalid trackId" };
+    const rawLimit = isPlainObject(query) ? query.limit : undefined;
+    if (rawLimit === undefined) {
+        return {
+            ok: true,
+            value: {
+                trackId: trackId.data.trackId,
+                limit: DEFAULT_MAP_ANCHOR_LIMIT,
+            },
+        };
+    }
+    const limit = mapAnchorLimitSchema.safeParse(rawLimit);
+    if (!limit.success) {
+        return {
+            ok: false,
+            error: "limit must be an integer between 1 and 16",
+        };
+    }
+    return {
+        ok: true,
+        value: { trackId: trackId.data.trackId, limit: limit.data },
     };
 }

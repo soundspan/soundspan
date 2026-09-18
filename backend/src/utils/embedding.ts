@@ -1,3 +1,11 @@
+/** pgvector input literal for a numeric embedding, e.g. "[0.1,0.2]". Throws on non-finite values. */
+export function toVectorLiteral(embedding: readonly number[]): string {
+    if (embedding.some((value) => !Number.isFinite(value))) {
+        throw new Error("Embedding must contain only finite values");
+    }
+    return `[${embedding.map((value) => value.toString()).join(",")}]`;
+}
+
 /**
  * Parse a pgvector embedding from its text representation "[0.1,0.2,...]"
  * into a number array.
