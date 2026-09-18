@@ -37,6 +37,7 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/playbackHistoryConfig.ts` | components |
 | `components/sections/PlaybackHistorySection.tsx` | components |
 | `components/sections/PlaybackSourcesSection.tsx` | components |
+| `components/sections/QueueDashboardSection.tsx` | components |
 | `components/sections/PlaybackSection.tsx` | components |
 | `components/sections/ScrobblingSection.tsx` | components |
 | `components/sections/SocialSection.tsx` | components |

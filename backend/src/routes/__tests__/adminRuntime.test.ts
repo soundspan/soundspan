@@ -1,8 +1,23 @@
 import { Request, Response } from "express";
 
+const mockGenerateQueueDashboardToken = jest.fn(() => "dashboard-token");
+const mockRequireAuth = jest.fn(
+    (_req: Request, _res: Response, next: () => void) => next(),
+);
+const mockRequireAdmin = jest.fn(
+    (req: Request, res: Response, next: () => void) => {
+        if (req.user?.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        return next();
+    },
+);
+
 jest.mock("../../middleware/auth", () => ({
-    requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
-    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
+    requireAuth: mockRequireAuth,
+    requireAdmin: mockRequireAdmin,
+    generateQueueDashboardToken: mockGenerateQueueDashboardToken,
+    QUEUE_DASHBOARD_TTL_SECONDS: 15 * 60,
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -29,6 +44,9 @@ jest.mock("../../utils/db", () => ({
         track: {
             count: jest.fn(),
         },
+        user: {
+            findUnique: jest.fn(),
+        },
     },
 }));
 
@@ -48,7 +66,10 @@ jest.mock("../../workers/queues", () => ({
 }));
 
 jest.mock("../../config", () => ({
-    config: { workers: { trackRemovalRetentionDays: 90 } },
+    config: {
+        secureCookies: false,
+        workers: { trackRemovalRetentionDays: 90 },
+    },
 }));
 
 import router from "../admin";
@@ -59,6 +80,7 @@ const mockFindMany = prisma.libraryHealthRecord.findMany as jest.Mock;
 const mockCount = prisma.libraryHealthRecord.count as jest.Mock;
 const mockDelete = prisma.libraryHealthRecord.delete as jest.Mock;
 const mockRemovedTrackCount = prisma.track.count as jest.Mock;
+const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
 const mockSchedulerAdd = schedulerQueue.add as jest.Mock;
 const mockSchedulerGetJob = schedulerQueue.getJob as jest.Mock;
 const mockSchedulerGetJobs = (schedulerQueue as any).getJobs as jest.Mock;
@@ -87,6 +109,9 @@ function createRes() {
             res.body = payload;
             return res;
         }),
+        cookie: jest.fn(() => res),
+        clearCookie: jest.fn(() => res),
+        end: jest.fn(() => res),
     };
 
     return res;
@@ -521,5 +546,95 @@ describe("admin library health routes", () => {
                 error: "Failed to read purge status",
             });
         });
+    });
+});
+
+describe("admin queue dashboard session routes", () => {
+    const createSessionHandler = getHandler("/queues/session", "post");
+    const deleteSessionHandler = getHandler("/queues/session", "delete");
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockUserFindUnique.mockResolvedValue({
+            id: "admin-1",
+            tokenVersion: 7,
+        });
+    });
+
+    it("sets the narrowly scoped dashboard cookie and returns 204", async () => {
+        const req = { user: { id: "admin-1", role: "admin" } } as any;
+        const res = createRes();
+
+        await createSessionHandler(req, res, jest.fn());
+
+        expect(mockUserFindUnique).toHaveBeenCalledWith({
+            where: { id: "admin-1" },
+            select: { id: true, tokenVersion: true },
+        });
+        expect(mockGenerateQueueDashboardToken).toHaveBeenCalledWith({
+            id: "admin-1",
+            tokenVersion: 7,
+        });
+        expect(res.cookie).toHaveBeenCalledWith(
+            "soundspan-queues",
+            "dashboard-token",
+            {
+                httpOnly: true,
+                sameSite: "strict",
+                secure: false,
+                path: "/api/admin/queues",
+                maxAge: 15 * 60 * 1000,
+            },
+        );
+        expect(res.status).toHaveBeenCalledWith(204);
+        expect(res.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns a canonical 500 when the current user cannot be loaded", async () => {
+        mockUserFindUnique.mockRejectedValueOnce(new Error("database details"));
+        const req = { user: { id: "admin-1", role: "admin" } } as any;
+        const res = createRes();
+
+        await createSessionHandler(req, res, jest.fn());
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({
+            error: "Failed to create queue dashboard session",
+        });
+    });
+
+    it("returns 403 for a non-admin before the session route runs", () => {
+        const req = {
+            user: { id: "user-1", username: "alice", role: "user" },
+        } as Request;
+        const res = createRes();
+        const next = jest.fn();
+        const routerMiddleware = (router as any).stack
+            .filter((entry: any) => !entry.route)
+            .map((entry: any) => entry.handle);
+
+        expect(routerMiddleware).toContain(mockRequireAdmin);
+        mockRequireAdmin(req, res, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(mockUserFindUnique).not.toHaveBeenCalled();
+    });
+
+    it("clears the dashboard cookie with the same scope and returns 204", async () => {
+        const res = createRes();
+
+        await deleteSessionHandler({} as any, res);
+
+        expect(res.clearCookie).toHaveBeenCalledWith("soundspan-queues", {
+            httpOnly: true,
+            sameSite: "strict",
+            secure: false,
+            path: "/api/admin/queues",
+            maxAge: 15 * 60 * 1000,
+        });
+        expect(res.status).toHaveBeenCalledWith(204);
+        expect(res.end).toHaveBeenCalledTimes(1);
     });
 });

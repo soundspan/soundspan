@@ -142,13 +142,14 @@ labels.
 
 ## Authentication and Credential Security
 
-Every authenticated request uses an explicit credential transport — there is no cookie-session authentication, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests.
+Every authenticated request uses an explicit credential transport — there is no cookie-session authentication, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests. The one deliberate exception is the queue dashboard: Bull Board is a server-rendered page that cannot carry a bearer token, so `Open queue dashboard` on the Admin page mints a 15-minute, HTTP-only, `SameSite=Strict` cookie whose path is limited to `/api/admin/queues`. Only that mount accepts it, only for administrators, and the token inside it carries a dashboard-only purpose claim that every other route rejects.
 
 | Surface | Credential transport | Lifetime | Revocation path |
 | ------- | -------------------- | -------- | --------------- |
 | Web UI and first-party API | `Authorization: Bearer` JWT access token plus refresh token in the refresh request body | Access: 24 hours. Refresh: 30 days. | A self-service password change or administrator-set password increments `tokenVersion`, invalidating outstanding access and refresh JWTs. Ordinary logout removes the current browser's tokens only; there is no separate logout-all-devices endpoint. |
 | OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. App-password credentials remain valid until revoked. The legacy dedicated Subsonic password is deprecated: it cannot be set from Settings, but direct API updates remain possible and existing stored values are honored. | Revoke an app password individually. Account password changes and administrator-set passwords clear any legacy dedicated Subsonic password. |
 | External API clients | `X-API-Key` header | 90 days from creation | Delete the API key. |
+| Queue dashboard (`/api/admin/queues`) | Bearer token, API key, or the path-scoped dashboard cookie minted by `POST /api/admin/queues/session` | Cookie: 15 minutes. | `DELETE /api/admin/queues/session` (`End dashboard access` on the Admin page), or let it expire. |
 | Federation peer API | Dedicated opaque `Authorization: Bearer` peer credential | No automatic expiry. | Rotate the credential, revoke the peer, or delete the peer. |
 | Internal sidecar requests | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |
 
@@ -223,7 +224,7 @@ treat a linked peer as trusted and limit admin access accordingly.
 ## Webhook and Admin Security
 
 - Lidarr webhook signatures are supported and should be configured
-- Bull Board (`/api/admin/queues`) requires authenticated admin access
+- Bull Board (`/api/admin/queues`) requires authenticated admin access: a bearer token, an API key, or the path-scoped dashboard cookie minted from the Admin page
 - Swagger docs: the UI at `/api/docs` is always accessible; the raw spec at `/api/docs.json` requires auth in production unless `DOCS_PUBLIC=true`
 
 ## Optional VPN Notes

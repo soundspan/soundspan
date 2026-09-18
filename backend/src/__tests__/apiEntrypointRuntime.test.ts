@@ -214,6 +214,9 @@ describe("api entrypoint runtime behavior", () => {
 
         const requireAuth = jest.fn((_req, _res, next) => next?.());
         const requireAdmin = jest.fn((_req, _res, next) => next?.());
+        const requireQueueDashboardAccess = jest.fn((_req, _res, next) =>
+            next?.(),
+        );
         const errorHandler = jest.fn((_err, _req, _res, _next) => undefined);
         const authLimiter = "auth-limiter";
         const refreshLimiter = "refresh-limiter";
@@ -323,6 +326,7 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../middleware/auth", () => ({
             requireAuth,
             requireAdmin,
+            requireQueueDashboardAccess,
         }));
         jest.doMock("../middleware/rateLimiter", () => ({
             authLimiter,
@@ -401,6 +405,7 @@ describe("api entrypoint runtime behavior", () => {
             ExpressAdapter,
             requireAuth,
             requireAdmin,
+            requireQueueDashboardAccess,
             shutdownWorkers,
             shutdownSchedulerClaimRedis,
             shutdownUmapProjection,
@@ -880,15 +885,14 @@ describe("api entrypoint runtime behavior", () => {
             }
         }
 
-        // Bull Board admin dashboard requires session auth + admin role.
+        // Bull Board accepts header auth or its purpose-bound dashboard cookie.
         const queuesCall = mocks.app.use.mock.calls.find(
             (args: unknown[]) => args[0] === "/api/admin/queues",
         );
         expect(queuesCall).toBeDefined();
         expect(queuesCall!.slice(1)).toEqual([
             "admin-surface-limiter",
-            mocks.requireAuth,
-            mocks.requireAdmin,
+            mocks.requireQueueDashboardAccess,
             "bull-router",
         ]);
     });

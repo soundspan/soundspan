@@ -112,7 +112,7 @@ export const APIKeysSection: React.FC = () => {
         <SettingsSection
             id="api-keys"
             title="API Keys"
-            description="Manage API keys for programmatic access to your account"
+            description="Manage API keys for programmatic access to your account. Clients send a key in the X-API-Key header."
         >
             {/* Generated Key Display */}
             {generatedApiKey && (
@@ -142,6 +142,20 @@ export const APIKeysSection: React.FC = () => {
                                 Save this key now, you won&apos;t be able to see
                                 it again
                             </p>
+                            <p className="text-xs text-gray-300 mt-3">
+                                Send it in an{" "}
+                                <code className="font-mono text-white">
+                                    X-API-Key
+                                </code>{" "}
+                                header, not as a Bearer token:
+                            </p>
+                            <pre className="mt-1 overflow-x-auto rounded bg-black/50 border border-white/10 px-3 py-2 text-xs text-gray-200 font-mono">
+                                {`curl -H "X-API-Key: <your key>" ${
+                                    typeof window === "undefined"
+                                        ? ""
+                                        : window.location.origin
+                                }/api/auth/me`}
+                            </pre>
                         </div>
                     </div>
                     <div className="flex justify-end">

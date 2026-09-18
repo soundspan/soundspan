@@ -346,6 +346,23 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
         async revokeApiKey(id: string): Promise<{ message: string }> {
             return this.delete(`/api-keys/${id}`);
         }
+
+        /**
+         * Mint the short-lived, path-scoped cookie that lets this browser open
+         * the Bull Board queue dashboard (admin only). Responds 204.
+         */
+        async createQueueDashboardSession(): Promise<void> {
+            await this.request<void>("/admin/queues/session", {
+                method: "POST",
+            });
+        }
+
+        /** Clear the queue dashboard cookie before it expires. Responds 204. */
+        async closeQueueDashboardSession(): Promise<void> {
+            await this.request<void>("/admin/queues/session", {
+                method: "DELETE",
+            });
+        }
     }
     return AuthApi;
 }

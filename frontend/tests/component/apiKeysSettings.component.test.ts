@@ -167,6 +167,28 @@ test("lists API-key expiry dates with expired and expiring-soon states", async (
     assert.match(text, new RegExp(formatDate(expiringSoon)));
 });
 
+test("a new key is shown with the X-API-Key header it must be sent in", async (t) => {
+    const harness = await mountApiKeysSection();
+    t.after(harness.unmount);
+
+    await click(findButton("Generate New API Key"));
+    const input = document.querySelector(
+        'input[placeholder^="e.g., My Laptop"]',
+    );
+    assert.ok(input instanceof HTMLInputElement);
+    await React.act(async () => typeInto(input, "Automation"));
+    await click(findButton("Create"));
+
+    assert.equal(createApiKey.mock.callCount(), 1);
+    const revealed = document.querySelector('input[value="generated-key"]');
+    assert.ok(revealed instanceof HTMLInputElement, "key not revealed");
+    const text = document.body.textContent ?? "";
+    assert.match(text, /Send it in an X-API-Key header, not as a Bearer token/);
+    assert.match(text, /curl -H "X-API-Key: <your key>"/);
+    assert.match(text, /\/api\/auth\/me/);
+    assert.doesNotMatch(text, /X-API-Key: generated-key/);
+});
+
 test("shows the interactive-session message when API-key creation is forbidden", async (t) => {
     createFailure = new Error("Interactive session authentication required");
     const harness = await mountApiKeysSection();
