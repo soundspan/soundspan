@@ -121,6 +121,27 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
             >("/vibe/map", { signal: options.signal });
         }
 
+        /**
+         * Where a track sits relative to the current map sample: `onMap` when
+         * it is one of the projected dots, otherwise its nearest sampled
+         * neighbours (ascending distance) so the client can place it
+         * approximately.
+         */
+        async getVibeMapAnchors(
+            trackId: string,
+            options: { limit?: number; signal?: AbortSignal } = {},
+        ) {
+            const query =
+                options.limit === undefined ? "" : `?limit=${options.limit}`;
+            return this.request<{
+                trackId: string;
+                onMap: boolean;
+                anchors: Array<{ id: string; distance: number }>;
+            }>(`/vibe/map/anchors/${encodeURIComponent(trackId)}${query}`, {
+                signal: options.signal,
+            });
+        }
+
         /** Drop the cached map and start a fresh build (admin only; 202). */
         async rebuildVibeMap(options: { signal?: AbortSignal } = {}) {
             return this.request<{

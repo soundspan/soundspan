@@ -34,6 +34,7 @@ import {
     fetchEmbeddingsByTrackIds,
     fetchTrackEmbedding,
     findLocalTracksNeedingActiveEmbedding,
+    findNearestAmongTracks,
     findNearestToEmbedding,
     findTracksByTextEmbedding,
     upsertTrackEmbedding,
@@ -337,6 +338,14 @@ describe("findNearestToEmbedding", () => {
         expect(query.strings.join(" ")).toContain("FROM track_embeddings te");
         expect(query.strings.join(" ")).toContain("te.space_id =");
         expect(query.values).toContain("space-active");
+        expect(query.values).toEqual([
+            "[0.1,0.2]",
+            "LOCAL",
+            "FEDERATED",
+            "space-active",
+            "[0.1,0.2]",
+            5,
+        ]);
         expect(query.strings.join(" ")).not.toContain("!= ALL");
     });
 
@@ -349,6 +358,67 @@ describe("findNearestToEmbedding", () => {
         expect(query.strings.join(" ")).toContain("!= ALL");
         expect(query.values).toContainEqual(["track-2"]);
         expect(query.values).toContain("space-active");
+        expect(query.values).toEqual([
+            "[0.1,0.2]",
+            "LOCAL",
+            "FEDERATED",
+            "space-active",
+            ["track-2"],
+            "[0.1,0.2]",
+            5,
+        ]);
+    });
+});
+
+describe("findNearestAmongTracks", () => {
+    it("runs an exact, fenced query with bound candidate IDs", async () => {
+        const rows = [{ id: "track-2", distance: 0.125 }];
+        mockQueryRaw.mockResolvedValue(rows);
+
+        await expect(
+            findNearestAmongTracks([0.25, 0.75], ["track-1", "track-2"], 2),
+        ).resolves.toBe(rows);
+
+        expect(mockRunAnnQuery).not.toHaveBeenCalled();
+        const query = mockQueryRaw.mock.calls[0][0];
+        expect(query.strings.join(" ")).toContain("FROM (");
+        expect(query.strings.join(" ")).toContain("OFFSET 0");
+        expect(query.strings.join(" ")).toContain(
+            "ORDER BY sub.distance ASC, sub.id ASC",
+        );
+        expect(query.values).toEqual([
+            "[0.25,0.75]",
+            "space-active",
+            ["track-1", "track-2"],
+            2,
+        ]);
+    });
+
+    it.each([
+        { embedding: [], candidateIds: ["track-1"], limit: 1 },
+        { embedding: [Number.NaN], candidateIds: ["track-1"], limit: 1 },
+        { embedding: [0.5], candidateIds: [], limit: 1 },
+        {
+            embedding: [0.5],
+            candidateIds: Array.from(
+                { length: 15_001 },
+                (_, index) => `track-${index}`,
+            ),
+            limit: 1,
+        },
+        { embedding: [0.5], candidateIds: ["track-1"], limit: 0 },
+        { embedding: [0.5], candidateIds: ["track-1"], limit: 33 },
+        { embedding: [0.5], candidateIds: ["track-1"], limit: 1.5 },
+    ])("rejects out-of-range exact-query input %#", async (input) => {
+        await expect(
+            findNearestAmongTracks(
+                input.embedding,
+                input.candidateIds,
+                input.limit,
+            ),
+        ).rejects.toBeInstanceOf(RangeError);
+        expect(mockGetActiveSpace).not.toHaveBeenCalled();
+        expect(mockQueryRaw).not.toHaveBeenCalled();
     });
 });
 
@@ -371,8 +441,11 @@ describe("findTracksByTextEmbedding", () => {
         // pass: LIMIT binds last, preceded by the ORDER BY vector, preceded
         // by the distance bound.
         expect(values[values.length - 1]).toBe(60);
-        expect(values[values.length - 2]).toEqual([0.25, 0.75]);
+        expect(values[values.length - 2]).toBe("[0.25,0.75]");
         expect(values[values.length - 3]).toBe(0.8);
+        expect(values.filter((value) => value === "[0.25,0.75]")).toHaveLength(
+            3,
+        );
         expect(mockRunAnnQuery).toHaveBeenCalledWith(query, undefined, {
             statementTimeoutMs: 5_000,
             timeoutMessage: "Vibe text search query timed out",

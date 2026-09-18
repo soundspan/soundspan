@@ -63,6 +63,18 @@ function trackIdsKeyForSpace(spaceId: string): string {
     return `${TRACK_IDS_KEY_PREFIX}:${spaceId}`;
 }
 
+/** Ids on the currently cached map for the active space; empty when no map is cached. */
+export async function readMapTrackIds(): Promise<ReadonlySet<string>> {
+    const { id: spaceId } = await getActiveSpace();
+    const members = await redisClient.sMembers(trackIdsKeyForSpace(spaceId));
+    if (members.length <= MAX_UMAP_WORKER_ROWS) return new Set(members);
+    log.warn("Ignoring oversized vibe map track ID cache", {
+        spaceId,
+        memberCount: members.length,
+    });
+    return new Set();
+}
+
 function refreshCheckKeyForSpace(spaceId: string): string {
     return `${REFRESH_CHECK_KEY_PREFIX}:${spaceId}`;
 }

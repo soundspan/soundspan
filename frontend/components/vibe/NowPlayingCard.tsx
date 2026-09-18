@@ -19,6 +19,8 @@ export interface NowPlayingCardProps {
     track: NowPlayingCardTrack | null;
     isPlaying: boolean;
     onMapPresent: boolean;
+    /** Placed next to its nearest sampled neighbours rather than projected. */
+    approximate?: boolean;
     moodColor?: string | null;
     onFlyTo: () => void;
     onTogglePlay: () => void;
@@ -151,18 +153,23 @@ function TrackLabels({ track }: { track: NowPlayingCardTrack }) {
 function FindButton({
     track,
     color,
+    approximate,
     onFlyTo,
 }: {
     track: NowPlayingCardTrack;
     color: string;
+    approximate: boolean;
     onFlyTo: () => void;
 }) {
+    const title = approximate
+        ? `Fly to the approximate spot for "${track.title}" (not in the map sample; placed next to its closest songs)`
+        : `Fly to "${track.title}" on the map`;
     return (
         <button
             type="button"
             onClick={onFlyTo}
-            title={`Fly to "${track.title}" on the map`}
-            aria-label={`Find ${track.title} on the map`}
+            title={title}
+            aria-label={`Find ${track.title} on the map${approximate ? " (approximate)" : ""}`}
             className="flex flex-shrink-0 items-center gap-1.5 h-10 px-2.5 sm:px-3 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
             style={{ backgroundColor: `${color}26`, color }}
         >
@@ -251,6 +258,7 @@ export function NowPlayingCard(props: NowPlayingCardProps) {
                 <FindButton
                     track={props.track}
                     color={color}
+                    approximate={props.approximate === true}
                     onFlyTo={props.onFlyTo}
                 />
             )}

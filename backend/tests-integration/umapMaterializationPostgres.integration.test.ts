@@ -40,6 +40,7 @@ async function createSchema(database: Client): Promise<void> {
             "peerId" TEXT,
             "dedupOfTrackId" TEXT,
             "removedAt" TIMESTAMP(3),
+            random DOUBLE PRECISION NOT NULL DEFAULT random(),
             "loudnessLufs" DOUBLE PRECISION,
             "truePeakDb" DOUBLE PRECISION,
             energy DOUBLE PRECISION,

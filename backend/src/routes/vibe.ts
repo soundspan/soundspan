@@ -12,6 +12,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import {
     computeMapProjection,
+    readMapTrackIds,
     rebuildMapProjection,
 } from "../services/umapProjection";
 import {
@@ -38,11 +39,15 @@ import {
     countEmbeddedBrowsableTracks,
     fetchEmbeddingsByTrackIds,
     fetchTrackEmbedding,
+    findNearestAmongTracks,
     findNearestToEmbedding,
     type NearestTrackRow,
 } from "../services/trackEmbeddings";
 import { getActiveSpace } from "../services/embeddingSpaces";
-import { parseJourneyRequest } from "./vibeJourneyRequest";
+import {
+    parseJourneyRequest,
+    parseVibeMapAnchorRequest,
+} from "./vibeJourneyRequest";
 import {
     sendRouteError,
     sendInternalRouteError,
@@ -221,6 +226,102 @@ router.post(
             sendInternalRouteError(res, "Failed to rebuild map projection");
         }
     }),
+);
+
+async function handleMapAnchorLookup(
+    req: Request<{ trackId: string }>,
+    res: Response,
+) {
+    const parsed = parseVibeMapAnchorRequest(req.params, req.query);
+    if (!parsed.ok) return sendRouteError(res, 400, parsed.error);
+    const { trackId, limit } = parsed.value;
+    try {
+        const ids = await readMapTrackIds();
+        if (ids.size === 0) {
+            return sendRouteError(res, 404, "No vibe map is built yet");
+        }
+        if (ids.has(trackId)) {
+            return res.json({ trackId, onMap: true, anchors: [] });
+        }
+        const embedding = await fetchTrackEmbedding(trackId);
+        if (!embedding) {
+            return sendRouteError(res, 404, "Track has no embedding");
+        }
+        const anchors = await findNearestAmongTracks(
+            embedding,
+            [...ids],
+            limit,
+        );
+        return res.json({ trackId, onMap: false, anchors });
+    } catch (error: unknown) {
+        logger.error("Vibe map anchor lookup error:", error);
+        return sendInternalRouteError(res, "Failed to locate track on the map");
+    }
+}
+
+/**
+ * @openapi
+ * /api/vibe/map/anchors/{trackId}:
+ *   get:
+ *     summary: Locate a track relative to the vibe map
+ *     description: Returns nearest sampled map neighbours so a client can place an off-map track approximately. A track already in the current sample returns no anchors because its projected position is already available.
+ *     tags: [Vibe]
+ *     security:
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 1
+ *           maxLength: 64
+ *           pattern: '^[A-Za-z0-9_-]+$'
+ *         description: Track ID to locate
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 16
+ *           default: 8
+ *         description: Maximum number of sampled neighbours to return
+ *     responses:
+ *       200:
+ *         description: Map membership or nearest sampled anchors
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [trackId, onMap, anchors]
+ *               properties:
+ *                 trackId:
+ *                   type: string
+ *                 onMap:
+ *                   type: boolean
+ *                 anchors:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [id, distance]
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       distance:
+ *                         type: number
+ *       400:
+ *         description: Invalid track ID or limit
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: No map is cached or the track has no embedding
+ *       500:
+ *         description: Failed to locate the track on the map
+ */
+router.get(
+    "/map/anchors/:trackId",
+    requireAuth,
+    asyncHandler(handleMapAnchorLookup),
 );
 
 function formatNearestTrack(row: NearestTrackRow) {

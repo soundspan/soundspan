@@ -73,7 +73,7 @@ function Decorations({ model }: { model: VibeMapViewModel }) {
 function ReadyMap({ model }: { model: VibeMapViewModel }) {
     const viewport = model.camera.viewport!;
     const beacon = model.audio.currentTrack
-        ? model.layout.posOf(model.audio.currentTrack.id)
+        ? model.positionOf(model.audio.currentTrack.id)
         : null;
     return (
         <>
@@ -99,6 +99,7 @@ function ReadyMap({ model }: { model: VibeMapViewModel }) {
                 width={model.dims.width}
                 height={model.dims.height}
                 beacon={beacon}
+                beaconApproximate={model.offMapPlacement !== null}
                 trail={model.presentation.shownTrail}
                 plan={model.presentation.shownPlan}
                 decorations={<Decorations model={model} />}

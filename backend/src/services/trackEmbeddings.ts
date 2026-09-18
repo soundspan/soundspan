@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { parseEmbedding } from "../utils/embedding";
+import { parseEmbedding, toVectorLiteral } from "../utils/embedding";
 import { runAnnQuery } from "../utils/annQuery";
 import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
 import {
@@ -11,6 +11,7 @@ import {
     vibeEmbeddingEligibleTrackWhere,
     vibeEmbeddingTargetGateWhere,
 } from "./vibeEmbeddingEligibility";
+import { MAX_UMAP_WORKER_ROWS } from "../workers/umapWorkerProtocol";
 
 /**
  * trackEmbeddings — service-layer reads of the pgvector `track_embeddings`
@@ -347,18 +348,63 @@ export async function fetchTrackEmbedding(
     return parseEmbedding(rows[0].embedding);
 }
 
+function validateNearestAmongTracksInput(
+    embedding: readonly number[],
+    candidateIds: readonly string[],
+    limit: number,
+): void {
+    if (
+        embedding.length === 0 ||
+        embedding.some((value) => !Number.isFinite(value))
+    ) {
+        throw new RangeError("Embedding must contain finite values");
+    }
+    if (candidateIds.length < 1 || candidateIds.length > MAX_UMAP_WORKER_ROWS) {
+        throw new RangeError("Candidate track count is out of range");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 32) {
+        throw new RangeError("Nearest-track limit is out of range");
+    }
+}
+
+/** Nearest tracks to an embedding among an explicit candidate set, exact (no ANN index). */
+export async function findNearestAmongTracks(
+    embedding: number[],
+    candidateIds: readonly string[],
+    limit: number,
+): Promise<Array<{ id: string; distance: number }>> {
+    validateNearestAmongTracksInput(embedding, candidateIds, limit);
+    const vector = toVectorLiteral(embedding);
+    const { id: spaceId } = await getActiveSpace();
+    const query = Prisma.sql`
+        SELECT sub.id, sub.distance
+        FROM (
+            SELECT te.track_id AS id,
+                   te.embedding <=> ${vector}::vector AS distance
+            FROM track_embeddings te
+            WHERE te.space_id = ${spaceId}
+              AND te.track_id = ANY(${[...candidateIds]}::text[])
+            OFFSET 0
+        ) AS sub
+        ORDER BY sub.distance ASC, sub.id ASC
+        LIMIT ${limit}
+    `;
+    return prisma.$queryRaw<Array<{ id: string; distance: number }>>(query);
+}
+
 /** Finds the closest browsable tracks to an embedding. */
 export async function findNearestToEmbedding(
     embedding: number[],
     limit: number,
     excludeIds: string[] = [],
 ): Promise<NearestTrackRow[]> {
+    const vector = toVectorLiteral(embedding);
     const activeSpace = await getActiveSpace();
     if (excludeIds.length > 0) {
         return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
             SELECT
                 t.id, t.title,
-                te.embedding <=> ${embedding}::vector AS distance,
+                te.embedding <=> ${vector}::vector AS distance,
                 a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
                 ar.id AS "artistId", ar.name AS "artistName",
                 t."loudnessLufs", t."truePeakDb",
@@ -372,14 +418,14 @@ export async function findNearestToEmbedding(
               AND ${TRACK_BROWSE_SQL}
               AND te.space_id = ${activeSpace.id}
               AND te.track_id != ALL(${excludeIds}::text[])
-            ORDER BY te.embedding <=> ${embedding}::vector
+            ORDER BY te.embedding <=> ${vector}::vector
             LIMIT ${limit}
         `);
     }
     return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
         SELECT
             t.id, t.title,
-            te.embedding <=> ${embedding}::vector AS distance,
+            te.embedding <=> ${vector}::vector AS distance,
             a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
             ar.id AS "artistId", ar.name AS "artistName",
             t."loudnessLufs", t."truePeakDb",
@@ -392,7 +438,7 @@ export async function findNearestToEmbedding(
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
           AND te.space_id = ${activeSpace.id}
-        ORDER BY te.embedding <=> ${embedding}::vector
+        ORDER BY te.embedding <=> ${vector}::vector
         LIMIT ${limit}
     `);
 }
@@ -404,6 +450,7 @@ export async function findTracksByTextEmbedding(
     candidateLimit: number,
     spaceId?: string,
 ): Promise<TextSearchResult[]> {
+    const vector = toVectorLiteral(searchEmbedding);
     const resolvedSpaceId = spaceId ?? (await getActiveSpace()).id;
     const boundedCandidateLimit =
         boundedTextSearchCandidateLimit(candidateLimit);
@@ -415,7 +462,7 @@ export async function findTracksByTextEmbedding(
             t.title,
             t.duration,
             t."trackNo",
-            te.embedding <=> ${searchEmbedding}::vector AS distance,
+            te.embedding <=> ${vector}::vector AS distance,
             a.id as "albumId",
             a.title as "albumTitle",
             a."coverUrl" as "albumCoverUrl",
@@ -439,8 +486,8 @@ export async function findTracksByTextEmbedding(
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
           AND te.space_id = ${resolvedSpaceId}
-          AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
-        ORDER BY te.embedding <=> ${searchEmbedding}::vector
+          AND te.embedding <=> ${vector}::vector <= ${maxDistance}
+        ORDER BY te.embedding <=> ${vector}::vector
         LIMIT ${boundedCandidateLimit}
     `;
     return runAnnQuery<TextSearchResult[]>(query, undefined, {

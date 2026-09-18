@@ -29,11 +29,14 @@ import { NowPlayingCard } from "./NowPlayingCard";
 export function NowPlayingConnected({
     track,
     onMapPresent,
+    approximate = false,
     moodColor,
     onFlyTo,
 }: {
     track: Track | null;
     onMapPresent: boolean;
+    /** The track is outside the sample and placed next to its neighbours. */
+    approximate?: boolean;
     moodColor: string | null;
     onFlyTo: () => void;
 }) {
@@ -52,6 +55,7 @@ export function NowPlayingConnected({
             track={track}
             isPlaying={isPlaying}
             onMapPresent={onMapPresent}
+            approximate={approximate}
             moodColor={moodColor}
             onFlyTo={onFlyTo}
             onTogglePlay={onTogglePlay}
