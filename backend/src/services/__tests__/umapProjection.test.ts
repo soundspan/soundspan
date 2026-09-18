@@ -75,6 +75,9 @@ const mockLoggerError = jest.fn<(...args: unknown[]) => void>();
 const mockGetActiveSpace = jest.fn<() => Promise<{ id: string }>>();
 const mockRecordVibeMapBuild = jest.fn();
 const mockRecordVibeMapRebuildRequest = jest.fn();
+const mockRecordVibeMapRefreshCheck = jest.fn();
+const mockCountEmbeddedBrowsableTracksInSpace =
+    jest.fn<(spaceId: string) => Promise<number>>();
 
 let pipeline: MockPipeline;
 let workerBehavior: ((worker: MockWorker, index: number) => void) | null = null;
@@ -149,16 +152,23 @@ jest.mock("../../utils/logger", () => ({
 jest.mock("../embeddingSpaces", () => ({
     getActiveSpace: () => mockGetActiveSpace(),
 }));
+jest.mock("../trackEmbeddings", () => ({
+    countEmbeddedBrowsableTracksInSpace: (spaceId: string) =>
+        mockCountEmbeddedBrowsableTracksInSpace(spaceId),
+}));
 jest.mock("../../metrics", () => ({
     recordVibeMapBuild: (...args: unknown[]) => mockRecordVibeMapBuild(...args),
     recordVibeMapRebuildRequest: (...args: unknown[]) =>
         mockRecordVibeMapRebuildRequest(...args),
+    recordVibeMapRefreshCheck: (...args: unknown[]) =>
+        mockRecordVibeMapRefreshCheck(...args),
 }));
 jest.mock("worker_threads", () => ({ Worker: MockWorker }));
 
 const SPACE_ID = "space-active";
 const PROJECTION_KEY = `vibe:map:v5:projection:${SPACE_ID}`;
 const TRACK_IDS_KEY = `vibe:map:v5:track_ids:${SPACE_ID}`;
+const REFRESH_CHECK_KEY = `vibe:map:v5:refresh-check:${SPACE_ID}`;
 const LEASE_KEY = `vibe-map:build-lease:${SPACE_ID}`;
 const FAILURE_KEY = `vibe-map:build-failed:${SPACE_ID}`;
 const FAILURE_COUNT_KEY = `vibe-map:build-failure-count:${SPACE_ID}`;
@@ -210,18 +220,22 @@ async function flushMicrotasks(turns = 10): Promise<void> {
 function createDeferred<T>(): {
     promise: Promise<T>;
     resolve: (value: T) => void;
+    reject: (reason: unknown) => void;
 } {
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>((promiseResolve) => {
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((promiseResolve, promiseReject) => {
         resolve = promiseResolve;
+        reject = promiseReject;
     });
-    return { promise, resolve };
+    return { promise, resolve, reject };
 }
 
 function cachedPayload(): {
     tracks: unknown[];
     trackCount: number;
     sampled?: boolean;
+    embeddedCount: number;
 } {
     const call = pipeline.setEx.mock.calls.find(
         (entry) => entry[0] === PROJECTION_KEY,
@@ -231,6 +245,7 @@ function cachedPayload(): {
         tracks: unknown[];
         trackCount: number;
         sampled?: boolean;
+        embeddedCount: number;
     };
 }
 
@@ -266,12 +281,14 @@ describe("computeMapProjection", () => {
         );
         mockPathJoin.mockImplementation((...parts) => parts.join("/"));
         mockGetActiveSpace.mockResolvedValue({ id: SPACE_ID });
+        mockCountEmbeddedBrowsableTracksInSpace.mockResolvedValue(100);
     });
 
     it("returns a cached projection without acquiring a build lease", async () => {
         const cached = {
             tracks: [],
             trackCount: 0,
+            embeddedCount: 100,
             computedAt: "2026-08-19T12:00:00.000Z",
         };
         mockRedisGet.mockImplementation(async (key) =>
@@ -282,7 +299,16 @@ describe("computeMapProjection", () => {
             status: "ready",
             data: cached,
         });
-        expect(mockRedisSet).not.toHaveBeenCalled();
+        await flushMicrotasks();
+        expect(mockRedisSet).toHaveBeenCalledWith(REFRESH_CHECK_KEY, "1", {
+            NX: true,
+            EX: 300,
+        });
+        expect(mockRedisSet).not.toHaveBeenCalledWith(
+            LEASE_KEY,
+            expect.any(String),
+            expect.anything(),
+        );
         expect(workers).toHaveLength(0);
     });
 
@@ -290,6 +316,7 @@ describe("computeMapProjection", () => {
         const cached = {
             tracks: [],
             trackCount: 0,
+            embeddedCount: 100,
             computedAt: "2026-08-19T12:00:00.000Z",
         };
         let published = false;
@@ -386,6 +413,7 @@ describe("computeMapProjection", () => {
         await flushMicrotasks();
 
         expect(cachedPayload().trackCount).toBe(5);
+        expect(cachedPayload().embeddedCount).toBe(100);
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "Ignoring malformed vibe map projection cache",
             { spaceId: SPACE_ID },
@@ -553,6 +581,8 @@ describe("computeMapProjection", () => {
             expect.any(String),
         );
         expect(cachedPayload().trackCount).toBe(0);
+        expect(cachedPayload().embeddedCount).toBe(0);
+        expect(mockCountEmbeddedBrowsableTracksInSpace).not.toHaveBeenCalled();
     });
 
     it("uses a circular layout for an undersized worker result", async () => {
@@ -575,7 +605,7 @@ describe("computeMapProjection", () => {
         await flushMicrotasks();
 
         expect(cachedPayload()).toEqual(
-            expect.objectContaining({ trackCount: 4 }),
+            expect.objectContaining({ trackCount: 4, embeddedCount: 100 }),
         );
         expect(cachedPayload().tracks[0]).toEqual(
             expect.objectContaining({
@@ -843,6 +873,281 @@ describe("computeMapProjection", () => {
     });
 });
 
+describe("background refresh", () => {
+    beforeEach(() => {
+        jest.resetModules();
+        jest.clearAllMocks();
+        jest.useRealTimers();
+        workers = [];
+        workerOptions = [];
+        workerBehavior = null;
+        pipeline = {
+            setEx: jest.fn(() => pipeline),
+            del: jest.fn(() => pipeline),
+            sAdd: jest.fn(() => pipeline),
+            expire: jest.fn(() => pipeline),
+            exec: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+        };
+        mockRedisGet.mockResolvedValue(null);
+        mockRedisSet.mockResolvedValue("OK");
+        mockRedisSetEx.mockResolvedValue("OK");
+        mockRedisEval.mockResolvedValue(1);
+        mockRedisIncr.mockResolvedValue(1);
+        mockRedisExpire.mockResolvedValue(true);
+        mockRedisDel.mockResolvedValue(1);
+        mockRedisMulti.mockReturnValue(pipeline);
+        mockExistsSync.mockImplementation((candidate) =>
+            candidate.endsWith("umapWorker.ts"),
+        );
+        mockPathJoin.mockImplementation((...parts) => parts.join("/"));
+        mockGetActiveSpace.mockResolvedValue({ id: SPACE_ID });
+        mockCountEmbeddedBrowsableTracksInSpace.mockResolvedValue(100);
+    });
+
+    function publishCachedProjection(cached: object): void {
+        mockRedisGet.mockImplementation(async (key) =>
+            key === PROJECTION_KEY ? JSON.stringify(cached) : null,
+        );
+    }
+
+    function cachedProjection(embeddedCount: number): object {
+        return {
+            tracks: [],
+            trackCount: 0,
+            embeddedCount,
+            computedAt: "2026-08-19T12:00:00.000Z",
+        };
+    }
+
+    it("serves stale data while starting a drift refresh", async () => {
+        const cached = cachedProjection(100);
+        publishCachedProjection(cached);
+        mockCountEmbeddedBrowsableTracksInSpace.mockResolvedValue(160);
+        const rows = makeRows(5);
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
+            status: "ready",
+            data: cached,
+        });
+        await flushMicrotasks();
+
+        expect(workers).toHaveLength(1);
+        expect(pipeline.del).not.toHaveBeenCalledWith(PROJECTION_KEY);
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith("started");
+        expect(mockLoggerInfo).toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            {
+                spaceId: SPACE_ID,
+                decision: "count_drift",
+                cachedEmbeddedCount: 100,
+                currentEmbeddedCount: 160,
+                outcome: "started",
+            },
+        );
+        expect(mockLoggerDebug).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "started" }),
+        );
+    });
+
+    it("keeps a projection fresh when drift is below threshold", async () => {
+        publishCachedProjection(cachedProjection(100));
+        mockCountEmbeddedBrowsableTracksInSpace.mockResolvedValue(149);
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual(
+            expect.objectContaining({ status: "ready" }),
+        );
+        await flushMicrotasks();
+
+        expect(workers).toHaveLength(0);
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith("fresh");
+        expect(mockLoggerInfo).toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "fresh" }),
+        );
+        expect(mockLoggerDebug).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "fresh" }),
+        );
+    });
+
+    it("does not query or build when the refresh check is throttled", async () => {
+        publishCachedProjection(cachedProjection(100));
+        mockRedisSet.mockImplementation(async (key) =>
+            key === REFRESH_CHECK_KEY ? null : "OK",
+        );
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual(
+            expect.objectContaining({ status: "ready" }),
+        );
+        await flushMicrotasks();
+
+        expect(mockCountEmbeddedBrowsableTracksInSpace).not.toHaveBeenCalled();
+        expect(workers).toHaveLength(0);
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith("throttled");
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "throttled" }),
+        );
+        expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "throttled" }),
+        );
+    });
+
+    it("skips the throttle write while a local build is active", async () => {
+        const module = loadModule();
+        await expect(module.computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        mockRedisSet.mockClear();
+        publishCachedProjection(cachedProjection(100));
+
+        await expect(module.computeMapProjection()).resolves.toEqual(
+            expect.objectContaining({ status: "ready" }),
+        );
+        await flushMicrotasks();
+
+        expect(mockRedisSet).not.toHaveBeenCalled();
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith(
+            "skipped_building",
+        );
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "skipped_building" }),
+        );
+        expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "skipped_building" }),
+        );
+        const rows = makeRows(5);
+        emitResult(
+            workers[0],
+            rows,
+            rows.map((_, index) => [index, index]),
+        );
+        await flushMicrotasks();
+    });
+
+    it("logs a held refresh lease at info", async () => {
+        publishCachedProjection(cachedProjection(100));
+        mockCountEmbeddedBrowsableTracksInSpace.mockResolvedValue(160);
+        mockRedisSet.mockResolvedValueOnce("OK").mockResolvedValueOnce(null);
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual(
+            expect.objectContaining({ status: "ready" }),
+        );
+        await flushMicrotasks();
+
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith(
+            "lease_held",
+        );
+        expect(mockLoggerInfo).toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "lease_held" }),
+        );
+        expect(mockLoggerDebug).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "lease_held" }),
+        );
+    });
+
+    it("refreshes a legacy cached payload with an unknown count", async () => {
+        const cached = {
+            tracks: [],
+            trackCount: 0,
+            computedAt: "2026-08-19T12:00:00.000Z",
+        };
+        publishCachedProjection(cached);
+        const rows = makeRows(5);
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
+            status: "ready",
+            data: cached,
+        });
+        await flushMicrotasks();
+
+        expect(workers).toHaveLength(1);
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith("started");
+        expect(mockLoggerInfo).toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ decision: "count_unknown" }),
+        );
+    });
+
+    it("owns a rejected count query through shutdown", async () => {
+        publishCachedProjection(cachedProjection(100));
+        const count = createDeferred<number>();
+        mockCountEmbeddedBrowsableTracksInSpace.mockReturnValue(count.promise);
+        const module = loadModule();
+
+        await expect(module.computeMapProjection()).resolves.toEqual(
+            expect.objectContaining({ status: "ready" }),
+        );
+        await flushMicrotasks(2);
+        let shutdownSettled = false;
+        const shutdown = module.shutdownUmapProjection().then(() => {
+            shutdownSettled = true;
+        });
+        await flushMicrotasks(2);
+        expect(shutdownSettled).toBe(false);
+
+        const countError = new Error("count failed");
+        count.reject(countError);
+        await shutdown;
+
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Vibe map refresh check failed",
+            countError,
+        );
+        expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
+        expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "failed" }),
+        );
+        expect(mockLoggerDebug).not.toHaveBeenCalledWith(
+            "Vibe map background refresh",
+            expect.objectContaining({ outcome: "failed" }),
+        );
+        expect(mockRecordVibeMapRefreshCheck).toHaveBeenCalledWith("failed");
+        expect(workers).toHaveLength(0);
+    });
+
+    it("does not start a build when shutdown begins during a count", async () => {
+        publishCachedProjection(cachedProjection(100));
+        const count = createDeferred<number>();
+        mockCountEmbeddedBrowsableTracksInSpace.mockReturnValue(count.promise);
+        const module = loadModule();
+
+        await expect(module.computeMapProjection()).resolves.toEqual(
+            expect.objectContaining({ status: "ready" }),
+        );
+        await flushMicrotasks(2);
+        const shutdown = module.shutdownUmapProjection();
+        count.resolve(200);
+        await shutdown;
+
+        expect(workers).toHaveLength(0);
+        expect(mockRedisSet).not.toHaveBeenCalledWith(
+            LEASE_KEY,
+            expect.any(String),
+            expect.anything(),
+        );
+    });
+});
+
 describe("rebuildMapProjection", () => {
     beforeEach(() => {
         jest.resetModules();
@@ -871,6 +1176,7 @@ describe("rebuildMapProjection", () => {
         );
         mockPathJoin.mockImplementation((...parts) => parts.join("/"));
         mockGetActiveSpace.mockResolvedValue({ id: SPACE_ID });
+        mockCountEmbeddedBrowsableTracksInSpace.mockResolvedValue(100);
     });
 
     it("invalidates both cache keys, clears failures, and starts a build", async () => {

@@ -5,7 +5,9 @@ import { config } from "../config";
 import {
     recordVibeMapBuild,
     recordVibeMapRebuildRequest,
+    recordVibeMapRefreshCheck,
     type VibeMapRebuildOutcome,
+    type VibeMapRefreshCheckOutcome,
 } from "../metrics";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
@@ -16,6 +18,7 @@ import {
     type UmapWorkerMessage,
 } from "../workers/umapWorkerProtocol";
 import { getActiveSpace } from "./embeddingSpaces";
+import { countEmbeddedBrowsableTracksInSpace } from "./trackEmbeddings";
 import {
     acquireVibeMapBuildLease,
     clearVibeMapBuildFailures,
@@ -24,6 +27,10 @@ import {
     type VibeMapBuildFailure,
     type VibeMapBuildLease,
 } from "./vibeMapBuildState";
+import {
+    decideVibeMapRefresh,
+    type VibeMapRefreshDecision,
+} from "./vibeMapRefreshPolicy";
 
 export type { VibeMapRebuildOutcome } from "../metrics";
 
@@ -33,13 +40,16 @@ const MIN_OOM_SAMPLE = 2000;
 const MAX_UMAP_ATTEMPTS = 3;
 const CACHE_KEY_PREFIX = "vibe:map:v5:projection";
 const TRACK_IDS_KEY_PREFIX = "vibe:map:v5:track_ids";
+const REFRESH_CHECK_KEY_PREFIX = "vibe:map:v5:refresh-check";
 const CACHE_TTL_SECONDS = 86400;
 const EMPTY_CACHE_TTL_SECONDS = 300;
+const REFRESH_CHECK_TTL_SECONDS = 300;
 const UMAP_TIMEOUT_MS = 15 * 60 * 1000;
 const UMAP_WARN_MS = 5 * 60 * 1000;
 const UMAP_SHUTDOWN_TIMEOUT_MS = 3 * 1000;
 const activeBuilds = new Map<string, Promise<void>>();
 const activeAdmissions = new Set<Promise<VibeMapProjectionState>>();
+const activeRefreshChecks = new Set<Promise<void>>();
 const activeWorkers = new Set<Worker>();
 const heldLeases = new Set<VibeMapBuildLease>();
 let acceptingBuilds = true;
@@ -51,6 +61,10 @@ function cacheKeyForSpace(spaceId: string): string {
 
 function trackIdsKeyForSpace(spaceId: string): string {
     return `${TRACK_IDS_KEY_PREFIX}:${spaceId}`;
+}
+
+function refreshCheckKeyForSpace(spaceId: string): string {
+    return `${REFRESH_CHECK_KEY_PREFIX}:${spaceId}`;
 }
 
 /** Track returned to the vibe-map client. */
@@ -78,6 +92,7 @@ export interface VibeMapTrack {
 export interface VibeMapResponse {
     tracks: VibeMapTrack[];
     trackCount: number;
+    embeddedCount: number;
     sampled?: boolean;
     computedAt: string;
 }
@@ -438,6 +453,7 @@ async function projectWithOomDegradation(
 async function buildCircularLayout(
     spaceId: string,
     rows: UmapProjectionRow[],
+    embeddedCount: number,
 ): Promise<VibeMapResponse> {
     const tracks = rows.map((row, index) => {
         const angle = (2 * Math.PI * index) / rows.length;
@@ -450,6 +466,7 @@ async function buildCircularLayout(
     const result = {
         tracks,
         trackCount: tracks.length,
+        embeddedCount,
         computedAt: new Date().toISOString(),
     };
     await cacheResult(
@@ -496,19 +513,22 @@ async function computeProjectionResult(
         const empty = {
             tracks: [],
             trackCount: 0,
+            embeddedCount: 0,
             computedAt: new Date().toISOString(),
         };
         await cacheResult(spaceId, empty, [], EMPTY_CACHE_TTL_SECONDS);
         return empty;
     }
+    const embeddedCount = await countEmbeddedBrowsableTracksInSpace(spaceId);
     if (rows.length < MIN_TRACKS_FOR_UMAP) {
-        return buildCircularLayout(spaceId, rows);
+        return buildCircularLayout(spaceId, rows, embeddedCount);
     }
     if (!projection) throw new Error("UMAP worker omitted its projection");
     const tracks = normalizeProjection(rows, projection);
     const result: VibeMapResponse = {
         tracks,
         trackCount: tracks.length,
+        embeddedCount,
         ...(degraded || rows.length === MAX_UMAP_WORKER_ROWS
             ? { sampled: true }
             : {}),
@@ -628,6 +648,7 @@ async function settleShutdownWork(
     canReleaseLeases: () => boolean,
 ): Promise<void> {
     await Promise.allSettled(Array.from(activeAdmissions));
+    await Promise.allSettled(Array.from(activeRefreshChecks));
     const terminations = Array.from(activeWorkers, terminateWorker);
     await Promise.allSettled(terminations);
     const builds = Array.from(activeBuilds.values());
@@ -679,36 +700,168 @@ export function shutdownUmapProjection(): Promise<void> {
     return shutdownPromise;
 }
 
-async function admitMapProjection(): Promise<VibeMapProjectionState> {
-    if (!acceptingBuilds) return { status: "building" };
-    const activeSpace = await getActiveSpace();
-    const spaceId = activeSpace.id;
-    const published = await readPublishedState(spaceId);
-    if (published) return published;
-    if (!acceptingBuilds) return { status: "building" };
-    if (activeBuilds.size > 0) return { status: "building" };
+type BuildStartGuard = () => Promise<boolean>;
+
+async function startLeasedBuild(
+    spaceId: string,
+    canStart: BuildStartGuard = async () => true,
+): Promise<boolean> {
+    if (!acceptingBuilds || activeBuilds.size > 0) return false;
     const lease = await acquireVibeMapBuildLease(spaceId);
     if (!lease) {
         log.debug("Vibe map build lease held by another replica", { spaceId });
-        return { status: "building" };
+        return false;
     }
     heldLeases.add(lease);
     let buildStarted = false;
     try {
-        if (!acceptingBuilds) return { status: "building" };
-        const publishedWhileAcquiring = await readPublishedState(spaceId);
-        if (publishedWhileAcquiring || !acceptingBuilds) {
-            return publishedWhileAcquiring ?? { status: "building" };
-        }
+        if (!acceptingBuilds || !(await canStart())) return false;
         const build = superviseBuild(spaceId, lease).finally(() => {
             activeBuilds.delete(spaceId);
         });
         activeBuilds.set(spaceId, build);
         buildStarted = true;
-        return { status: "building" };
+        return true;
     } finally {
         if (!buildStarted) await releaseLease(lease);
     }
+}
+
+interface RefreshCheckDetails {
+    spaceId: string;
+    cachedEmbeddedCount: number | undefined;
+    currentEmbeddedCount: number | null;
+    decision: VibeMapRefreshDecision | null;
+}
+
+const REFRESH_OUTCOME_LOG_LEVELS = {
+    failed: null,
+    fresh: "info",
+    lease_held: "info",
+    skipped_building: "debug",
+    started: "info",
+    throttled: "debug",
+} as const satisfies Readonly<
+    Record<VibeMapRefreshCheckOutcome, "debug" | "info" | null>
+>;
+
+function refreshOutcomeLogLevel(
+    outcome: VibeMapRefreshCheckOutcome,
+): "debug" | "info" | null {
+    return REFRESH_OUTCOME_LOG_LEVELS[outcome];
+}
+
+function recordRefreshCheckOutcome(
+    details: RefreshCheckDetails,
+    outcome: VibeMapRefreshCheckOutcome,
+): void {
+    recordVibeMapRefreshCheck(outcome);
+    const level = refreshOutcomeLogLevel(outcome);
+    if (level)
+        log[level]("Vibe map background refresh", { ...details, outcome });
+}
+
+function pendingRefreshDetails(
+    spaceId: string,
+    cached: VibeMapResponse,
+): RefreshCheckDetails {
+    return {
+        spaceId,
+        cachedEmbeddedCount: cached.embeddedCount,
+        currentEmbeddedCount: null,
+        decision: null,
+    };
+}
+
+async function evaluateRefreshDrift(
+    spaceId: string,
+    cached: VibeMapResponse,
+): Promise<void> {
+    const currentEmbeddedCount =
+        await countEmbeddedBrowsableTracksInSpace(spaceId);
+    const decision = decideVibeMapRefresh({
+        cachedEmbeddedCount: cached.embeddedCount,
+        currentEmbeddedCount,
+    });
+    const details = {
+        ...pendingRefreshDetails(spaceId, cached),
+        currentEmbeddedCount,
+        decision,
+    };
+    if (decision === "fresh") {
+        recordRefreshCheckOutcome(details, "fresh");
+        return;
+    }
+    const started = await startLeasedBuild(spaceId);
+    recordRefreshCheckOutcome(details, started ? "started" : "lease_held");
+}
+
+async function runRefreshCheck(
+    spaceId: string,
+    cached: VibeMapResponse,
+): Promise<void> {
+    if (!acceptingBuilds) return;
+    const pending = pendingRefreshDetails(spaceId, cached);
+    if (activeBuilds.size > 0) {
+        recordRefreshCheckOutcome(pending, "skipped_building");
+        return;
+    }
+    const admitted = await redisClient.set(
+        refreshCheckKeyForSpace(spaceId),
+        "1",
+        {
+            NX: true,
+            EX: REFRESH_CHECK_TTL_SECONDS,
+        },
+    );
+    if (!admitted) {
+        recordRefreshCheckOutcome(pending, "throttled");
+        return;
+    }
+    await evaluateRefreshDrift(spaceId, cached);
+}
+
+function scheduleRefreshCheck(spaceId: string, cached: VibeMapResponse): void {
+    let owned!: Promise<void>;
+    owned = (async () => {
+        try {
+            await runRefreshCheck(spaceId, cached);
+        } catch (error) {
+            log.warn("Vibe map refresh check failed", error);
+            recordRefreshCheckOutcome(
+                pendingRefreshDetails(spaceId, cached),
+                "failed",
+            );
+        } finally {
+            activeRefreshChecks.delete(owned);
+        }
+    })();
+    activeRefreshChecks.add(owned);
+}
+
+async function admitMapProjection(): Promise<VibeMapProjectionState> {
+    if (!acceptingBuilds) return { status: "building" };
+    const activeSpace = await getActiveSpace();
+    const spaceId = activeSpace.id;
+    const published = await readPublishedState(spaceId);
+    if (published?.status === "ready") {
+        scheduleRefreshCheck(spaceId, published.data);
+        return published;
+    }
+    if (published) return published;
+    if (!acceptingBuilds) return { status: "building" };
+    if (activeBuilds.size > 0) return { status: "building" };
+    const acquisition: { published: VibeMapProjectionState | null } = {
+        published: null,
+    };
+    await startLeasedBuild(spaceId, async () => {
+        acquisition.published = await readPublishedState(spaceId);
+        return acquisition.published === null && acceptingBuilds;
+    });
+    if (acquisition.published?.status === "ready") {
+        scheduleRefreshCheck(spaceId, acquisition.published.data);
+    }
+    return acquisition.published ?? { status: "building" };
 }
 
 /** Serve cached data or supervise one leased background build per space. */

@@ -26,6 +26,8 @@ export interface MapMigrationInput {
 export interface MapStatusInput {
     computedAt: string;
     trackCount: number;
+    /** Songs the map was drawn from, when the server reported it. */
+    embeddedCount?: number | null;
     sampled: boolean;
     rebuildState: MapRebuildState;
     /** Small screens drop the song count so the chip stays one line. */
@@ -54,7 +56,7 @@ export interface MapStatusView {
 }
 
 const CACHE_NOTE =
-    "The map is rebuilt automatically about once a day. Songs analyzed since the last build appear after the next rebuild.";
+    "The map is rebuilt automatically about once a day, or sooner when many songs have been analyzed since the last build. Songs analyzed since then appear after the next rebuild.";
 const SAMPLE_NOTE =
     "Your library has more songs than the map can place at once, so it shows a random sample.";
 
@@ -80,12 +82,24 @@ function rebuildSummary(state: MapRebuildState): string | null {
     }
 }
 
+/** "5,617 songs", or "sample of 7,500 from 21,000 songs" when the server sampled. */
+function coverageSummary(input: MapStatusInput): string {
+    const source = input.embeddedCount;
+    const sampledFromKnownTotal =
+        input.sampled &&
+        typeof source === "number" &&
+        Number.isInteger(source) &&
+        source > input.trackCount;
+    if (!sampledFromKnownTotal) return formatSongCount(input.trackCount);
+    return `sample of ${input.trackCount.toLocaleString()} from ${formatSongCount(source)}`;
+}
+
 function builtSummary(input: MapStatusInput): string {
     const age = formatRelativeTime(input.computedAt, {
         justNowLabel: "just now",
     });
     if (input.compact) return `Built ${age}`;
-    return `Built ${age} · ${formatSongCount(input.trackCount)}`;
+    return `Built ${age} · ${coverageSummary(input)}`;
 }
 
 function isCount(value: number): boolean {

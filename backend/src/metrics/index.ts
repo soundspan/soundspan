@@ -56,6 +56,7 @@ import {
     createVibeMapMetrics,
     type VibeMapBuildOutcome,
     type VibeMapRebuildOutcome,
+    type VibeMapRefreshCheckOutcome,
 } from "./vibeMapMetrics";
 import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
 import { prisma } from "../utils/db";
@@ -94,6 +95,7 @@ export type {
 export type {
     VibeMapBuildOutcome,
     VibeMapRebuildOutcome,
+    VibeMapRefreshCheckOutcome,
 } from "./vibeMapMetrics";
 
 /** Single process-local Prometheus registry. */
@@ -427,6 +429,13 @@ export function recordVibeMapRebuildRequest(
     outcome: VibeMapRebuildOutcome,
 ): void {
     vibeMapMetrics.recordRebuildRequest(outcome);
+}
+
+/** Records one bounded background vibe map refresh-check outcome. */
+export function recordVibeMapRefreshCheck(
+    outcome: VibeMapRefreshCheckOutcome,
+): void {
+    vibeMapMetrics.recordRefreshCheck(outcome);
 }
 
 /** Records one completed federation page carrying peer embeddings. */

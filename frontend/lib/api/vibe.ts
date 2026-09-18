@@ -111,6 +111,8 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
                           valence: number | null;
                       }>;
                       trackCount: number;
+                      /** Browsable embedded tracks at build time; absent on older cached maps. */
+                      embeddedCount?: number;
                       computedAt: string;
                       sampled?: boolean;
                       building?: undefined;

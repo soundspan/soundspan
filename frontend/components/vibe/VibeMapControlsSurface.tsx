@@ -100,12 +100,19 @@ function useMapMigration(): MapMigrationInput | null {
 /** Freshness chip; absent until the first projection has loaded. */
 function MapStatusSurface({ model }: { model: VibeMapViewModel }) {
     const migration = useMapMigration();
-    const { computedAt, trackCount, sampled, rebuildState, rebuild } =
-        model.data;
+    const {
+        computedAt,
+        trackCount,
+        embeddedCount,
+        sampled,
+        rebuildState,
+        rebuild,
+    } = model.data;
     if (!computedAt) return null;
     const status = describeMapStatus({
         computedAt,
         trackCount,
+        embeddedCount,
         sampled,
         rebuildState,
         compact: model.shell.smallScreen,

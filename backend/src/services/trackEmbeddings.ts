@@ -449,19 +449,26 @@ export async function findTracksByTextEmbedding(
     });
 }
 
-/** Counts embeddings for tracks visible on browsable library surfaces. */
-export async function countEmbeddedBrowsableTracks(): Promise<number> {
-    const activeSpace = await getActiveSpace();
+/** Counts browsable embedded tracks in one embedding space. */
+export async function countEmbeddedBrowsableTracksInSpace(
+    spaceId: string,
+): Promise<number> {
     const embeddedTracks = await prisma.$queryRaw<{ count: bigint }[]>`
         SELECT COUNT(*) as count
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
-          AND te.space_id = ${activeSpace.id}
+          AND te.space_id = ${spaceId}
     `;
 
     return Number(embeddedTracks[0]?.count || 0);
+}
+
+/** Counts embeddings for tracks visible on browsable library surfaces. */
+export async function countEmbeddedBrowsableTracks(): Promise<number> {
+    const activeSpace = await getActiveSpace();
+    return countEmbeddedBrowsableTracksInSpace(activeSpace.id);
 }
 
 /** Counts embeddings for local tracks included in analysis status. */

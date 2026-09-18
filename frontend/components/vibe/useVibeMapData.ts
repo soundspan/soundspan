@@ -24,6 +24,8 @@ import type { MapTrack } from "./types";
 export interface VibeMapData {
     tracks: MapTrack[];
     trackCount: number;
+    /** Songs the map was drawn from; null when the server did not say. */
+    embeddedCount: number | null;
     /** ISO timestamp of the build behind `tracks`; null until first load. */
     computedAt: string | null;
     /** True when the server projected a random subset of the library. */
@@ -50,6 +52,7 @@ type MapLoadState = Omit<VibeMapData, "rebuild" | "quantiles">;
 const INITIAL_STATE: MapLoadState = {
     tracks: [],
     trackCount: 0,
+    embeddedCount: null,
     computedAt: null,
     sampled: false,
     loading: true,
@@ -64,6 +67,7 @@ function readyPatch(payload: VibeMapPayload): Partial<MapLoadState> {
     return {
         tracks: payload.tracks,
         trackCount: payload.trackCount,
+        embeddedCount: payload.embeddedCount ?? null,
         computedAt: payload.computedAt,
         sampled: payload.sampled === true,
         loading: false,
