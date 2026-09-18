@@ -5,6 +5,8 @@
 import { AlchemyTray } from "./AlchemyTray";
 import { FiltersPanel } from "./FiltersPanel";
 import { JourneyPanel } from "./JourneyPanel";
+import { MapStatusChip } from "./MapStatusChip";
+import { describeMapStatus } from "./mapStatus";
 import { NowPlayingConnected } from "./NowPlayingConnected";
 import { QueuePanel } from "./QueuePanel";
 import { SpotlightSearch } from "./SpotlightSearch";
@@ -84,6 +86,28 @@ function MapViewControls({ model }: { model: VibeMapViewModel }) {
     );
 }
 
+/** Freshness chip; absent until the first projection has loaded. */
+function MapStatusSurface({ model }: { model: VibeMapViewModel }) {
+    const { computedAt, trackCount, sampled, rebuildState, rebuild } =
+        model.data;
+    if (!computedAt) return null;
+    const status = describeMapStatus({
+        computedAt,
+        trackCount,
+        sampled,
+        rebuildState,
+        compact: model.shell.smallScreen,
+    });
+    return (
+        <MapStatusChip
+            status={status}
+            canRebuild={model.props.canRebuildMap === true}
+            onRebuild={rebuild}
+            compact={model.shell.smallScreen}
+        />
+    );
+}
+
 function FloatingControls({ model }: { model: VibeMapViewModel }) {
     return (
         <div className="pointer-events-none absolute inset-0 z-30">
@@ -110,6 +134,7 @@ function FloatingControls({ model }: { model: VibeMapViewModel }) {
                 reducedMotion={model.shell.reducedMotion}
                 compact={model.shell.smallScreen}
             />
+            <MapStatusSurface model={model} />
         </div>
     );
 }

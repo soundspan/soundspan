@@ -83,6 +83,10 @@ Node process defaults (memory, CPU, event loop, GC) are exported under the
 | `soundspan_vibe_provider_queue_capacity`        | Gauge     | —                     | Configured admission capacity for the vibe provider queue.       |
 | `soundspan_vibe_provider_status_fresh`          | Gauge     | —                     | Whether Redis holds at least one unexpired vibe worker heartbeat. |
 | `soundspan_vibe_migration_active`               | Gauge     | —                     | Whether this worker is targeting a migrating vibe space.         |
+| `soundspan_vibe_map_builds_total`               | Counter   | `outcome`             | Vibe map projection builds by final outcome (`completed`, `failed`). |
+| `soundspan_vibe_map_build_seconds`              | Histogram | —                     | Vibe map projection build duration, including out-of-memory retries. |
+| `soundspan_vibe_map_sampled`                    | Gauge     | —                     | Whether the most recent completed vibe map build projected a sample rather than every embedded track. |
+| `soundspan_vibe_map_rebuild_requests_total`     | Counter   | `outcome`             | Admin vibe map rebuild requests by outcome (`started`, `already_building`). |
 | `soundspan_metrics_collection_errors_total`     | Counter   | `collector`           | Prometheus collection errors by bounded collector name.          |
 
 ### Federation

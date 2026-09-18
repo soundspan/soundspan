@@ -14,6 +14,8 @@ export interface VibeMapProps {
     headerSlot?: ReactNode;
     /** Extra bottom clearance for a fixed host surface. */
     bottomInset?: number;
+    /** Show the admin-only rebuild control on the map status chip. */
+    canRebuildMap?: boolean;
 }
 
 /** Render the interactive library embedding navigator. */

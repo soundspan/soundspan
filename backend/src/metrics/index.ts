@@ -52,6 +52,11 @@ import {
     type VibeSpaceTransition,
     type VibeVocabularySpaceMismatchReason,
 } from "./vibeEmbedMetrics";
+import {
+    createVibeMapMetrics,
+    type VibeMapBuildOutcome,
+    type VibeMapRebuildOutcome,
+} from "./vibeMapMetrics";
 import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
 import { prisma } from "../utils/db";
 import {
@@ -86,6 +91,10 @@ export type {
     FederationPlaylistFetchOutcome,
     FederationPlaylistFollowOutcome,
 } from "./federationMetrics";
+export type {
+    VibeMapBuildOutcome,
+    VibeMapRebuildOutcome,
+} from "./vibeMapMetrics";
 
 /** Single process-local Prometheus registry. */
 export const metricsRegistry = new Registry();
@@ -134,6 +143,7 @@ const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
         return (await readVibeWorkerStatus(redisClient)) !== null;
     },
 });
+const vibeMapMetrics = createVibeMapMetrics(metricsRegistry);
 let federationMetrics: FederationMetrics | null = null;
 
 /** Registers federation instruments once for the process role that owns them. */
@@ -401,6 +411,22 @@ export function setVibeProviderQueueCapacity(capacity: number): void {
 /** Marks whether the worker currently owns a migrating target space. */
 export function setVibeMigrationActive(active: boolean): void {
     vibeEmbedMetrics.setMigrationActive(active);
+}
+
+/** Records one final vibe map build outcome, duration, and sample state. */
+export function recordVibeMapBuild(
+    outcome: VibeMapBuildOutcome,
+    seconds: number,
+    sampled: boolean,
+): void {
+    vibeMapMetrics.recordBuild(outcome, seconds, sampled);
+}
+
+/** Records one administrator-requested vibe map rebuild outcome. */
+export function recordVibeMapRebuildRequest(
+    outcome: VibeMapRebuildOutcome,
+): void {
+    vibeMapMetrics.recordRebuildRequest(outcome);
 }
 
 /** Records one completed federation page carrying peer embeddings. */

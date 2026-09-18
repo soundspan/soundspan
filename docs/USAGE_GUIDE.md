@@ -20,7 +20,7 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 - Search understands artist and album names, tolerates typos, and ranks near-misses by similarity instead of alphabetically
 - Discovery search supports preview/download/subscription actions
 - Explore and `/radio` station tiles (Quick Start, genres, decades) open a generated station playlist you can inspect before playing; Shuffle All still starts playback immediately
-- The Vibe Map in the main navigation plots your analyzed library as an explorable similarity map
+- The Vibe Map in the main navigation plots your analyzed library as an explorable similarity map. Laying out the map is slow, so it is built once and kept for about a day; the chip in the bottom-right corner says when it was built and how many songs it covers. Songs analyzed after that build appear on the next one. Very large libraries show a random sample of songs (the chip says `Sample`), and raising `VIBE_MAP_WORKER_MEMORY_MB` lets the map hold more of them.
 - Artists and albums you browse are remembered locally. Repeat visits load instantly, and the pages keep working during MusicBrainz outages. Entries untouched for 180 days are cleaned up automatically.
 
 ### Sharing a song
@@ -104,6 +104,7 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 - Integration and storage settings
 - Download source/fallback settings
 - Enrichment controls
+- `Rebuild` on the Vibe Map's status chip, which throws away the cached map and builds a fresh one right away instead of waiting for the daily rebuild; the current map stays on screen until the new one is ready
 - Activity panel events and active jobs
 - Library Insights panels: metadata gaps, analysis coverage, duplicate clusters, storage breakdown, and low-bitrate albums
 - Federation health panel with per-peer sync, stream, and error diagnostics

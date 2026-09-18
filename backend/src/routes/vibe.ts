@@ -7,10 +7,13 @@ import {
 } from "../utils/librarySorting";
 import { redisClient } from "../utils/redis";
 import { blendEmbeddings, lerpEmbedding } from "../utils/embedding";
-import { requireAuth } from "../middleware/auth";
+import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { findSimilarTracks } from "../services/hybridSimilarity";
-import { computeMapProjection } from "../services/umapProjection";
+import {
+    computeMapProjection,
+    rebuildMapProjection,
+} from "../services/umapProjection";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -170,6 +173,52 @@ router.get(
         } catch (error: any) {
             logger.error("Vibe map error:", error);
             sendInternalRouteError(res, "Failed to compute map projection");
+        }
+    }),
+);
+
+/**
+ * @openapi
+ * /api/vibe/map/rebuild:
+ *   post:
+ *     summary: Rebuild the vibe map projection
+ *     description: Invalidates the active embedding space's projection and track-ID caches, which otherwise remain cached for 24 hours, clears any build failure cooldown, and starts a fresh leased background build.
+ *     tags: [Vibe]
+ *     security:
+ *       - apiKeyAuth: []
+ *     responses:
+ *       202:
+ *         description: A fresh map build is in progress locally or on another replica
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [building, outcome]
+ *               properties:
+ *                 building:
+ *                   type: boolean
+ *                   enum: [true]
+ *                 outcome:
+ *                   type: string
+ *                   enum: [started, already_building]
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to rebuild the map projection
+ */
+router.post(
+    "/map/rebuild",
+    requireAuth,
+    requireAdmin,
+    asyncHandler(async (_req, res) => {
+        try {
+            const { outcome } = await rebuildMapProjection();
+            res.status(202).json({ building: true, outcome });
+        } catch (error: unknown) {
+            logger.error("Vibe map rebuild error:", error);
+            sendInternalRouteError(res, "Failed to rebuild map projection");
         }
     }),
 );
