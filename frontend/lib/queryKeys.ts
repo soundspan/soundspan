@@ -175,6 +175,10 @@ export const queryKeys = {
     podcastDiscoveryGenres: () => ["podcasts", "discovery", "genres"] as const,
     podcastPeers: () => ["podcasts", "peers"] as const,
 
+    // Vibe map
+    vibeMap: () => ["vibe", "map"] as const,
+    vibeCalibration: () => ["vibe", "calibration"] as const,
+
     // Player overlay related-content
     playerRelatedTracks: (trackId: string | undefined) =>
         ["player-related-tracks", trackId] as const,

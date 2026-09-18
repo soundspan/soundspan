@@ -937,7 +937,7 @@
         {
             "id": "vibe-map",
             "name": "Vibe Map Navigator",
-            "description": "Full-bleed interactive map of the library's CLAP-embedding space (frontend/components/vibe: thin VibeMap.tsx container backed by useVibeMapController, focused data/camera/shell hooks, pure vibeMapModel decisions, and separate canvas/control/feedback views; the controller composes useMapLayout/useMapCamera/useMapGestures/useMapSweep/useAuxSurface/useTrailDisplay plus the useVibeMode travel/journey/alchemy orchestrator over the pure vibeModeMachine reducer) with mood filter chips, energy/valence range sliders, a spotlight text search, and four interaction modes - Travel (click-to-explore neighbors with a mood compass), Journey (route to a destination track or mood, POST /api/vibe/journey), Drift (one-click mood-slide preset), and Alchemy (blend 2-10 tracks, POST /api/vibe/alchemy) - plus sweep-to-queue, save-as-playlist, calibrated match percentages (GET /api/vibe/calibration), a flight-plan queue preview, and a bottom-right status chip (MapStatusChip over the pure mapStatus copy and the bounded mapLoader poller) that shows the build age, track count, and sampled flag from GET /api/vibe/map and offers admins an in-place rebuild (POST /api/vibe/map/rebuild, which drops the 24h Redis projection cache and starts a leased build); served at /vibe (frontend/app/vibe/page.tsx)",
+            "description": "Full-bleed interactive map of the library's CLAP-embedding space (frontend/components/vibe: thin VibeMap.tsx container backed by useVibeMapController, focused data/camera/shell hooks, pure vibeMapModel decisions, and separate canvas/control/feedback views; the controller composes useMapLayout/useMapCamera/useMapGestures/useMapSweep/useAuxSurface/useTrailDisplay plus the useVibeMode travel/journey/alchemy orchestrator over the pure vibeModeMachine reducer) with mood filter chips, energy/valence range sliders, a spotlight text search, and four interaction modes - Travel (click-to-explore neighbors with a mood compass), Journey (route to a destination track or mood, POST /api/vibe/journey), Drift (one-click mood-slide preset), and Alchemy (blend 2-10 tracks, POST /api/vibe/alchemy) - plus sweep-to-queue, save-as-playlist, calibrated match percentages (GET /api/vibe/calibration), a flight-plan queue preview, and a bottom-right status chip (MapStatusChip over the pure mapStatus copy; map server state lives in React Query via useVibeMapData over the pure mapQueryPolicy merge/poll decisions) that shows the build age, track count, and sampled flag from GET /api/vibe/map and offers admins an in-place rebuild (POST /api/vibe/map/rebuild, which drops the 24h Redis projection cache and starts a leased build); served at /vibe (frontend/app/vibe/page.tsx)",
             "frontend": {
                 "feature_dirs": [],
                 "routes": ["/vibe"]
@@ -964,7 +964,7 @@
                     "mapFilters.test.ts",
                     "mapHints.test.ts",
                     "mapLayout.test.ts",
-                    "mapLoader.test.ts",
+                    "mapQueryPolicy.test.ts",
                     "mapSearch.test.ts",
                     "mapStatus.test.ts",
                     "mapViewport.test.ts",
@@ -984,6 +984,7 @@
                     "spotlightSearch.component.test.ts",
                     "mapOverlay.component.test.ts",
                     "mapStatusChip.component.test.ts",
+                    "useVibeMapData.component.test.ts",
                     "vibeMap.component.test.ts",
                     "vibePanels.component.test.ts"
                 ]

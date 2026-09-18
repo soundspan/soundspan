@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Vibe Map keeps its last loaded map for a few minutes when you leave the page and come back, instead of fetching it again every time, and a background refresh of the map never replaces the dots on screen with a spinner.
 - The Library, Audiobooks, and Podcasts pages now share one visual language for their header controls: filter pills, sort/genre/pagination dropdowns, and item counts use the same shared components and styling, and the Podcasts controls moved out of the "My Podcasts" heading into a left-aligned control row matching the sibling pages (#868).
 - The consistency sweep now covers the rest of the app: the Playlists source toggle, Requests status filter, Explore provider tabs, Vibe view toggle, and playlist-import source toggle share one segmented-pill component; search result filters use the standard filter pills; section headings across Podcasts, Audiobooks, Search, and Radio share one heading component; and the Releases, Vibe, and podcast genre pages adopt the standard page header (#868).
 - Subsection headings on detail and utility pages (artist, album, audiobook, podcast, queue, history, device, releases, discover settings) now share the same heading component as page sections, at a smaller scale, and the artist Discography sort dropdown uses the standard select styling (#868).
