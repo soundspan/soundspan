@@ -18,6 +18,7 @@ const IDLE: MapStatusView = {
     detail: "The map is rebuilt automatically about once a day.",
     sampled: false,
     busy: false,
+    migration: null,
 };
 
 function render(props: Partial<React.ComponentProps<typeof MapStatusChip>>) {
@@ -76,4 +77,22 @@ test("a sampled map shows the sample badge", () => {
     const html = render({ status: { ...IDLE, sampled: true } });
     assert.match(html, />Sample</);
     assert.match(html, /Random sample of your library/);
+});
+
+test("an in-progress re-analysis shows its badge and explanation", () => {
+    const html = render({
+        status: {
+            ...IDLE,
+            migration: {
+                badge: "Re-analyzing · 21%",
+                detail: "A newer analysis is in progress: 5,617 of 26,716 songs done.",
+            },
+        },
+    });
+    assert.match(html, />Re-analyzing · 21%</);
+    assert.match(html, /title="A newer analysis is in progress/);
+});
+
+test("no migration means no re-analysis badge", () => {
+    assert.doesNotMatch(render({}), /Re-analyzing/);
 });

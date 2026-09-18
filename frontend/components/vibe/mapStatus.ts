@@ -14,6 +14,15 @@ export type MapRebuildState =
     | "failed"
     | "error";
 
+/** Progress of a newer embedding space that has not cut over yet. */
+export interface MapMigrationInput {
+    embedded: number;
+    pending: number;
+    failed: number;
+    /** Fraction of the library that must be done before cutover (0.5..1). */
+    cutoverThreshold: number;
+}
+
 export interface MapStatusInput {
     computedAt: string;
     trackCount: number;
@@ -21,6 +30,14 @@ export interface MapStatusInput {
     rebuildState: MapRebuildState;
     /** Small screens drop the song count so the chip stays one line. */
     compact: boolean;
+    /** Present while a newer analysis is still filling its space. */
+    migration?: MapMigrationInput | null;
+}
+
+/** Badge and tooltip for an in-progress re-analysis. */
+export interface MapMigrationNotice {
+    badge: string;
+    detail: string;
 }
 
 /** Rendered text for the chip. */
@@ -32,6 +49,8 @@ export interface MapStatusView {
     sampled: boolean;
     /** True while a rebuild is requested or running. */
     busy: boolean;
+    /** Set while the map is still reading the previous analysis. */
+    migration: MapMigrationNotice | null;
 }
 
 const CACHE_NOTE =
@@ -69,12 +88,46 @@ function builtSummary(input: MapStatusInput): string {
     return `Built ${age} · ${formatSongCount(input.trackCount)}`;
 }
 
+function isCount(value: number): boolean {
+    return Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Explain a re-analysis that the map cannot show yet. Returns null when
+ * there is no migration, its numbers are unusable, or nothing is counted.
+ */
+export function describeMigrationNotice(
+    migration: MapMigrationInput | null | undefined,
+): MapMigrationNotice | null {
+    if (!migration) return null;
+    const { embedded, pending, failed, cutoverThreshold } = migration;
+    if (![embedded, pending, failed].every(isCount)) return null;
+    if (!(cutoverThreshold > 0 && cutoverThreshold <= 1)) return null;
+    const total = embedded + pending + failed;
+    if (total === 0) return null;
+    const percent = Math.floor((embedded / total) * 100);
+    const cutoverPercent = Math.round(cutoverThreshold * 100);
+    return {
+        badge: `Re-analyzing · ${percent}%`,
+        detail:
+            `A newer analysis is in progress: ${formatSongCount(embedded)} of ${formatSongCount(total)} done. ` +
+            `The map switches to the new results automatically at ${cutoverPercent}%; until then, songs analyzed only in the new format are not on it.`,
+    };
+}
+
 /** Derive the chip's summary, tooltip, and busy flag from map state. */
 export function describeMapStatus(input: MapStatusInput): MapStatusView {
     const busy =
         input.rebuildState === "requesting" ||
         input.rebuildState === "building";
     const summary = rebuildSummary(input.rebuildState) ?? builtSummary(input);
-    const detail = input.sampled ? `${CACHE_NOTE} ${SAMPLE_NOTE}` : CACHE_NOTE;
-    return { summary, detail, sampled: input.sampled, busy };
+    const migration = describeMigrationNotice(input.migration);
+    const detail = [
+        CACHE_NOTE,
+        input.sampled ? SAMPLE_NOTE : null,
+        migration?.detail ?? null,
+    ]
+        .filter((note): note is string => note !== null)
+        .join(" ");
+    return { summary, detail, sampled: input.sampled, busy, migration };
 }

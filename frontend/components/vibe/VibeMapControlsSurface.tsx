@@ -5,8 +5,9 @@
 import { AlchemyTray } from "./AlchemyTray";
 import { FiltersPanel } from "./FiltersPanel";
 import { JourneyPanel } from "./JourneyPanel";
+import { useFeatures } from "@/lib/features-context";
 import { MapStatusChip } from "./MapStatusChip";
-import { describeMapStatus } from "./mapStatus";
+import { describeMapStatus, type MapMigrationInput } from "./mapStatus";
 import { NowPlayingConnected } from "./NowPlayingConnected";
 import { QueuePanel } from "./QueuePanel";
 import { SpotlightSearch } from "./SpotlightSearch";
@@ -86,8 +87,19 @@ function MapViewControls({ model }: { model: VibeMapViewModel }) {
     );
 }
 
+/** Migration progress from the features poll, or null when none is running. */
+function useMapMigration(): MapMigrationInput | null {
+    const migration = useFeatures().vibe.migration;
+    if (!migration?.coverage) return null;
+    return {
+        ...migration.coverage,
+        cutoverThreshold: migration.cutoverThreshold,
+    };
+}
+
 /** Freshness chip; absent until the first projection has loaded. */
 function MapStatusSurface({ model }: { model: VibeMapViewModel }) {
+    const migration = useMapMigration();
     const { computedAt, trackCount, sampled, rebuildState, rebuild } =
         model.data;
     if (!computedAt) return null;
@@ -97,6 +109,7 @@ function MapStatusSurface({ model }: { model: VibeMapViewModel }) {
         sampled,
         rebuildState,
         compact: model.shell.smallScreen,
+        migration,
     });
     return (
         <MapStatusChip

@@ -74,6 +74,15 @@ mock.module("@/lib/auth-context", {
     },
 });
 
+// The status chip reads migration progress from the features poll.
+mock.module("@/lib/features-context", {
+    namedExports: {
+        useFeatures: () => ({
+            vibe: { activeSpace: null, migration: null },
+        }),
+    },
+});
+
 mock.module("@/lib/audio-state-context", {
     namedExports: {
         useAudioState: () => ({
