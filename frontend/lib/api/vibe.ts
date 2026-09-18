@@ -219,12 +219,12 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
          * `sampleSize: 0` / `quantiles: []` on a library with fewer than 10
          * embedded tracks — callers fall back to the old linear mapping.
          */
-        async getVibeCalibration() {
+        async getVibeCalibration(options: { signal?: AbortSignal } = {}) {
             return this.request<{
                 sampleSize: number;
                 updatedAt?: string;
                 quantiles: number[];
-            }>("/vibe/calibration");
+            }>("/vibe/calibration", { signal: options.signal });
         }
     }
     return VibeApi;

@@ -1,21 +1,21 @@
 "use client";
 
-/** Bounded lifecycle hooks for VibeMap data and container measurement. */
+/**
+ * Server state for the VibeMap, owned by React Query, plus the container
+ * measurement hook. The query keeps the last ready projection while a
+ * build runs (see mapQueryPolicy), so a rebuild never blanks the map.
+ */
 
-import {
-    useCallback,
-    useEffect,
-    useRef,
-    useState,
-    type RefObject,
-} from "react";
+import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/queryKeys";
 import {
-    pollVibeMap,
-    type MapPollHandle,
-    type MapPollHandlers,
-    type VibeMapPayload,
-} from "./mapLoader";
+    isPollExhausted,
+    mergeMapAnswer,
+    nextPollDelayMs,
+    type VibeMapQueryData,
+} from "./mapQueryPolicy";
 import type { MapRebuildState } from "./mapStatus";
 import type { MapDims } from "./mapViewport";
 import type { MapTrack } from "./types";
@@ -39,137 +39,102 @@ export interface VibeMapData {
     quantiles: readonly number[] | null;
 }
 
-const BUILDING_POLL_MS = 5000;
-const BUILDING_POLL_LIMIT = 120;
 const STALLED_MESSAGE =
     "The map is still being built — try again in a few minutes";
 const FAILED_MESSAGE =
     "The last map build failed. It will retry automatically — check back in a few minutes.";
 const LOAD_ERROR_MESSAGE = "Failed to load vibe map data";
 
-type MapLoadState = Omit<VibeMapData, "rebuild" | "quantiles">;
+type LoadView = Pick<VibeMapData, "loading" | "building" | "error">;
 
-const INITIAL_STATE: MapLoadState = {
-    tracks: [],
-    trackCount: 0,
-    embeddedCount: null,
-    computedAt: null,
-    sampled: false,
-    loading: true,
-    building: false,
-    error: null,
-    rebuildState: "idle",
-};
-
-type Patch = (patch: Partial<MapLoadState>) => void;
-
-function readyPatch(payload: VibeMapPayload): Partial<MapLoadState> {
-    return {
-        tracks: payload.tracks,
-        trackCount: payload.trackCount,
-        embeddedCount: payload.embeddedCount ?? null,
-        computedAt: payload.computedAt,
-        sampled: payload.sampled === true,
-        loading: false,
-        building: false,
-        error: null,
-        rebuildState: "idle",
-    };
+/** First-load presentation: with no payload yet, the phase drives the overlay. */
+function describeLoad(
+    data: VibeMapQueryData | undefined,
+    requestFailed: boolean,
+): LoadView {
+    if (data?.payload) return { loading: false, building: false, error: null };
+    if (requestFailed) {
+        return { loading: false, building: false, error: LOAD_ERROR_MESSAGE };
+    }
+    if (data?.phase === "failed") {
+        return { loading: false, building: false, error: FAILED_MESSAGE };
+    }
+    if (data?.phase === "building") {
+        if (isPollExhausted(data)) {
+            return { loading: false, building: false, error: STALLED_MESSAGE };
+        }
+        return { loading: true, building: true, error: null };
+    }
+    return { loading: true, building: false, error: null };
 }
 
-/** First load: the map has nothing to show, so state drives the overlay. */
-function initialLoadHandlers(update: Patch): MapPollHandlers {
-    const settled = { loading: false, building: false };
-    return {
-        onReady: (payload) => update(readyPatch(payload)),
-        onBuilding: () => update({ loading: true, building: true }),
-        onFailed: () => update({ ...settled, error: FAILED_MESSAGE }),
-        onStalled: () => update({ ...settled, error: STALLED_MESSAGE }),
-        onError: () => update({ ...settled, error: LOAD_ERROR_MESSAGE }),
-    };
+/** Rebuild presentation: with a payload on screen, only the chip reports. */
+function describeRebuild(
+    data: VibeMapQueryData | undefined,
+    request: { isPending: boolean; isError: boolean },
+): MapRebuildState {
+    if (request.isPending) return "requesting";
+    if (request.isError) return "error";
+    if (!data?.payload) return "idle";
+    if (data.phase === "failed") return "failed";
+    if (data.phase === "building") {
+        return isPollExhausted(data) ? "stalled" : "building";
+    }
+    return "idle";
 }
 
-/** Rebuild: the stale map stays visible and only the chip reports progress. */
-function rebuildHandlers(update: Patch): MapPollHandlers {
-    return {
-        onReady: (payload) => update(readyPatch(payload)),
-        onBuilding: () => update({ rebuildState: "building" }),
-        onFailed: () => update({ rebuildState: "failed" }),
-        onStalled: () => update({ rebuildState: "stalled" }),
-        onError: () => update({ rebuildState: "error" }),
-    };
+function useMapQuery() {
+    const queryClient = useQueryClient();
+    return useQuery({
+        queryKey: queryKeys.vibeMap(),
+        queryFn: async ({ signal }) =>
+            mergeMapAnswer(
+                queryClient.getQueryData<VibeMapQueryData>(queryKeys.vibeMap()),
+                await api.getVibeMap({ signal }),
+            ),
+        retry: false,
+        refetchInterval: (query) => nextPollDelayMs(query.state.data),
+    });
 }
 
-function useMapTracks(): MapLoadState & { rebuild: () => void } {
-    const [state, setState] = useState<MapLoadState>(INITIAL_STATE);
-    const pollRef = useRef<MapPollHandle | null>(null);
-    const rebuildRequestRef = useRef<AbortController | null>(null);
-    const update = useCallback<Patch>((patch) => {
-        setState((previous) => ({ ...previous, ...patch }));
-    }, []);
-    const startPolling = useCallback((handlers: MapPollHandlers) => {
-        pollRef.current?.cancel();
-        pollRef.current = pollVibeMap(
-            (signal) => api.getVibeMap({ signal }),
-            handlers,
-            {
-                intervalMs: BUILDING_POLL_MS,
-                maxBuildingPolls: BUILDING_POLL_LIMIT,
-            },
-        );
-    }, []);
+function useRebuildRequest() {
+    const queryClient = useQueryClient();
+    const { mutate, isPending, isError } = useMutation({
+        mutationFn: () => api.rebuildVibeMap(),
+        onSuccess: () =>
+            queryClient.invalidateQueries({ queryKey: queryKeys.vibeMap() }),
+    });
+    const rebuild = useCallback(() => mutate(), [mutate]);
+    return { rebuild, isPending, isError };
+}
 
-    useEffect(() => {
-        startPolling(initialLoadHandlers(update));
-        return () => {
-            pollRef.current?.cancel();
-            pollRef.current = null;
-            rebuildRequestRef.current?.abort();
-            rebuildRequestRef.current = null;
-        };
-    }, [startPolling, update]);
-
-    // The request is owned by this hook: unmount aborts it and nothing
-    // that resolves afterwards may start a poller or touch state.
-    const rebuild = useCallback(() => {
-        rebuildRequestRef.current?.abort();
-        const controller = new AbortController();
-        rebuildRequestRef.current = controller;
-        update({ rebuildState: "requesting" });
-        void api.rebuildVibeMap({ signal: controller.signal }).then(
-            () => {
-                if (controller.signal.aborted) return;
-                startPolling(rebuildHandlers(update));
-            },
-            () => {
-                if (controller.signal.aborted) return;
-                update({ rebuildState: "error" });
-            },
-        );
-    }, [startPolling, update]);
-
-    return { ...state, rebuild };
+function useMapTracks(): Omit<VibeMapData, "quantiles"> {
+    const query = useMapQuery();
+    const request = useRebuildRequest();
+    const payload = query.data?.payload ?? null;
+    return {
+        tracks: payload?.tracks ?? [],
+        trackCount: payload?.trackCount ?? 0,
+        embeddedCount: payload?.embeddedCount ?? null,
+        computedAt: payload?.computedAt ?? null,
+        sampled: payload?.sampled === true,
+        ...describeLoad(query.data, query.isError),
+        rebuildState: describeRebuild(query.data, request),
+        rebuild: request.rebuild,
+    };
 }
 
 function useCalibration(): readonly number[] | null {
-    const [quantiles, setQuantiles] = useState<readonly number[] | null>(null);
-    useEffect(() => {
-        let cancelled = false;
-        void api
-            .getVibeCalibration()
-            .then((data) => {
-                if (!cancelled)
-                    setQuantiles(data.sampleSize > 0 ? data.quantiles : null);
-            })
-            .catch(() => undefined);
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-    return quantiles;
+    const { data } = useQuery({
+        queryKey: queryKeys.vibeCalibration(),
+        queryFn: ({ signal }) => api.getVibeCalibration({ signal }),
+        retry: false,
+    });
+    if (!data || data.sampleSize <= 0) return null;
+    return data.quantiles;
 }
 
-/** Load map tracks and best-effort calibration data once per mount. */
+/** Map tracks and best-effort calibration data from the query cache. */
 export function useVibeMapData(): VibeMapData {
     return { ...useMapTracks(), quantiles: useCalibration() };
 }
