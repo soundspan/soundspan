@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 /**
  * Static render smoke tests for VibeMap. renderToStaticMarkup does not run
@@ -138,9 +139,20 @@ beforeEach(() => {
     state.rejectMap = false;
 });
 
+/** Static render under a fresh QueryClient; the map query stays pending. */
+function renderStatic(element: React.ReactElement): string {
+    return renderToStaticMarkup(
+        React.createElement(
+            QueryClientProvider,
+            { client: new QueryClient() },
+            element,
+        ),
+    );
+}
+
 test("renders the floating spotlight, view controls and filters pill shell", async () => {
     const { VibeMap } = await import("../../components/vibe/VibeMap");
-    const html = renderToStaticMarkup(React.createElement(VibeMap));
+    const html = renderStatic(React.createElement(VibeMap));
 
     // Spotlight search pill (input still carries the accessible label).
     assert.match(html, /Spotlight a vibe/);
@@ -161,7 +173,7 @@ test("renders its shell without throwing when the map API rejects", async () => 
 
     let html = "";
     assert.doesNotThrow(() => {
-        html = renderToStaticMarkup(React.createElement(VibeMap));
+        html = renderStatic(React.createElement(VibeMap));
     });
     // The floating controls shell still renders even though the load will fail.
     assert.match(html, /Spotlight a vibe/);
@@ -171,7 +183,7 @@ test("renders its shell without throwing when the map API rejects", async () => 
 
 test("map tab renders full-bleed and clears the mobile player", async () => {
     const { VibeMapTab } = await import("../../components/vibe/VibeMapTab");
-    const html = renderToStaticMarkup(
+    const html = renderStatic(
         React.createElement(VibeMapTab, {
             currentTrackPresent: true,
             onExplore: () => undefined,
