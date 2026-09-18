@@ -2,7 +2,7 @@ import { Registry } from "prom-client";
 import { createVibeMapMetrics } from "../vibeMapMetrics";
 
 describe("vibe map metrics", () => {
-    it("registers the build and rebuild metric families", () => {
+    it("registers the build, rebuild, and refresh metric families", () => {
         const registry = new Registry();
 
         createVibeMapMetrics(registry);
@@ -20,6 +20,9 @@ describe("vibe map metrics", () => {
             registry.getSingleMetric(
                 "soundspan_vibe_map_rebuild_requests_total",
             ),
+        ).toBeDefined();
+        expect(
+            registry.getSingleMetric("soundspan_vibe_map_refresh_checks_total"),
         ).toBeDefined();
     });
 
@@ -74,6 +77,24 @@ describe("vibe map metrics", () => {
         );
         expect(exposition).toContain(
             'soundspan_vibe_map_rebuild_requests_total{outcome="already_building"} 1',
+        );
+    });
+
+    it.each([
+        "fresh",
+        "started",
+        "lease_held",
+        "throttled",
+        "skipped_building",
+        "failed",
+    ] as const)("records the bounded refresh outcome %s", async (outcome) => {
+        const registry = new Registry();
+        const metrics = createVibeMapMetrics(registry);
+
+        metrics.recordRefreshCheck(outcome);
+
+        expect(await registry.metrics()).toContain(
+            `soundspan_vibe_map_refresh_checks_total{outcome="${outcome}"} 1`,
         );
     });
 });

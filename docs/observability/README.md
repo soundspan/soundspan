@@ -87,6 +87,7 @@ Node process defaults (memory, CPU, event loop, GC) are exported under the
 | `soundspan_vibe_map_build_seconds`              | Histogram | —                     | Vibe map projection build duration, including out-of-memory retries. |
 | `soundspan_vibe_map_sampled`                    | Gauge     | —                     | Whether the most recent completed vibe map build projected a sample rather than every embedded track. |
 | `soundspan_vibe_map_rebuild_requests_total`     | Counter   | `outcome`             | Admin vibe map rebuild requests by outcome (`started`, `already_building`). |
+| `soundspan_vibe_map_refresh_checks_total`       | Counter   | `outcome`             | Background staleness checks on a served vibe map (`fresh`, `started`, `lease_held`, `throttled`, `skipped_building`, `failed`). |
 | `soundspan_metrics_collection_errors_total`     | Counter   | `collector`           | Prometheus collection errors by bounded collector name.          |
 
 ### Federation

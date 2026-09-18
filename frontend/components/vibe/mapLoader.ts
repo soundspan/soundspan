@@ -13,6 +13,8 @@ import type { MapTrack } from "./types";
 export interface VibeMapPayload {
     tracks: MapTrack[];
     trackCount: number;
+    /** Browsable embedded tracks when the map was built; absent on older maps. */
+    embeddedCount?: number;
     computedAt: string;
     /** True when the server had to project a random subset of the library. */
     sampled?: boolean;

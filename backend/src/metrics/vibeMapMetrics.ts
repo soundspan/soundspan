@@ -6,18 +6,29 @@ export type VibeMapBuildOutcome = "completed" | "failed";
 /** Closed outcome vocabulary for an admin-requested map rebuild. */
 export type VibeMapRebuildOutcome = "started" | "already_building";
 
-/** Instruments for vibe map builds and administrator rebuild requests. */
+/** Closed outcome vocabulary for one background refresh check. */
+export type VibeMapRefreshCheckOutcome =
+    | "fresh"
+    | "started"
+    | "lease_held"
+    | "throttled"
+    | "skipped_building"
+    | "failed";
+
+/** Instruments for vibe map builds, rebuild requests, and refresh checks. */
 export interface VibeMapMetrics {
     builds: Counter<"outcome">;
     buildSeconds: Histogram;
     sampled: Gauge;
     rebuildRequests: Counter<"outcome">;
+    refreshChecks: Counter<"outcome">;
     recordBuild(
         outcome: VibeMapBuildOutcome,
         seconds: number,
         sampled: boolean,
     ): void;
     recordRebuildRequest(outcome: VibeMapRebuildOutcome): void;
+    recordRefreshCheck(outcome: VibeMapRefreshCheckOutcome): void;
 }
 
 function createBuildCounter(registry: Registry): Counter<"outcome"> {
@@ -55,18 +66,29 @@ function createRebuildCounter(registry: Registry): Counter<"outcome"> {
     });
 }
 
-/** Registers bounded vibe map build and rebuild request metrics. */
+function createRefreshCheckCounter(registry: Registry): Counter<"outcome"> {
+    return new Counter({
+        name: "soundspan_vibe_map_refresh_checks_total",
+        help: "Vibe map background refresh checks by bounded outcome.",
+        labelNames: ["outcome"] as const,
+        registers: [registry],
+    });
+}
+
+/** Registers bounded vibe map build, rebuild, and refresh metrics. */
 export function createVibeMapMetrics(registry: Registry): VibeMapMetrics {
     const builds = createBuildCounter(registry);
     const buildSeconds = createBuildHistogram(registry);
     const sampled = createSampledGauge(registry);
     const rebuildRequests = createRebuildCounter(registry);
+    const refreshChecks = createRefreshCheckCounter(registry);
 
     return {
         builds,
         buildSeconds,
         sampled,
         rebuildRequests,
+        refreshChecks,
         recordBuild(outcome, seconds, wasSampled): void {
             builds.inc({ outcome });
             buildSeconds.observe(seconds);
@@ -74,6 +96,9 @@ export function createVibeMapMetrics(registry: Registry): VibeMapMetrics {
         },
         recordRebuildRequest(outcome): void {
             rebuildRequests.inc({ outcome });
+        },
+        recordRefreshCheck(outcome): void {
+            refreshChecks.inc({ outcome });
         },
     };
 }

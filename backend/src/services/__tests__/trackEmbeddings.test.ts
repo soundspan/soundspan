@@ -29,6 +29,7 @@ import { runAnnQuery } from "../../utils/annQuery";
 import * as embeddingUtils from "../../utils/embedding";
 import {
     countEmbeddedBrowsableTracks,
+    countEmbeddedBrowsableTracksInSpace,
     countEmbeddedLocalTracks,
     fetchEmbeddingsByTrackIds,
     fetchTrackEmbedding,
@@ -394,14 +395,28 @@ describe("findTracksByTextEmbedding", () => {
 });
 
 describe("embedding counts", () => {
-    it("counts browsable embeddings and parses bigint rows", async () => {
+    it("binds the requested space when counting browsable embeddings", async () => {
+        mockQueryRaw.mockResolvedValue([{ count: BigInt(4) }]);
+
+        await expect(
+            countEmbeddedBrowsableTracksInSpace("space-requested"),
+        ).resolves.toBe(4);
+
+        const [query, ...values] = mockQueryRaw.mock.calls[0];
+        expect(query.join(" ")).toContain("FROM track_embeddings te");
+        expect(query.join(" ")).toContain("te.space_id =");
+        expect(values).toContain("space-requested");
+        expect(mockGetActiveSpace).not.toHaveBeenCalled();
+    });
+
+    it("counts browsable embeddings in the active space", async () => {
         mockQueryRaw.mockResolvedValue([{ count: BigInt(4) }]);
 
         await expect(countEmbeddedBrowsableTracks()).resolves.toBe(4);
 
-        const query = mockQueryRaw.mock.calls[0][0];
-        expect(query.join(" ")).toContain("FROM track_embeddings te");
-        expect(query.join(" ")).toContain("te.space_id =");
+        expect(mockGetActiveSpace).toHaveBeenCalledTimes(1);
+        const [, ...values] = mockQueryRaw.mock.calls[0];
+        expect(values).toContain("space-active");
     });
 
     it("counts only local embeddings for analysis status", async () => {

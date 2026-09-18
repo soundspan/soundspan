@@ -65,6 +65,57 @@ test("a sampled map explains the sample in its detail", () => {
     });
     assert.equal(view.sampled, true);
     assert.match(view.detail, /random sample/);
+    assert.equal(view.summary, `Built 1h ago · ${formatSongCount(7500)}`);
+});
+
+test("a sampled map with a known source count says what it was sampled from", () => {
+    const view = describeMapStatus({
+        computedAt: builtHoursAgo(1),
+        trackCount: 7500,
+        embeddedCount: 21000,
+        sampled: true,
+        rebuildState: "idle",
+        compact: false,
+    });
+    assert.equal(
+        view.summary,
+        `Built 1h ago · sample of ${(7500).toLocaleString()} from ${formatSongCount(21000)}`,
+    );
+});
+
+test("the source count only changes the summary for a genuine sample", () => {
+    const full = describeMapStatus({
+        computedAt: builtHoursAgo(1),
+        trackCount: 92,
+        embeddedCount: 92,
+        sampled: false,
+        rebuildState: "idle",
+        compact: false,
+    });
+    assert.equal(full.summary, `Built 1h ago · ${formatSongCount(92)}`);
+
+    const inconsistent = describeMapStatus({
+        computedAt: builtHoursAgo(1),
+        trackCount: 7500,
+        embeddedCount: 7000,
+        sampled: true,
+        rebuildState: "idle",
+        compact: false,
+    });
+    assert.equal(
+        inconsistent.summary,
+        `Built 1h ago · ${formatSongCount(7500)}`,
+    );
+
+    const legacy = describeMapStatus({
+        computedAt: builtHoursAgo(1),
+        trackCount: 7500,
+        embeddedCount: null,
+        sampled: true,
+        rebuildState: "idle",
+        compact: true,
+    });
+    assert.equal(legacy.summary, "Built 1h ago");
 });
 
 test("a running re-analysis becomes a percentage badge with a plain explanation", () => {
