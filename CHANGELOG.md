@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Now Playing screen on phones and tablets has a visible `Minimize player` button again (the arrow in the top-left corner), and swiping down on its header no longer triggers the browser's pull-to-refresh, which used to reload the page and stop playback (#909).
 - The API Keys settings page now says that a key is sent in an `X-API-Key` header and shows a copy-ready example; sending it as a Bearer token returned an unexplained 401 (#897).
 - Native dropdown menus (sort, genre, and pagination on the Audiobooks and Podcasts pages, and other built-in selects) no longer render white text on a white popup; the app now declares its dark color scheme to the browser so native controls match the theme.
 - Audiobook listening progress and playback state are now tied to their audiobook at the database level: removing a book — scheduled prune, manual sync, or federation cleanup — atomically deletes its progress rows and nulls the active-audiobook reference in playback state, closing a race where progress saved mid-removal could linger as a phantom entry in Continue Listening; the upgrade migration also removes any orphaned progress rows left behind by earlier removals (#866).
