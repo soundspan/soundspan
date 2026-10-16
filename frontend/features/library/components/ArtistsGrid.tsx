@@ -9,6 +9,11 @@ import { api } from "@/lib/api";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { getArtistHref } from "@/utils/artistRoute";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { RemoteSourceBadges } from "@/components/ui/RemoteSourceBadges";
+import {
+    formatArtistCountLabel,
+    type LibraryEmptyCopy,
+} from "../libraryEmptyCopy";
 
 interface ArtistsGridProps {
     artists: Artist[];
@@ -17,6 +22,7 @@ interface ArtistsGridProps {
     canDelete?: boolean;
     isLoading?: boolean;
     hidePlayButtons?: boolean;
+    emptyCopy?: LibraryEmptyCopy;
 }
 
 const getArtistImageSrc = (coverArt?: string | null): string | null => {
@@ -120,22 +126,24 @@ const ArtistCardItem = memo(
                                 </button>
                             )}
                         {/* Delete button */}
-                        {canDelete && artist.source !== "federated" && (
-                            <button
-                                onClick={handleDelete}
-                                className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
-                                title="Delete artist"
-                            >
-                                <Trash2 className="w-3.5 h-3.5 text-white" />
-                            </button>
-                        )}
+                        {canDelete &&
+                            artist.source !== "federated" &&
+                            artist.source !== "remote" && (
+                                <button
+                                    onClick={handleDelete}
+                                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
+                                    title="Delete artist"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5 text-white" />
+                                </button>
+                            )}
                     </div>
                     <h3 className="text-sm font-semibold text-white truncate">
                         {artist.name}
                     </h3>
                     <div className="mt-0.5 flex items-center gap-2">
                         <p className="min-w-0 flex-1 truncate text-xs text-gray-400">
-                            {artist.albumCount || 0} albums
+                            {formatArtistCountLabel(artist)}
                         </p>
                         {artist.source === "federated" && artist.peer && (
                             <PeerBadge
@@ -143,14 +151,18 @@ const ArtistCardItem = memo(
                                 online={artist.peer.online}
                             />
                         )}
+                        <RemoteSourceBadges sources={artist.remoteSources} />
                     </div>
                 </div>
             </Link>
         );
     },
-    (prevProps, nextProps) => {
-        return prevProps.artist.id === nextProps.artist.id;
-    },
+    // Re-render when the item object changes: counts and badges differ by origin.
+    (prevProps, nextProps) =>
+        prevProps.artist === nextProps.artist &&
+        prevProps.index === nextProps.index &&
+        prevProps.canDelete === nextProps.canDelete &&
+        prevProps.hidePlayButtons === nextProps.hidePlayButtons,
 );
 
 const ArtistsGrid = memo(function ArtistsGrid({
@@ -160,6 +172,7 @@ const ArtistsGrid = memo(function ArtistsGrid({
     canDelete = false,
     isLoading = false,
     hidePlayButtons = false,
+    emptyCopy,
 }: ArtistsGridProps) {
     if (isLoading) {
         return (
@@ -173,8 +186,11 @@ const ArtistsGrid = memo(function ArtistsGrid({
         return (
             <EmptyState
                 icon={<Music className="w-12 h-12" />}
-                title="No artists yet"
-                description="Your library is empty. Sync your music to get started."
+                title={emptyCopy?.title ?? "No artists yet"}
+                description={
+                    emptyCopy?.description ??
+                    "Your library is empty. Sync your music to get started."
+                }
             />
         );
     }

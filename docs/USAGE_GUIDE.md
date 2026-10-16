@@ -27,6 +27,41 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 
 Every track's menu has `Copy link to song`. The link opens the album page with that song highlighted and starts playing it. On a brand-new device the browser may ask for one tap before audio starts.
 
+## Your Library
+
+The Library page lists your music as `Artists`, `Albums`, and `Songs`.
+
+### Where the music comes from
+
+When peer servers or a streaming service are available, buttons above the list choose what to show:
+
+- `All` — everything: the music files on this server, music shared by peer servers, and the songs you liked on TIDAL or YouTube Music that are not in your library yet.
+- `Local` — only the music files on this server. Nothing from peers or streaming services ever appears here.
+- `Peers` — only music shared by other servers. This button appears when federation is turned on.
+- `Remote` — only the songs you liked on TIDAL or YouTube Music that are not in your library yet. This button appears when you are signed in to TIDAL, or when YouTube Music is turned on for this server.
+
+### Songs you liked on TIDAL or YouTube Music
+
+When you like a song that plays from TIDAL or YouTube Music, it appears in your Library right away. A small TIDAL or YouTube badge marks it, so you can always tell it apart from your own files, and it plays from that service.
+
+- Only your own likes appear. Other people's likes stay in their own Library.
+- Artists you only know from streaming appear in `Artists` with the number of streaming albums or songs you liked. Their artist page lists those albums together with your own, each with its badge.
+- If you sign out of TIDAL, or an admin turns a service off, its songs leave your Library until it is back. Your likes are kept, and `My Liked` still lists them.
+- To take a streaming song out of your Library, unlike it. Streaming songs have no `Delete` option, because there is no file to delete.
+- Sorting artists by `Most Tracks` counts only your own files.
+- The Library shows up to the 5,000 most recently liked songs from each service.
+
+### Adding a streaming song to your library
+
+Open the song's menu (the `⋮` button at the end of the row). What it offers depends on the song's album and on who you are:
+
+- When the album has a MusicBrainz match, admins see `Add album to library`. It downloads the whole album, the same as the `Download` button on an album page.
+- When the album has a MusicBrainz match and music requests are turned on, other users see `Request album`. It asks an admin to add the album (see [Requesting Music](#requesting-music)).
+- When a YouTube Music song's album has no MusicBrainz match, admins see `Add song to library`. It downloads that one song.
+- Otherwise the menu has no add option. This is the case for a TIDAL song on an album with no MusicBrainz match.
+
+After the files arrive and the next library scan matches the song to them, only your own copy shows, without the badge.
+
 ## Artist Playback Order
 
 Artist-level Play queues owned albums newest-to-oldest, with track ordering by disc and track number.

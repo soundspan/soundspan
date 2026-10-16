@@ -30,6 +30,7 @@ Start-here guide for `frontend/features/artist`.
 | `hooks/useTidalTopTracks.ts` | hooks |
 | `hooks/useTrackAlbumResolutions.ts` | hooks |
 | `hooks/useYtMusicTopTracks.ts` | hooks |
+| `artistAlbumVisibility.ts` | root |
 | `types.ts` | root |
 
 ## Update Rule

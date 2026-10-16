@@ -27,6 +27,20 @@ export interface ArtistPlaybackTrack {
         coverArt?: string | null;
         year?: number | null;
     };
+    /** Present on liked TIDAL / YouTube Music tracks of remote albums. */
+    streamSource?: "tidal" | "youtube";
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+}
+
+/** Album-level fields shared by every queued track of one album. */
+export interface ArtistPlaybackAlbumContext {
+    artistId?: string;
+    artistName: string;
+    albumId: string;
+    albumTitle: string;
+    coverArt?: string | null;
+    year?: number | null;
 }
 
 interface LoadOwnedArtistTracksParams {
@@ -85,6 +99,58 @@ function normalizeAlbums(albums: unknown[]): ArtistPlaybackAlbum[] {
                 : undefined,
         }))
         .filter((album) => !!album.id);
+}
+
+function toStreamFields(
+    track: Record<string, unknown>,
+): Pick<
+    ArtistPlaybackTrack,
+    "streamSource" | "tidalTrackId" | "youtubeVideoId"
+> {
+    const source = track.streamSource ?? track.source;
+    if (source !== "tidal" && source !== "youtube") return {};
+    const provider = toRecord(track.provider);
+    const tidalTrackId = toNumber(
+        track.tidalTrackId ?? provider?.tidalTrackId,
+        0,
+    );
+    const youtubeVideoId =
+        toOptionalString(track.youtubeVideoId) ??
+        toOptionalString(provider?.youtubeVideoId);
+    return {
+        streamSource: source,
+        ...(tidalTrackId > 0 ? { tidalTrackId } : {}),
+        ...(youtubeVideoId ? { youtubeVideoId } : {}),
+    };
+}
+
+/**
+ * Maps one album-detail track into a queue entry. Returns null for rows
+ * without an id. Streaming fields are kept so remote tracks stay playable.
+ */
+export function toArtistPlaybackTrack(
+    track: Record<string, unknown>,
+    context: ArtistPlaybackAlbumContext,
+): ArtistPlaybackTrack | null {
+    const trackId = toOptionalString(track.id);
+    if (!trackId) return null;
+    return {
+        id: trackId,
+        title:
+            toOptionalString(track.displayTitle) ||
+            toOptionalString(track.title) ||
+            "Unknown Track",
+        duration: toNumber(track.duration, 0),
+        trackNumber: getTrackSortValue(track),
+        artist: { id: context.artistId, name: context.artistName },
+        album: {
+            id: context.albumId,
+            title: context.albumTitle,
+            coverArt: context.coverArt,
+            year: context.year,
+        },
+        ...toStreamFields(track),
+    };
 }
 
 function sortAlbumsNewestFirst(
@@ -163,29 +229,17 @@ export async function loadOwnedArtistTracksNewestFirst({
             toOptionalString(albumData.coverUrl) ??
             seedAlbum.coverArt;
 
+        const context: ArtistPlaybackAlbumContext = {
+            artistId: resolvedArtistId,
+            artistName: resolvedArtistName,
+            albumId: resolvedAlbumId,
+            albumTitle: resolvedAlbumTitle,
+            coverArt: resolvedCoverArt,
+            year: seedAlbum.year,
+        };
         sortedTracks.forEach((track: Record<string, unknown>) => {
-            const trackId = toOptionalString(track.id);
-            if (!trackId) return;
-
-            queueTracks.push({
-                id: trackId,
-                title:
-                    toOptionalString(track.displayTitle) ||
-                    toOptionalString(track.title) ||
-                    "Unknown Track",
-                duration: toNumber(track.duration, 0),
-                trackNumber: getTrackSortValue(track),
-                artist: {
-                    id: resolvedArtistId,
-                    name: resolvedArtistName,
-                },
-                album: {
-                    id: resolvedAlbumId,
-                    title: resolvedAlbumTitle,
-                    coverArt: resolvedCoverArt,
-                    year: seedAlbum.year,
-                },
-            });
+            const queueTrack = toArtistPlaybackTrack(track, context);
+            if (queueTrack) queueTracks.push(queueTrack);
         });
     });
 

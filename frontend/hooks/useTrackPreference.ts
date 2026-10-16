@@ -13,6 +13,7 @@ import {
     type TrackPreferenceOptimisticQueryClient,
 } from "@/hooks/trackPreferenceOptimistic";
 import { queryKeys } from "@/lib/queryKeys";
+import { invalidateLibraryAfterRemoteLike } from "@/lib/libraryBrowseInvalidation";
 
 export interface TrackPreferenceMetadata {
     title?: string;
@@ -104,6 +105,10 @@ export function useTrackPreference(
             queryClient.invalidateQueries({
                 queryKey: queryKeys.likedPlaylistAll(),
             });
+            invalidateLibraryAfterRemoteLike(queryClient, [
+                trackId ?? "",
+                data.trackId,
+            ]);
         },
         onError: (_error, _signal, context) => {
             if (!context?.canonicalQueryKey) return;

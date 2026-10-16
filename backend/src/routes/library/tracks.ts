@@ -53,10 +53,8 @@ import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
     TRACK_BROWSE_WHERE,
-    TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
-    parseLibraryOrigin,
-    trackBrowseWhere,
+    parseLibraryBrowseOrigin,
 } from "../../utils/librarySorting";
 import { loadActiveFederationStreamPeer } from "./federationStreamPeer";
 import {
@@ -82,6 +80,11 @@ import {
 } from "./libraryPeerStream";
 import { serveNativeLibraryTrack } from "./libraryNativeTrackStream";
 import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
+import {
+    loadLibrarySongsPage,
+    loadPrismaLibraryTrackPage,
+    loadRemoteLibrarySet,
+} from "../../services/remoteLibrary";
 
 /**
  * Router segment for tracks routes registered at this position.
@@ -142,9 +145,9 @@ export const tracksDeletionRouter = Router();
  *         name: origin
  *         schema:
  *           type: string
- *           enum: [all, local, peers]
+ *           enum: [all, local, peers, remote]
  *           default: all
- *         description: Filter tracks by local or federated origin
+ *         description: Filter tracks by local or federated origin; remote is your liked TIDAL / YouTube Music tracks that are not in the library
  *       - in: query
  *         name: sortBy
  *         schema:
@@ -164,6 +167,25 @@ export const tracksDeletionRouter = Router();
  *                   type: array
  *                   items:
  *                     type: object
+ *                     properties:
+ *                       source:
+ *                         type: string
+ *                         enum: [local, federated, tidal, youtube]
+ *                       streamSource:
+ *                         type: string
+ *                         enum: [peer, tidal, youtube]
+ *                       tidalTrackId:
+ *                         type: integer
+ *                       youtubeVideoId:
+ *                         type: string
+ *                       provider:
+ *                         type: object
+ *                       album:
+ *                         type: object
+ *                         properties:
+ *                           rgMbid:
+ *                             type: string
+ *                             nullable: true
  *                 total:
  *                   type: integer
  *                 offset:
@@ -173,7 +195,6 @@ export const tracksDeletionRouter = Router();
  *       401:
  *         description: Not authenticated
  */
-// GET /library/tracks?albumId=&limit=100&offset=0
 /**
  * Handles GET /api/library/tracks.
  */
@@ -185,7 +206,7 @@ export async function handleGetTracks(req: Request, res: Response) {
         sortBy = "name",
         origin: originParam,
     } = req.query;
-    const origin = parseLibraryOrigin(originParam);
+    const origin = parseLibraryBrowseOrigin(originParam);
     if (!origin) {
         return sendRouteError(res, 400, "Invalid library origin filter");
     }
@@ -195,71 +216,46 @@ export async function handleGetTracks(req: Request, res: Response) {
     );
     const offset = parseInt(offsetParam as string, 10) || 0;
 
-    let orderBy:
-        | Prisma.TrackOrderByWithRelationInput
-        | Prisma.TrackOrderByWithRelationInput[];
     if (albumId) {
-        orderBy = [{ discNo: "asc" as const }, { trackNo: "asc" as const }];
-    } else {
-        orderBy = TRACK_SORT_MAP[sortBy as string] ?? {
-            title: "asc" as const,
-        };
+        if (origin === "remote") {
+            return sendRouteError(res, 400, "Invalid library origin filter");
+        }
+        const page = await loadPrismaLibraryTrackPage({
+            origin,
+            albumId: albumId as string,
+            sortBy: sortBy as string,
+            limit,
+            offset,
+        });
+        return res.json({ ...page, offset, limit });
     }
-
-    const where: Prisma.TrackWhereInput = {
-        ...TRACK_VISIBLE_WHERE,
-        ...trackBrowseWhere(origin),
-    };
-    if (albumId) {
-        where.albumId = albumId as string;
+    if (origin === "local" || origin === "peers") {
+        const page = await loadPrismaLibraryTrackPage({
+            origin,
+            sortBy: sortBy as string,
+            limit,
+            offset,
+        });
+        return res.json({ ...page, offset, limit });
     }
-
-    const [tracksData, total] = await Promise.all([
-        prisma.track.findMany({
-            where,
-            skip: offset,
-            take: limit,
-            orderBy,
-            include: {
-                album: {
-                    include: {
-                        artist: {
-                            select: {
-                                id: true,
-                                name: true,
-                            },
-                        },
-                    },
-                },
-                federationPeer: {
-                    select: { id: true, name: true, outboundStatus: true },
-                },
-            },
-        }),
-        prisma.track.count({ where }),
-    ]);
-
-    // Add coverArt field to albums
-    const tracks = tracksData.map(({ federationPeer, ...track }) => ({
-        ...track,
-        source: track.origin === "FEDERATED" ? "federated" : "local",
-        ...(track.origin === "FEDERATED"
-            ? { streamSource: "peer" as const }
-            : {}),
-        peer: federationPeer
-            ? {
-                  id: federationPeer.id,
-                  name: federationPeer.name,
-                  online: federationPeer.outboundStatus === "ACTIVE",
-              }
-            : undefined,
-        album: {
-            ...track.album,
-            coverArt: track.album.coverUrl,
-        },
-    }));
-
-    res.json({ tracks, total, offset, limit });
+    const remoteLibrary = await loadRemoteLibrarySet(req.user?.id);
+    if (origin === "all" && remoteLibrary.tracks.length === 0) {
+        const page = await loadPrismaLibraryTrackPage({
+            origin: "all",
+            sortBy: sortBy as string,
+            limit,
+            offset,
+        });
+        return res.json({ ...page, offset, limit });
+    }
+    const page = await loadLibrarySongsPage({
+        origin,
+        remoteLibrary,
+        sortBy: sortBy as string,
+        limit,
+        offset,
+    });
+    return res.json({ ...page, offset, limit });
 }
 
 tracksBrowseRouter.get("/tracks", asyncHandler(handleGetTracks));

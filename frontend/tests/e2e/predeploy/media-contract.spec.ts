@@ -32,7 +32,7 @@ test.describe("Media Contract", () => {
 
         const requestOrigin = new URL(baseURL).origin;
         const tracksResponse = await page.request.get(
-            "/api/library/tracks?limit=1",
+            "/api/library/tracks?limit=1&origin=local",
         );
         expect(tracksResponse.ok()).toBeTruthy();
 
