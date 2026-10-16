@@ -66,3 +66,36 @@ test("dedupeDiscoverTracks keeps artist-less rows and everything when either sid
     assert.deepEqual(dedupeDiscoverTracks(all, []), all);
     assert.deepEqual(dedupeDiscoverTracks([], [libraryTrack("A", "B")]), []);
 });
+
+test("dedupeDiscoverTracks also drops external rows that duplicate liked streaming songs", () => {
+    const streamingRow = {
+        id: "tidal:7",
+        title: "Hurt",
+        duration: 220,
+        source: "tidal" as const,
+        album: {
+            id: "a",
+            title: "American IV",
+            artist: { id: "x", name: "Johnny Cash" },
+        },
+    };
+    const deduped = dedupeDiscoverTracks(
+        [
+            { type: "track", name: "Hurt", artist: "Johnny Cash" },
+            { type: "track", name: "Ring of Fire", artist: "Johnny Cash" },
+        ] as never,
+        [streamingRow],
+    );
+    assert.deepEqual(
+        deduped.map((track) => track.name),
+        ["Ring of Fire"],
+    );
+});
+
+test("dedupeDiscoverTracks tolerates rows without an album artist", () => {
+    const deduped = dedupeDiscoverTracks(
+        [{ type: "track", name: "Hurt", artist: "Johnny Cash" }] as never,
+        [{ title: "Hurt" }],
+    );
+    assert.equal(deduped.length, 1);
+});

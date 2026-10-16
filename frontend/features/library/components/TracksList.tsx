@@ -5,7 +5,7 @@ import { Track } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import Link from "next/link";
-import { AudioLines, Download, Send, Trash2 } from "lucide-react";
+import { AudioLines, Trash2 } from "lucide-react";
 import { getArtistHref } from "@/utils/artistRoute";
 import { resolveStreamCoverArtUrl } from "@/lib/streamCoverArt";
 import { TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
@@ -21,12 +21,11 @@ import {
     getRemoteLibrarySource,
     toLibraryAudioTrack,
 } from "../libraryTrackPlayback";
-import {
-    getRemoteTrackAcquisitionLabel,
-    resolveRemoteTrackAcquisition,
-    type RemoteTrackAcquisition,
-    type RemoteTrackAcquisitionPolicy,
+import type {
+    RemoteTrackAcquisition,
+    RemoteTrackAcquisitionPolicy,
 } from "../remoteTrackAcquisition";
+import { RemoteTrackAcquisitionItem } from "./RemoteTrackAcquisitionItem";
 
 /** Empty-state copy for the list. */
 export interface TracksListEmptyCopy {
@@ -86,27 +85,6 @@ function renderTitleBadges(track: Track) {
     return remoteSource ? (
         <RemoteSourceBadges sources={[remoteSource]} />
     ) : undefined;
-}
-
-function renderAcquisitionItem(
-    track: Track,
-    policy: RemoteTrackAcquisitionPolicy,
-    onAcquire: ((action: RemoteTrackAcquisition) => void) | undefined,
-) {
-    if (!onAcquire) return undefined;
-    const action = resolveRemoteTrackAcquisition(track, policy);
-    if (!action) return undefined;
-    const Icon = action.kind === "request-album" ? Send : Download;
-    return (
-        <TrackMenuButton
-            onClick={(e) => {
-                e.stopPropagation();
-                onAcquire(action);
-            }}
-            icon={<Icon className="h-4 w-4" />}
-            label={getRemoteTrackAcquisitionLabel(action)}
-        />
-    );
 }
 
 /**
@@ -173,10 +151,12 @@ export function TracksList({
                     title: track.displayTitle ?? track.title,
                 },
                 showMatchVibe: !isRemote,
-                extraItemsBefore: renderAcquisitionItem(
-                    track,
-                    acquisitionPolicy,
-                    onAcquire,
+                extraItemsBefore: (
+                    <RemoteTrackAcquisitionItem
+                        track={track}
+                        policy={acquisitionPolicy}
+                        onAcquire={onAcquire}
+                    />
                 ),
                 extraItemsAfter:
                     canDelete && track.source !== "federated" && !isRemote ? (

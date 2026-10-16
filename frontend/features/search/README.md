@@ -25,6 +25,7 @@ Start-here guide for `frontend/features/search`.
 | `components/SearchFilters.tsx` | components |
 | `components/SimilarArtistsGrid.tsx` | components |
 | `components/SoulseekSongsList.tsx` | components |
+| `components/StreamingLikesList.tsx` | components |
 | `components/TopResult.tsx` | components |
 | `components/TVSearchInput.tsx` | components |
 | `components/YouTubePlaylistPreviewCard.tsx` | components |

@@ -22,6 +22,8 @@ import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudio
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
 import { DiscoverTracksList } from "@/features/search/components/DiscoverTracksList";
+import { StreamingLikesList } from "@/features/search/components/StreamingLikesList";
+import { useRemoteTrackAcquisition } from "@/features/library/hooks/useRemoteTrackAcquisition";
 import {
     deriveDiscoverySelection,
     normalizeArtistName,
@@ -46,6 +48,8 @@ export default function SearchPage() {
     const { user } = useAuth();
     const { federation } = useFeatures();
     const canDownloadYouTube = user?.role === "admin";
+    const { policy: acquisitionPolicy, acquire: acquireRemoteTrack } =
+        useRemoteTrackAcquisition();
     const [filterTab, setFilterTab] = useState<FilterTab>("all");
     const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
     const isPodcastTab = filterTab === "podcasts";
@@ -164,6 +168,12 @@ export default function SearchPage() {
         (result) => result.type === "podcast",
     );
     const libraryTracks = libraryResults?.tracks ?? [];
+    // Liked TIDAL / YouTube songs not in the library: a separate group under
+    // the library songs, never on the Peers tab.
+    const streamingTracks =
+        showLibrary && filterTab !== "peers"
+            ? (libraryResults?.remoteTracks ?? [])
+            : [];
     const libraryAlbums = libraryResults?.albums ?? [];
     const libraryPodcasts = libraryResults?.podcasts ?? [];
     const hasPodcastResults =
@@ -171,13 +181,17 @@ export default function SearchPage() {
     // One Songs section: external matches continue the owned list, minus
     // songs the library results already cover.
     const unownedDiscoverTracks = showDiscover
-        ? dedupeDiscoverTracks(discoverTracks, libraryTracks)
+        ? dedupeDiscoverTracks(discoverTracks, [
+              ...libraryTracks,
+              ...streamingTracks,
+          ])
         : [];
 
     // Determine if we should show the 2-column layout
     const hasTopResult = visibleLibraryTopArtist || topArtist;
     const hasTracks =
         libraryTracks.length > 0 ||
+        streamingTracks.length > 0 ||
         soulseekResults.length > 0 ||
         unownedDiscoverTracks.length > 0;
     const show2ColumnLayout =
@@ -409,6 +423,12 @@ export default function SearchPage() {
                                                 limit={isTracksView ? null : 10}
                                             />
                                         )}
+                                    <StreamingLikesList
+                                        tracks={streamingTracks}
+                                        limit={isTracksView ? null : 5}
+                                        acquisitionPolicy={acquisitionPolicy}
+                                        onAcquire={acquireRemoteTrack}
+                                    />
                                     {unownedDiscoverTracks.length > 0 && (
                                         <DiscoverTracksList
                                             tracks={unownedDiscoverTracks}
@@ -498,6 +518,7 @@ export default function SearchPage() {
                             !isPodcastTab &&
                             (sectionView === null || isTracksView) &&
                             ((showLibrary && libraryTracks.length > 0) ||
+                                streamingTracks.length > 0 ||
                                 unownedDiscoverTracks.length > 0) && (
                                 <section>
                                     <SectionHeader
@@ -517,6 +538,12 @@ export default function SearchPage() {
                                                 limit={isTracksView ? null : 10}
                                             />
                                         )}
+                                    <StreamingLikesList
+                                        tracks={streamingTracks}
+                                        limit={isTracksView ? null : 5}
+                                        acquisitionPolicy={acquisitionPolicy}
+                                        onAcquire={acquireRemoteTrack}
+                                    />
                                     {unownedDiscoverTracks.length > 0 && (
                                         <DiscoverTracksList
                                             tracks={unownedDiscoverTracks}
@@ -639,6 +666,7 @@ export default function SearchPage() {
                               (!libraryResults.artists?.length &&
                                   !libraryResults.albums?.length &&
                                   !libraryResults.tracks?.length &&
+                                  !libraryResults.remoteTracks?.length &&
                                   !libraryResults.audiobooks?.length &&
                                   // Library podcasts render only on the All
                                   // and Podcasts tabs; episodes only under

@@ -17,6 +17,7 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 - Search includes tabs for library, peers, discovery, Soulseek, and podcasts; peer and Soulseek tabs appear when their integrations are enabled
 - Search shows one **Songs** section: songs you own and songs you don't sit together in a single ranked list. External matches carry a provider badge (TIDAL or YouTube) and never duplicate something already in your library.
 - External songs with a streaming match play right from the results, and every row — owned or not — has the full menu with like/dislike, Go to artist, and Go to album
+- Songs you liked on TIDAL or YouTube Music that are not in your library yet show in their own **From your streaming services** group, below your library songs and with a provider badge. The group appears on the `All` and `My Library` tabs, and each row's menu has the same add-to-library options as in your Library (see [Your Library](#your-library))
 - Search understands artist and album names, tolerates typos, and ranks near-misses by similarity instead of alphabetically
 - Discovery search supports preview/download/subscription actions
 - Explore and `/radio` station tiles (Quick Start, genres, decades) open a generated station playlist you can inspect before playing; Shuffle All still starts playback immediately
@@ -45,6 +46,7 @@ When peer servers or a streaming service are available, buttons above the list c
 When you like a song that plays from TIDAL or YouTube Music, it appears in your Library right away. A small TIDAL or YouTube badge marks it, so you can always tell it apart from your own files, and it plays from that service.
 
 - Only your own likes appear. Other people's likes stay in their own Library.
+- Search finds them too, in their own **From your streaming services** group below your library songs.
 - Artists you only know from streaming appear in `Artists` with the number of streaming albums or songs you liked. Their artist page lists those albums together with your own, each with its badge.
 - If you sign out of TIDAL, or an admin turns a service off, its songs leave your Library until it is back. Your likes are kept, and `My Liked` still lists them.
 - To take a streaming song out of your Library, unlike it. Streaming songs have no `Delete` option, because there is no file to delete.

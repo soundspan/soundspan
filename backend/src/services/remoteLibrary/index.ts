@@ -16,6 +16,10 @@ export { loadRemoteLibraryAccess } from "./providers";
 export { toLibraryRemoteTrack } from "./responseRow";
 export { loadLibrarySongsPage } from "./librarySongsPage";
 export { loadPrismaLibraryTrackPage } from "./libraryTrackRows";
+export {
+    rankRemoteLibraryTracks,
+    searchRemoteLibraryTracks,
+} from "./remoteLibrarySearch";
 export { loadRemoteLibrarySet, REMOTE_LIBRARY_ROW_CAP } from "./setLoader";
 export type {
     ConnectedRemoteProviders,

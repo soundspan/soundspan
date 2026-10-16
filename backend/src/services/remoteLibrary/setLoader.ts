@@ -19,6 +19,7 @@ import type {
 
 /** Maximum liked rows loaded from each provider for one request. */
 export const REMOTE_LIBRARY_ROW_CAP = 5_000;
+const REMOTE_LIBRARY_TEXT_TERM_CAP = 6;
 const remoteLibraryLogger = logger.child("RemoteLibrary");
 const capWarningLimiter = new RemoteLibraryCapWarningLimiter();
 
@@ -111,6 +112,20 @@ function effectiveArtistScopeWhere(artistId: string | undefined) {
     };
 }
 
+function textScopeWhere(text: string | undefined) {
+    const terms = (text ?? "").trim().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return {};
+    return {
+        AND: terms.slice(0, REMOTE_LIBRARY_TEXT_TERM_CAP).map((term) => ({
+            OR: [
+                { title: { contains: term, mode: "insensitive" as const } },
+                { artist: { contains: term, mode: "insensitive" as const } },
+                { album: { contains: term, mode: "insensitive" as const } },
+            ],
+        })),
+    };
+}
+
 function mapTidalLikedRow(entry: TidalLikedRow): RemoteLibraryTrack[] {
     if (!entry.trackTidal) return [];
     return [
@@ -157,6 +172,7 @@ function matchesArtistScope(
 async function loadTidalRows(
     userId: string,
     artistId: string | undefined,
+    text: string | undefined,
 ): Promise<RemoteLibraryTrack[]> {
     const rows: TidalLikedRow[] = await prisma.likedRemoteTrack.findMany({
         where: {
@@ -165,6 +181,7 @@ async function loadTidalRows(
             trackTidal: {
                 is: {
                     ...effectiveArtistScopeWhere(artistId),
+                    ...textScopeWhere(text),
                     mappings: { none: visibleMappingWhere() },
                 },
             },
@@ -183,6 +200,7 @@ async function loadTidalRows(
 async function loadYoutubeRows(
     userId: string,
     artistId: string | undefined,
+    text: string | undefined,
 ): Promise<RemoteLibraryTrack[]> {
     const rows: YtLikedRow[] = await prisma.likedRemoteTrack.findMany({
         where: {
@@ -191,6 +209,7 @@ async function loadYoutubeRows(
             trackYtMusic: {
                 is: {
                     ...effectiveArtistScopeWhere(artistId),
+                    ...textScopeWhere(text),
                     mappings: { none: visibleMappingWhere() },
                 },
             },
@@ -228,7 +247,7 @@ function preferredProvider(
 /** Loads and derives the bounded per-user remote library set. */
 export async function loadRemoteLibrarySet(
     userId: string | undefined,
-    scope?: { artistId: string },
+    scope?: { artistId?: string; text?: string },
 ): Promise<RemoteLibrarySet> {
     if (!userId) return emptyRemoteLibrarySet();
     const access = await loadRemoteLibraryAccess(userId);
@@ -237,10 +256,10 @@ export async function loadRemoteLibrarySet(
     }
     const [tidalRows, youtubeRows] = await Promise.all([
         access.providers.tidal
-            ? loadTidalRows(userId, scope?.artistId)
+            ? loadTidalRows(userId, scope?.artistId, scope?.text)
             : Promise.resolve([]),
         access.providers.youtube
-            ? loadYoutubeRows(userId, scope?.artistId)
+            ? loadYoutubeRows(userId, scope?.artistId, scope?.text)
             : Promise.resolve([]),
     ]);
     const tracks = collapseProviderDuplicates(

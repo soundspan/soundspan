@@ -14,11 +14,8 @@ import {
     formatLibraryTrackRow,
     LIBRARY_TRACK_INCLUDE,
 } from "./libraryTrackRows";
-import type {
-    HydratedRemoteLibraryTrack,
-    RemoteLibrarySet,
-    RemoteLibraryTrack,
-} from "./types";
+import { hydrateRemoteLibraryTracks } from "./remoteDisplayHydration";
+import type { RemoteLibrarySet, RemoteLibraryTrack } from "./types";
 
 type SongsPageOrigin = "all" | "remote";
 type SongsPageKind = "local" | "tidal" | "youtube";
@@ -30,50 +27,6 @@ const SORT_DIRECTIONS = {
     name: Prisma.raw("ASC"),
     "name-desc": Prisma.raw("DESC"),
 } as const;
-const remoteArtistSelect = {
-    id: true,
-    name: true,
-} satisfies Prisma.ArtistSelect;
-const remoteAlbumSelect = {
-    id: true,
-    title: true,
-    rgMbid: true,
-    coverUrl: true,
-    artistId: true,
-    location: true,
-    artist: { select: remoteArtistSelect },
-} satisfies Prisma.AlbumSelect;
-const tidalDisplaySelect = {
-    id: true,
-    tidalId: true,
-    title: true,
-    artist: true,
-    album: true,
-    duration: true,
-    artistId: true,
-    albumId: true,
-    artistEntity: { select: remoteArtistSelect },
-    albumEntity: { select: remoteAlbumSelect },
-} satisfies Prisma.TrackTidalSelect;
-const youtubeDisplaySelect = {
-    id: true,
-    videoId: true,
-    title: true,
-    artist: true,
-    album: true,
-    duration: true,
-    thumbnailUrl: true,
-    artistId: true,
-    albumId: true,
-    artistEntity: { select: remoteArtistSelect },
-    albumEntity: { select: remoteAlbumSelect },
-} satisfies Prisma.TrackYtMusicSelect;
-type TidalDisplayRow = Prisma.TrackTidalGetPayload<{
-    select: typeof tidalDisplaySelect;
-}>;
-type YoutubeDisplayRow = Prisma.TrackYtMusicGetPayload<{
-    select: typeof youtubeDisplaySelect;
-}>;
 
 /** Resolves the SQL title direction using the Prisma path's fallback. */
 export function resolveSongsSortDirection(sortBy: string): Prisma.Sql {
@@ -138,17 +91,17 @@ async function hydrateSongsPage(
     const localIds = idPage
         .filter((row) => row.kind === "local")
         .map((row) => row.id);
-    const tidalIds = providerIdsForPage(idPage, "tidal");
-    const youtubeIds = providerIdsForPage(idPage, "youtube");
-    const [localRows, tidalRows, youtubeRows] = await Promise.all([
+    const selectedRemoteRows = remoteRowsForPage(idPage, remoteLibrary);
+    const [localRows, hydratedRemoteRows] = await Promise.all([
         loadLocalRows(localIds, localWhere),
-        loadTidalDisplayRows(tidalIds),
-        loadYoutubeDisplayRows(youtubeIds),
+        hydrateRemoteLibraryTracks(selectedRemoteRows),
     ]);
     const localById = new Map(
         localRows.map((row) => [`local:${row.id}`, formatLibraryTrackRow(row)]),
     );
-    const remoteById = hydrateRemoteRows(remoteLibrary, tidalRows, youtubeRows);
+    const remoteById = new Map(
+        hydratedRemoteRows.map((row) => [remoteRowKey(row), row]),
+    );
     return idPage.flatMap<HydratedSong>((row) => {
         const key = `${row.kind}:${row.id}`;
         const localTrack = localById.get(key);
@@ -158,11 +111,24 @@ async function hydrateSongsPage(
     });
 }
 
-function providerIdsForPage(
+function remoteRowsForPage(
     idPage: SongsIdRow[],
-    kind: Exclude<SongsPageKind, "local">,
-): string[] {
-    return idPage.filter((row) => row.kind === kind).map((row) => row.id);
+    remoteLibrary: RemoteLibrarySet,
+) {
+    const selectedKeys = new Set(
+        idPage
+            .filter((row) => row.kind !== "local")
+            .map((row) => `${row.kind}:${row.id}`),
+    );
+    return remoteLibrary.tracks.filter((row) =>
+        selectedKeys.has(remoteRowKey(row)),
+    );
+}
+
+function remoteRowKey(
+    row: Pick<RemoteLibraryTrack, "provider" | "providerRowId">,
+): string {
+    return `${row.provider}:${row.providerRowId}`;
 }
 
 async function loadLocalRows(ids: string[], where: Prisma.TrackWhereInput) {
@@ -171,52 +137,6 @@ async function loadLocalRows(ids: string[], where: Prisma.TrackWhereInput) {
         where: { ...where, id: { in: ids } },
         include: LIBRARY_TRACK_INCLUDE,
     });
-}
-
-async function loadTidalDisplayRows(ids: string[]) {
-    if (ids.length === 0) return [];
-    return prisma.trackTidal.findMany({
-        where: { id: { in: ids } },
-        select: tidalDisplaySelect,
-    });
-}
-
-async function loadYoutubeDisplayRows(ids: string[]) {
-    if (ids.length === 0) return [];
-    return prisma.trackYtMusic.findMany({
-        where: { id: { in: ids } },
-        select: youtubeDisplaySelect,
-    });
-}
-
-function hydrateRemoteRow(
-    row: RemoteLibraryTrack,
-    tidalById: ReadonlyMap<string, TidalDisplayRow>,
-    youtubeById: ReadonlyMap<string, YoutubeDisplayRow>,
-): HydratedRemoteLibraryTrack | null {
-    if (row.provider === "tidal") {
-        const track = tidalById.get(row.providerRowId);
-        return track ? { ...row, track } : null;
-    }
-    const track = youtubeById.get(row.providerRowId);
-    return track ? { ...row, track } : null;
-}
-
-function hydrateRemoteRows(
-    remoteLibrary: RemoteLibrarySet,
-    tidalRows: TidalDisplayRow[],
-    youtubeRows: YoutubeDisplayRow[],
-): Map<string, HydratedRemoteLibraryTrack> {
-    const tidalById = new Map(tidalRows.map((row) => [row.id, row]));
-    const youtubeById = new Map(youtubeRows.map((row) => [row.id, row]));
-    return new Map(
-        remoteLibrary.tracks.flatMap((row) => {
-            const hydrated = hydrateRemoteRow(row, tidalById, youtubeById);
-            return hydrated
-                ? [[`${row.provider}:${row.providerRowId}`, hydrated] as const]
-                : [];
-        }),
-    );
 }
 
 /** Loads one deterministic page across visible Track and remote provider rows. */

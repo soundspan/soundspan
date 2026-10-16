@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 
+const mockRemoteSearchWarn = jest.fn();
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
 }));
@@ -10,6 +12,7 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({ warn: mockRemoteSearchWarn })),
     },
 }));
 
@@ -60,12 +63,17 @@ jest.mock("../../services/search", () => ({
     normalizeCacheQuery: (query: string) => query.trim().toLowerCase(),
 }));
 
+jest.mock("../../services/remoteLibrary/remoteLibrarySearch", () => ({
+    searchRemoteLibraryTracks: jest.fn(),
+}));
+
 import axios from "axios";
-import router from "../search";
+import router, { remoteSearchLimitFor } from "../search";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { lastFmService } from "../../services/lastfm";
 import { searchService } from "../../services/search";
+import { searchRemoteLibraryTracks } from "../../services/remoteLibrary/remoteLibrarySearch";
 
 const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
 const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
@@ -81,6 +89,7 @@ const mockEnrichSimilarArtists =
     lastFmService.enrichSimilarArtists as jest.Mock;
 const mockSearchAll = searchService.searchAll as jest.Mock;
 const mockSearchByType = searchService.searchByType as jest.Mock;
+const mockSearchRemoteLibraryTracks = searchRemoteLibraryTracks as jest.Mock;
 const mockAxiosGet = (axios as any).get as jest.Mock;
 
 function getGetHandler(path: string) {
@@ -108,6 +117,35 @@ function createRes() {
     };
     return res;
 }
+
+describe("remote search eligibility", () => {
+    it.each([
+        ["all", 20, 5],
+        ["tracks", 37, 37],
+    ] as const)(
+        "returns the group size for %s search",
+        (type, limit, expected) => {
+            expect(
+                remoteSearchLimitFor({
+                    userId: "user-1",
+                    source: "all",
+                    type,
+                    offset: 0,
+                    limit,
+                }),
+            ).toBe(expected);
+        },
+    );
+
+    it.each([
+        { userId: undefined, source: "all", type: "tracks", offset: 0 },
+        { userId: "user-1", source: "local", type: "tracks", offset: 0 },
+        { userId: "user-1", source: "all", type: "artists", offset: 0 },
+        { userId: "user-1", source: "all", type: "tracks", offset: 1 },
+    ] as const)("returns zero for an ineligible request", (input) => {
+        expect(remoteSearchLimitFor({ ...input, limit: 20 })).toBe(0);
+    });
+});
 
 describe("search route runtime behavior", () => {
     const rootHandler = getGetHandler("/");
@@ -144,6 +182,7 @@ describe("search route runtime behavior", () => {
             podcasts: [],
             episodes: [],
         });
+        mockSearchRemoteLibraryTracks.mockResolvedValue([]);
         mockAxiosGet.mockResolvedValue({ data: { results: [] } });
     });
 
@@ -161,9 +200,11 @@ describe("search route runtime behavior", () => {
             audiobooks: [],
             podcasts: [],
             episodes: [],
+            remoteTracks: [],
         });
         expect(mockSearchAll).not.toHaveBeenCalled();
         expect(mockSearchByType).not.toHaveBeenCalled();
+        expect(mockSearchRemoteLibraryTracks).not.toHaveBeenCalled();
     });
 
     it("uses searchAll with clamped limit and transforms response shape", async () => {
@@ -257,7 +298,108 @@ describe("search route runtime behavior", () => {
                 audiobooks: [{ id: "book-1" }],
                 podcasts: [{ id: "pod-1" }],
                 episodes: [{ id: "ep-1" }],
+                remoteTracks: [],
             }),
+        );
+    });
+
+    it("adds up to five remote tracks after an all-type library search", async () => {
+        const remoteTracks = [{ id: "tidal:42", source: "tidal" }];
+        mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
+        const req = {
+            query: { q: "radiohead", type: "all" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchAll).toHaveBeenCalledWith({
+            query: "radiohead",
+            limit: 20,
+            genre: undefined,
+        });
+        expect(mockSearchRemoteLibraryTracks).toHaveBeenCalledWith(
+            "user-1",
+            "radiohead",
+            5,
+        );
+        expect(mockSearchAll.mock.invocationCallOrder[0]).toBeLessThan(
+            mockSearchRemoteLibraryTracks.mock.invocationCallOrder[0],
+        );
+        expect(res.body.remoteTracks).toEqual(remoteTracks);
+    });
+
+    it("uses the requested limit for remote track-only search", async () => {
+        const remoteTracks = [{ id: "yt:video-1", source: "youtube" }];
+        mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
+        const req = {
+            query: {
+                q: "boards",
+                type: "tracks",
+                source: "all",
+                limit: "7",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchByType).toHaveBeenCalledWith({
+            query: "boards",
+            type: "tracks",
+            limit: 7,
+            offset: 0,
+            genre: undefined,
+            source: "all",
+        });
+        expect(mockSearchRemoteLibraryTracks).toHaveBeenCalledWith(
+            "user-1",
+            "boards",
+            7,
+        );
+        expect(res.body.remoteTracks).toEqual(remoteTracks);
+    });
+
+    it.each([
+        ["peer source", { type: "tracks", source: "peers" }, "user-1"],
+        ["non-track type", { type: "artists" }, "user-1"],
+        ["later page", { type: "tracks", offset: "1" }, "user-1"],
+        ["no user", { type: "tracks" }, undefined],
+    ])(
+        "returns no remote tracks for %s",
+        async (_caseName, queryOptions, userId) => {
+            const req = {
+                query: { q: "search", ...queryOptions },
+                user: userId ? { id: userId } : undefined,
+            } as any;
+            const res = createRes();
+
+            await rootHandler(req, res);
+
+            expect(mockSearchRemoteLibraryTracks).not.toHaveBeenCalled();
+            expect(res.statusCode).toBe(200);
+            expect(res.body.remoteTracks).toEqual([]);
+        },
+    );
+
+    it("isolates remote search failures from the main search response", async () => {
+        const remoteError = new Error("remote unavailable");
+        mockSearchRemoteLibraryTracks.mockRejectedValueOnce(remoteError);
+        const req = {
+            query: { q: "radiohead", type: "all" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.remoteTracks).toEqual([]);
+        expect(mockRemoteSearchWarn).toHaveBeenCalledWith(
+            "Remote library search failed",
+            { error: remoteError, queryLength: 9 },
         );
     });
 
@@ -310,6 +452,7 @@ describe("search route runtime behavior", () => {
             expect(mockSearchByType).not.toHaveBeenCalled();
             expect(res.statusCode).toBe(400);
             expect(res.body).toEqual({ error: "Invalid search query" });
+            expect(res.body).not.toHaveProperty("remoteTracks");
         },
     );
 
@@ -343,6 +486,7 @@ describe("search route runtime behavior", () => {
         expect(mockSearchByType).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(400);
         expect(res.body).toEqual({ error: "Invalid search query" });
+        expect(res.body).not.toHaveProperty("remoteTracks");
     });
 
     it("ignores undeclared search parameters for caller compatibility", async () => {
@@ -375,6 +519,7 @@ describe("search route runtime behavior", () => {
 
         expect(res.statusCode).toBe(400);
         expect(res.body).toEqual({ error: "Invalid search query" });
+        expect(res.body).not.toHaveProperty("remoteTracks");
         expect(mockSearchAll).not.toHaveBeenCalled();
         expect(mockSearchByType).not.toHaveBeenCalled();
     });
@@ -397,6 +542,7 @@ describe("search route runtime behavior", () => {
         });
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Search failed" });
+        expect(res.body).not.toHaveProperty("remoteTracks");
     });
 
     it("returns empty and visible genres while hiding all-removed genres", async () => {

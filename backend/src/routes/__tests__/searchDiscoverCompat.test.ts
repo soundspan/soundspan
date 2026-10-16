@@ -47,6 +47,10 @@ jest.mock("../../services/search", () => ({
     normalizeCacheQuery: (query: string) => query.trim().toLowerCase(),
 }));
 
+jest.mock("../../services/remoteLibrary/remoteLibrarySearch", () => ({
+    searchRemoteLibraryTracks: jest.fn(),
+}));
+
 import router from "../search";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";

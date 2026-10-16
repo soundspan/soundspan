@@ -1,3 +1,4 @@
+import type { Track as LibraryBrowseTrack } from "@/features/library/types";
 import type {
     FederatedTrackPeer,
     UnifiedTrackSource,
@@ -96,6 +97,8 @@ export interface SearchResult {
     tracks?: LibraryTrack[];
     audiobooks?: Audiobook[];
     episodes?: Episode[];
+    /** The viewer's liked TIDAL / YouTube Music songs that are not in the library. */
+    remoteTracks?: LibraryBrowseTrack[];
 }
 
 export interface DiscoverResult {

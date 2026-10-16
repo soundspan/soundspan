@@ -19,6 +19,7 @@ Start-here guide for `frontend/features/library`.
 | `components/ArtistsGrid.tsx` | components |
 | `components/LibraryHeader.tsx` | components |
 | `components/LibraryTabs.tsx` | components |
+| `components/RemoteTrackAcquisitionItem.tsx` | components |
 | `components/TracksList.tsx` | components |
 | `hooks/useLibraryActions.ts` | hooks |
 | `hooks/useRemoteTrackAcquisition.ts` | hooks |
