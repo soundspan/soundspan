@@ -46,7 +46,7 @@ import {
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
     isLibrarySurfaceAlbumLocation,
-    parseLibraryOrigin,
+    parseLibraryBrowseOrigin,
     trackBrowseWhere,
 } from "../../utils/librarySorting";
 import {
@@ -56,6 +56,12 @@ import {
     libraryDeletionLogger,
 } from "../../utils/libraryDeletion";
 import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
+import {
+    collapseProviderDuplicateSets,
+    loadRemoteLibrarySet,
+    mergeRemoteAlbumWhere,
+    shouldLoadRemoteLibrary,
+} from "../../services/remoteLibrary";
 
 /**
  * Router segment for albums routes registered at this position.
@@ -108,9 +114,9 @@ export const albumsDeletionRouter = Router();
  *         name: origin
  *         schema:
  *           type: string
- *           enum: [all, local, peers]
+ *           enum: [all, local, peers, remote]
  *           default: all
- *         description: Filter albums by local or federated track origin
+ *         description: Filter albums by local or federated track origin; remote is your liked TIDAL / YouTube Music tracks that are not in the library
  *       - in: query
  *         name: sortBy
  *         schema:
@@ -130,6 +136,15 @@ export const albumsDeletionRouter = Router();
  *                   type: array
  *                   items:
  *                     type: object
+ *                     properties:
+ *                       source:
+ *                         type: string
+ *                         enum: [local, federated, remote]
+ *                       remoteSources:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                           enum: [tidal, youtube]
  *                 total:
  *                   type: integer
  *                 offset:
@@ -153,14 +168,23 @@ export async function handleGetAlbums(req: Request, res: Response) {
             sortBy = "name",
             origin: originParam,
         } = req.query;
-        const origin = parseLibraryOrigin(originParam);
+        const origin = parseLibraryBrowseOrigin(originParam);
         if (!origin) {
             return sendRouteError(res, 400, "Invalid library origin filter");
         }
         const browseTrackWhere = {
             ...TRACK_VISIBLE_WHERE,
-            ...trackBrowseWhere(origin),
+            ...trackBrowseWhere(origin === "remote" ? "all" : origin),
         };
+        const remoteLibrary = shouldLoadRemoteLibrary(origin, filter)
+            ? await loadRemoteLibrarySet(
+                  req.user?.id,
+                  artistId ? { artistId: artistId as string } : undefined,
+              )
+            : null;
+        const remoteAlbumIds = remoteLibrary
+            ? [...remoteLibrary.byAlbumId.keys()]
+            : [];
         const limit = Math.min(
             parseInt(limitParam as string, 10) || 500,
             MAX_LIMIT,
@@ -177,7 +201,9 @@ export async function handleGetAlbums(req: Request, res: Response) {
         };
 
         // Apply location filter
-        if (filter === "owned") {
+        if (origin === "remote") {
+            where = { location: "REMOTE", id: { in: remoteAlbumIds } };
+        } else if (filter === "owned") {
             // Get all owned album rgMbids (includes liked discovery albums)
             const ownedAlbumMbids = await prisma.ownedAlbum.findMany({
                 select: { rgMbid: true },
@@ -207,17 +233,12 @@ export async function handleGetAlbums(req: Request, res: Response) {
         }
         // filter === "all" shows all locations
 
-        // If artistId is provided, filter by artist
-        if (artistId) {
-            if (where.OR) {
-                // If we have OR conditions, wrap with AND
-                where = {
-                    AND: [{ OR: where.OR }, { artistId: artistId as string }],
-                };
-            } else {
-                where.artistId = artistId as string;
-            }
-        }
+        where = mergeRemoteAlbumWhere(
+            where,
+            origin,
+            remoteAlbumIds,
+            artistId as string | undefined,
+        );
 
         const [albumsData, total] = await Promise.all([
             prisma.album.findMany({
@@ -248,18 +269,28 @@ export async function handleGetAlbums(req: Request, res: Response) {
         // Normalize coverArt field for frontend
         const albums = albumsData
             .filter((album) => isLibrarySurfaceAlbumLocation(album.location))
-            .map(({ federationPeer, ...album }) => ({
-                ...album,
-                source: album.location === "FEDERATED" ? "federated" : "local",
-                peer: federationPeer
-                    ? {
-                          id: federationPeer.id,
-                          name: federationPeer.name,
-                          online: federationPeer.outboundStatus === "ACTIVE",
-                      }
-                    : undefined,
-                coverArt: album.coverUrl,
-            }));
+            .map(({ federationPeer, ...album }) => {
+                const remoteSources = remoteLibrary?.byAlbumId.get(album.id);
+                return {
+                    ...album,
+                    source:
+                        album.location === "FEDERATED"
+                            ? "federated"
+                            : album.location === "REMOTE" && remoteSources
+                              ? "remote"
+                              : "local",
+                    ...(remoteSources ? { remoteSources } : {}),
+                    peer: federationPeer
+                        ? {
+                              id: federationPeer.id,
+                              name: federationPeer.name,
+                              online:
+                                  federationPeer.outboundStatus === "ACTIVE",
+                          }
+                        : undefined,
+                    coverArt: album.coverUrl,
+                };
+            });
 
         res.json({
             albums,
@@ -495,29 +526,15 @@ function formatYtAlbumTracks(album: AlbumWithTracks) {
     }));
 }
 
-type ProviderTrack =
-    | AlbumWithTracks["tracksTidal"][number]
-    | AlbumWithTracks["tracksYtMusic"][number];
-
-function canonicalMappingKeys(track: ProviderTrack): string[] {
-    return (track.mappings ?? []).flatMap((mapping) => [
-        `mapping:${mapping.id}`,
-        ...(mapping.trackId ? [`track:${mapping.trackId}`] : []),
-    ]);
-}
-
 function formatRemoteAlbumTracks(album: AlbumWithTracks) {
-    const tidalMappingKeys = new Set(
-        album.tracksTidal.flatMap(canonicalMappingKeys),
-    );
-    // Prefer TIDAL when an active mapping proves both provider rows represent
-    // one canonical recording. Unmapped provider rows remain independently playable.
-    const uniqueYtTracks = album.tracksYtMusic.filter((track) =>
-        canonicalMappingKeys(track).every((key) => !tidalMappingKeys.has(key)),
+    const unique = collapseProviderDuplicateSets(
+        album.tracksTidal,
+        album.tracksYtMusic,
+        "tidal",
     );
     return [
-        ...formatTidalAlbumTracks(album),
-        ...formatYtAlbumTracks({ ...album, tracksYtMusic: uniqueYtTracks }),
+        ...formatTidalAlbumTracks({ ...album, tracksTidal: unique.tidalRows }),
+        ...formatYtAlbumTracks({ ...album, tracksYtMusic: unique.youtubeRows }),
     ];
 }
 

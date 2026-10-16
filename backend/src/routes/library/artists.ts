@@ -40,7 +40,7 @@ import {
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
     isLibrarySurfaceAlbumLocation,
-    parseLibraryOrigin,
+    parseLibraryBrowseOrigin,
     trackBrowseWhere,
 } from "../../utils/librarySorting";
 import {
@@ -67,6 +67,12 @@ import {
     persistCatalogReleaseGroups,
     readFreshCatalogReleaseGroups,
 } from "../../services/metadata/catalogPersistence";
+import {
+    formatRemoteAwareArtist,
+    loadRemoteLibrarySet,
+    mergeRemoteArtistWhere,
+    shouldLoadRemoteLibrary,
+} from "../../services/remoteLibrary";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -111,9 +117,9 @@ export const artistsDeletionRouter = Router();
  *         name: origin
  *         schema:
  *           type: string
- *           enum: [all, local, peers]
+ *           enum: [all, local, peers, remote]
  *           default: all
- *         description: Filter artists by local or federated track origin
+ *         description: Filter artists by local or federated track origin; remote is your liked TIDAL / YouTube Music tracks that are not in the library
  *       - in: query
  *         name: cursor
  *         schema:
@@ -125,7 +131,7 @@ export const artistsDeletionRouter = Router();
  *           type: string
  *           enum: [name, name-desc, tracks]
  *           default: name
- *         description: Sort order
+ *         description: Sort order; tracks uses stored library track counts and does not include remote counts
  *     responses:
  *       200:
  *         description: Paginated list of artists
@@ -138,6 +144,15 @@ export const artistsDeletionRouter = Router();
  *                   type: array
  *                   items:
  *                     type: object
+ *                     properties:
+ *                       source:
+ *                         type: string
+ *                         enum: [local, federated, remote]
+ *                       remoteSources:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                           enum: [tidal, youtube]
  *                 total:
  *                   type: integer
  *                 offset:
@@ -150,8 +165,6 @@ export const artistsDeletionRouter = Router();
  *       401:
  *         description: Not authenticated
  */
-// GET /library/artists?query=&limit=&offset=&filter=owned|discovery|remote|all&cursor=
-// Optimized with denormalized counts for O(1) filtering
 /**
  * Handles GET /api/library/artists.
  */
@@ -161,19 +174,25 @@ export async function handleGetArtists(req: Request, res: Response) {
             query = "",
             limit: limitParam = "50",
             offset: offsetParam = "0",
-            filter = "owned", // owned (default), discovery, remote, all
-            cursor, // Optional cursor for cursor-based pagination
+            filter = "owned",
+            cursor,
             sortBy = "name",
             origin: originParam,
         } = req.query;
-        const origin = parseLibraryOrigin(originParam);
+        const origin = parseLibraryBrowseOrigin(originParam);
         if (!origin) {
             return sendRouteError(res, 400, "Invalid library origin filter");
         }
         const browseTrackWhere = {
             ...TRACK_VISIBLE_WHERE,
-            ...trackBrowseWhere(origin),
+            ...trackBrowseWhere(origin === "remote" ? "all" : origin),
         };
+        const remoteLibrary = shouldLoadRemoteLibrary(origin, filter)
+            ? await loadRemoteLibrarySet(req.user?.id)
+            : null;
+        const remoteArtistIds = remoteLibrary
+            ? [...remoteLibrary.byArtistId.keys()]
+            : [];
 
         const limit = Math.min(
             parseInt(limitParam as string, 10) || 50,
@@ -185,25 +204,22 @@ export async function handleGetArtists(req: Request, res: Response) {
             name: "asc" as const,
         };
 
-        // Check whether denormalized counts have been backfilled.
-        // If no artist has a non-null countsLastUpdated, the counts are stale
-        // (e.g. fresh DB after first scan before backfill finishes) and we
-        // must fall back to JOIN-based filtering to avoid returning 0 results.
         const countsReady =
             origin !== "peers" &&
+            origin !== "remote" &&
             (await prisma.artist.count({
                 where: { countsLastUpdated: { not: null } },
             })) > 0;
 
-        // Build WHERE clause
-        const where: Prisma.ArtistWhereInput = {};
+        let where: Prisma.ArtistWhereInput = {};
 
-        if (origin === "peers") {
+        if (origin === "remote") {
+            where.id = { in: remoteArtistIds };
+        } else if (origin === "peers") {
             where.albums = {
                 some: { tracks: { some: browseTrackWhere } },
             };
         } else if (countsReady) {
-            // Fast path: use denormalized counts (indexed lookup)
             if (filter === "owned") {
                 where.OR = [
                     { libraryAlbumCount: { gt: 0 } },
@@ -227,7 +243,6 @@ export async function handleGetArtists(req: Request, res: Response) {
                 ];
             }
         } else {
-            // Fallback: counts not yet backfilled — use JOINs
             if (filter === "owned") {
                 where.OR = [
                     {
@@ -289,12 +304,12 @@ export async function handleGetArtists(req: Request, res: Response) {
             }
         }
 
-        // Add search query if provided
+        where = mergeRemoteArtistWhere(where, origin, remoteArtistIds);
+
         if (query) {
             where.name = { contains: query as string, mode: "insensitive" };
         }
 
-        // Execute queries with timeout to prevent cascade failures
         const [artists, total] = await prisma.$transaction(
             async (tx) => {
                 // Build findMany args - cursor or offset pagination
@@ -344,38 +359,12 @@ export async function handleGetArtists(req: Request, res: Response) {
 
         const artistsWithImages = artists.map((artist) => {
             const coverArt = imageMap.get(artist.id) || artist.heroUrl || null;
-
-            // Use denormalized counts when ready, otherwise show raw sum
-            const albumCount = countsReady
-                ? filter === "discovery"
-                    ? artist.discoveryAlbumCount
-                    : filter === "all"
-                      ? artist.libraryAlbumCount + artist.discoveryAlbumCount
-                      : artist.libraryAlbumCount
-                : artist.libraryAlbumCount + artist.discoveryAlbumCount;
-
-            return {
-                id: artist.id,
-                mbid: artist.mbid,
-                name: artist.name,
-                heroUrl: coverArt,
-                coverArt, // Alias for frontend consistency
-                albumCount,
-                trackCount: artist.totalTrackCount,
-                ...(artist.peerId && artist.federationPeer
-                    ? {
-                          source: "federated" as const,
-                          streamSource: "peer" as const,
-                          peer: {
-                              id: artist.federationPeer.id,
-                              name: artist.federationPeer.name,
-                              online:
-                                  artist.federationPeer.outboundStatus ===
-                                  "ACTIVE",
-                          },
-                      }
-                    : {}),
-            };
+            return formatRemoteAwareArtist(artist, coverArt, {
+                countsReady,
+                filter,
+                origin,
+                remoteStats: remoteLibrary?.byArtistId.get(artist.id),
+            });
         });
 
         // Include cursor for next page (last artist ID)
@@ -436,6 +425,27 @@ artistsListRouter.get("/artists", handleGetArtists);
  *     responses:
  *       200:
  *         description: Artist details with albums, top tracks, and similar artists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 albums:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       source:
+ *                         type: string
+ *                         enum: [database, musicbrainz, remote]
+ *                       remoteSources:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                           enum: [tidal, youtube]
+ *                       provenanceSource:
+ *                         type: string
+ *                         enum: [local, federated, remote]
  *       404:
  *         description: Artist not found
  *       401:
@@ -477,6 +487,12 @@ export async function handleGetArtist(
     if (!artist) {
         return sendRouteError(res, 404, "Artist not found");
     }
+    const hasRemoteAlbums = artist.albums.some(
+        (album) => album.location === "REMOTE",
+    );
+    const remoteLibrary = hasRemoteAlbums
+        ? await loadRemoteLibrarySet(req.user?.id, { artistId: artist.id })
+        : null;
 
     // For enriched artists with ownedAlbums, skip expensive MusicBrainz calls.
     // Only fetch from MusicBrainz if the artist hasn't been enriched yet.
@@ -545,7 +561,8 @@ export async function handleGetArtist(
         .filter(
             (album) =>
                 isLibrarySurfaceAlbumLocation(album.location) &&
-                album.location !== "REMOTE",
+                (album.location !== "REMOTE" ||
+                    remoteLibrary?.byAlbumId.has(album.id)),
         )
         .map((album) => ({
             ...album,
@@ -555,9 +572,22 @@ export async function handleGetArtist(
             owned:
                 album.location === "LIBRARY" || ownedRgMbids.has(album.rgMbid),
             coverArt: album.coverUrl,
-            source: "database" as const,
+            source:
+                album.location === "REMOTE"
+                    ? ("remote" as const)
+                    : ("database" as const),
+            ...(album.location === "REMOTE"
+                ? {
+                      remoteSources:
+                          remoteLibrary?.byAlbumId.get(album.id) ?? [],
+                  }
+                : {}),
             provenanceSource:
-                album.location === "FEDERATED" ? "federated" : "local",
+                album.location === "FEDERATED"
+                    ? "federated"
+                    : album.location === "REMOTE"
+                      ? "remote"
+                      : "local",
             peer: album.federationPeer
                 ? {
                       id: album.federationPeer.id,
@@ -568,7 +598,7 @@ export async function handleGetArtist(
         }));
 
     logger.debug(
-        `[Artist] Found ${dbAlbums.length} albums from database (excluding REMOTE-only)`,
+        `[Artist] Found ${dbAlbums.length} visible albums from database`,
     );
 
     if (!includeDiscography) {

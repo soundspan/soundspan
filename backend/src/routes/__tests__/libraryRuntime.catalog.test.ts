@@ -70,6 +70,8 @@ import {
     mockDislikedEntityDeleteMany,
     mockRemoteLikedTrackFindMany,
     mockRemoteLikedTrackCount,
+    mockTrackTidalFindMany,
+    mockTrackYtMusicFindMany,
     mockRedisGet,
     mockRedisSetEx,
     mockPlayFindFirst,
@@ -157,6 +159,49 @@ import {
     expectNoUnboundedIdPoolFetch,
 } from "./libraryRuntime.helpers";
 
+function remoteTidalLikedEntry(input: {
+    id: string;
+    title: string;
+    artistId: string;
+    albumId?: string;
+}) {
+    return {
+        likedAt: new Date("2026-10-01T00:00:00.000Z"),
+        trackTidal: {
+            id: input.id,
+            title: input.title,
+            artistId: input.artistId,
+            albumId: input.albumId ?? null,
+            albumEntity: input.albumId
+                ? {
+                      artistId: input.artistId,
+                      location: "REMOTE",
+                  }
+                : null,
+            mappings: [],
+        },
+    };
+}
+
+function remoteTidalDisplayRow(input: {
+    id: string;
+    tidalId: number;
+    title: string;
+}) {
+    return {
+        id: input.id,
+        tidalId: input.tidalId,
+        title: input.title,
+        artist: "Remote artist",
+        album: "Remote album",
+        duration: 180,
+        artistId: null,
+        albumId: null,
+        artistEntity: null,
+        albumEntity: null,
+    };
+}
+
 describe("library catalog list runtime coverage", () => {
     const recentlyListenedHandler = getHandler("get", "/recently-listened");
     const recentlyAddedHandler = getHandler("get", "/recently-added");
@@ -213,6 +258,8 @@ describe("library catalog list runtime coverage", () => {
         mockDislikedEntityDeleteMany.mockReset();
         mockRemoteLikedTrackFindMany.mockReset();
         mockRemoteLikedTrackCount.mockReset();
+        mockTrackTidalFindMany.mockReset();
+        mockTrackYtMusicFindMany.mockReset();
         mockTrackMappingFindMany.mockReset();
         mockAlbumFindMany.mockReset();
         mockAlbumGroupBy.mockReset();
@@ -291,6 +338,8 @@ describe("library catalog list runtime coverage", () => {
         mockDislikedEntityDeleteMany.mockResolvedValue({ count: 0 });
         mockRemoteLikedTrackFindMany.mockResolvedValue([]);
         mockRemoteLikedTrackCount.mockResolvedValue(0);
+        mockTrackTidalFindMany.mockResolvedValue([]);
+        mockTrackYtMusicFindMany.mockResolvedValue([]);
         mockTrackMappingFindMany.mockResolvedValue([]);
         mockDownloadAndStoreImage.mockResolvedValue(
             "native:albums/library-runtime-default-cover.jpg",
@@ -1190,6 +1239,161 @@ describe("library catalog list runtime coverage", () => {
         );
     });
 
+    it("does not load remote membership for artist detail without REMOTE albums", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce({
+            id: "local-detail-artist",
+            name: "Local Detail Artist",
+            mbid: "temp-local-detail",
+            heroUrl: null,
+            userHeroUrl: null,
+            similarArtistsJson: null,
+            ownedAlbums: [],
+            albums: [
+                {
+                    id: "local-detail-album",
+                    title: "Local Detail Album",
+                    rgMbid: "rg-local-detail",
+                    location: "LIBRARY",
+                    coverUrl: null,
+                    tracks: [],
+                    federationPeer: null,
+                },
+            ],
+        });
+        const res = createRes();
+
+        await artistByIdHandler(
+            {
+                params: { id: "local-detail-artist" },
+                query: {
+                    includeDiscography: "false",
+                    includeTopTracks: "false",
+                    includeSimilarArtists: "false",
+                },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(mockUserSettingsFindUnique).not.toHaveBeenCalled();
+        expect(mockGetSystemSettings).not.toHaveBeenCalled();
+        expect(mockRemoteLikedTrackFindMany).not.toHaveBeenCalled();
+    });
+
+    it("merges only the requesting user's remote albums into artist detail", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                likedAt: new Date(),
+                trackTidal: {
+                    id: "tidal-detail",
+                    tidalId: 77,
+                    title: "Remote detail song",
+                    artist: "Artist detail",
+                    album: "Remote detail album",
+                    duration: 180,
+                    artistId: "artist-detail",
+                    albumId: "remote-detail-album",
+                    artistEntity: null,
+                    albumEntity: {
+                        id: "remote-detail-album",
+                        title: "Remote detail album",
+                        rgMbid: "remote:detail",
+                        coverUrl: "detail-cover.jpg",
+                        artistId: "artist-detail",
+                        location: "REMOTE",
+                        artist: {
+                            id: "artist-detail",
+                            name: "Artist detail",
+                        },
+                    },
+                    mappings: [],
+                },
+            },
+        ]);
+        mockArtistFindFirst.mockResolvedValueOnce({
+            id: "artist-detail",
+            name: "Artist detail",
+            mbid: "temp-detail",
+            heroUrl: null,
+            userHeroUrl: null,
+            similarArtistsJson: null,
+            catalogSyncedAt: null,
+            peerId: null,
+            federationPeer: null,
+            ownedAlbums: [],
+            albums: [
+                {
+                    id: "remote-detail-album",
+                    title: "Remote detail album",
+                    rgMbid: "remote:detail",
+                    location: "REMOTE",
+                    coverUrl: "detail-cover.jpg",
+                    tracks: [],
+                    federationPeer: null,
+                },
+                {
+                    id: "other-remote-album",
+                    title: "Other remote album",
+                    rgMbid: "remote:other",
+                    location: "REMOTE",
+                    coverUrl: null,
+                    tracks: [],
+                    federationPeer: null,
+                },
+            ],
+        });
+        const res = createRes();
+
+        await artistByIdHandler(
+            {
+                params: { id: "artist-detail" },
+                query: {
+                    includeDiscography: "false",
+                    includeTopTracks: "false",
+                    includeSimilarArtists: "false",
+                },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.body.albums).toEqual([
+            expect.objectContaining({
+                id: "remote-detail-album",
+                source: "remote",
+                remoteSources: ["tidal"],
+            }),
+        ]);
+        expect(mockRemoteLikedTrackFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    trackTidal: {
+                        is: expect.objectContaining({
+                            OR: [
+                                { artistId: "artist-detail" },
+                                {
+                                    albumEntity: {
+                                        is: { artistId: "artist-detail" },
+                                    },
+                                },
+                            ],
+                        }),
+                    },
+                }),
+            }),
+        );
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
+    });
+
     it("treats unknown boolean-like artist query values as default values", async () => {
         mockArtistFindFirst.mockResolvedValueOnce({
             id: "artist-default-unknown",
@@ -1866,6 +2070,686 @@ describe("library catalog list runtime coverage", () => {
         const errRes = createRes();
         await invokeWithErrorHandler(tracksHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
+    });
+
+    it.each([
+        ["artists", artistsHandler],
+        ["albums", albumsHandler],
+        ["tracks", tracksHandler],
+    ])("rejects an invalid %s browse origin", async (_name, handler) => {
+        const res = createRes();
+
+        await handler({ query: { origin: "internet" } } as any, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Invalid library origin filter" });
+    });
+
+    it.each(["local", "peers"])(
+        "keeps %s track browsing off the remote-library path",
+        async (origin) => {
+            mockTrackFindMany.mockResolvedValueOnce([]);
+            mockTrackCount.mockResolvedValueOnce(0);
+            const res = createRes();
+
+            await tracksHandler(
+                { query: { origin }, user: { id: "user-1" } } as any,
+                res,
+            );
+
+            expect(res.body).toEqual({
+                tracks: [],
+                total: 0,
+                offset: 0,
+                limit: 100,
+            });
+            expect(mockUserSettingsFindUnique).not.toHaveBeenCalled();
+            expect(mockRemoteLikedTrackFindMany).not.toHaveBeenCalled();
+            expect(mockPrismaQueryRaw).not.toHaveBeenCalled();
+        },
+    );
+
+    it("rejects remote origin when albumId uses the Prisma track path", async () => {
+        const res = createRes();
+
+        await tracksHandler(
+            {
+                query: { albumId: "album-1", origin: "remote" },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Invalid library origin filter" });
+        expect(mockTrackFindMany).not.toHaveBeenCalled();
+        expect(mockRemoteLikedTrackFindMany).not.toHaveBeenCalled();
+    });
+
+    it("adds remote artist ids on the counts-ready all-origin path", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            remoteTidalLikedEntry({
+                id: "tidal-counts",
+                title: "Counts remote",
+                artistId: "remote-counts-artist",
+                albumId: "remote-counts-album",
+            }),
+        ]);
+        const txArtistFindMany = jest.fn().mockResolvedValue([]);
+        mockPrismaTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                artist: {
+                    findMany: txArtistFindMany,
+                    count: jest.fn().mockResolvedValue(0),
+                },
+            }),
+        );
+        const res = createRes();
+
+        await artistsHandler(
+            {
+                query: { origin: "all", filter: "owned" },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(txArtistFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: expect.arrayContaining([
+                        { id: { in: ["remote-counts-artist"] } },
+                    ]),
+                }),
+            }),
+        );
+    });
+
+    it("adds remote artist ids on the JOIN-fallback all-origin path", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            remoteTidalLikedEntry({
+                id: "tidal-fallback",
+                title: "Fallback remote",
+                artistId: "remote-fallback-artist",
+                albumId: "remote-fallback-album",
+            }),
+        ]);
+        mockArtistCount.mockResolvedValueOnce(0);
+        const txArtistFindMany = jest.fn().mockResolvedValue([]);
+        mockPrismaTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                artist: {
+                    findMany: txArtistFindMany,
+                    count: jest.fn().mockResolvedValue(0),
+                },
+            }),
+        );
+        const res = createRes();
+
+        await artistsHandler(
+            {
+                query: { origin: "all", filter: "owned" },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(txArtistFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: expect.arrayContaining([
+                        { id: { in: ["remote-fallback-artist"] } },
+                    ]),
+                }),
+            }),
+        );
+    });
+
+    it("uses the unchanged Prisma track page when the remote set is empty", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: false,
+            ytMusicEnabled: false,
+        });
+        mockTrackFindMany.mockResolvedValueOnce([]);
+        mockTrackCount.mockResolvedValueOnce(0);
+        const res = createRes();
+
+        await tracksHandler(
+            { query: { origin: "all" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(res.body).toEqual({
+            tracks: [],
+            total: 0,
+            offset: 0,
+            limit: 100,
+        });
+        expect(mockRemoteLikedTrackFindMany).not.toHaveBeenCalled();
+        expect(mockPrismaQueryRaw).not.toHaveBeenCalled();
+    });
+
+    it("uses the unchanged Prisma track page for connected providers with zero likes", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: true,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValue([]);
+        mockTrackFindMany.mockResolvedValueOnce([
+            {
+                id: "local-zero-likes",
+                title: "Local zero likes",
+                origin: "LOCAL",
+                federationPeer: null,
+                album: {
+                    id: "album-zero-likes",
+                    title: "Album zero likes",
+                    coverUrl: null,
+                    artist: { id: "artist-1", name: "Artist" },
+                },
+            },
+        ]);
+        mockTrackCount.mockResolvedValueOnce(1);
+        const res = createRes();
+
+        await tracksHandler(
+            { query: { origin: "all" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(res.body).toEqual({
+            tracks: [
+                expect.objectContaining({
+                    id: "local-zero-likes",
+                    source: "local",
+                }),
+            ],
+            total: 1,
+            offset: 0,
+            limit: 100,
+        });
+        expect(mockRemoteLikedTrackFindMany).toHaveBeenCalledTimes(2);
+        expect(mockPrismaQueryRaw).not.toHaveBeenCalled();
+        expect(mockTrackTidalFindMany).not.toHaveBeenCalled();
+        expect(mockTrackYtMusicFindMany).not.toHaveBeenCalled();
+    });
+
+    it("decorates remote-only artists with per-user counts", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+            playbackSourceOrder: "library,peers,tidal,ytmusic",
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                likedAt: new Date(),
+                trackTidal: {
+                    id: "tidal-row",
+                    tidalId: 42,
+                    title: "Remote song",
+                    artist: "Remote artist",
+                    album: "Remote album",
+                    duration: 180,
+                    artistId: "remote-artist",
+                    albumId: "remote-album",
+                    artistEntity: null,
+                    albumEntity: {
+                        id: "remote-album",
+                        title: "Remote album",
+                        rgMbid: "remote:album",
+                        coverUrl: null,
+                        artistId: "remote-artist",
+                        location: "REMOTE",
+                        artist: {
+                            id: "remote-artist",
+                            name: "Remote artist",
+                        },
+                    },
+                    mappings: [],
+                },
+            },
+        ]);
+        const txArtistFindMany = jest.fn().mockResolvedValue([
+            {
+                id: "remote-artist",
+                mbid: "remote-artist-mbid",
+                name: "Remote artist",
+                heroUrl: null,
+                userHeroUrl: null,
+                libraryAlbumCount: 0,
+                discoveryAlbumCount: 0,
+                totalTrackCount: 0,
+                remoteTrackCount: 1,
+                peerId: null,
+                federationPeer: null,
+            },
+        ]);
+        mockPrismaTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                artist: {
+                    findMany: txArtistFindMany,
+                    count: jest.fn().mockResolvedValue(1),
+                },
+            }),
+        );
+        const res = createRes();
+
+        await artistsHandler(
+            { query: { origin: "remote" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(txArtistFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: { in: ["remote-artist"] } },
+            }),
+        );
+        expect(res.body.artists[0]).toEqual(
+            expect.objectContaining({
+                source: "remote",
+                remoteSources: ["tidal"],
+                albumCount: 1,
+                trackCount: 1,
+            }),
+        );
+        expect(mockTrackTidalFindMany).not.toHaveBeenCalled();
+        expect(mockTrackYtMusicFindMany).not.toHaveBeenCalled();
+    });
+
+    it("returns only liked REMOTE albums for the remote origin", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                likedAt: new Date(),
+                trackTidal: {
+                    id: "tidal-row",
+                    tidalId: 42,
+                    title: "Remote song",
+                    artist: "Remote artist",
+                    album: "Remote album",
+                    duration: 180,
+                    artistId: "remote-artist",
+                    albumId: "remote-album",
+                    artistEntity: null,
+                    albumEntity: {
+                        id: "remote-album",
+                        title: "Remote album",
+                        rgMbid: "remote:album",
+                        coverUrl: "remote-cover.jpg",
+                        artistId: "remote-artist",
+                        location: "REMOTE",
+                        artist: {
+                            id: "remote-artist",
+                            name: "Remote artist",
+                        },
+                    },
+                    mappings: [],
+                },
+            },
+        ]);
+        mockAlbumFindMany.mockResolvedValueOnce([
+            {
+                id: "remote-album",
+                title: "Remote album",
+                location: "REMOTE",
+                coverUrl: "remote-cover.jpg",
+                federationPeer: null,
+                artist: {
+                    id: "remote-artist",
+                    mbid: "artist-mbid",
+                    name: "Remote artist",
+                },
+            },
+        ]);
+        mockAlbumCount.mockResolvedValueOnce(1);
+        const res = createRes();
+
+        await albumsHandler(
+            { query: { origin: "remote" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(mockAlbumFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    location: "REMOTE",
+                    id: { in: ["remote-album"] },
+                },
+            }),
+        );
+        expect(res.body.albums[0]).toEqual(
+            expect.objectContaining({
+                source: "remote",
+                remoteSources: ["tidal"],
+                coverArt: "remote-cover.jpg",
+            }),
+        );
+        expect(mockTrackTidalFindMany).not.toHaveBeenCalled();
+        expect(mockTrackYtMusicFindMany).not.toHaveBeenCalled();
+    });
+
+    it("keeps a REMOTE-location album local when local origin did not load it remotely", async () => {
+        mockAlbumFindMany.mockResolvedValueOnce([
+            {
+                id: "downloaded-remote-album",
+                title: "Downloaded remote album",
+                location: "REMOTE",
+                coverUrl: null,
+                federationPeer: null,
+                artist: {
+                    id: "artist-1",
+                    mbid: "artist-mbid",
+                    name: "Artist",
+                },
+            },
+        ]);
+        mockAlbumCount.mockResolvedValueOnce(1);
+        const res = createRes();
+
+        await albumsHandler(
+            { query: { origin: "local", filter: "all" } } as any,
+            res,
+        );
+
+        expect(res.body.albums[0]).toEqual(
+            expect.objectContaining({
+                id: "downloaded-remote-album",
+                source: "local",
+            }),
+        );
+        expect(res.body.albums[0]).not.toHaveProperty("remoteSources");
+        expect(mockUserSettingsFindUnique).not.toHaveBeenCalled();
+        expect(mockRemoteLikedTrackFindMany).not.toHaveBeenCalled();
+    });
+
+    it("wraps the all-origin remote album union before artist filtering", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            remoteTidalLikedEntry({
+                id: "tidal-filtered-album",
+                title: "Filtered remote album",
+                artistId: "filtered-artist",
+                albumId: "filtered-remote-album",
+            }),
+        ]);
+        mockAlbumFindMany.mockResolvedValueOnce([]);
+        mockAlbumCount.mockResolvedValueOnce(0);
+        const res = createRes();
+
+        await albumsHandler(
+            {
+                query: {
+                    origin: "all",
+                    filter: "all",
+                    artistId: "filtered-artist",
+                },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        const where = mockAlbumFindMany.mock.calls[0][0].where;
+        expect(where).toEqual({
+            AND: [
+                {
+                    OR: [
+                        expect.objectContaining({
+                            location: {
+                                in: [
+                                    "LIBRARY",
+                                    "DISCOVER",
+                                    "REMOTE",
+                                    "FEDERATED",
+                                ],
+                            },
+                        }),
+                        {
+                            location: "REMOTE",
+                            id: { in: ["filtered-remote-album"] },
+                        },
+                    ],
+                },
+                { artistId: "filtered-artist" },
+            ],
+        });
+    });
+
+    it("keeps a LIBRARY album local when it contains a remote-set row", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                likedAt: new Date(),
+                trackTidal: {
+                    id: "tidal-library-row",
+                    tidalId: 43,
+                    title: "Liked library song",
+                    artist: "Library artist",
+                    album: "Library album",
+                    duration: 180,
+                    artistId: "library-artist",
+                    albumId: "library-album",
+                    artistEntity: null,
+                    albumEntity: {
+                        id: "library-album",
+                        title: "Library album",
+                        rgMbid: "rg-library",
+                        coverUrl: "library-cover.jpg",
+                        artistId: "library-artist",
+                        location: "LIBRARY",
+                        artist: {
+                            id: "library-artist",
+                            name: "Library artist",
+                        },
+                    },
+                    mappings: [],
+                },
+            },
+        ]);
+        mockAlbumFindMany.mockResolvedValueOnce([
+            {
+                id: "library-album",
+                title: "Library album",
+                location: "LIBRARY",
+                coverUrl: "library-cover.jpg",
+                federationPeer: null,
+                artist: {
+                    id: "library-artist",
+                    mbid: "artist-mbid",
+                    name: "Library artist",
+                },
+            },
+        ]);
+        mockAlbumCount.mockResolvedValueOnce(1);
+        const res = createRes();
+
+        await albumsHandler(
+            {
+                query: { origin: "all", artistId: "library-artist" },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.body.albums[0]).toEqual(
+            expect.objectContaining({
+                id: "library-album",
+                source: "local",
+            }),
+        );
+        expect(res.body.albums[0]).not.toHaveProperty("remoteSources");
+        expect(mockRemoteLikedTrackFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    trackTidal: {
+                        is: expect.objectContaining({
+                            OR: [
+                                { artistId: "library-artist" },
+                                {
+                                    albumEntity: {
+                                        is: { artistId: "library-artist" },
+                                    },
+                                },
+                            ],
+                        }),
+                    },
+                }),
+            }),
+        );
+    });
+
+    it("returns a remote-only Songs page through the ordered id query", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                likedAt: new Date(),
+                trackTidal: {
+                    id: "tidal-row",
+                    tidalId: 42,
+                    title: "Remote song",
+                    artist: "Remote artist",
+                    album: "Remote album",
+                    duration: 180,
+                    artistId: null,
+                    albumId: null,
+                    artistEntity: null,
+                    albumEntity: null,
+                    mappings: [],
+                },
+            },
+        ]);
+        mockPrismaQueryRaw.mockResolvedValueOnce([
+            { kind: "tidal", id: "tidal-row", title: "Remote song" },
+        ]);
+        mockTrackTidalFindMany.mockResolvedValueOnce([
+            remoteTidalDisplayRow({
+                id: "tidal-row",
+                tidalId: 42,
+                title: "Remote song",
+            }),
+        ]);
+        const res = createRes();
+
+        await tracksHandler(
+            { query: { origin: "remote" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                total: 1,
+                tracks: [
+                    expect.objectContaining({
+                        id: "tidal:42",
+                        source: "tidal",
+                        streamSource: "tidal",
+                    }),
+                ],
+            }),
+        );
+        expect(mockTrackCount).not.toHaveBeenCalled();
+    });
+
+    it("merges the all-origin Songs union in page order and reports total", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            remoteTidalLikedEntry({
+                id: "tidal-all-row",
+                title: "Alpha remote",
+                artistId: "remote-artist",
+            }),
+        ]);
+        mockPrismaQueryRaw.mockResolvedValueOnce([
+            { kind: "tidal", id: "tidal-all-row", title: "Alpha remote" },
+            { kind: "local", id: "local-all-row", title: "Zulu local" },
+        ]);
+        mockTrackCount.mockResolvedValueOnce(1);
+        mockTrackFindMany.mockResolvedValueOnce([
+            {
+                id: "local-all-row",
+                title: "Zulu local",
+                origin: "LOCAL",
+                federationPeer: null,
+                album: {
+                    id: "local-album",
+                    title: "Local album",
+                    coverUrl: null,
+                    artist: { id: "local-artist", name: "Local artist" },
+                },
+            },
+        ]);
+        mockTrackTidalFindMany.mockResolvedValueOnce([
+            remoteTidalDisplayRow({
+                id: "tidal-all-row",
+                tidalId: 84,
+                title: "Alpha remote",
+            }),
+        ]);
+        const res = createRes();
+
+        await tracksHandler(
+            { query: { origin: "all" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(res.body.total).toBe(2);
+        expect(
+            res.body.tracks.map((track: { id: string }) => track.id),
+        ).toEqual(["tidal:84", "local-all-row"]);
+        expect(mockPrismaQueryRaw).toHaveBeenCalledTimes(1);
     });
 
     it("requires authentication for liked playlist retrieval", async () => {

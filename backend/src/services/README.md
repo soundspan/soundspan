@@ -191,6 +191,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |
 | `backend/src/services/remoteTrackBackfillService.ts` | Core |
+| `backend/src/services/remoteLibrary/` | Per-user liked provider library loading, deduplication, derivation, and response mapping |
 | `backend/src/services/remoteTrackMetadataRefresh.ts` | Core |
 | `backend/src/services/scannedTrackPersistence.ts` | Scanner track persistence, audio-change invalidation, and album loudness refresh |
 | `backend/src/services/scrobbleConnections.ts` | Encrypted per-user scrobbler connection and provider-auth lifecycle |

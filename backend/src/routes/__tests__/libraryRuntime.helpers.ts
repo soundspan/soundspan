@@ -100,10 +100,12 @@ jest.mock("../../utils/db", () => ({
         },
         trackTidal: {
             findUnique: jest.fn(),
+            findMany: jest.fn(),
             upsert: jest.fn(),
         },
         trackYtMusic: {
             findUnique: jest.fn(),
+            findMany: jest.fn(),
             upsert: jest.fn(),
         },
         trackMapping: {
@@ -505,6 +507,9 @@ const mockRemoteLikedTrackFindMany = (prisma as any).likedRemoteTrack
     .findMany as jest.Mock;
 const mockRemoteLikedTrackCount = (prisma as any).likedRemoteTrack
     .count as jest.Mock;
+const mockTrackTidalFindMany = (prisma as any).trackTidal.findMany as jest.Mock;
+const mockTrackYtMusicFindMany = (prisma as any).trackYtMusic
+    .findMany as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
 const mockPlayFindFirst = prisma.play.findFirst as jest.Mock;
@@ -835,6 +840,8 @@ export {
     mockDislikedEntityDeleteMany,
     mockRemoteLikedTrackFindMany,
     mockRemoteLikedTrackCount,
+    mockTrackTidalFindMany,
+    mockTrackYtMusicFindMany,
     mockRedisGet,
     mockRedisSetEx,
     mockPlayFindFirst,
