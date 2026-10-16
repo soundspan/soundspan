@@ -339,6 +339,7 @@ const overlayCalls = {
     skipForward: [] as number[],
     previous: 0,
     next: 0,
+    returnToPreviousMode: 0,
 };
 
 mock.module("@/lib/audio-context", {
@@ -372,7 +373,9 @@ mock.module("@/lib/audio-context", {
             previous: () => {
                 overlayCalls.previous += 1;
             },
-            returnToPreviousMode: () => undefined,
+            returnToPreviousMode: () => {
+                overlayCalls.returnToPreviousMode += 1;
+            },
             seek: () => undefined,
             toggleShuffle: () => undefined,
             toggleRepeat: () => undefined,
@@ -533,6 +536,7 @@ beforeEach(() => {
     overlayCalls.skipForward.length = 0;
     overlayCalls.previous = 0;
     overlayCalls.next = 0;
+    overlayCalls.returnToPreviousMode = 0;
     overlayState.playbackType = "podcast";
     overlayState.currentPodcast = {
         id: "pod-1",
@@ -783,6 +787,45 @@ test("OverlayPlayer renders Skip back/forward 15 seconds buttons for podcast pla
 
     assert.ok(skipBack, "expected a 'Skip back 15 seconds' button");
     assert.ok(skipForward, "expected a 'Skip forward 15 seconds' button");
+
+    await unmount(mounted);
+});
+
+test("OverlayPlayer on mobile shows a Minimize player button that closes the overlay (#909)", async () => {
+    const { OverlayPlayer } =
+        await import("../../components/player/OverlayPlayer");
+    const mounted = await mount(
+        withQueryClient(React.createElement(OverlayPlayer)),
+    );
+
+    const minimize = mounted.container.querySelector(
+        'button[aria-label="Minimize player"]',
+    ) as HTMLButtonElement | null;
+    assert.ok(minimize, "expected a visible Minimize player button on mobile");
+
+    await React.act(async () => {
+        minimize.click();
+    });
+    assert.equal(overlayCalls.returnToPreviousMode, 1);
+
+    await unmount(mounted);
+});
+
+test("OverlayPlayer header blocks browser pull-to-refresh on its swipe-down area (#909)", async () => {
+    const { OverlayPlayer } =
+        await import("../../components/player/OverlayPlayer");
+    const mounted = await mount(
+        withQueryClient(React.createElement(OverlayPlayer)),
+    );
+
+    const minimize = mounted.container.querySelector(
+        'button[aria-label="Minimize player"]',
+    );
+    const header = minimize?.closest(".touch-none");
+    assert.ok(
+        header,
+        "expected the swipe-down header to set touch-action: none",
+    );
 
     await unmount(mounted);
 });

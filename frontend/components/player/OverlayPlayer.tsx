@@ -506,8 +506,11 @@ export function OverlayPlayer() {
             }
         >
             {/* Header */}
+            {/* touch-none: the header owns the swipe-down so the browser
+                cannot turn it into pull-to-refresh (React touch listeners
+                are passive, so preventDefault alone cannot stop it). */}
             <div
-                className="flex-shrink-0 px-4 pt-3 pb-2"
+                className="flex-shrink-0 px-4 pt-3 pb-2 touch-none"
                 style={{ paddingTop: "calc(12px + env(safe-area-inset-top))" }}
                 onTouchStart={
                     isMobileOrTablet
@@ -526,21 +529,18 @@ export function OverlayPlayer() {
                 }
             >
                 <div className="flex items-center justify-between">
-                    {isMobileOrTablet ? (
-                        <div className="w-11" />
-                    ) : (
-                        <button
-                            onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                returnToPreviousMode();
-                            }}
-                            className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/10"
-                            title="Close"
-                        >
-                            <ChevronDown className="w-7 h-7" />
-                        </button>
-                    )}
+                    <button
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            returnToPreviousMode();
+                        }}
+                        className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/10"
+                        title="Minimize player"
+                        aria-label="Minimize player"
+                    >
+                        <ChevronDown className="w-7 h-7" />
+                    </button>
                     {/* Now Playing indicator */}
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-400 uppercase tracking-widest font-medium">
