@@ -50,6 +50,10 @@ type TidalDisplayRow = Prisma.TrackTidalGetPayload<{
 type YoutubeDisplayRow = Prisma.TrackYtMusicGetPayload<{
     select: typeof youtubeDisplaySelect;
 }>;
+type RemoteTrackMatchRow = { id: string };
+
+const REMOTE_LIBRARY_TEXT_TERM_CAP = 6;
+const REMOTE_SEARCH_PROVIDER_ROW_CAP = 400;
 
 function providerIds(
     rows: ReadonlyArray<RemoteLibraryTrack>,
@@ -58,6 +62,93 @@ function providerIds(
     return rows
         .filter((row) => row.provider === provider)
         .map((row) => row.providerRowId);
+}
+
+function textTerms(query: string): string[] {
+    return query
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, REMOTE_LIBRARY_TEXT_TERM_CAP);
+}
+
+function textMatchAlternatives(term: string) {
+    const contains = { contains: term, mode: "insensitive" as const };
+    return [
+        { title: contains },
+        { artist: contains },
+        { album: contains },
+        {
+            artistEntity: {
+                is: {
+                    name: contains,
+                },
+            },
+        },
+        {
+            albumEntity: {
+                is: {
+                    title: contains,
+                },
+            },
+        },
+    ];
+}
+
+function textMatchWhere(terms: ReadonlyArray<string>) {
+    return {
+        AND: terms.map((term) => ({
+            OR: textMatchAlternatives(term),
+        })),
+    };
+}
+
+async function loadMatchingTidalIds(
+    ids: string[],
+    terms: ReadonlyArray<string>,
+    take: number,
+): Promise<RemoteTrackMatchRow[]> {
+    if (ids.length === 0) return [];
+    return prisma.trackTidal.findMany({
+        where: { id: { in: ids }, ...textMatchWhere(terms) },
+        select: { id: true },
+        take,
+    });
+}
+
+async function loadMatchingYoutubeIds(
+    ids: string[],
+    terms: ReadonlyArray<string>,
+    take: number,
+): Promise<RemoteTrackMatchRow[]> {
+    if (ids.length === 0) return [];
+    return prisma.trackYtMusic.findMany({
+        where: { id: { in: ids }, ...textMatchWhere(terms) },
+        select: { id: true },
+        take,
+    });
+}
+
+/** Filters collapsed remote-library rows through bounded provider text queries. */
+export async function findMatchingRemoteLibraryTracks(
+    rows: ReadonlyArray<RemoteLibraryTrack>,
+    query: string,
+    limit: number,
+): Promise<RemoteLibraryTrack[]> {
+    const terms = textTerms(query);
+    if (rows.length === 0 || terms.length === 0 || limit < 1) return [];
+    const take = Math.min(limit * 4, REMOTE_SEARCH_PROVIDER_ROW_CAP);
+    const [tidalRows, youtubeRows] = await Promise.all([
+        loadMatchingTidalIds(providerIds(rows, "tidal"), terms, take),
+        loadMatchingYoutubeIds(providerIds(rows, "youtube"), terms, take),
+    ]);
+    const tidalIds = new Set(tidalRows.map((row) => row.id));
+    const youtubeIds = new Set(youtubeRows.map((row) => row.id));
+    return rows.filter((row) =>
+        row.provider === "tidal"
+            ? tidalIds.has(row.providerRowId)
+            : youtubeIds.has(row.providerRowId),
+    );
 }
 
 async function loadTidalDisplayRows(ids: string[]) {

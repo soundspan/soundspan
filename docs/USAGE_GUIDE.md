@@ -15,9 +15,9 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 
 - Home surfaces continue listening, recently added artists, Made For You mixes, recommendations, popular artists, community playlists, podcasts, and audiobooks
 - Search includes tabs for library, peers, discovery, Soulseek, and podcasts; peer and Soulseek tabs appear when their integrations are enabled
-- Search shows one **Songs** section: songs you own and songs you don't sit together in a single ranked list. External matches carry a provider badge (TIDAL or YouTube) and never duplicate something already in your library.
+- Search shows one **Songs** section in up to three parts: your library songs first, then the songs you liked on TIDAL or YouTube Music that are not in your library yet, under **From your streaming services**, then **More songs** from outside your library. External matches carry a provider badge (TIDAL or YouTube) and never repeat a song shown above them.
 - External songs with a streaming match play right from the results, and every row — owned or not — has the full menu with like/dislike, Go to artist, and Go to album
-- Songs you liked on TIDAL or YouTube Music that are not in your library yet show in their own **From your streaming services** group, below your library songs and with a provider badge. The group appears on the `All` and `My Library` tabs, and each row's menu has the same add-to-library options as in your Library (see [Your Library](#your-library))
+- The **From your streaming services** group shows up to five songs, each with a provider badge, on the `All` and `My Library` tabs. It matches every word of your search against the song title, artist, and album, but does not correct typos. Each row's menu has the same add-to-library options as in your Library (see [Your Library](#your-library)), and `Library` → `Remote` lists all of them
 - Search understands artist and album names, tolerates typos, and ranks near-misses by similarity instead of alphabetically
 - Discovery search supports preview/download/subscription actions
 - Explore and `/radio` station tiles (Quick Start, genres, decades) open a generated station playlist you can inspect before playing; Shuffle All still starts playback immediately

@@ -47,16 +47,36 @@ mock.module("lucide-react", {
     ),
 });
 
-const played: unknown[][] = [];
+const played: Array<{ tracks: unknown[]; index: number }> = [];
+const playerState = {
+    currentTrack: null as { id: string } | null,
+    isPlaying: false,
+    pauses: 0,
+    resumes: 0,
+};
 installTrackOverflowHarness(mock, {
     useAudioControls: () => ({
         playNext: () => undefined,
         addToQueue: () => undefined,
-        playTracks: (tracks: unknown[]) => {
-            played.push(tracks);
+        playTracks: (tracks: unknown[], index: number) => {
+            played.push({ tracks, index });
+        },
+        pause: () => {
+            playerState.pauses += 1;
+        },
+        resume: () => {
+            playerState.resumes += 1;
         },
     }),
-    useAudioState: () => ({ playbackType: "track", currentTrack: null }),
+    useAudioState: () => ({
+        playbackType: "track",
+        currentTrack: playerState.currentTrack,
+    }),
+});
+mock.module("@/lib/audio-playback-context", {
+    namedExports: {
+        usePlaybackStatus: () => ({ isPlaying: playerState.isPlaying }),
+    },
 });
 
 mock.module("@/hooks/useQueuedTrackIds", {
@@ -215,18 +235,74 @@ test("members can request the album from the row menu", async () => {
     await mounted.unmount();
 });
 
-test("playing a row queues the group as YouTube Music tracks", async () => {
+const tidalRow = {
+    id: "tidal:77",
+    title: "Liked Tidal Song",
+    duration: 200,
+    source: "tidal" as const,
+    streamSource: "tidal" as const,
+    tidalTrackId: 77,
+    album: {
+        id: "album-tidal",
+        title: "Tidal Album",
+        coverArt: null,
+        rgMbid: null,
+        artist: { id: "artist-7", name: "Tidal Artist" },
+    },
+};
+
+function rowsOf(container: HTMLElement): HTMLElement[] {
+    return Array.from(
+        container.querySelectorAll(
+            '[data-tv-section="search-streaming-likes"] [data-tv-card]',
+        ),
+    ) as HTMLElement[];
+}
+
+test("playing a row queues the whole group from that row with stream fields", async () => {
     played.length = 0;
-    const mounted = await mountList({ tracks: [ytRow] });
-    const row = mounted.container.querySelector(
-        '[data-tv-section="search-streaming-likes"] [role="button"], [data-tv-section="search-streaming-likes"] [tabindex="0"]',
-    ) as HTMLElement | null;
-    assert.ok(row, "expected a playable row");
+    playerState.currentTrack = null;
+    const mounted = await mountList({ tracks: [ytRow, tidalRow] });
+    const rows = rowsOf(mounted.container);
+    assert.equal(rows.length, 2);
     await React.act(async () => {
-        row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        rows[1].dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    const queued = played[0] as Array<Record<string, unknown>>;
+    assert.equal(played.length, 1);
+    assert.equal(played[0].index, 1);
+    const queued = played[0].tracks as Array<Record<string, unknown>>;
     assert.equal(queued[0].streamSource, "youtube");
     assert.equal(queued[0].youtubeVideoId, "abc");
+    assert.equal(queued[1].streamSource, "tidal");
+    assert.equal(queued[1].tidalTrackId, 77);
+    await mounted.unmount();
+});
+
+test("clicking the song that is already playing pauses it instead of restarting", async () => {
+    played.length = 0;
+    playerState.currentTrack = { id: "tidal:77" };
+    playerState.isPlaying = true;
+    playerState.pauses = 0;
+    const mounted = await mountList({ tracks: [tidalRow] });
+    await React.act(async () => {
+        rowsOf(mounted.container)[0].dispatchEvent(
+            new MouseEvent("click", { bubbles: true }),
+        );
+    });
+    assert.equal(playerState.pauses, 1);
+    assert.equal(played.length, 0);
+    playerState.currentTrack = null;
+    playerState.isPlaying = false;
+    await mounted.unmount();
+});
+
+test("shows five songs by default", async () => {
+    const many = Array.from({ length: 7 }, (_, index) => ({
+        ...tidalRow,
+        id: `tidal:${100 + index}`,
+        tidalTrackId: 100 + index,
+    }));
+    const mounted = await mountList({ tracks: many });
+    assert.equal(rowsOf(mounted.container).length, 5);
     await mounted.unmount();
 });

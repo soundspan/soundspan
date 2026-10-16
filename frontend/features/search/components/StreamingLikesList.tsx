@@ -3,6 +3,8 @@
 import { useCallback } from "react";
 import Link from "next/link";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { useAudioState } from "@/lib/audio-state-context";
+import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { formatTime } from "@/utils/formatTime";
 import { getArtistHref } from "@/utils/artistRoute";
 import { TrackList } from "@/components/track";
@@ -22,6 +24,7 @@ import type {
     RemoteTrackAcquisitionPolicy,
 } from "@/features/library/remoteTrackAcquisition";
 import type { Track as LibraryBrowseTrack } from "@/features/library/types";
+import { SongsSubheading } from "./SongsSubheading";
 
 interface StreamingLikesListProps {
     tracks: LibraryBrowseTrack[];
@@ -90,14 +93,22 @@ export function StreamingLikesList({
     acquisitionPolicy,
     onAcquire,
 }: StreamingLikesListProps) {
-    const { playTracks } = useAudioControls();
+    const { currentTrack } = useAudioState();
+    const { isPlaying } = usePlaybackStatus();
+    const { playTracks, pause, resume } = useAudioControls();
     const visibleTracks =
         typeof limit === "number" ? tracks.slice(0, limit) : tracks;
 
     const handlePlay = useCallback(
-        (_track: LibraryBrowseTrack, index: number) =>
-            playTracks(visibleTracks.map(toLibraryAudioTrack), index),
-        [playTracks, visibleTracks],
+        (track: LibraryBrowseTrack, index: number) => {
+            if (currentTrack?.id !== track.id) {
+                playTracks(visibleTracks.map(toLibraryAudioTrack), index);
+                return;
+            }
+            if (isPlaying) pause();
+            else resume();
+        },
+        [currentTrack?.id, isPlaying, pause, playTracks, resume, visibleTracks],
     );
 
     const rowSlots = useCallback(
@@ -120,7 +131,7 @@ export function StreamingLikesList({
                         </span>
                         <TrackPreferenceButtons
                             trackId={track.id}
-                            mode="up-only"
+                            mode="both"
                             buttonSizeClassName="h-8 w-8"
                             iconSizeClassName="h-4 w-4"
                             metadata={buildPreferenceMetadata({
@@ -152,13 +163,13 @@ export function StreamingLikesList({
     if (visibleTracks.length === 0) return null;
 
     return (
-        <section aria-labelledby="search-streaming-likes-heading">
-            <h3
-                id="search-streaming-likes-heading"
-                className="mt-6 mb-2 px-3 text-sm font-semibold text-gray-300"
-            >
+        <section
+            aria-labelledby="search-streaming-likes-heading"
+            className="my-4 rounded-lg border border-white/10 pt-3 pb-1"
+        >
+            <SongsSubheading id="search-streaming-likes-heading">
                 From your streaming services
-            </h3>
+            </SongsSubheading>
             <TrackList
                 items={visibleTracks}
                 toRowItem={toRowItem}

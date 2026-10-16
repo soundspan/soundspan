@@ -139,21 +139,33 @@ describe("remote library search", () => {
             byArtistId: new Map(),
             byAlbumId: new Map(),
         });
-        mockTidalFindMany.mockResolvedValueOnce([
-            tidalDisplayRow("tidal-exact", "ALPHA"),
-        ]);
+        mockTidalFindMany
+            .mockResolvedValueOnce([{ id: "tidal-exact" }])
+            .mockResolvedValueOnce([tidalDisplayRow("tidal-exact", "ALPHA")]);
+        mockYoutubeFindMany.mockResolvedValueOnce([{ id: "youtube-rest" }]);
 
         const result = await searchRemoteLibraryTracks("user-1", " alpha ", 1);
 
         expect(mockLoadRemoteLibrarySet).toHaveBeenCalledWith("user-1", {
-            text: "alpha",
+            reportCap: false,
         });
-        expect(mockTidalFindMany).toHaveBeenCalledWith(
+        expect(mockTidalFindMany).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    id: { in: ["tidal-exact"] },
+                }),
+                select: { id: true },
+                take: 4,
+            }),
+        );
+        expect(mockTidalFindMany).toHaveBeenNthCalledWith(
+            2,
             expect.objectContaining({
                 where: { id: { in: ["tidal-exact"] } },
             }),
         );
-        expect(mockYoutubeFindMany).not.toHaveBeenCalled();
+        expect(mockYoutubeFindMany).toHaveBeenCalledTimes(1);
         expect(result).toEqual([
             expect.objectContaining({
                 id: "tidal:42",
@@ -167,5 +179,110 @@ describe("remote library search", () => {
                 }),
             }),
         ]);
+    });
+
+    it("requires every term to match provider or linked display fields", async () => {
+        const tidal = remoteRow("tidal", "tidal-1", "Provider title");
+        const youtube = remoteRow("youtube", "youtube-1", "Video title");
+        mockLoadRemoteLibrarySet.mockResolvedValueOnce({
+            tracks: [tidal, youtube],
+            byArtistId: new Map(),
+            byAlbumId: new Map(),
+        });
+
+        await searchRemoteLibraryTracks("user-1", "  blue   train ", 5);
+
+        const expectedTerms = ["blue", "train"].map((term) => ({
+            OR: [
+                { title: { contains: term, mode: "insensitive" } },
+                { artist: { contains: term, mode: "insensitive" } },
+                { album: { contains: term, mode: "insensitive" } },
+                {
+                    artistEntity: {
+                        is: {
+                            name: { contains: term, mode: "insensitive" },
+                        },
+                    },
+                },
+                {
+                    albumEntity: {
+                        is: {
+                            title: { contains: term, mode: "insensitive" },
+                        },
+                    },
+                },
+            ],
+        }));
+        expect(mockTidalFindMany).toHaveBeenCalledWith({
+            where: { id: { in: ["tidal-1"] }, AND: expectedTerms },
+            select: { id: true },
+            take: 20,
+        });
+        expect(mockYoutubeFindMany).toHaveBeenCalledWith({
+            where: { id: { in: ["youtube-1"] }, AND: expectedTerms },
+            select: { id: true },
+            take: 20,
+        });
+    });
+
+    it("caps each provider text-match query at 400 rows", async () => {
+        mockLoadRemoteLibrarySet.mockResolvedValueOnce({
+            tracks: [remoteRow("tidal", "tidal-1", "Match")],
+            byArtistId: new Map(),
+            byAlbumId: new Map(),
+        });
+
+        await searchRemoteLibraryTracks("user-1", "match", 200);
+
+        expect(mockTidalFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 400 }),
+        );
+    });
+
+    it("caps provider text matching at six terms", async () => {
+        mockLoadRemoteLibrarySet.mockResolvedValueOnce({
+            tracks: [remoteRow("tidal", "tidal-1", "Match")],
+            byArtistId: new Map(),
+            byAlbumId: new Map(),
+        });
+
+        await searchRemoteLibraryTracks(
+            "user-1",
+            "one two three four five six seven eight",
+            5,
+        );
+
+        const terms = mockTidalFindMany.mock.calls[0][0].where.AND.map(
+            (clause: { OR: [{ title: { contains: string } }] }) =>
+                clause.OR[0].title.contains,
+        );
+        expect(terms).toEqual(["one", "two", "three", "four", "five", "six"]);
+    });
+
+    it("never searches or returns a collapsed non-preferred duplicate", async () => {
+        const preferredTidal = remoteRow(
+            "tidal",
+            "tidal-preferred",
+            "Different metadata",
+        );
+        mockLoadRemoteLibrarySet.mockResolvedValueOnce({
+            tracks: [preferredTidal],
+            byArtistId: new Map(),
+            byAlbumId: new Map(),
+        });
+        mockTidalFindMany.mockResolvedValueOnce([]);
+
+        await expect(
+            searchRemoteLibraryTracks("user-1", "youtube-only-match", 5),
+        ).resolves.toEqual([]);
+
+        expect(mockTidalFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    id: { in: ["tidal-preferred"] },
+                }),
+            }),
+        );
+        expect(mockYoutubeFindMany).not.toHaveBeenCalled();
     });
 });

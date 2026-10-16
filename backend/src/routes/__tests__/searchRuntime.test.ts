@@ -120,17 +120,18 @@ function createRes() {
 
 describe("remote search eligibility", () => {
     it.each([
-        ["all", 20, 5],
-        ["tracks", 37, 37],
+        ["all", 20, 0, 5],
+        ["all", 20, 20, 5],
+        ["tracks", 37, 0, 37],
     ] as const)(
-        "returns the group size for %s search",
-        (type, limit, expected) => {
+        "returns the group size for %s search at offset %s",
+        (type, limit, offset, expected) => {
             expect(
                 remoteSearchLimitFor({
                     userId: "user-1",
                     source: "all",
                     type,
-                    offset: 0,
+                    offset,
                     limit,
                 }),
             ).toBe(expected);
@@ -142,6 +143,13 @@ describe("remote search eligibility", () => {
         { userId: "user-1", source: "local", type: "tracks", offset: 0 },
         { userId: "user-1", source: "all", type: "artists", offset: 0 },
         { userId: "user-1", source: "all", type: "tracks", offset: 1 },
+        {
+            userId: "user-1",
+            source: "all",
+            type: "tracks",
+            offset: 0,
+            genre: "ambient",
+        },
     ] as const)("returns zero for an ineligible request", (input) => {
         expect(remoteSearchLimitFor({ ...input, limit: 20 })).toBe(0);
     });
@@ -330,6 +338,25 @@ describe("search route runtime behavior", () => {
         expect(res.body.remoteTracks).toEqual(remoteTracks);
     });
 
+    it("adds remote tracks when an all-type search includes an ignored offset", async () => {
+        const remoteTracks = [{ id: "tidal:42", source: "tidal" }];
+        mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
+        const req = {
+            query: { q: "radiohead", type: "all", offset: "20" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchRemoteLibraryTracks).toHaveBeenCalledWith(
+            "user-1",
+            "radiohead",
+            5,
+        );
+        expect(res.body.remoteTracks).toEqual(remoteTracks);
+    });
+
     it("uses the requested limit for remote track-only search", async () => {
         const remoteTracks = [{ id: "yt:video-1", source: "youtube" }];
         mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
@@ -366,6 +393,12 @@ describe("search route runtime behavior", () => {
         ["peer source", { type: "tracks", source: "peers" }, "user-1"],
         ["non-track type", { type: "artists" }, "user-1"],
         ["later page", { type: "tracks", offset: "1" }, "user-1"],
+        ["all-type genre filter", { type: "all", genre: "ambient" }, "user-1"],
+        [
+            "track-only genre filter",
+            { type: "tracks", genre: "ambient" },
+            "user-1",
+        ],
         ["no user", { type: "tracks" }, undefined],
     ])(
         "returns no remote tracks for %s",

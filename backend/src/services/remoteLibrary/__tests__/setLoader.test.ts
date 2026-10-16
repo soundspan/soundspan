@@ -184,103 +184,6 @@ describe("remote library set loader", () => {
         }
     });
 
-    it("adds every text term to both provider queries", async () => {
-        mockAccess.mockResolvedValueOnce({
-            providers: { tidal: true, youtube: true },
-            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
-        });
-
-        await loadRemoteLibrarySet("user-1", { text: "  blue   train " });
-
-        expect(mockFindMany).toHaveBeenCalledTimes(2);
-        for (const call of mockFindMany.mock.calls) {
-            const relation =
-                call[0].where.trackTidal ?? call[0].where.trackYtMusic;
-            expect(relation.is.AND).toEqual([
-                {
-                    OR: [
-                        {
-                            title: {
-                                contains: "blue",
-                                mode: "insensitive",
-                            },
-                        },
-                        {
-                            artist: {
-                                contains: "blue",
-                                mode: "insensitive",
-                            },
-                        },
-                        {
-                            album: {
-                                contains: "blue",
-                                mode: "insensitive",
-                            },
-                        },
-                    ],
-                },
-                {
-                    OR: [
-                        {
-                            title: {
-                                contains: "train",
-                                mode: "insensitive",
-                            },
-                        },
-                        {
-                            artist: {
-                                contains: "train",
-                                mode: "insensitive",
-                            },
-                        },
-                        {
-                            album: {
-                                contains: "train",
-                                mode: "insensitive",
-                            },
-                        },
-                    ],
-                },
-            ]);
-        }
-    });
-
-    it("caps text scope at six terms", async () => {
-        mockAccess.mockResolvedValueOnce({
-            providers: { tidal: true, youtube: false },
-            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
-        });
-
-        await loadRemoteLibrarySet("user-1", {
-            text: "one two three four five six seven eight",
-        });
-
-        const clauses = mockFindMany.mock.calls[0][0].where.trackTidal.is.AND;
-        expect(clauses).toHaveLength(6);
-        expect(
-            clauses.map(
-                (clause: { OR: [{ title: { contains: string } }] }) =>
-                    clause.OR[0].title.contains,
-            ),
-        ).toEqual(["one", "two", "three", "four", "five", "six"]);
-    });
-
-    it("does not add a text predicate for blank text", async () => {
-        mockAccess.mockResolvedValueOnce({
-            providers: { tidal: true, youtube: true },
-            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
-        });
-
-        await loadRemoteLibrarySet("user-1", { text: "   " });
-
-        expect(mockFindMany).toHaveBeenCalledTimes(2);
-        for (const call of mockFindMany.mock.calls) {
-            const relation =
-                call[0].where.trackTidal ?? call[0].where.trackYtMusic;
-            expect(relation.is.AND).toBeUndefined();
-        }
-    });
-
     it("includes album owners even when the provider track artist differs", async () => {
         mockAccess.mockResolvedValueOnce({
             providers: { tidal: true, youtube: false },
@@ -418,5 +321,25 @@ describe("remote library set loader", () => {
                 cap: REMOTE_LIBRARY_ROW_CAP,
             },
         );
+    });
+
+    it("skips cap reporting for a search membership load", async () => {
+        mockAccess.mockResolvedValue({
+            providers: { tidal: true, youtube: false },
+            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
+        });
+        mockFindMany.mockResolvedValue(
+            Array.from({ length: REMOTE_LIBRARY_ROW_CAP + 1 }, (_, index) =>
+                tidalEntry(index),
+            ),
+        );
+
+        const result = await loadRemoteLibrarySet("user-1", {
+            reportCap: false,
+        });
+
+        expect(result.tracks).toHaveLength(REMOTE_LIBRARY_ROW_CAP);
+        expect(mockRecordCapped).not.toHaveBeenCalled();
+        expect(mockRemoteLibraryWarn).not.toHaveBeenCalled();
     });
 });

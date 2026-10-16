@@ -1,4 +1,7 @@
-import { hydrateRemoteLibraryTracks } from "./remoteDisplayHydration";
+import {
+    findMatchingRemoteLibraryTracks,
+    hydrateRemoteLibraryTracks,
+} from "./remoteDisplayHydration";
 import { toLibraryRemoteTrack } from "./responseRow";
 import { loadRemoteLibrarySet } from "./setLoader";
 import type { RemoteLibraryTrack } from "./types";
@@ -56,10 +59,15 @@ export async function searchRemoteLibraryTracks(
     const normalizedQuery = query.trim();
     if (!userId || !normalizedQuery || limit < 1) return [];
     const remoteLibrary = await loadRemoteLibrarySet(userId, {
-        text: normalizedQuery,
+        reportCap: false,
     });
-    const selectedRows = rankRemoteLibraryTracks(
+    const matchingRows = await findMatchingRemoteLibraryTracks(
         remoteLibrary.tracks,
+        normalizedQuery,
+        limit,
+    );
+    const selectedRows = rankRemoteLibraryTracks(
+        matchingRows,
         normalizedQuery,
     ).slice(0, limit);
     const hydratedRows = await hydrateRemoteLibraryTracks(selectedRows);

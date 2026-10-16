@@ -40,7 +40,7 @@ const searchQuerySchema = z.object({
 type SearchQuery = z.infer<typeof searchQuerySchema>;
 type RemoteSearchEligibility = Pick<
     SearchQuery,
-    "source" | "type" | "offset" | "limit"
+    "source" | "type" | "genre" | "offset" | "limit"
 > & {
     userId: string | undefined;
 };
@@ -57,9 +57,9 @@ type CachedLibrarySearchRequest = Pick<
 
 /** Resolves whether a search request gets a remote group and its size. */
 export function remoteSearchLimitFor(input: RemoteSearchEligibility): number {
-    if (!input.userId || input.source !== "all" || input.offset !== 0) return 0;
+    if (!input.userId || input.source !== "all" || input.genre) return 0;
     if (input.type === "all") return 5;
-    return input.type === "tracks" ? input.limit : 0;
+    return input.type === "tracks" && input.offset === 0 ? input.limit : 0;
 }
 
 async function loadRemoteSearchTracks(input: RemoteSearchRequest) {
@@ -301,7 +301,7 @@ router.use(requireAuth);
  * /api/search:
  *   get:
  *     summary: Search across your music library
- *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search. remoteTracks is a per-user, uncached group populated only for source=all, type=all or tracks, and offset=0.
+ *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search. remoteTracks is a per-user, uncached group populated only without a genre filter for source=all and either type=all or the first page of type=tracks.
  *     tags: [Search]
  *     security:
  *       - apiKeyAuth: []
@@ -370,29 +370,82 @@ router.use(requireAuth);
  *                     $ref: '#/components/schemas/Track'
  *                 remoteTracks:
  *                   type: array
- *                   description: Liked remote-only tracks from the signed-in user's connected streaming services. This group is loaded per user after the cached library search and is populated only for source=all, type=all or tracks, and offset=0.
+ *                   description: Liked remote-only tracks from the signed-in user's connected streaming services. This group is loaded per user after the cached library search and is populated only without a genre filter for source=all and either type=all or the first page of type=tracks.
  *                   items:
- *                     allOf:
- *                       - $ref: '#/components/schemas/Track'
- *                       - type: object
- *                         required: [source, streamSource, album]
+ *                     type: object
+ *                     required: [id, title, duration, trackNo, trackNumber, artistId, albumId, source, streamSource, provider, artist, album]
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       title:
+ *                         type: string
+ *                       duration:
+ *                         type: integer
+ *                       trackNo:
+ *                         type: integer
+ *                         nullable: true
+ *                       trackNumber:
+ *                         type: integer
+ *                         nullable: true
+ *                       artistId:
+ *                         type: string
+ *                         nullable: true
+ *                       albumId:
+ *                         type: string
+ *                         nullable: true
+ *                       source:
+ *                         type: string
+ *                         enum: [tidal, youtube]
+ *                       streamSource:
+ *                         type: string
+ *                         enum: [tidal, youtube]
+ *                       tidalTrackId:
+ *                         type: integer
+ *                       youtubeVideoId:
+ *                         type: string
+ *                       provider:
+ *                         type: object
+ *                         required: [tidalTrackId, youtubeVideoId]
  *                         properties:
- *                           source:
- *                             type: string
- *                             enum: [tidal, youtube]
- *                           streamSource:
- *                             type: string
- *                             enum: [tidal, youtube]
  *                           tidalTrackId:
  *                             type: integer
+ *                             nullable: true
  *                           youtubeVideoId:
  *                             type: string
- *                           album:
+ *                             nullable: true
+ *                       artist:
+ *                         type: object
+ *                         required: [id, name]
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             nullable: true
+ *                           name:
+ *                             type: string
+ *                       album:
+ *                         type: object
+ *                         required: [id, title, rgMbid, coverArt, artist]
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             nullable: true
+ *                           title:
+ *                             type: string
+ *                           rgMbid:
+ *                             type: string
+ *                             nullable: true
+ *                           coverArt:
+ *                             type: string
+ *                             nullable: true
+ *                           artist:
  *                             type: object
+ *                             required: [id, name]
  *                             properties:
- *                               rgMbid:
+ *                               id:
  *                                 type: string
  *                                 nullable: true
+ *                               name:
+ *                                 type: string
  *                 audiobooks:
  *                   type: array
  *                   items:
@@ -445,6 +498,7 @@ router.get("/", async (req, res) => {
                 query,
                 type,
                 source,
+                genre,
                 offset,
                 limit: searchLimit,
             }),
