@@ -1418,14 +1418,10 @@ router.get("/:podcastId/episodes/:episodeId/cache-status", async (req, res) => {
  *         description: HTTP range header for partial content
  *     responses:
  *       200:
- *         description: Full audio stream
- *         content:
- *           audio/mpeg:
- *             schema:
- *               type: string
- *               format: binary
+ *         description: Full podcast episode stream
+ *         content: { "audio/mpeg": { schema: { type: string, format: binary } }, "video/mp4": { schema: { type: string, format: binary } }, "video/x-m4v": { schema: { type: string, format: binary } }, "video/m4v": { schema: { type: string, format: binary } }, "video/webm": { schema: { type: string, format: binary } } }
  *       206:
- *         description: Partial audio stream
+ *         description: Partial podcast episode stream
  *       404:
  *         description: Episode not found
  *       401:
