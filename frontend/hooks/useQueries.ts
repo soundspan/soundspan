@@ -24,6 +24,7 @@ import {
 } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { AddToPlaylistRef } from "@/lib/trackRef";
+import type { LibraryBrowseOrigin } from "@/lib/api/library";
 import type { Artist, Album, Track } from "@/features/library/types";
 import {
     isGenreCategory,
@@ -230,7 +231,7 @@ export function useRecentlyAddedQuery(limit: number = 10) {
 }
 
 export type LibraryFilter = "owned" | "discovery" | "all";
-export type LibraryOrigin = "all" | "local" | "peers";
+export type LibraryOrigin = LibraryBrowseOrigin;
 export type SortOption = "name" | "name-desc" | "recent" | "tracks";
 
 interface LibraryArtistsParams {

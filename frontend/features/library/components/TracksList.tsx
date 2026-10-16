@@ -5,9 +5,9 @@ import { Track } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import Link from "next/link";
-import { AudioLines, Trash2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { AudioLines, Download, Send, Trash2 } from "lucide-react";
 import { getArtistHref } from "@/utils/artistRoute";
+import { resolveStreamCoverArtUrl } from "@/lib/streamCoverArt";
 import { TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 import { TrackList, TrackListHeader } from "@/components/track";
 import type {
@@ -16,6 +16,23 @@ import type {
     TrackRowSlots,
 } from "@/components/track";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { RemoteSourceBadges } from "@/components/ui/RemoteSourceBadges";
+import {
+    getRemoteLibrarySource,
+    toLibraryAudioTrack,
+} from "../libraryTrackPlayback";
+import {
+    getRemoteTrackAcquisitionLabel,
+    resolveRemoteTrackAcquisition,
+    type RemoteTrackAcquisition,
+    type RemoteTrackAcquisitionPolicy,
+} from "../remoteTrackAcquisition";
+
+/** Empty-state copy for the list. */
+export interface TracksListEmptyCopy {
+    title: string;
+    description: string;
+}
 
 interface TracksListProps {
     tracks: Track[];
@@ -23,7 +40,21 @@ interface TracksListProps {
     onDelete: (trackId: string, trackTitle: string) => void;
     canDelete?: boolean;
     isLoading?: boolean;
+    /** What the viewer may do to bring a liked streaming song into the library. */
+    acquisitionPolicy?: RemoteTrackAcquisitionPolicy;
+    onAcquire?: (action: RemoteTrackAcquisition) => void;
+    emptyCopy?: TracksListEmptyCopy;
 }
+
+const DEFAULT_EMPTY_COPY: TracksListEmptyCopy = {
+    title: "No songs yet",
+    description: "Your library is empty. Sync your music to get started.",
+};
+
+const NO_ACQUISITION: RemoteTrackAcquisitionPolicy = {
+    downloadsEnabled: false,
+    requestsEnabled: false,
+};
 
 function toRowItem(track: Track): TrackRowItem {
     return {
@@ -32,15 +63,50 @@ function toRowItem(track: Track): TrackRowItem {
         displayTitle: track.displayTitle,
         artistName: track.album?.artist?.name ?? "",
         duration: track.duration,
-        coverArtUrl: track.album?.coverArt
-            ? api.getCoverArtUrl(track.album.coverArt, 80)
-            : null,
+        coverArtUrl: resolveStreamCoverArtUrl(
+            track.album?.coverArt,
+            getRemoteLibrarySource(track),
+            80,
+        ),
         isPlayable: track.source !== "federated" || track.peer?.online === true,
         unplayableReason:
             track.source === "federated" && track.peer?.online === false
                 ? "peer_offline"
                 : undefined,
     };
+}
+
+function renderTitleBadges(track: Track) {
+    if (track.source === "federated" && track.peer) {
+        return (
+            <PeerBadge peerName={track.peer.name} online={track.peer.online} />
+        );
+    }
+    const remoteSource = getRemoteLibrarySource(track);
+    return remoteSource ? (
+        <RemoteSourceBadges sources={[remoteSource]} />
+    ) : undefined;
+}
+
+function renderAcquisitionItem(
+    track: Track,
+    policy: RemoteTrackAcquisitionPolicy,
+    onAcquire: ((action: RemoteTrackAcquisition) => void) | undefined,
+) {
+    if (!onAcquire) return undefined;
+    const action = resolveRemoteTrackAcquisition(track, policy);
+    if (!action) return undefined;
+    const Icon = action.kind === "request-album" ? Send : Download;
+    return (
+        <TrackMenuButton
+            onClick={(e) => {
+                e.stopPropagation();
+                onAcquire(action);
+            }}
+            icon={<Icon className="h-4 w-4" />}
+            label={getRemoteTrackAcquisitionLabel(action)}
+        />
+    );
 }
 
 /**
@@ -52,6 +118,9 @@ export function TracksList({
     onDelete,
     canDelete = false,
     isLoading = false,
+    acquisitionPolicy = NO_ACQUISITION,
+    onAcquire,
+    emptyCopy = DEFAULT_EMPTY_COPY,
 }: TracksListProps) {
     const handlePlay = useCallback(
         (_item: Track, index: number) => onPlay(tracks, index),
@@ -60,13 +129,7 @@ export function TracksList({
 
     const rowSlots = useCallback(
         (track: Track): TrackRowSlots => ({
-            titleBadges:
-                track.source === "federated" && track.peer ? (
-                    <PeerBadge
-                        peerName={track.peer.name}
-                        online={track.peer.online}
-                    />
-                ) : undefined,
+            titleBadges: renderTitleBadges(track),
             artistContent: track.album?.artist
                 ? (() => {
                       const href = getArtistHref({
@@ -102,37 +165,34 @@ export function TracksList({
     );
 
     const rowOverflow = useCallback(
-        (track: Track): OverflowConfig => ({
-            track: {
-                id: track.id,
-                title: track.displayTitle ?? track.title,
-                artist: track.album?.artist
-                    ? {
-                          name: track.album.artist.name,
-                          id: track.album.artist.id,
-                      }
-                    : { name: "" },
-                album: {
-                    title: track.album?.title ?? "",
-                    coverArt: track.album?.coverArt,
-                    id: track.album?.id,
+        (track: Track): OverflowConfig => {
+            const isRemote = getRemoteLibrarySource(track) !== null;
+            return {
+                track: {
+                    ...toLibraryAudioTrack(track),
+                    title: track.displayTitle ?? track.title,
                 },
-                duration: track.duration,
-            },
-            extraItemsAfter:
-                canDelete && track.source !== "federated" ? (
-                    <TrackMenuButton
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(track.id, track.title);
-                        }}
-                        icon={<Trash2 className="h-4 w-4" />}
-                        label="Delete track"
-                        className="text-red-400 hover:text-red-300"
-                    />
-                ) : undefined,
-        }),
-        [canDelete, onDelete],
+                showMatchVibe: !isRemote,
+                extraItemsBefore: renderAcquisitionItem(
+                    track,
+                    acquisitionPolicy,
+                    onAcquire,
+                ),
+                extraItemsAfter:
+                    canDelete && track.source !== "federated" && !isRemote ? (
+                        <TrackMenuButton
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onDelete(track.id, track.title);
+                            }}
+                            icon={<Trash2 className="h-4 w-4" />}
+                            label="Delete track"
+                            className="text-red-400 hover:text-red-300"
+                        />
+                    ) : undefined,
+            };
+        },
+        [acquisitionPolicy, canDelete, onAcquire, onDelete],
     );
 
     return (
@@ -154,8 +214,8 @@ export function TracksList({
             emptyState={
                 <EmptyState
                     icon={<AudioLines className="w-12 h-12" />}
-                    title="No songs yet"
-                    description="Your library is empty. Sync your music to get started."
+                    title={emptyCopy.title}
+                    description={emptyCopy.description}
                 />
             }
             header={

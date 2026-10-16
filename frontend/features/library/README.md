@@ -21,6 +21,11 @@ Start-here guide for `frontend/features/library`.
 | `components/LibraryTabs.tsx` | components |
 | `components/TracksList.tsx` | components |
 | `hooks/useLibraryActions.ts` | hooks |
+| `hooks/useRemoteTrackAcquisition.ts` | hooks |
+| `libraryEmptyCopy.ts` | root |
+| `libraryOrigins.ts` | root |
+| `libraryTrackPlayback.ts` | root |
+| `remoteTrackAcquisition.ts` | root |
 | `types.ts` | root |
 
 ## Update Rule

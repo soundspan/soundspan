@@ -20,6 +20,7 @@ import { resolvePreferenceTrackId } from "@/lib/trackRef";
 
 // Hooks
 import { useArtistData } from "@/features/artist/hooks/useArtistData";
+import { isLibraryVisibleArtistAlbum } from "@/features/artist/artistAlbumVisibility";
 import { useArtistAlbumRequests } from "@/features/artist/hooks/useArtistAlbumRequests";
 import { useArtistActions } from "@/features/artist/hooks/useArtistActions";
 import { useDownloadActions } from "@/features/artist/hooks/useDownloadActions";
@@ -161,8 +162,10 @@ export default function ArtistPage() {
         isYtMatching;
 
     // Separate owned and available albums
-    const ownedAlbums = albums.filter((a) => a.owned);
-    const availableAlbums = albums.filter((a) => !a.owned);
+    const ownedAlbums = albums.filter(isLibraryVisibleArtistAlbum);
+    const availableAlbums = albums.filter(
+        (album) => !isLibraryVisibleArtistAlbum(album),
+    );
 
     // Get image URLs for display and color extraction
     const rawImageUrl =

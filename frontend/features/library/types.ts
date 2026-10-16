@@ -5,6 +5,12 @@ import type {
 
 export type Tab = "artists" | "albums" | "tracks";
 
+/** Streaming providers whose liked tracks can appear in the Library. */
+export type RemoteLibrarySource = "tidal" | "youtube";
+
+/** Where a Library artist or album comes from; "remote" means streaming-only. */
+export type LibraryItemSource = UnifiedTrackSource | "remote";
+
 export interface Artist {
     id: string;
     mbid?: string;
@@ -12,8 +18,10 @@ export interface Artist {
     coverArt?: string | null;
     albumCount?: number;
     trackCount?: number;
-    source?: UnifiedTrackSource;
+    source?: LibraryItemSource;
     peer?: FederatedTrackPeer;
+    /** Streaming providers holding this artist's liked, not-yet-local tracks. */
+    remoteSources?: RemoteLibrarySource[];
 }
 
 export interface Album {
@@ -26,8 +34,9 @@ export interface Album {
         mbid?: string;
         name: string;
     };
-    source?: UnifiedTrackSource;
+    source?: LibraryItemSource;
     peer?: FederatedTrackPeer;
+    remoteSources?: RemoteLibrarySource[];
 }
 
 export interface Track {
@@ -43,6 +52,8 @@ export interface Track {
         id: string;
         title: string;
         coverArt?: string | null;
+        /** Release-group MBID; remote albums may carry a synthetic `remote:` id. */
+        rgMbid?: string | null;
         artist?: {
             id: string;
             name: string;
@@ -54,6 +65,14 @@ export interface Track {
     hasUserOverrides?: boolean;
     source?: UnifiedTrackSource;
     peer?: FederatedTrackPeer;
+    /** Streaming fields present on liked TIDAL / YouTube Music rows. */
+    streamSource?: "local" | "peer" | RemoteLibrarySource;
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    provider?: {
+        tidalTrackId?: number | null;
+        youtubeVideoId?: string | null;
+    };
 }
 
 export interface DeleteDialogState {

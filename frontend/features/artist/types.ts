@@ -1,3 +1,4 @@
+import type { RemoteBadgeSource } from "@/components/ui/RemoteSourceBadges";
 import type {
     FederatedTrackPeer,
     UnifiedTrackSource,
@@ -52,9 +53,12 @@ export interface Album {
     userCoverUrl?: string | null;
     userGenres?: string[];
     hasUserOverrides?: boolean;
-    source?: UnifiedTrackSource;
-    provenanceSource?: UnifiedTrackSource;
+    /** "database" for library rows; "remote" for liked TIDAL / YouTube Music albums. */
+    source?: UnifiedTrackSource | "database" | "remote";
+    provenanceSource?: UnifiedTrackSource | "remote";
     peer?: FederatedTrackPeer;
+    /** Streaming providers behind a remote album's liked songs. */
+    remoteSources?: RemoteBadgeSource[];
 }
 
 export interface Track {

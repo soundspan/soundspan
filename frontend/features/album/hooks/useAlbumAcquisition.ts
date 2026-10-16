@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import type { Album } from "../types";
 import { resolveAcquisitionMbid } from "../albumActionVisibility";
 
-interface AlbumAcquisitionRequest {
+/** Everything an album download needs once the album has a real MBID. */
+export interface AlbumAcquisitionRequest {
     artistName: string;
     albumTitle: string;
     mbid: string;
@@ -55,17 +56,25 @@ async function startAlbumDownload(
     }
 }
 
-/** Provides album acquisition with synthetic-MBID rejection. */
-export function useAlbumAcquisition() {
+/** Starts an album download for a resolved request, skipping duplicates. */
+export function useStartAlbumDownload() {
     const { addPendingDownload, isPendingByMbid } = useDownloadContext();
-    return async (album: Album | null, event?: React.MouseEvent) => {
-        event?.stopPropagation();
-        const request = getAlbumAcquisitionRequest(album);
-        if (!request) return;
+    return async (request: AlbumAcquisitionRequest) => {
         if (isPendingByMbid(request.mbid)) {
             toast.info("Album is already being downloaded");
             return;
         }
         await startAlbumDownload(request, addPendingDownload);
+    };
+}
+
+/** Provides album acquisition with synthetic-MBID rejection. */
+export function useAlbumAcquisition() {
+    const startDownload = useStartAlbumDownload();
+    return async (album: Album | null, event?: React.MouseEvent) => {
+        event?.stopPropagation();
+        const request = getAlbumAcquisitionRequest(album);
+        if (!request) return;
+        await startDownload(request);
     };
 }

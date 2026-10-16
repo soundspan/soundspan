@@ -6,6 +6,7 @@ import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceO
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { queryKeys } from "@/lib/queryKeys";
+import { invalidateLibraryAfterRemoteLike } from "@/lib/libraryBrowseInvalidation";
 
 export interface LikeableTrack {
     id: string;
@@ -120,6 +121,7 @@ export function useCollectionLikeAll(tracks: LikeableTrack[]) {
             queryClient.invalidateQueries({
                 queryKey: queryKeys.likedPlaylistAll(),
             });
+            invalidateLibraryAfterRemoteLike(queryClient, trackIds);
 
             if (nextSignal === "thumbs_up") {
                 toast.success(
