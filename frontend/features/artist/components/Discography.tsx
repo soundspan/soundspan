@@ -6,8 +6,21 @@ import { api } from "@/lib/api";
 import type { Album } from "../types";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { RemoteSourceBadges } from "@/components/ui/RemoteSourceBadges";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { ControlSelect } from "@/components/ui/ControlSelect";
+
+function renderDiscographyBadge(album: Album) {
+    if (album.provenanceSource === "federated" && album.peer) {
+        return (
+            <PeerBadge peerName={album.peer.name} online={album.peer.online} />
+        );
+    }
+    if (album.source === "remote") {
+        return <RemoteSourceBadges sources={album.remoteSources} />;
+    }
+    return "owned" as const;
+}
 
 interface DiscographyProps {
     albums: Album[];
@@ -75,17 +88,7 @@ export function Discography({
                             placeholderIcon={
                                 <Disc3 className="w-12 h-12 text-gray-400" />
                             }
-                            badge={
-                                album.provenanceSource === "federated" &&
-                                album.peer ? (
-                                    <PeerBadge
-                                        peerName={album.peer.name}
-                                        online={album.peer.online}
-                                    />
-                                ) : (
-                                    "owned"
-                                )
-                            }
+                            badge={renderDiscographyBadge(album)}
                             circular={false}
                             colors={colors}
                             onPlay={

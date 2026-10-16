@@ -1,11 +1,25 @@
 import {
+    LIBRARY_BROWSE_ORIGIN_VALUES,
     LOCAL_TRACK_WHERE,
-    parseLibraryOrigin,
+    parseLibraryBrowseOrigin,
     trackBrowseWhere,
 } from "../librarySorting";
 import { trackBrowseSql } from "../libraryRadioPredicates";
 
 describe("library federation scoping", () => {
+    it("parses the Library list-only remote origin", () => {
+        expect(LIBRARY_BROWSE_ORIGIN_VALUES).toEqual([
+            "all",
+            "local",
+            "peers",
+            "remote",
+        ]);
+        expect(parseLibraryBrowseOrigin(undefined)).toBe("all");
+        expect(parseLibraryBrowseOrigin("remote")).toBe("remote");
+        expect(parseLibraryBrowseOrigin("REMOTE")).toBeNull();
+        expect(parseLibraryBrowseOrigin(["remote"])).toBeNull();
+    });
+
     it("keeps the local-only predicate byte-stable for default local rows", () => {
         expect(LOCAL_TRACK_WHERE).toEqual({ origin: "LOCAL" });
     });
@@ -56,9 +70,5 @@ describe("library federation scoping", () => {
         expect(predicate.strings.join(" ")).toContain(
             'dedup_peer."showDedupedCopies"',
         );
-    });
-
-    it("rejects unknown origin filters", () => {
-        expect(parseLibraryOrigin("internet")).toBeNull();
     });
 });

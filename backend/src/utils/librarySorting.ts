@@ -47,12 +47,24 @@ export const LOCAL_TRACK_WHERE = {
 export const LIBRARY_ORIGIN_VALUES = ["all", "local", "peers"] as const;
 export type LibraryOriginFilter = (typeof LIBRARY_ORIGIN_VALUES)[number];
 
-/** Parses a read-surface origin value without accepting arrays or aliases. */
-export function parseLibraryOrigin(value: unknown): LibraryOriginFilter | null {
+/** Origin values accepted only by the three Library browse list endpoints. */
+export const LIBRARY_BROWSE_ORIGIN_VALUES = [
+    "all",
+    "local",
+    "peers",
+    "remote",
+] as const;
+/** Library list origin, including the authenticated user's remote library. */
+export type LibraryBrowseOrigin = (typeof LIBRARY_BROWSE_ORIGIN_VALUES)[number];
+
+/** Parses a Library list origin without changing other read surfaces. */
+export function parseLibraryBrowseOrigin(
+    value: unknown,
+): LibraryBrowseOrigin | null {
     if (value === undefined) return "all";
     return typeof value === "string" &&
-        LIBRARY_ORIGIN_VALUES.includes(value as LibraryOriginFilter)
-        ? (value as LibraryOriginFilter)
+        LIBRARY_BROWSE_ORIGIN_VALUES.includes(value as LibraryBrowseOrigin)
+        ? (value as LibraryBrowseOrigin)
         : null;
 }
 

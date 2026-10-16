@@ -29,6 +29,15 @@ import { useAuth } from "@/lib/auth-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useFeatures } from "@/lib/features-context";
 import { queryKeys } from "@/lib/queryKeys";
+import { useRemoteProviderConnections } from "@/hooks/useRemoteProviderConnections";
+import {
+    getLibraryOriginLabel,
+    listLibraryOrigins,
+    resolveLibraryOrigin,
+} from "@/features/library/libraryOrigins";
+import { toLibraryAudioTrack } from "@/features/library/libraryTrackPlayback";
+import { getLibraryEmptyCopy } from "@/features/library/libraryEmptyCopy";
+import { useRemoteTrackAcquisition } from "@/features/library/hooks/useRemoteTrackAcquisition";
 
 /**
  * Renders the LibraryPage component.
@@ -40,6 +49,9 @@ export default function LibraryPage() {
     const { isInGroup } = useListenTogether();
     const { user } = useAuth();
     const { federation } = useFeatures();
+    const remoteProviders = useRemoteProviderConnections();
+    const { policy: acquisitionPolicy, acquire: acquireRemoteTrack } =
+        useRemoteTrackAcquisition();
     const isAdmin = user?.role === "admin";
     const [canDeleteFromLibrary, setCanDeleteFromLibrary] = useState(false);
 
@@ -56,6 +68,24 @@ export default function LibraryPage() {
     // Filter state (owned = your library, discovery = discovery weekly artists)
     const [filter, setFilter] = useState<LibraryFilter>("owned");
     const [origin, setOrigin] = useState<LibraryOrigin>("all");
+    const offeredOrigins = useMemo(
+        () =>
+            listLibraryOrigins({
+                federation: Boolean(federation),
+                remote: remoteProviders.any,
+            }),
+        [federation, remoteProviders.any],
+    );
+    const originOptions = useMemo(
+        () =>
+            offeredOrigins.map((value) => ({
+                value,
+                label: getLibraryOriginLabel(value),
+            })),
+        [offeredOrigins],
+    );
+    // Fall back to "All" when the chosen source disappears (e.g. disconnect).
+    const effectiveOrigin = resolveLibraryOrigin(origin, offeredOrigins);
 
     // Sort and pagination state
     const [sortBy, setSortBy] = useState<SortOption>("name");
@@ -112,7 +142,7 @@ export default function LibraryPage() {
         limit: itemsPerPage,
         page: currentPage,
         enabled: activeTab === "artists",
-        origin,
+        origin: effectiveOrigin,
     });
 
     const albumsQuery = useLibraryAlbumsQuery({
@@ -121,7 +151,7 @@ export default function LibraryPage() {
         limit: itemsPerPage,
         page: currentPage,
         enabled: activeTab === "albums",
-        origin,
+        origin: effectiveOrigin,
     });
 
     const tracksQuery = useLibraryTracksQuery({
@@ -129,7 +159,7 @@ export default function LibraryPage() {
         limit: itemsPerPage,
         page: currentPage,
         enabled: activeTab === "tracks",
-        origin,
+        origin: effectiveOrigin,
     });
 
     // Get data based on active tab
@@ -225,7 +255,12 @@ export default function LibraryPage() {
     // Reset page when filter or sort changes
     useEffect(() => {
         setCurrentPage(1);
-    }, [filter, origin, sortBy, itemsPerPage]);
+    }, [filter, effectiveOrigin, sortBy, itemsPerPage]);
+
+    const emptyCopy = useMemo(
+        () => getLibraryEmptyCopy(activeTab, effectiveOrigin),
+        [activeTab, effectiveOrigin],
+    );
 
     // Get total items and pages from pagination
     const totalItems = pagination.total;
@@ -259,24 +294,11 @@ export default function LibraryPage() {
     );
 
     // Helper to convert library Track to audio context Track format
-    const formatTracksForAudio = useCallback((libraryTracks: typeof tracks) => {
-        return libraryTracks.map((track) => ({
-            id: track.id,
-            title: track.title,
-            duration: track.duration,
-            artist: {
-                id: track.album?.artist?.id,
-                name: track.album?.artist?.name || "Unknown Artist",
-            },
-            album: {
-                id: track.album?.id,
-                title: track.album?.title || "Unknown Album",
-                coverArt: track.album?.coverArt,
-            },
-            source: track.source,
-            peer: track.peer,
-        }));
-    }, []);
+    const formatTracksForAudio = useCallback(
+        (libraryTracks: typeof tracks) =>
+            libraryTracks.map(toLibraryAudioTrack),
+        [],
+    );
 
     // Wrapper for playTracks that converts track format
     // When startIndex is provided, it's a single track click — use playNow
@@ -417,32 +439,14 @@ export default function LibraryPage() {
                         onTabChange={changeTab}
                     />
 
-                    {federation && (
-                        <div
-                            className="flex items-center gap-1"
+                    {originOptions.length > 0 && (
+                        <FilterPills<LibraryOrigin>
+                            options={originOptions}
+                            value={effectiveOrigin}
+                            onChange={setOrigin}
+                            size="segmented"
                             aria-label="Library source"
-                        >
-                            {(["all", "local", "peers"] as const).map(
-                                (value) => (
-                                    <button
-                                        key={value}
-                                        type="button"
-                                        onClick={() => setOrigin(value)}
-                                        className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition-all ${
-                                            origin === value
-                                                ? "bg-brand text-black"
-                                                : "bg-white/10 text-white hover:bg-white/15"
-                                        }`}
-                                    >
-                                        {value === "all"
-                                            ? "All"
-                                            : value === "local"
-                                              ? "Local"
-                                              : "Peers"}
-                                    </button>
-                                ),
-                            )}
-                        </div>
+                        />
                     )}
 
                     <div className="flex items-center gap-2">
@@ -484,33 +488,34 @@ export default function LibraryPage() {
                 {showFilters && (
                     <div className="flex flex-wrap items-center gap-2 mb-6 pb-4 border-b border-white/5">
                         {/* Filter Toggle (Owned / Discovery / All) - Only show for artists and albums */}
-                        {(activeTab === "artists" ||
-                            activeTab === "albums") && (
-                            <FilterPills<LibraryFilter>
-                                aria-label="Filter library"
-                                size="sm"
-                                options={[
-                                    {
-                                        value: "owned",
-                                        label: "Owned",
-                                        activeClassName: "bg-brand text-black",
-                                    },
-                                    {
-                                        value: "discovery",
-                                        label: "Discovery",
-                                        activeClassName: "bg-ai text-white",
-                                    },
-                                    {
-                                        value: "all",
-                                        label: "All",
-                                        activeClassName:
-                                            "bg-white/20 text-white",
-                                    },
-                                ]}
-                                value={filter}
-                                onChange={setFilter}
-                            />
-                        )}
+                        {(activeTab === "artists" || activeTab === "albums") &&
+                            effectiveOrigin !== "remote" && (
+                                <FilterPills<LibraryFilter>
+                                    aria-label="Filter library"
+                                    size="sm"
+                                    options={[
+                                        {
+                                            value: "owned",
+                                            label: "Owned",
+                                            activeClassName:
+                                                "bg-brand text-black",
+                                        },
+                                        {
+                                            value: "discovery",
+                                            label: "Discovery",
+                                            activeClassName: "bg-ai text-white",
+                                        },
+                                        {
+                                            value: "all",
+                                            label: "All",
+                                            activeClassName:
+                                                "bg-white/20 text-white",
+                                        },
+                                    ]}
+                                    value={filter}
+                                    onChange={setFilter}
+                                />
+                            )}
 
                         {/* Sort Dropdown */}
                         <ControlSelect
@@ -552,6 +557,7 @@ export default function LibraryPage() {
                         onDelete={handleDeleteArtist}
                         canDelete={canDeleteFromLibrary}
                         hidePlayButtons={isInGroup}
+                        emptyCopy={emptyCopy}
                     />
                 )}
 
@@ -563,6 +569,7 @@ export default function LibraryPage() {
                         onDelete={handleDeleteAlbum}
                         canDelete={canDeleteFromLibrary}
                         hidePlayButtons={isInGroup}
+                        emptyCopy={emptyCopy}
                     />
                 )}
 
@@ -573,6 +580,9 @@ export default function LibraryPage() {
                         onPlay={handlePlayTracks}
                         onDelete={handleDeleteTrack}
                         canDelete={canDeleteFromLibrary}
+                        acquisitionPolicy={acquisitionPolicy}
+                        onAcquire={acquireRemoteTrack}
+                        emptyCopy={emptyCopy}
                     />
                 )}
 

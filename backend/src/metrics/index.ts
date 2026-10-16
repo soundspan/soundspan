@@ -80,6 +80,10 @@ import {
 } from "./soulseekAlbumMetrics";
 import { createScrobbleMetrics, type ScrobbleOutcome } from "./scrobbleMetrics";
 import type { ScrobbleService } from "../services/scrobbleTypes";
+import {
+    createRemoteLibraryMetrics,
+    type RemoteLibraryMetricProvider,
+} from "./remoteLibraryMetrics";
 
 export type {
     FederationAuthFailureReason,
@@ -117,6 +121,7 @@ const catalogMetrics = createCatalogMetrics(metricsRegistry);
 const schedulerMetrics = createSchedulerMetrics(metricsRegistry);
 const soulseekAlbumMetrics = createSoulseekAlbumMetrics(metricsRegistry);
 const scrobbleMetrics = createScrobbleMetrics(metricsRegistry);
+const remoteLibraryMetrics = createRemoteLibraryMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma, {
     getBackfillOutcomes: async () => {
         const { redisClient } = await import("../utils/redis");
@@ -242,6 +247,13 @@ export function recordLibraryHealthCacheResult(
     result: LibraryHealthCacheResult,
 ): void {
     libraryHealthMetrics.cacheResults.inc({ panel, result });
+}
+
+/** Records one provider load that reached the remote-library row cap. */
+export function recordRemoteLibraryRowsCapped(
+    provider: RemoteLibraryMetricProvider,
+): void {
+    remoteLibraryMetrics.rowsCapped.inc({ provider });
 }
 
 /** Records one final federation sync outcome. */

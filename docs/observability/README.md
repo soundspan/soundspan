@@ -51,6 +51,7 @@ Node process defaults (memory, CPU, event loop, GC) are exported under the
 | Metric                                                       | Type      | Labels            | Meaning                                                        |
 | ------------------------------------------------------------ | --------- | ----------------- | -------------------------------------------------------------- |
 | `soundspan_library_health_cache_total`                       | Counter   | `panel`, `result` | Library Health dashboard cache operations.                     |
+| `soundspan_library_remote_rows_capped_total`                 | Counter   | `provider`        | Library loads that hit the 5,000-liked-songs-per-provider cap. |
 | `soundspan_browse_image_cache_requests_total`                | Counter   | `result`          | Browse image cache lookups by result.                          |
 | `soundspan_catalog_albums`                                   | Gauge     | —                 | Current number of persisted metadata-catalog albums.           |
 | `soundspan_catalog_writes_total`                             | Counter   | `kind`            | Successful catalog writes: `release_group` or `tracklist`.     |

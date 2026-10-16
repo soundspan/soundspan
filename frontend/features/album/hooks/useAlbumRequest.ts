@@ -9,6 +9,30 @@ import {
 } from "@/hooks/useMusicRequests";
 import { isSyntheticRgMbid } from "../albumActionVisibility";
 import type { Album } from "../types";
+import type { CreateMusicRequestInput } from "@/lib/api/requests";
+
+/** Submits one album request and reports the outcome in a toast. */
+export async function submitAlbumRequest(
+    createRequest: (input: CreateMusicRequestInput) => Promise<unknown>,
+    input: CreateMusicRequestInput,
+): Promise<void> {
+    const toastId = `music-request-${input.rgMbid}`;
+    toast.loading(`Requesting ${input.albumTitle}...`, { id: toastId });
+    try {
+        await createRequest(input);
+        toast.success(
+            `Requested ${input.albumTitle} — an admin will review it`,
+            { id: toastId },
+        );
+    } catch (error) {
+        toast.error(
+            error instanceof Error
+                ? error.message
+                : "Failed to submit the request",
+            { id: toastId },
+        );
+    }
+}
 
 /**
  * Request-flow state and submit action for the album page. Only meaningful
@@ -28,29 +52,12 @@ export function useAlbumRequest(album: Album | null | undefined) {
 
     const requestAlbum = async () => {
         if (!album || !rgMbid || create.isPending) return;
-        const toastId = `music-request-${rgMbid}`;
-        toast.loading(`Requesting ${album.title}...`, { id: toastId });
-        try {
-            await create.mutateAsync({
-                artistName: album.artist?.name || "Unknown Artist",
-                albumTitle: album.title,
-                rgMbid,
-                ...(album.artist?.mbid
-                    ? { artistMbid: album.artist.mbid }
-                    : {}),
-            });
-            toast.success(
-                `Requested ${album.title} — an admin will review it`,
-                { id: toastId },
-            );
-        } catch (error) {
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : "Failed to submit the request",
-                { id: toastId },
-            );
-        }
+        await submitAlbumRequest(create.mutateAsync, {
+            artistName: album.artist?.name || "Unknown Artist",
+            albumTitle: album.title,
+            rgMbid,
+            ...(album.artist?.mbid ? { artistMbid: album.artist.mbid } : {}),
+        });
     };
 
     return {

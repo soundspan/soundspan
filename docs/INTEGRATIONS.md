@@ -105,6 +105,8 @@ Stream unowned tracks via per-user YouTube Music OAuth.
 3. Complete the provider authorization flow
 4. Choose quality and save
 
+Songs you like from YouTube Music appear in your Library with a YouTube badge. This works without signing in. See [Your Library](USAGE_GUIDE.md#your-library).
+
 ### Quality settings
 
 | Setting  | Approximate bitrate |
@@ -162,6 +164,8 @@ Stream unowned tracks via per-user TIDAL OAuth.
 4. Choose quality and save
 
 Streaming auth is separate from admin download auth.
+
+Songs you like from TIDAL appear in your Library with a TIDAL badge while you are signed in. See [Your Library](USAGE_GUIDE.md#your-library).
 
 ### Quality settings
 

@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { Artist, Album, Track } from "../types";
 import { shuffleArray } from "@/utils/shuffle";
 import { loadOwnedArtistTracksNewestFirst } from "@/lib/artistPlayback";
+import { isLibraryVisibleArtistAlbum } from "../artistAlbumVisibility";
 import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceOptimistic";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { toast } from "sonner";
@@ -38,7 +39,7 @@ export function useArtistActions() {
                         title: album.title,
                         year: album.year,
                         coverArt: album.coverArt || album.coverUrl,
-                        owned: album.owned,
+                        owned: isLibraryVisibleArtistAlbum(album),
                     })),
                 });
 
@@ -70,7 +71,7 @@ export function useArtistActions() {
                         title: album.title,
                         year: album.year,
                         coverArt: album.coverArt || album.coverUrl,
-                        owned: album.owned,
+                        owned: isLibraryVisibleArtistAlbum(album),
                     })),
                 });
 
@@ -136,7 +137,7 @@ export function useArtistActions() {
                         title: album.title,
                         year: album.year,
                         coverArt: album.coverArt || album.coverUrl,
-                        owned: album.owned,
+                        owned: isLibraryVisibleArtistAlbum(album),
                     })),
                 });
 
@@ -170,7 +171,7 @@ export function useArtistActions() {
                         title: album.title,
                         year: album.year,
                         coverArt: album.coverArt || album.coverUrl,
-                        owned: album.owned,
+                        owned: isLibraryVisibleArtistAlbum(album),
                     })),
                 });
 
@@ -263,7 +264,7 @@ export function useArtistActions() {
                     title: album.title,
                     year: album.year,
                     coverArt: album.coverArt || album.coverUrl,
-                    owned: album.owned,
+                    owned: isLibraryVisibleArtistAlbum(album),
                 })),
             });
 

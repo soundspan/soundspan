@@ -53,6 +53,8 @@ mock.module("lucide-react", {
         Eye: trackOverflowIcon,
         EyeOff: trackOverflowIcon,
         Trash2: trackOverflowIcon,
+        Download: trackOverflowIcon,
+        Send: trackOverflowIcon,
         RefreshCw: trackOverflowIcon,
         AlertCircle: trackOverflowIcon,
         X: trackOverflowIcon,
