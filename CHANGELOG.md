@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Podcasts that publish their episodes only as video (MP4, M4V, or WebM) now list and play those episodes as audio instead of showing none; when an episode has both an audio and a video file, the audio one is used. A one-time migration clears every podcast's cached feed headers so existing subscriptions pick up the missing episodes on their next refresh (#910).
 - The Now Playing screen on phones and tablets has a visible `Minimize player` button again (the arrow in the top-left corner), and swiping down on its header no longer triggers the browser's pull-to-refresh, which used to reload the page and stop playback (#909).
 - The API Keys settings page now says that a key is sent in an `X-API-Key` header and shows a copy-ready example; sending it as a Bearer token returned an unexplained 401 (#897).
 - Native dropdown menus (sort, genre, and pagination on the Audiobooks and Podcasts pages, and other built-in selects) no longer render white text on a white popup; the app now declares its dark color scheme to the browser so native controls match the theme.

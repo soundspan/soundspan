@@ -782,6 +782,38 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(upstream.destroy).toHaveBeenCalled();
     });
 
+    it("proxies a video enclosure with its persisted content type", async () => {
+        prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
+            id: "ep-video",
+            title: "Video Episode",
+            guid: "guid-video",
+            audioUrl: "https://media.example/episode.mp4",
+            mimeType: "video/mp4",
+            fileSize: 1000,
+        });
+        getCachedFilePath.mockResolvedValueOnce(null);
+
+        const upstream = createStream();
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
+            data: upstream,
+            headers: { "content-length": "1000" },
+        });
+
+        const req = {
+            params: { podcastId: "pod-1", episodeId: "ep-video" },
+            user: { id: "user-1" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.headers["Content-Type"]).toBe("video/mp4");
+        expect(upstream.pipe).toHaveBeenCalledWith(res);
+    });
+
     it("does not reflect arbitrary Origin with credentials on the authenticated stream", async () => {
         prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
             id: "ep-untrusted-origin",

@@ -198,7 +198,7 @@ describe("rssParserService", () => {
         expect(ep5.duration).toBe(0);
     });
 
-    it("filters items without valid audio enclosures and supports mime-type fallback checks", async () => {
+    it("filters items without playable enclosures and preserves audio mime-type fallback checks", async () => {
         mockFeedResponse({
             title: "Feed With Mixed Enclosures",
             author: "Feed Author",
@@ -268,15 +268,125 @@ describe("rssParserService", () => {
 
         expect(result.podcast.explicit).toBe(false);
         expect(result.podcast.itunesId).toBe("987654321");
-        expect(result.episodes).toHaveLength(3);
+        expect(result.episodes).toHaveLength(4);
         expect(result.episodes.map((episode) => episode.audioUrl)).toEqual([
+            "https://cdn.example.com/video.mp4",
             "https://cdn.example.com/fallback.mp3",
             "https://cdn.example.com/stream1",
             "https://cdn.example.com/stream2",
         ]);
-        expect(result.episodes[0].duration).toBe(45);
-        expect(result.episodes[0].fileSize).toBe(4096);
-        expect(mockLogger.warn).toHaveBeenCalledTimes(3);
+        expect(result.episodes[0].mimeType).toBe("video/mp4");
+        expect(result.episodes[1].duration).toBe(45);
+        expect(result.episodes[1].fileSize).toBe(4096);
+        expect(mockLogger.warn).toHaveBeenCalledTimes(2);
+    });
+
+    it("accepts supported video enclosures, normalizes types, and prefers audio", async () => {
+        mockFeedResponse({
+            title: "Video Podcast",
+            items: [
+                {
+                    title: "MP4 episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/episode.mp4",
+                        type: "video/mp4",
+                    },
+                },
+                {
+                    title: "WebM episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/episode.webm",
+                        type: "video/webm",
+                    },
+                },
+                {
+                    title: "M4V episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/episode.m4v",
+                        type: "video/x-m4v",
+                    },
+                },
+                {
+                    title: "Normalized MP4 episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/normalized.mp4",
+                        type: 'Video/MP4; codecs="avc1"',
+                    },
+                },
+                {
+                    title: "Audio wins",
+                    enclosure: {
+                        url: "https://cdn.example.com/video-first.mp4",
+                        type: "video/mp4",
+                    },
+                    enclosures: [
+                        {
+                            url: "https://cdn.example.com/audio-second.mp3",
+                            type: 'audio/MPEG; codecs="mp3"',
+                        },
+                    ],
+                },
+                {
+                    title: "QuickTime is unsupported",
+                    enclosure: {
+                        url: "https://cdn.example.com/episode.mov",
+                        type: "video/quicktime",
+                    },
+                },
+                {
+                    title: "Missing type is unsupported",
+                    enclosure: {
+                        url: "https://cdn.example.com/no-type.mp4",
+                    },
+                },
+            ],
+        });
+
+        const result = await rssParserService.parseFeed(
+            "https://example.com/video-podcast.xml",
+        );
+
+        expect(
+            result.episodes.map(({ audioUrl, mimeType }) => ({
+                audioUrl,
+                mimeType,
+            })),
+        ).toEqual([
+            {
+                audioUrl: "https://cdn.example.com/episode.mp4",
+                mimeType: "video/mp4",
+            },
+            {
+                audioUrl: "https://cdn.example.com/episode.webm",
+                mimeType: "video/webm",
+            },
+            {
+                audioUrl: "https://cdn.example.com/episode.m4v",
+                mimeType: "video/x-m4v",
+            },
+            {
+                audioUrl: "https://cdn.example.com/normalized.mp4",
+                mimeType: "video/mp4",
+            },
+            {
+                audioUrl: "https://cdn.example.com/audio-second.mp3",
+                mimeType: "audio/mpeg",
+            },
+        ]);
+        expect(mockLogger.warn).toHaveBeenCalledTimes(2);
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            'Skipping episode "QuickTime is unsupported" - no audio found',
+        );
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            'Skipping episode "Missing type is unsupported" - no audio found',
+        );
+        expect(
+            mockLogger.debug.mock.calls.filter(
+                ([message]) => message === "Parsed video podcast episodes",
+            ),
+        ).toEqual([
+            ["Parsed video podcast episodes", { videoEpisodeCount: 4 }],
+        ]);
     });
 
     it("extracts image urls from feed and item variants and falls back to podcast image", async () => {
