@@ -3,27 +3,8 @@ import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { loadOwnedArtistTracksNewestFirst } from "@/lib/artistPlayback";
 import { Track } from "../types";
+import { toLibraryAudioTrack } from "../libraryTrackPlayback";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
-
-// Helper to convert library Track to audio context Track format
-const formatTrackForAudio = (track: Track) => ({
-    id: track.id,
-    title: track.title,
-    duration: track.duration,
-    artist: {
-        id: track.album?.artist?.id,
-        name: track.album?.artist?.name || "Unknown Artist",
-    },
-    album: {
-        id: track.album?.id,
-        title: track.album?.title || "Unknown Album",
-        coverArt: track.album?.coverArt,
-        albumLoudnessLufs: track.album?.albumLoudnessLufs ?? null,
-        albumTruePeakDb: track.album?.albumTruePeakDb ?? null,
-    },
-    loudnessLufs: track.loudnessLufs ?? null,
-    truePeakDb: track.truePeakDb ?? null,
-});
 
 /**
  * Executes useLibraryActions.
@@ -86,7 +67,7 @@ export function useLibraryActions() {
     const addTrackToQueue = useCallback(
         (track: Track) => {
             try {
-                addToQueue(formatTrackForAudio(track));
+                addToQueue(toLibraryAudioTrack(track));
             } catch (error) {
                 sharedFrontendLogger.error(
                     "Error adding track to queue:",

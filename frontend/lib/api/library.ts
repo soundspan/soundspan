@@ -16,6 +16,9 @@ import {
     type ApiData,
 } from "./core";
 
+/** Library browse origins accepted by the artists, albums, and tracks lists. */
+export type LibraryBrowseOrigin = "all" | "local" | "peers" | "remote";
+
 /** Add library-domain operations to an API client base class. */
 export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class LibraryApi extends Base {
@@ -25,7 +28,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             offset?: number;
             filter?: "owned" | "discovery" | "all";
             sortBy?: string;
-            origin?: "all" | "local" | "peers";
+            origin?: LibraryBrowseOrigin;
         }) {
             return this.request<{
                 artists: ApiData[];
@@ -94,7 +97,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             offset?: number;
             filter?: "owned" | "discovery" | "all";
             sortBy?: string;
-            origin?: "all" | "local" | "peers";
+            origin?: LibraryBrowseOrigin;
         }) {
             return this.request<{
                 albums: ApiData[];
@@ -124,7 +127,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             limit?: number;
             offset?: number;
             sortBy?: string;
-            origin?: "all" | "local" | "peers";
+            origin?: LibraryBrowseOrigin;
         }) {
             return this.request<{
                 tracks: ApiData[];

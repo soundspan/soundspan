@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/cn";
 import { api, vibeErrorMessage } from "@/lib/api";
+import { isLibraryTrackRow } from "@/features/library/libraryTrackPlayback";
 import { useFeatures } from "@/lib/features-context";
 import { useAudioState } from "@/lib/audio-state-context";
 import Image from "next/image";
@@ -1003,7 +1004,9 @@ function VibePageContent() {
                     api.getTracks({ limit: 200 }),
                 ]);
                 setVibeStatus(status);
-                setLibraryTracks(tracks);
+                // Liked TIDAL / YouTube songs share this list; vibe seeds
+                // need library tracks.
+                setLibraryTracks(tracks.filter(isLibraryTrackRow));
             } catch (err) {
                 sharedFrontendLogger.error("Failed to load vibe status:", err);
             }
@@ -1067,7 +1070,9 @@ function VibePageContent() {
                     api.getTracks({ limit: 200 }),
                 ]);
                 setVibeStatus(status);
-                setLibraryTracks(tracks);
+                // Liked TIDAL / YouTube songs share this list; vibe seeds
+                // need library tracks.
+                setLibraryTracks(tracks.filter(isLibraryTrackRow));
             } catch (err) {
                 sharedFrontendLogger.error("Failed to refresh:", err);
             }

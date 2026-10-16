@@ -37,6 +37,7 @@ import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { toAudioTrack } from "./likedPlaylistUtils";
+import { resolveStreamCoverArtUrl } from "@/lib/streamCoverArt";
 import { TrackList, TrackListHeader } from "@/components/track";
 import type { TrackRowItem, TrackRowSlots } from "@/components/track";
 
@@ -49,16 +50,11 @@ export function resolveLikedTrackCoverUrl(
     track: LikedPlaylistTrack,
     size: number,
 ): string | null {
-    if (!track.album.coverArt) {
-        return null;
-    }
-    if (track.streamSource === "tidal") {
-        return api.getTidalBrowseImageUrl(track.album.coverArt);
-    }
-    if (track.streamSource === "youtube") {
-        return api.getBrowseImageUrl(track.album.coverArt);
-    }
-    return api.getCoverArtUrl(track.album.coverArt, size);
+    return resolveStreamCoverArtUrl(
+        track.album.coverArt,
+        track.streamSource,
+        size,
+    );
 }
 
 function toRowItem(track: LikedPlaylistTrack): TrackRowItem {

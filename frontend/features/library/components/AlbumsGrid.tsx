@@ -8,6 +8,8 @@ import { Disc3, Play, Trash2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { RemoteSourceBadges } from "@/components/ui/RemoteSourceBadges";
+import type { LibraryEmptyCopy } from "../libraryEmptyCopy";
 
 interface AlbumsGridProps {
     albums: Album[];
@@ -16,6 +18,7 @@ interface AlbumsGridProps {
     canDelete?: boolean;
     isLoading?: boolean;
     hidePlayButtons?: boolean;
+    emptyCopy?: LibraryEmptyCopy;
 }
 
 interface AlbumCardItemProps {
@@ -109,15 +112,17 @@ const AlbumCardItem = memo(
                                 </button>
                             )}
                         {/* Delete button */}
-                        {canDelete && album.source !== "federated" && (
-                            <button
-                                onClick={handleDelete}
-                                className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
-                                title="Delete album"
-                            >
-                                <Trash2 className="w-3.5 h-3.5 text-white" />
-                            </button>
-                        )}
+                        {canDelete &&
+                            album.source !== "federated" &&
+                            album.source !== "remote" && (
+                                <button
+                                    onClick={handleDelete}
+                                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
+                                    title="Delete album"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5 text-white" />
+                                </button>
+                            )}
                     </div>
                     <h3 className="text-sm font-semibold text-white truncate">
                         {album.title}
@@ -132,14 +137,18 @@ const AlbumCardItem = memo(
                                 online={album.peer.online}
                             />
                         )}
+                        <RemoteSourceBadges sources={album.remoteSources} />
                     </div>
                 </div>
             </Link>
         );
     },
-    (prevProps, nextProps) => {
-        return prevProps.album.id === nextProps.album.id;
-    },
+    // Re-render when the item object changes: counts and badges differ by origin.
+    (prevProps, nextProps) =>
+        prevProps.album === nextProps.album &&
+        prevProps.index === nextProps.index &&
+        prevProps.canDelete === nextProps.canDelete &&
+        prevProps.hidePlayButtons === nextProps.hidePlayButtons,
 );
 
 const AlbumsGrid = memo(function AlbumsGrid({
@@ -149,6 +158,7 @@ const AlbumsGrid = memo(function AlbumsGrid({
     canDelete = false,
     isLoading = false,
     hidePlayButtons = false,
+    emptyCopy,
 }: AlbumsGridProps) {
     if (isLoading) {
         return (
@@ -162,8 +172,11 @@ const AlbumsGrid = memo(function AlbumsGrid({
         return (
             <EmptyState
                 icon={<Disc3 className="w-12 h-12" />}
-                title="No albums yet"
-                description="Your library is empty. Sync your music to get started."
+                title={emptyCopy?.title ?? "No albums yet"}
+                description={
+                    emptyCopy?.description ??
+                    "Your library is empty. Sync your music to get started."
+                }
             />
         );
     }

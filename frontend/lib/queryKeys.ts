@@ -170,6 +170,7 @@ export const queryKeys = {
     userSettings: () => ["user-settings"] as const,
     scrobblingStatus: () => ["scrobbling-status"] as const,
     tidalStreamingStatus: () => ["tidal-streaming-status"] as const,
+    ytMusicStatus: () => ["ytmusic-status"] as const,
 
     // Podcast discovery
     podcastDiscoveryGenres: () => ["podcasts", "discovery", "genres"] as const,
