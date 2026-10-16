@@ -5,6 +5,10 @@ import {
     resolveSafeOutboundUrl,
     resolveSafeOutboundRedirectTarget,
 } from "./outboundUrlSafety";
+import {
+    classifyPodcastEnclosureMimeType,
+    type PodcastEnclosureKind,
+} from "./podcastEnclosurePolicy";
 
 /** Redirect-hop cap for feed fetches (matches the image proxy's limit). */
 const MAX_FEED_REDIRECTS = 5;
@@ -74,6 +78,24 @@ interface RSSEpisode {
     imageUrl?: string;
     fileSize?: number; // bytes
     mimeType?: string;
+}
+
+interface PlayableEnclosure {
+    url: string;
+    type?: string;
+    length?: string;
+    kind: Exclude<PodcastEnclosureKind, "unsupported">;
+    mimeType: string;
+}
+
+interface ParsedEpisode {
+    episode: RSSEpisode;
+    enclosureKind: PlayableEnclosure["kind"];
+}
+
+interface ParsedEpisodes {
+    episodes: RSSEpisode[];
+    videoEpisodeCount: number;
 }
 
 interface ParsedPodcastFeed {
@@ -322,7 +344,15 @@ class RSSParserService {
             rssParserLogger.debug(`Podcast: ${podcast.title}`);
             rssParserLogger.debug(`Author: ${podcast.author || "Unknown"}`);
             rssParserLogger.debug(`Episodes found: ${items.length}`);
-            const episodes = this.parseEpisodes(items, podcast);
+            const { episodes, videoEpisodeCount } = this.parseEpisodes(
+                items,
+                podcast,
+            );
+            if (videoEpisodeCount > 0) {
+                rssParserLogger.debug("Parsed video podcast episodes", {
+                    videoEpisodeCount,
+                });
+            }
             rssParserLogger.debug(
                 `Successfully parsed ${episodes.length} episodes`,
             );
@@ -345,32 +375,43 @@ class RSSParserService {
         }
     }
 
-    private parseEpisodes(items: any[], podcast: RSSPodcast): RSSEpisode[] {
-        return items
-            .map((item) => {
-                try {
-                    return this.parseEpisode(item, podcast);
-                } catch (error) {
-                    rssParserLogger.error(
-                        `Error parsing episode "${item.title}"`,
-                        describeRSSParserError(error),
-                    );
-                    return null;
-                }
-            })
-            .filter((episode): episode is RSSEpisode => episode !== null);
+    private parseEpisodes(items: any[], podcast: RSSPodcast): ParsedEpisodes {
+        const episodes: RSSEpisode[] = [];
+        let videoEpisodeCount = 0;
+        for (const item of items) {
+            const parsed = this.parseEpisodeSafely(item, podcast);
+            if (!parsed) continue;
+            episodes.push(parsed.episode);
+            if (parsed.enclosureKind === "video") videoEpisodeCount += 1;
+        }
+        return { episodes, videoEpisodeCount };
     }
 
-    private parseEpisode(item: any, podcast: RSSPodcast): RSSEpisode | null {
-        const audioEnclosure = this.findAudioEnclosure(item);
-        if (!audioEnclosure) {
+    private parseEpisodeSafely(
+        item: any,
+        podcast: RSSPodcast,
+    ): ParsedEpisode | null {
+        try {
+            return this.parseEpisode(item, podcast);
+        } catch (error) {
+            rssParserLogger.error(
+                `Error parsing episode "${item.title}"`,
+                describeRSSParserError(error),
+            );
+            return null;
+        }
+    }
+
+    private parseEpisode(item: any, podcast: RSSPodcast): ParsedEpisode | null {
+        const enclosure = this.findPlayableEnclosure(item);
+        if (!enclosure) {
             rssParserLogger.warn(
                 `Skipping episode "${item.title}" - no audio found`,
             );
             return null;
         }
-        const fileSize = this.parseEnclosureSize(audioEnclosure.length);
-        if (this.isRejectedEnclosureSize(audioEnclosure.length)) {
+        const fileSize = this.parseEnclosureSize(enclosure.length);
+        if (this.isRejectedEnclosureSize(enclosure.length)) {
             rssParserLogger.warn(
                 `Skipping episode "${item.title}" - enclosure exceeds size limit`,
             );
@@ -378,10 +419,22 @@ class RSSParserService {
         }
 
         return {
+            episode: this.buildEpisode(item, podcast, enclosure, fileSize),
+            enclosureKind: enclosure.kind,
+        };
+    }
+
+    private buildEpisode(
+        item: any,
+        podcast: RSSPodcast,
+        enclosure: PlayableEnclosure,
+        fileSize?: number,
+    ): RSSEpisode {
+        return {
             guid: item.guid || item.link || item.title || "",
             title: item.title || "Unknown Episode",
             description: item.content || item.contentSnippet || undefined,
-            audioUrl: audioEnclosure.url,
+            audioUrl: enclosure.url,
             duration: this.parseDuration(item.itunesDuration),
             publishedAt: item.pubDate ? new Date(item.pubDate) : new Date(),
             episodeNumber: item.itunesEpisode
@@ -391,7 +444,7 @@ class RSSParserService {
             imageUrl:
                 this.extractImageUrl(item) || podcast.imageUrl || undefined,
             fileSize,
-            mimeType: audioEnclosure.type || "audio/mpeg",
+            mimeType: this.resolveEnclosureMimeType(enclosure),
         };
     }
 
@@ -441,51 +494,37 @@ class RSSParserService {
         return undefined;
     }
 
-    /**
-     * Find audio enclosure in episode
-     */
-    private findAudioEnclosure(
-        item: any,
-    ): { url: string; type?: string; length?: string } | null {
-        // Check enclosure field
-        if (item.enclosure) {
-            const enc = item.enclosure;
-            if (enc.url && this.isAudioMimeType(enc.type)) {
-                return {
-                    url: enc.url,
-                    type: enc.type,
-                    length: enc.length,
-                };
-            }
+    private findPlayableEnclosure(item: any): PlayableEnclosure | null {
+        const candidates = [
+            ...(item.enclosure ? [item.enclosure] : []),
+            ...(Array.isArray(item.enclosures) ? item.enclosures : []),
+        ];
+        let firstVideo: PlayableEnclosure | null = null;
+        for (const candidate of candidates) {
+            const enclosure = this.toPlayableEnclosure(candidate);
+            if (!enclosure) continue;
+            if (enclosure.kind === "audio") return enclosure;
+            firstVideo ??= enclosure;
         }
-
-        // Check enclosures array
-        if (Array.isArray(item.enclosures)) {
-            for (const enc of item.enclosures) {
-                if (enc.url && this.isAudioMimeType(enc.type)) {
-                    return {
-                        url: enc.url,
-                        type: enc.type,
-                        length: enc.length,
-                    };
-                }
-            }
-        }
-
-        return null;
+        return firstVideo;
     }
 
-    /**
-     * Check if MIME type is audio
-     */
-    private isAudioMimeType(mimeType?: string): boolean {
-        if (!mimeType) return false;
-        return (
-            mimeType.startsWith("audio/") ||
-            mimeType.includes("mpeg") ||
-            mimeType.includes("mp3") ||
-            mimeType.includes("m4a")
-        );
+    private toPlayableEnclosure(candidate: any): PlayableEnclosure | null {
+        if (!candidate?.url) return null;
+        const classification = classifyPodcastEnclosureMimeType(candidate.type);
+        if (classification.kind === "unsupported") return null;
+        return {
+            url: candidate.url,
+            type: candidate.type,
+            length: candidate.length,
+            kind: classification.kind,
+            mimeType: classification.mimeType,
+        };
+    }
+
+    private resolveEnclosureMimeType(enclosure: PlayableEnclosure): string {
+        if (enclosure.kind === "video") return enclosure.mimeType;
+        return enclosure.mimeType || "audio/mpeg";
     }
 
     /**

@@ -37,6 +37,8 @@ Playing an older podcast episode creates a forward-only queue of newer episodes;
 
 Podcast episodes and music tracks share one mixed-media play queue: while an episode plays you can queue tracks behind it (and vice versa) with "Add to queue" / "Play next", and skip controls and auto-advance move through the combined queue. Listen Together sessions remain music-only.
 
+Video podcasts work too. When an episode is published only as a video (MP4, M4V, or WebM), soundspan plays its sound like any other episode; the picture is not shown. If an episode comes in both audio and video versions, soundspan uses the audio version. Video files are much larger than audio files, so these episodes take longer to cache and use more disk space.
+
 ## Playback Settings
 
 Configure stream/transcode quality and cache behavior in Settings.
