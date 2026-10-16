@@ -1,4 +1,10 @@
-import type { DiscoverResult, LibraryTrack } from "./types";
+import type { DiscoverResult } from "./types";
+
+/** Any song row with a title and an album artist (library or streaming). */
+export interface SongKeySource {
+    title: string;
+    album?: { artist?: { name: string } };
+}
 
 /**
  * Normalize an artist/title pair for owned-vs-external song comparison:
@@ -17,20 +23,20 @@ export function normalizeSongKey(artist: string, title: string): string {
 
 /**
  * Drop external track results that duplicate a song already present in the
- * library results, so the unified Songs section never shows the same song
- * twice. External rows without an artist cannot be safely compared and are
+ * library results or the viewer's liked streaming songs, so the Songs
+ * section never shows the same song twice. External rows without an artist cannot be safely compared and are
  * kept.
  */
 export function dedupeDiscoverTracks(
     discoverTracks: DiscoverResult[],
-    libraryTracks: LibraryTrack[],
+    libraryTracks: ReadonlyArray<SongKeySource>,
 ): DiscoverResult[] {
     if (discoverTracks.length === 0 || libraryTracks.length === 0) {
         return discoverTracks;
     }
     const ownedKeys = new Set(
         libraryTracks.map((track) =>
-            normalizeSongKey(track.album.artist.name, track.title),
+            normalizeSongKey(track.album?.artist?.name ?? "", track.title),
         ),
     );
     return discoverTracks.filter(

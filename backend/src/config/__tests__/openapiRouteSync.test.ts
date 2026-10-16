@@ -62,4 +62,53 @@ describe("openapi route sync", () => {
         expect(swaggerSpec.info.version).toBe(pkg.version);
         expect(swaggerSpec.info.version).not.toBe("1.0.0");
     });
+
+    test("search documents the nullable remote track response shape", () => {
+        const { swaggerSpec } = require("../swagger");
+        const remoteTrackSchema =
+            swaggerSpec.paths["/api/search"].get.responses["200"].content[
+                "application/json"
+            ].schema.properties.remoteTracks.items;
+
+        expect(remoteTrackSchema).not.toHaveProperty("allOf");
+        expect(remoteTrackSchema.required).toEqual(
+            expect.arrayContaining([
+                "albumId",
+                "trackNo",
+                "source",
+                "streamSource",
+                "album",
+            ]),
+        );
+        expect(remoteTrackSchema.properties).toEqual(
+            expect.objectContaining({
+                albumId: { type: "string", nullable: true },
+                trackNo: { type: "integer", nullable: true },
+                source: { type: "string", enum: ["tidal", "youtube"] },
+                streamSource: {
+                    type: "string",
+                    enum: ["tidal", "youtube"],
+                },
+                tidalTrackId: { type: "integer" },
+                youtubeVideoId: { type: "string" },
+                album: expect.objectContaining({
+                    required: ["id", "title", "rgMbid", "coverArt", "artist"],
+                    properties: expect.objectContaining({
+                        id: { type: "string", nullable: true },
+                        title: { type: "string" },
+                        rgMbid: { type: "string", nullable: true },
+                        coverArt: { type: "string", nullable: true },
+                        artist: {
+                            type: "object",
+                            required: ["id", "name"],
+                            properties: {
+                                id: { type: "string", nullable: true },
+                                name: { type: "string" },
+                            },
+                        },
+                    }),
+                }),
+            }),
+        );
+    });
 });

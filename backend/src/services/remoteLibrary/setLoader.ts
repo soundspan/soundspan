@@ -157,6 +157,7 @@ function matchesArtistScope(
 async function loadTidalRows(
     userId: string,
     artistId: string | undefined,
+    shouldReportCap: boolean,
 ): Promise<RemoteLibraryTrack[]> {
     const rows: TidalLikedRow[] = await prisma.likedRemoteTrack.findMany({
         where: {
@@ -173,7 +174,7 @@ async function loadTidalRows(
         orderBy: [{ likedAt: "desc" }, { id: "asc" }],
         take: REMOTE_LIBRARY_ROW_CAP + 1,
     });
-    reportCap(userId, "tidal", rows.length);
+    if (shouldReportCap) reportCap(userId, "tidal", rows.length);
     const tracks = rows
         .slice(0, REMOTE_LIBRARY_ROW_CAP)
         .flatMap(mapTidalLikedRow);
@@ -183,6 +184,7 @@ async function loadTidalRows(
 async function loadYoutubeRows(
     userId: string,
     artistId: string | undefined,
+    shouldReportCap: boolean,
 ): Promise<RemoteLibraryTrack[]> {
     const rows: YtLikedRow[] = await prisma.likedRemoteTrack.findMany({
         where: {
@@ -202,7 +204,7 @@ async function loadYoutubeRows(
         orderBy: [{ likedAt: "desc" }, { id: "asc" }],
         take: REMOTE_LIBRARY_ROW_CAP + 1,
     });
-    reportCap(userId, "youtube", rows.length);
+    if (shouldReportCap) reportCap(userId, "youtube", rows.length);
     const tracks = rows
         .slice(0, REMOTE_LIBRARY_ROW_CAP)
         .flatMap(mapYoutubeLikedRow);
@@ -228,19 +230,20 @@ function preferredProvider(
 /** Loads and derives the bounded per-user remote library set. */
 export async function loadRemoteLibrarySet(
     userId: string | undefined,
-    scope?: { artistId: string },
+    options?: { artistId?: string; reportCap?: boolean },
 ): Promise<RemoteLibrarySet> {
     if (!userId) return emptyRemoteLibrarySet();
     const access = await loadRemoteLibraryAccess(userId);
     if (!access.providers.tidal && !access.providers.youtube) {
         return emptyRemoteLibrarySet();
     }
+    const shouldReportCap = options?.reportCap ?? true;
     const [tidalRows, youtubeRows] = await Promise.all([
         access.providers.tidal
-            ? loadTidalRows(userId, scope?.artistId)
+            ? loadTidalRows(userId, options?.artistId, shouldReportCap)
             : Promise.resolve([]),
         access.providers.youtube
-            ? loadYoutubeRows(userId, scope?.artistId)
+            ? loadYoutubeRows(userId, options?.artistId, shouldReportCap)
             : Promise.resolve([]),
     ]);
     const tracks = collapseProviderDuplicates(

@@ -24,7 +24,9 @@ Start-here guide for `frontend/features/search`.
 | `components/LibraryTracksList.tsx` | components |
 | `components/SearchFilters.tsx` | components |
 | `components/SimilarArtistsGrid.tsx` | components |
+| `components/SongsSubheading.tsx` | components |
 | `components/SoulseekSongsList.tsx` | components |
+| `components/StreamingLikesList.tsx` | components |
 | `components/TopResult.tsx` | components |
 | `components/TVSearchInput.tsx` | components |
 | `components/YouTubePlaylistPreviewCard.tsx` | components |
@@ -35,6 +37,7 @@ Start-here guide for `frontend/features/search`.
 | `hooks/useYouTubePlaylist.ts` | hooks |
 | `hooks/useYouTubeUrl.ts` | hooks |
 | `discoverySelection.ts` | root |
+| `searchSongGroups.ts` | root |
 | `songDedup.ts` | root |
 | `types.ts` | root |
 

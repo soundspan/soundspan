@@ -12,6 +12,7 @@ import axios from "axios";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
 import { LIBRARY_ORIGIN_VALUES } from "../utils/librarySorting";
+import { searchRemoteLibraryTracks } from "../services/remoteLibrary/remoteLibrarySearch";
 
 const router = Router();
 
@@ -36,6 +37,50 @@ const searchQuerySchema = z.object({
     offset: z.coerce.number().int().min(0).max(10_000).default(0),
     source: z.enum(LIBRARY_ORIGIN_VALUES).default("all"),
 });
+type SearchQuery = z.infer<typeof searchQuerySchema>;
+type RemoteSearchEligibility = Pick<
+    SearchQuery,
+    "source" | "type" | "genre" | "offset" | "limit"
+> & {
+    userId: string | undefined;
+};
+type RemoteSearchRequest = RemoteSearchEligibility & {
+    query: string;
+};
+type CachedLibrarySearchRequest = Pick<
+    SearchQuery,
+    "type" | "genre" | "offset" | "limit"
+> & {
+    query: string;
+    sourceOption: Partial<Pick<SearchQuery, "source">>;
+};
+
+/** Resolves whether a search request gets a remote group and its size. */
+export function remoteSearchLimitFor(input: RemoteSearchEligibility): number {
+    if (!input.userId || input.source !== "all" || input.genre) return 0;
+    if (input.type === "all") return 5;
+    return input.type === "tracks" && input.offset === 0 ? input.limit : 0;
+}
+
+async function loadRemoteSearchTracks(input: RemoteSearchRequest) {
+    const limit = remoteSearchLimitFor(input);
+    if (limit < 1) return [];
+    try {
+        return await searchRemoteLibraryTracks(
+            input.userId,
+            input.query,
+            limit,
+        );
+    } catch (error) {
+        logger
+            .child("RemoteLibrarySearch")
+            .warn("Remote library search failed", {
+                error,
+                queryLength: input.query.length,
+            });
+        return [];
+    }
+}
 
 function normalizeDiscoverArtistName(value: unknown): string {
     return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -220,6 +265,35 @@ function transformSearchResults(serviceResults: SearchResults) {
     };
 }
 
+async function transformSearchResultsForUser(
+    serviceResults: SearchResults,
+    input: RemoteSearchRequest,
+) {
+    const remoteTracks = await loadRemoteSearchTracks(input);
+    return { ...transformSearchResults(serviceResults), remoteTracks };
+}
+
+async function searchCachedLibrary(
+    input: CachedLibrarySearchRequest,
+): Promise<SearchResults> {
+    if (input.type === "all") {
+        return searchService.searchAll({
+            query: input.query,
+            limit: input.limit,
+            genre: input.genre,
+            ...input.sourceOption,
+        });
+    }
+    return searchService.searchByType({
+        query: input.query,
+        type: input.type,
+        limit: input.limit,
+        offset: input.offset,
+        genre: input.genre,
+        ...input.sourceOption,
+    });
+}
+
 router.use(requireAuth);
 
 /**
@@ -227,7 +301,7 @@ router.use(requireAuth);
  * /api/search:
  *   get:
  *     summary: Search across your music library
- *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search
+ *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search. remoteTracks is a per-user, uncached group populated only without a genre filter for source=all and either type=all or the first page of type=tracks.
  *     tags: [Search]
  *     security:
  *       - apiKeyAuth: []
@@ -294,6 +368,84 @@ router.use(requireAuth);
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/Track'
+ *                 remoteTracks:
+ *                   type: array
+ *                   description: Liked remote-only tracks from the signed-in user's connected streaming services. This group is loaded per user after the cached library search and is populated only without a genre filter for source=all and either type=all or the first page of type=tracks.
+ *                   items:
+ *                     type: object
+ *                     required: [id, title, duration, trackNo, trackNumber, artistId, albumId, source, streamSource, provider, artist, album]
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       title:
+ *                         type: string
+ *                       duration:
+ *                         type: integer
+ *                       trackNo:
+ *                         type: integer
+ *                         nullable: true
+ *                       trackNumber:
+ *                         type: integer
+ *                         nullable: true
+ *                       artistId:
+ *                         type: string
+ *                         nullable: true
+ *                       albumId:
+ *                         type: string
+ *                         nullable: true
+ *                       source:
+ *                         type: string
+ *                         enum: [tidal, youtube]
+ *                       streamSource:
+ *                         type: string
+ *                         enum: [tidal, youtube]
+ *                       tidalTrackId:
+ *                         type: integer
+ *                       youtubeVideoId:
+ *                         type: string
+ *                       provider:
+ *                         type: object
+ *                         required: [tidalTrackId, youtubeVideoId]
+ *                         properties:
+ *                           tidalTrackId:
+ *                             type: integer
+ *                             nullable: true
+ *                           youtubeVideoId:
+ *                             type: string
+ *                             nullable: true
+ *                       artist:
+ *                         type: object
+ *                         required: [id, name]
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             nullable: true
+ *                           name:
+ *                             type: string
+ *                       album:
+ *                         type: object
+ *                         required: [id, title, rgMbid, coverArt, artist]
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             nullable: true
+ *                           title:
+ *                             type: string
+ *                           rgMbid:
+ *                             type: string
+ *                             nullable: true
+ *                           coverArt:
+ *                             type: string
+ *                             nullable: true
+ *                           artist:
+ *                             type: object
+ *                             required: [id, name]
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                                 nullable: true
+ *                               name:
+ *                                 type: string
  *                 audiobooks:
  *                   type: array
  *                   items:
@@ -328,32 +480,29 @@ router.get("/", async (req, res) => {
                 audiobooks: [],
                 podcasts: [],
                 episodes: [],
+                remoteTracks: [],
             });
         }
 
-        // Delegate to service (handles caching + parallel execution + genre filtering)
-        if (type === "all") {
-            const serviceResults = await searchService.searchAll({
-                query,
-                limit: searchLimit,
-                genre: genre as string | undefined,
-                ...sourceOption,
-            });
-
-            return res.json(transformSearchResults(serviceResults));
-        }
-
-        // Single-type search (service handles caching)
-        const serviceResults = await searchService.searchByType({
+        const serviceResults = await searchCachedLibrary({
             query,
-            type: type as string,
+            type,
             limit: searchLimit,
             offset,
-            genre: genre as string | undefined,
-            ...sourceOption,
+            genre,
+            sourceOption,
         });
-
-        res.json(transformSearchResults(serviceResults));
+        return res.json(
+            await transformSearchResultsForUser(serviceResults, {
+                userId: req.user?.id,
+                query,
+                type,
+                source,
+                genre,
+                offset,
+                limit: searchLimit,
+            }),
+        );
     } catch (error) {
         logger.error("Search error:", error);
         res.status(500).json({ error: "Search failed" });

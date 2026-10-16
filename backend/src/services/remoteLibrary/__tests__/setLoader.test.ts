@@ -322,4 +322,24 @@ describe("remote library set loader", () => {
             },
         );
     });
+
+    it("skips cap reporting for a search membership load", async () => {
+        mockAccess.mockResolvedValue({
+            providers: { tidal: true, youtube: false },
+            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
+        });
+        mockFindMany.mockResolvedValue(
+            Array.from({ length: REMOTE_LIBRARY_ROW_CAP + 1 }, (_, index) =>
+                tidalEntry(index),
+            ),
+        );
+
+        const result = await loadRemoteLibrarySet("user-1", {
+            reportCap: false,
+        });
+
+        expect(result.tracks).toHaveLength(REMOTE_LIBRARY_ROW_CAP);
+        expect(mockRecordCapped).not.toHaveBeenCalled();
+        expect(mockRemoteLibraryWarn).not.toHaveBeenCalled();
+    });
 });

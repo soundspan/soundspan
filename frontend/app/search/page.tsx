@@ -6,7 +6,6 @@ import { SectionHeader } from "@/components/layout/SectionHeader";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SearchIcon } from "lucide-react";
 import { useSearchData } from "@/features/search/hooks/useSearchData";
-import { dedupeDiscoverTracks } from "@/features/search/songDedup";
 import { useSoulseekSearch } from "@/features/search/hooks/useSoulseekSearch";
 import { useYouTubeUrl } from "@/features/search/hooks/useYouTubeUrl";
 import { YouTubePreviewCard } from "@/features/search/components/YouTubePreviewCard";
@@ -22,6 +21,10 @@ import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudio
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
 import { DiscoverTracksList } from "@/features/search/components/DiscoverTracksList";
+import { StreamingLikesList } from "@/features/search/components/StreamingLikesList";
+import { SongsSubheading } from "@/features/search/components/SongsSubheading";
+import { selectSearchSongGroups } from "@/features/search/searchSongGroups";
+import { useRemoteTrackAcquisition } from "@/features/library/hooks/useRemoteTrackAcquisition";
 import {
     deriveDiscoverySelection,
     normalizeArtistName,
@@ -46,6 +49,8 @@ export default function SearchPage() {
     const { user } = useAuth();
     const { federation } = useFeatures();
     const canDownloadYouTube = user?.role === "admin";
+    const { policy: acquisitionPolicy, acquire: acquireRemoteTrack } =
+        useRemoteTrackAcquisition();
     const [filterTab, setFilterTab] = useState<FilterTab>("all");
     const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
     const isPodcastTab = filterTab === "podcasts";
@@ -163,21 +168,26 @@ export default function SearchPage() {
     const discoverPodcastResults = discoverResults.filter(
         (result) => result.type === "podcast",
     );
-    const libraryTracks = libraryResults?.tracks ?? [];
+    // Songs: library songs, then liked streaming songs in their own group,
+    // then external matches minus anything already shown.
+    const { libraryTracks, streamingTracks, unownedDiscoverTracks } =
+        selectSearchSongGroups({
+            filterTab,
+            showLibrary,
+            showDiscover,
+            libraryResults,
+            discoverTracks,
+        });
     const libraryAlbums = libraryResults?.albums ?? [];
     const libraryPodcasts = libraryResults?.podcasts ?? [];
     const hasPodcastResults =
         libraryPodcasts.length > 0 || discoverPodcastResults.length > 0;
-    // One Songs section: external matches continue the owned list, minus
-    // songs the library results already cover.
-    const unownedDiscoverTracks = showDiscover
-        ? dedupeDiscoverTracks(discoverTracks, libraryTracks)
-        : [];
 
     // Determine if we should show the 2-column layout
     const hasTopResult = visibleLibraryTopArtist || topArtist;
     const hasTracks =
         libraryTracks.length > 0 ||
+        streamingTracks.length > 0 ||
         soulseekResults.length > 0 ||
         unownedDiscoverTracks.length > 0;
     const show2ColumnLayout =
@@ -409,11 +419,23 @@ export default function SearchPage() {
                                                 limit={isTracksView ? null : 10}
                                             />
                                         )}
+                                    <StreamingLikesList
+                                        tracks={streamingTracks}
+                                        acquisitionPolicy={acquisitionPolicy}
+                                        onAcquire={acquireRemoteTrack}
+                                    />
                                     {unownedDiscoverTracks.length > 0 && (
-                                        <DiscoverTracksList
-                                            tracks={unownedDiscoverTracks}
-                                            limit={5}
-                                        />
+                                        <>
+                                            {streamingTracks.length > 0 && (
+                                                <SongsSubheading>
+                                                    More songs
+                                                </SongsSubheading>
+                                            )}
+                                            <DiscoverTracksList
+                                                tracks={unownedDiscoverTracks}
+                                                limit={5}
+                                            />
+                                        </>
                                     )}
                                 </>
                             )}
@@ -498,6 +520,7 @@ export default function SearchPage() {
                             !isPodcastTab &&
                             (sectionView === null || isTracksView) &&
                             ((showLibrary && libraryTracks.length > 0) ||
+                                streamingTracks.length > 0 ||
                                 unownedDiscoverTracks.length > 0) && (
                                 <section>
                                     <SectionHeader
@@ -517,11 +540,23 @@ export default function SearchPage() {
                                                 limit={isTracksView ? null : 10}
                                             />
                                         )}
+                                    <StreamingLikesList
+                                        tracks={streamingTracks}
+                                        acquisitionPolicy={acquisitionPolicy}
+                                        onAcquire={acquireRemoteTrack}
+                                    />
                                     {unownedDiscoverTracks.length > 0 && (
-                                        <DiscoverTracksList
-                                            tracks={unownedDiscoverTracks}
-                                            limit={isTracksView ? null : 5}
-                                        />
+                                        <>
+                                            {streamingTracks.length > 0 && (
+                                                <SongsSubheading>
+                                                    More songs
+                                                </SongsSubheading>
+                                            )}
+                                            <DiscoverTracksList
+                                                tracks={unownedDiscoverTracks}
+                                                limit={isTracksView ? null : 5}
+                                            />
+                                        </>
                                     )}
                                 </section>
                             )}
@@ -639,6 +674,7 @@ export default function SearchPage() {
                               (!libraryResults.artists?.length &&
                                   !libraryResults.albums?.length &&
                                   !libraryResults.tracks?.length &&
+                                  streamingTracks.length === 0 &&
                                   !libraryResults.audiobooks?.length &&
                                   // Library podcasts render only on the All
                                   // and Podcasts tabs; episodes only under
