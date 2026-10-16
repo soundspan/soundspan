@@ -61,14 +61,14 @@ jobs:
         # hashFiles guard: if the scan step failed before writing the SARIF,
         # skip the upload instead of cascading a second, confusing red step.
         if: always() && hashFiles('trivy-fs-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: trivy-fs-results.sarif
           category: trivy-fs
 
       - name: Upload SARIF artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trivy-fs-results-${{ github.run_id }}
           path: trivy-fs-results.sarif
@@ -153,14 +153,14 @@ jobs:
         # hashFiles guard: if the scan step failed before writing the SARIF,
         # skip the upload instead of cascading a second, confusing red step.
         if: always() && hashFiles('gitleaks-report/results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: gitleaks-report/results.sarif
           category: gitleaks
 
       - name: Upload report artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gitleaks-results-${{ github.run_id }}
           path: gitleaks-report/
