@@ -156,7 +156,6 @@ describe("remote library search", () => {
                     id: { in: ["tidal-exact"] },
                 }),
                 select: { id: true },
-                take: 4,
             }),
         );
         expect(mockTidalFindMany).toHaveBeenNthCalledWith(
@@ -211,31 +210,60 @@ describe("remote library search", () => {
                         },
                     },
                 },
+                {
+                    albumEntity: {
+                        is: {
+                            artist: {
+                                is: {
+                                    name: {
+                                        contains: term,
+                                        mode: "insensitive",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             ],
         }));
         expect(mockTidalFindMany).toHaveBeenCalledWith({
             where: { id: { in: ["tidal-1"] }, AND: expectedTerms },
             select: { id: true },
-            take: 20,
         });
         expect(mockYoutubeFindMany).toHaveBeenCalledWith({
             where: { id: { in: ["youtube-1"] }, AND: expectedTerms },
             select: { id: true },
-            take: 20,
         });
     });
 
-    it("caps each provider text-match query at 400 rows", async () => {
+    it("ranks an exact-title match after every provider match is loaded", async () => {
+        const partialMatches = Array.from({ length: 20 }, (_, index) =>
+            remoteRow("tidal", `tidal-partial-${index}`, `Love Song ${index}`),
+        );
+        const exactMatch = remoteRow("tidal", "tidal-exact", "Love");
         mockLoadRemoteLibrarySet.mockResolvedValueOnce({
-            tracks: [remoteRow("tidal", "tidal-1", "Match")],
+            tracks: [...partialMatches, exactMatch],
             byArtistId: new Map(),
             byAlbumId: new Map(),
         });
+        const databaseOrder = [...partialMatches, exactMatch].map((row) => ({
+            id: row.providerRowId,
+        }));
+        mockTidalFindMany
+            .mockImplementationOnce((args) =>
+                Promise.resolve(
+                    databaseOrder.slice(0, args.take ?? databaseOrder.length),
+                ),
+            )
+            .mockResolvedValueOnce([tidalDisplayRow("tidal-exact", "Love")]);
 
-        await searchRemoteLibraryTracks("user-1", "match", 200);
+        const result = await searchRemoteLibraryTracks("user-1", "love", 5);
 
-        expect(mockTidalFindMany).toHaveBeenCalledWith(
-            expect.objectContaining({ take: 400 }),
+        expect(result[0]).toEqual(
+            expect.objectContaining({
+                id: "tidal:42",
+                title: "Love",
+            }),
         );
     });
 

@@ -296,6 +296,23 @@ test("clicking the song that is already playing pauses it instead of restarting"
     await mounted.unmount();
 });
 
+test("clicking the paused current song resumes it", async () => {
+    played.length = 0;
+    playerState.currentTrack = { id: "tidal:77" };
+    playerState.isPlaying = false;
+    playerState.resumes = 0;
+    const mounted = await mountList({ tracks: [tidalRow] });
+    await React.act(async () => {
+        rowsOf(mounted.container)[0].dispatchEvent(
+            new MouseEvent("click", { bubbles: true }),
+        );
+    });
+    assert.equal(playerState.resumes, 1);
+    assert.equal(played.length, 0);
+    playerState.currentTrack = null;
+    await mounted.unmount();
+});
+
 test("shows five songs by default", async () => {
     const many = Array.from({ length: 7 }, (_, index) => ({
         ...tidalRow,

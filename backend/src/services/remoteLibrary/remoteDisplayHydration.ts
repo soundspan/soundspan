@@ -53,7 +53,6 @@ type YoutubeDisplayRow = Prisma.TrackYtMusicGetPayload<{
 type RemoteTrackMatchRow = { id: string };
 
 const REMOTE_LIBRARY_TEXT_TERM_CAP = 6;
-const REMOTE_SEARCH_PROVIDER_ROW_CAP = 400;
 
 function providerIds(
     rows: ReadonlyArray<RemoteLibraryTrack>,
@@ -92,6 +91,17 @@ function textMatchAlternatives(term: string) {
                 },
             },
         },
+        {
+            albumEntity: {
+                is: {
+                    artist: {
+                        is: {
+                            name: contains,
+                        },
+                    },
+                },
+            },
+        },
     ];
 }
 
@@ -106,26 +116,22 @@ function textMatchWhere(terms: ReadonlyArray<string>) {
 async function loadMatchingTidalIds(
     ids: string[],
     terms: ReadonlyArray<string>,
-    take: number,
 ): Promise<RemoteTrackMatchRow[]> {
     if (ids.length === 0) return [];
     return prisma.trackTidal.findMany({
         where: { id: { in: ids }, ...textMatchWhere(terms) },
         select: { id: true },
-        take,
     });
 }
 
 async function loadMatchingYoutubeIds(
     ids: string[],
     terms: ReadonlyArray<string>,
-    take: number,
 ): Promise<RemoteTrackMatchRow[]> {
     if (ids.length === 0) return [];
     return prisma.trackYtMusic.findMany({
         where: { id: { in: ids }, ...textMatchWhere(terms) },
         select: { id: true },
-        take,
     });
 }
 
@@ -137,10 +143,9 @@ export async function findMatchingRemoteLibraryTracks(
 ): Promise<RemoteLibraryTrack[]> {
     const terms = textTerms(query);
     if (rows.length === 0 || terms.length === 0 || limit < 1) return [];
-    const take = Math.min(limit * 4, REMOTE_SEARCH_PROVIDER_ROW_CAP);
     const [tidalRows, youtubeRows] = await Promise.all([
-        loadMatchingTidalIds(providerIds(rows, "tidal"), terms, take),
-        loadMatchingYoutubeIds(providerIds(rows, "youtube"), terms, take),
+        loadMatchingTidalIds(providerIds(rows, "tidal"), terms),
+        loadMatchingYoutubeIds(providerIds(rows, "youtube"), terms),
     ]);
     const tidalIds = new Set(tidalRows.map((row) => row.id));
     const youtubeIds = new Set(youtubeRows.map((row) => row.id));
