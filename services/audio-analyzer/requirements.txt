@@ -19,7 +19,7 @@ essentia-tensorflow==2.1b6.dev1389
 
 # Queue and database
 redis>=6.4.0
-psycopg2-binary>=2.9.0
+psycopg2-binary>=2.9.13
 
 # NumPy 1.26.x is the last 1.x line and matches the jointly locked TensorFlow
 # 2.15 companion set used by AIO; TensorFlow 2.15 does not accept NumPy 2.x.
