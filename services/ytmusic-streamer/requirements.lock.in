@@ -24,5 +24,5 @@ httpx>=0.28.1
 requests>=2.34.2
 # yt-dlp[default] stable extras (see requirements-exempt.txt)
 brotli>=1.2.0
-pycryptodomex>=3.23.0
+pycryptodomex>=3.24.1
 websockets>=17.2
