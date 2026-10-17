@@ -2,5 +2,5 @@ fastapi>=0.142.2
 uvicorn>=0.54.0
 tiddl>=3.4.4
 tidalapi>=0.8.11,<1.0.0
-pydantic>=2.13.5
+pydantic>=2.14.1
 httpx>=0.28.1
