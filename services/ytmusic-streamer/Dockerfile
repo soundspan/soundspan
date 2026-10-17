@@ -2,7 +2,7 @@
 # Streams audio from YouTube Music via ytmusicapi + yt-dlp with a bounded transient spool
 FROM denoland/deno:bin-2.9.6@sha256:4cf0029b9aeeeed5efcbb71828737f0d7c8c8a20072df960e51a5679ef0d21ba AS deno
 
-FROM python:3.14-slim@sha256:cae66f2ef0ec51a9891263eeee7f987dacf0a9879e8aa9353d5606e0530619a5
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 
 # yt-dlp uses Deno for YouTube's JavaScript challenge solving.
 COPY --from=deno /deno /usr/local/bin/deno
