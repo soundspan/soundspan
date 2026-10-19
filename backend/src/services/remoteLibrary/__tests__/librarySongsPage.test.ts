@@ -30,6 +30,8 @@ function youtubeRow(): YoutubeRemoteRow {
         albumId: null,
         albumLocation: null,
         albumArtistId: null,
+        albumMatchedRgMbid: null,
+        albumMatchedInLibrary: false,
         likedAt: new Date(),
         mappings: [],
     };
@@ -96,6 +98,11 @@ describe("Library Songs merged page", () => {
             "yt:video-1",
             "local-1",
         ]);
+        expect(page.tracks[0]).toEqual(
+            expect.objectContaining({
+                album: expect.objectContaining({ matchedInLibrary: false }),
+            }),
+        );
         expect(page.total).toBe(2);
     });
 

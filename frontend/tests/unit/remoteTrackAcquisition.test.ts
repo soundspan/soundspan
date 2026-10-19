@@ -158,6 +158,40 @@ test("a MusicBrainz match also wins over the single TIDAL song", () => {
     assert.equal(action?.kind, "download-album");
 });
 
+test("a match the library already holds falls back to the single song", () => {
+    const album = {
+        id: "a",
+        title: "Album",
+        rgMbid: "remote:abc",
+        matchedRgMbid: "8e8a6f1c-0000-4000-8000-000000000002",
+        matchedInLibrary: true,
+    };
+    assert.deepEqual(
+        resolveRemoteTrackAcquisition(remoteTrack({ album }), admin),
+        {
+            kind: "download-tidal",
+            tidalTrackId: 1,
+            title: "Song",
+        },
+    );
+    const youtube = remoteTrack({
+        id: "yt:vid",
+        source: "youtube",
+        streamSource: "youtube",
+        tidalTrackId: undefined,
+        provider: { youtubeVideoId: "vid", tidalTrackId: null },
+        album,
+    });
+    assert.equal(
+        resolveRemoteTrackAcquisition(youtube, admin)?.kind,
+        "download-youtube",
+    );
+    assert.equal(
+        resolveRemoteTrackAcquisition(remoteTrack({ album }), member),
+        null,
+    );
+});
+
 test("admins can add a single YouTube Music song when the album is not acquirable", () => {
     const track = remoteTrack({
         id: "yt:vid",

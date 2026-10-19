@@ -476,6 +476,8 @@ export function AlbumActionBar(props: AlbumActionBarProps) {
         albumId: props.album.id,
         rgMbid: props.album.rgMbid,
         mbid: props.album.mbid,
+        matchedRgMbid: props.album.matchedRgMbid,
+        matchedInLibrary: props.album.matchedInLibrary,
         downloadsEnabled: props.downloadsEnabled ?? true,
         requestsEnabled:
             (props.requestsEnabled ?? false) && Boolean(props.onRequestAlbum),

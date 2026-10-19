@@ -29,6 +29,10 @@ export interface Album {
     type?: string;
     mbid?: string;
     rgMbid?: string;
+    /** MusicBrainz release group matched for a streaming-only album. */
+    matchedRgMbid?: string | null;
+    /** True when a library album already holds `matchedRgMbid`. */
+    matchedInLibrary?: boolean;
     owned?: boolean;
     tracks?: Track[];
     similarAlbums?: SimilarAlbum[];

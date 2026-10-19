@@ -202,6 +202,119 @@ function remoteTidalDisplayRow(input: {
     };
 }
 
+function matchedRemoteLike(input: {
+    id: string;
+    title: string;
+    albumId: string;
+    matchedRgMbid: string;
+}) {
+    return {
+        likedAt: new Date(),
+        trackTidal: {
+            id: input.id,
+            title: input.title,
+            artistId: "artist-matched",
+            albumId: input.albumId,
+            albumEntity: {
+                artistId: "artist-matched",
+                location: "REMOTE",
+                matchedRgMbid: input.matchedRgMbid,
+            },
+            mappings: [],
+        },
+    };
+}
+
+function matchedArtistRemoteLikes() {
+    return [
+        matchedRemoteLike({
+            id: "tidal-held",
+            title: "Held bonus track",
+            albumId: "remote-held",
+            matchedRgMbid: "rg-held",
+        }),
+        matchedRemoteLike({
+            id: "tidal-unheld",
+            title: "Unheld track",
+            albumId: "remote-unheld",
+            matchedRgMbid: "rg-unheld",
+        }),
+    ];
+}
+
+function matchedArtistAlbum(input: {
+    id: string;
+    title: string;
+    rgMbid: string;
+    matchedRgMbid: string | null;
+    location: "LIBRARY" | "REMOTE";
+}) {
+    return {
+        ...input,
+        coverUrl: null,
+        tracks: [],
+        federationPeer: null,
+    };
+}
+
+function matchedArtistAlbums() {
+    return [
+        matchedArtistAlbum({
+            id: "library-held",
+            title: "Held album",
+            rgMbid: "rg-held",
+            matchedRgMbid: null,
+            location: "LIBRARY",
+        }),
+        matchedArtistAlbum({
+            id: "remote-held",
+            title: "Held streaming edition",
+            rgMbid: "remote:held",
+            matchedRgMbid: "rg-held",
+            location: "REMOTE",
+        }),
+        matchedArtistAlbum({
+            id: "remote-unheld",
+            title: "Unheld streaming edition",
+            rgMbid: "remote:unheld",
+            matchedRgMbid: "rg-unheld",
+            location: "REMOTE",
+        }),
+    ];
+}
+
+function matchedArtistDetail() {
+    return {
+        id: "artist-matched",
+        name: "Matched artist",
+        mbid: "temp-matched",
+        heroUrl: null,
+        userHeroUrl: null,
+        similarArtistsJson: null,
+        catalogSyncedAt: null,
+        peerId: null,
+        federationPeer: null,
+        ownedAlbums: [],
+        albums: matchedArtistAlbums(),
+    };
+}
+
+function albumDetailRow(
+    id: string,
+    location: "LIBRARY" | "REMOTE",
+    matchedRgMbid: string | null,
+) {
+    return {
+        id,
+        artistId: "artist-1",
+        rgMbid: location === "REMOTE" ? `remote:${id}` : id,
+        matchedRgMbid,
+        location,
+        coverUrl: null,
+        artist: { id: "artist-1", mbid: null, name: "Artist" },
+    };
+}
+
 describe("library catalog list runtime coverage", () => {
     const recentlyListenedHandler = getHandler("get", "/recently-listened");
     const recentlyAddedHandler = getHandler("get", "/recently-added");
@@ -1394,6 +1507,48 @@ describe("library catalog list runtime coverage", () => {
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 
+    it("hides held matched placeholders from artist detail but keeps unheld matches", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce(
+            matchedArtistRemoteLikes(),
+        );
+        mockAlbumFindMany.mockResolvedValueOnce([{ rgMbid: "rg-held" }]);
+        mockArtistFindFirst.mockResolvedValueOnce(matchedArtistDetail());
+        const res = createRes();
+
+        await artistByIdHandler(
+            {
+                params: { id: "artist-matched" },
+                query: {
+                    includeDiscography: "false",
+                    includeTopTracks: "false",
+                    includeSimilarArtists: "false",
+                },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(
+            res.body.albums.map((album: { id: string }) => album.id),
+        ).toEqual(["library-held", "remote-unheld"]);
+        expect(mockAlbumFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    location: "LIBRARY",
+                    rgMbid: { in: ["rg-held", "rg-unheld"] },
+                }),
+            }),
+        );
+    });
+
     it("treats unknown boolean-like artist query values as default values", async () => {
         mockArtistFindFirst.mockResolvedValueOnce({
             id: "artist-default-unknown",
@@ -1931,6 +2086,91 @@ describe("library catalog list runtime coverage", () => {
         );
     });
 
+    it("reports whether a matched REMOTE album is held", async () => {
+        mockAlbumFindFirst
+            .mockResolvedValueOnce(
+                albumDetailRow("remote-held", "REMOTE", "rg-held"),
+            )
+            .mockResolvedValueOnce(
+                albumDetailRow("remote-unheld", "REMOTE", "rg-unheld"),
+            );
+        mockOwnedAlbumFindUnique.mockResolvedValue(null);
+        mockAlbumFindMany
+            .mockResolvedValueOnce([{ rgMbid: "rg-held" }])
+            .mockResolvedValueOnce([]);
+
+        const responses = [];
+        for (const id of ["remote-held", "remote-unheld"]) {
+            const res = createRes();
+            await albumByIdHandler(
+                { params: { id }, query: { includeTracks: "false" } } as any,
+                res,
+            );
+            responses.push(res.body);
+        }
+
+        expect(responses).toEqual([
+            expect.objectContaining({
+                matchedRgMbid: "rg-held",
+                matchedInLibrary: true,
+            }),
+            expect.objectContaining({
+                matchedRgMbid: "rg-unheld",
+                matchedInLibrary: false,
+            }),
+        ]);
+        expect(mockAlbumFindMany).toHaveBeenCalledTimes(2);
+    });
+
+    it("reports whether a matched LIBRARY album is held", async () => {
+        mockAlbumFindFirst.mockResolvedValueOnce(
+            albumDetailRow("adopted-placeholder", "LIBRARY", "rg-held"),
+        );
+        mockOwnedAlbumFindUnique.mockResolvedValueOnce(null);
+        mockAlbumFindMany.mockResolvedValueOnce([{ rgMbid: "rg-held" }]);
+        const res = createRes();
+
+        await albumByIdHandler(
+            {
+                params: { id: "adopted-placeholder" },
+                query: { includeTracks: "false" },
+            } as any,
+            res,
+        );
+
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                matchedRgMbid: "rg-held",
+                matchedInLibrary: true,
+            }),
+        );
+        expect(mockAlbumFindMany).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([["remote-unmatched", "REMOTE", null]] as const)(
+        "reports false without a held lookup for %s",
+        async (id, location, matchedRgMbid) => {
+            mockAlbumFindFirst.mockResolvedValueOnce(
+                albumDetailRow(id, location, matchedRgMbid),
+            );
+            mockOwnedAlbumFindUnique.mockResolvedValueOnce(null);
+            const res = createRes();
+
+            await albumByIdHandler(
+                { params: { id }, query: { includeTracks: "false" } } as any,
+                res,
+            );
+
+            expect(res.body).toEqual(
+                expect.objectContaining({
+                    matchedRgMbid,
+                    matchedInLibrary: false,
+                }),
+            );
+            expect(mockAlbumFindMany).not.toHaveBeenCalled();
+        },
+    );
+
     it("accepts includeTracks as string true and boolean true", async () => {
         mockAlbumFindFirst
             .mockResolvedValueOnce({
@@ -2377,7 +2617,7 @@ describe("library catalog list runtime coverage", () => {
         expect(mockTrackYtMusicFindMany).not.toHaveBeenCalled();
     });
 
-    it("returns only liked REMOTE albums for the remote origin", async () => {
+    it("returns only liked unheld REMOTE albums for the remote origin", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             tidalEnabled: true,
             ytMusicEnabled: false,
@@ -2403,6 +2643,7 @@ describe("library catalog list runtime coverage", () => {
                         id: "remote-album",
                         title: "Remote album",
                         rgMbid: "remote:album",
+                        matchedRgMbid: "rg-unheld",
                         coverUrl: "remote-cover.jpg",
                         artistId: "remote-artist",
                         location: "REMOTE",
@@ -2415,10 +2656,12 @@ describe("library catalog list runtime coverage", () => {
                 },
             },
         ]);
-        mockAlbumFindMany.mockResolvedValueOnce([
+        mockAlbumFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
             {
                 id: "remote-album",
                 title: "Remote album",
+                rgMbid: "remote:album",
+                matchedRgMbid: "rg-unheld",
                 location: "REMOTE",
                 coverUrl: "remote-cover.jpg",
                 federationPeer: null,

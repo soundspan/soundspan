@@ -27,10 +27,10 @@ function resolveAlbumAcquisition(
     track: Track,
     policy: RemoteTrackAcquisitionPolicy,
 ): RemoteTrackAcquisition | null {
-    // A streaming-only album keeps its placeholder id; the background
-    // MusicBrainz match is what the download and request flows can use.
     const rgMbid = resolveAcquisitionMbid({
-        rgMbid: track.album?.matchedRgMbid || track.album?.rgMbid || undefined,
+        rgMbid: track.album?.rgMbid ?? undefined,
+        matchedRgMbid: track.album?.matchedRgMbid,
+        matchedInLibrary: track.album?.matchedInLibrary,
     });
     const albumTitle = track.album?.title;
     if (!rgMbid || !albumTitle) return null;
@@ -70,8 +70,8 @@ function resolveTidalAcquisition(
 
 /**
  * Picks the "add to library" action for a liked streaming track. The whole
- * album is preferred when it has a real MusicBrainz id; a single song from
- * the same provider is the admin fallback.
+ * album is preferred when it has a real MusicBrainz id the library does not
+ * already hold; a single song from the same provider is the admin fallback.
  */
 export function resolveRemoteTrackAcquisition(
     track: Track,

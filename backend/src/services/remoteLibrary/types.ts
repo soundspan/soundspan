@@ -33,7 +33,6 @@ export interface RemoteLibraryAlbumEntity {
     id: string;
     title: string;
     rgMbid: string;
-    matchedRgMbid: string | null;
     coverUrl: string | null;
     artistId: string;
     location: AlbumLocation;
@@ -70,6 +69,10 @@ interface RemoteLibraryTrackBase {
     albumId: string | null;
     albumLocation: AlbumLocation | null;
     albumArtistId: string | null;
+    /** MusicBrainz release group matched to the linked album. */
+    albumMatchedRgMbid: string | null;
+    /** Whether a visible local library album holds the linked album's match. */
+    albumMatchedInLibrary: boolean;
     likedAt: Date;
     mappings: RemoteLibraryMapping[];
 }

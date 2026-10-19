@@ -62,7 +62,13 @@ Open the song's menu (the `⋮` button at the end of the row). What it offers de
 - When the album has no MusicBrainz match, admins see `Add song to library`. It downloads that one song. A TIDAL song needs TIDAL set up as a download source (see [TIDAL Downloads](INTEGRATIONS.md#tidal-downloads)).
 - Otherwise the menu has no add option. This is the case for users who are not admins when the album has no MusicBrainz match, and for admins on a TIDAL song when TIDAL is not set up as a download source.
 
-soundspan looks up MusicBrainz matches for the albums of your liked streaming songs in the background, about once an hour. A song whose album gets a sure match offers `Add album to library` or `Request album`, the same as a song on an album with a MusicBrainz match. An album without a sure match is checked again a week later, and a match is checked again after a month.
+soundspan looks up MusicBrainz matches for the albums of your liked streaming songs in the background, about once an hour. A song whose album gets a sure match offers `Add album to library` or `Request album`, the same as a song on an album with a MusicBrainz match. The streaming album's page offers `Download` or `Request` for it too. An album without a sure match is checked again a week later, and a match is checked again after a month.
+
+When your library already has the matched album, for example after you add it, soundspan does not offer that album again:
+
+- A liked song that the album did not bring in, such as a streaming-only bonus track, offers neither `Add album to library` nor `Request album`. Admins see `Add song to library` instead, under the same rules as a song whose album has no MusicBrainz match: a TIDAL song needs TIDAL set up as a download source.
+- The streaming album's page shows no `Download` or `Request`.
+- The streaming album does not appear in the `Albums` list, so with `All` the album shows once, as your own copy. Its leftover liked songs stay in `Songs` and still open the streaming album's page.
 
 After the files arrive and the next library scan matches the song to them, only your own copy shows, without the badge.
 

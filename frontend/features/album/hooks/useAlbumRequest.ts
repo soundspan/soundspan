@@ -11,8 +11,9 @@ import {
     albumRequestState,
     describeRequestSubmitError,
     formatRequestDate,
+    isRequestableMbid,
 } from "@/lib/musicRequests";
-import { isSyntheticRgMbid } from "../albumActionVisibility";
+import { resolveAcquisitionMbid } from "../albumActionVisibility";
 import type { Album } from "../types";
 import type { CreateMusicRequestInput } from "@/lib/api/requests";
 
@@ -45,9 +46,7 @@ export function useAlbumRequest(album: Album | null | undefined) {
     const myRequests = useMyOpenMusicRequests(requestsEnabled);
     const create = useCreateMusicRequest();
 
-    const candidate = album?.rgMbid || album?.mbid || null;
-    const rgMbid =
-        candidate && !isSyntheticRgMbid(candidate) ? candidate : null;
+    const rgMbid = album ? resolveAcquisitionMbid(album) : null;
     const isRequestedAlbum = Boolean(
         rgMbid && openRequestRgMbids(myRequests.data).has(rgMbid.toLowerCase()),
     );
@@ -55,11 +54,15 @@ export function useAlbumRequest(album: Album | null | undefined) {
 
     const requestAlbum = async () => {
         if (!album || !rgMbid || create.isPending) return;
+        // Streaming-only artists carry a placeholder id the API rejects.
+        const artistMbid = album.artist?.mbid;
         await submitAlbumRequest(create.mutateAsync, {
             artistName: album.artist?.name || "Unknown Artist",
             albumTitle: album.title,
             rgMbid,
-            ...(album.artist?.mbid ? { artistMbid: album.artist.mbid } : {}),
+            ...(artistMbid && isRequestableMbid(artistMbid)
+                ? { artistMbid }
+                : {}),
         });
     };
 

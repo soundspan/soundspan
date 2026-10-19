@@ -26,6 +26,7 @@ import { useTrackDeepLink } from "@/features/album/hooks/useTrackDeepLink";
 import { useYtMusicGapFill } from "@/features/album/hooks/useYtMusicGapFill";
 import { useTidalGapFill } from "@/features/album/hooks/useTidalGapFill";
 import { useTrackPreview } from "@/hooks/useTrackPreview";
+import { resolveAcquisitionMbid } from "@/features/album/albumActionVisibility";
 import type { Track as AlbumTrack } from "@/features/album/types";
 import { toAddToPlaylistRef, type AddToPlaylistRef } from "@/lib/trackRef";
 
@@ -257,7 +258,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     }}
                     isAlbumLiked={isAlbumLiked}
                     isPendingDownload={isPendingByMbid(
-                        album?.mbid || album?.rgMbid || "",
+                        resolveAcquisitionMbid(album) ?? "",
                     )}
                     isApplyingAlbumPreference={isApplyingAlbumPreference}
                     isPlaying={isPlaying}
