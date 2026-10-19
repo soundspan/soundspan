@@ -12,10 +12,44 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+MIGRATIONS_DIR = REPO_ROOT / "backend/prisma/migrations"
 HEALTHCHECK = REPO_ROOT / "healthcheck-prod.js"
 COMPOSE_FILE = REPO_ROOT / "docker-compose.aio.yml"
 CHART_DEPLOYMENT = REPO_ROOT / "charts/soundspan/templates/aio/deployment.yaml"
 POSTGRES_CREDENTIALS = REPO_ROOT / "scripts/aio-postgres-credentials.sh"
+FAKE_GOSU = """#!/usr/bin/env bash
+set -eu
+
+sql="${!#}"
+if [[ "$sql" == *"soulseekFallback"* ]]; then
+    printf 'f\n'
+elif [[ "$sql" == *"'_prisma_migrations'"* ]]; then
+    printf '%s\n' "$FAKE_MIGRATIONS_EXIST"
+elif [[ "$sql" == *"table_name = 'User'"* ]]; then
+    printf '%s\n' "$FAKE_USER_TABLE_EXIST"
+fi
+"""
+FAKE_PRISMA = """#!/usr/bin/env bash
+set -eu
+
+printf '%s\n' "$*" >> "$PRISMA_LOG"
+if [[ "$1" == "migrate" && "$2" == "resolve" && "$3" == "--applied" ]]; then
+    migration_name="${4:-}"
+    if [[ "$FAKE_RESOLVE_FAILS" == "1" ]]; then
+        printf 'Error: baseline resolution failed.\n' >&2
+        exit 1
+    fi
+    if [[ ! -f "prisma/migrations/$migration_name/migration.sql" ]]; then
+        printf 'Error: P3017 The migration %s could not be found.\n' "$migration_name" >&2
+        exit 1
+    fi
+    exit 0
+fi
+if [[ "$1" == "migrate" && "$2" == "deploy" ]]; then
+    exit 0
+fi
+exit 1
+"""
 TOKENIZER_SHA256 = {
     "config.json": "9efb9557bc804f2ca6e394486af2e45dfed0b18554909735a99c6220b84e4288",
     "merges.txt": "fe36cab26d4f4421ed725e10a2e9ddb7f799449c603a96e7f29b5a3c82a95862",
@@ -68,6 +102,98 @@ def _secret_resolution_block(start_script: str, secret_directory: Path) -> str:
     end = start_script.index(end_marker, start)
     block = start_script[start:end].replace("/data/secrets", str(secret_directory))
     return f"set -euo pipefail\n{block}"
+
+
+def _migration_block(start_script: str) -> str:
+    """Return the executable AIO migration decision block."""
+    start_marker = "# Check if _prisma_migrations table exists"
+    end_marker = 'echo "✓ Migrations completed successfully"'
+    start = start_script.index(start_marker)
+    end = start_script.index(end_marker, start) + len(end_marker)
+    return f"set -e\n{start_script[start:end]}\n"
+
+
+def _fake_migration_runtime(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
+    """Build a fake PostgreSQL and Prisma runtime for the migration block."""
+    bin_directory = tmp_path / "bin"
+    backend_directory = tmp_path / "backend"
+    prisma_directory = backend_directory / "node_modules/.bin"
+    migration_parent = backend_directory / "prisma"
+    bin_directory.mkdir()
+    prisma_directory.mkdir(parents=True)
+    migration_parent.mkdir()
+    gosu = bin_directory / "gosu"
+    prisma = prisma_directory / "prisma"
+    gosu.write_text(FAKE_GOSU, encoding="utf-8")
+    prisma.write_text(FAKE_PRISMA, encoding="utf-8")
+    gosu.chmod(0o755)
+    prisma.chmod(0o755)
+    (migration_parent / "migrations").symlink_to(MIGRATIONS_DIR, target_is_directory=True)
+    prisma_log = tmp_path / "prisma.log"
+    prisma_log.touch()
+    environment = {**os.environ, "PATH": f"{bin_directory}:{os.environ['PATH']}"}
+    environment["PRISMA_LOG"] = str(prisma_log)
+    return backend_directory, environment, prisma_log
+
+
+def test_legacy_database_baseline_records_init_migration(tmp_path: Path) -> None:
+    """A legacy database must baseline the real migration that creates User."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    start_script = _heredoc(dockerfile, "/app/start.sh")
+    working_directory, environment, prisma_log = _fake_migration_runtime(tmp_path)
+    environment.update(
+        FAKE_MIGRATIONS_EXIST="f",
+        FAKE_USER_TABLE_EXIST="t",
+        FAKE_RESOLVE_FAILS="0",
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", _migration_block(start_script)],
+        cwd=working_directory,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode == 0, result.stderr
+    prisma_calls = prisma_log.read_text(encoding="utf-8").splitlines()
+    assert len(prisma_calls) == 2
+    resolve_call = prisma_calls[0].split()
+    assert resolve_call[:3] == ["migrate", "resolve", "--applied"]
+    migration_name = resolve_call[3]
+    assert prisma_calls[1] == "migrate deploy"
+    migration_file = MIGRATIONS_DIR / migration_name / "migration.sql"
+    assert migration_file.exists()
+    assert 'CREATE TABLE "User"' in migration_file.read_text(encoding="utf-8")
+    assert "P3017" not in result.stderr
+
+
+def test_failed_legacy_baseline_stops_before_deploy(tmp_path: Path) -> None:
+    """A failed legacy baseline must stop startup before migrate deploy."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    start_script = _heredoc(dockerfile, "/app/start.sh")
+    working_directory, environment, prisma_log = _fake_migration_runtime(tmp_path)
+    environment.update(
+        FAKE_MIGRATIONS_EXIST="f",
+        FAKE_USER_TABLE_EXIST="t",
+        FAKE_RESOLVE_FAILS="1",
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", _migration_block(start_script)],
+        cwd=working_directory,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode != 0
+    assert "FATAL" in result.stdout or "FATAL" in result.stderr
+    assert "migrate deploy" not in prisma_log.read_text(encoding="utf-8")
 
 
 def test_dockerfile_creates_nonroot_app_user() -> None:

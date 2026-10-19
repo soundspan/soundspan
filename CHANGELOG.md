@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The all-in-one container starts against an existing database that has soundspan's tables but no Prisma migration history (no `_prisma_migrations` table). Startup recorded the wrong name for the first migration, ignored the error, and then failed while re-creating tables that already existed; it now records `20251130000000_init` as applied and runs only the later migrations. If recording it fails, startup stops with a `FATAL` message before it changes the database.
 - An album page opened from a MusicBrainz release, rather than its release group, shows the `Download` button as pending while that album downloads; the check used the release id, but downloads are tracked by release group (#926).
 - TIDAL album and song downloads that the TIDAL sidecar rejects as unauthorized refresh the TIDAL sign-in and retry once, then fail, instead of retrying without limit.
 - Podcasts that publish their episodes only as video (MP4, M4V, or WebM) now list and play those episodes as audio instead of showing none; when an episode has both an audio and a video file, the audio one is used. A one-time migration clears every podcast's cached feed headers so existing subscriptions pick up the missing episodes on their next refresh (#910).
