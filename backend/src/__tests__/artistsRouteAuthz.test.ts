@@ -101,7 +101,6 @@ jest.mock("../services/metadata/catalogPersistence", () => ({
     logCatalogPersistenceError: jest.fn(),
     persistCatalogReleaseGroups: jest.fn(async () => undefined),
     persistCatalogTracklist: jest.fn(async () => undefined),
-    readFreshCatalogReleaseGroups: jest.fn(() => null),
 }));
 
 import artistsRouter from "../routes/artists";

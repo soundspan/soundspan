@@ -207,6 +207,31 @@ async function seedAlbums(): Promise<void> {
     await prisma.album.createMany({ data: SEEDED_ALBUMS });
 }
 
+async function seedCatalogReleaseGroups(): Promise<void> {
+    await prisma.artistCatalogReleaseGroup.createMany({
+        data: [
+            {
+                artistId: ARTIST_A_ID,
+                rgMbid: ARTIST_A_CATALOG_ALBUM_RG_MBID,
+                position: 0,
+                title: "Persisted Album",
+                firstReleaseDate: "2021",
+                primaryType: "Album",
+                secondaryTypes: [],
+            },
+            {
+                artistId: ARTIST_A_ID,
+                rgMbid: ARTIST_A_CATALOG_EP_RG_MBID,
+                position: 1,
+                title: "Persisted EP",
+                firstReleaseDate: "2019",
+                primaryType: "EP",
+                secondaryTypes: [],
+            },
+        ],
+    });
+}
+
 async function seedOwnedTracks(): Promise<void> {
     const fileModified = new Date("2026-10-19T00:00:00.000Z");
     await prisma.track.createMany({
@@ -337,6 +362,7 @@ describeWithPostgres(
             await applyScaleMigrations(process.env.DATABASE_URL!);
             await seedArtists();
             await seedAlbums();
+            await seedCatalogReleaseGroups();
             await seedOwnedTracks();
         });
 
