@@ -7,6 +7,8 @@ describe("restore schema reset", () => {
         const client = {
             query: jest.fn(async (sql: string) => {
                 queries.push(sql);
+                if (sql.includes("to_regclass"))
+                    return { rows: [{ present: true }] };
                 if (sql.includes("count(*)")) return { rows: [{ count: "1" }] };
                 return { rows: [] };
             }),
@@ -16,13 +18,66 @@ describe("restore schema reset", () => {
             code: "RESTORE_UNAVAILABLE",
         });
         expect(queries[0]).toBe("BEGIN");
-        expect(queries[1]).toContain('LOCK TABLE public."User"');
-        expect(queries[2]).toContain('FROM public."User"');
+        expect(queries[1]).toContain("to_regclass");
+        expect(queries[2]).toContain('LOCK TABLE public."User"');
+        expect(queries[3]).toContain('FROM public."User"');
         expect(queries.at(-1)).toBe("ROLLBACK");
         expect(queries.some((sql) => sql.includes("FROM pg_class"))).toBe(
             false,
         );
         expect(queries.some((sql) => sql.startsWith("DROP "))).toBe(false);
+    });
+
+    it("resets an empty schema without locking a missing User table", async () => {
+        const queries: string[] = [];
+        const client = {
+            query: jest.fn(async (sql: string) => {
+                queries.push(sql);
+                if (sql.includes("to_regclass")) {
+                    return { rows: [{ present: false }] };
+                }
+                if (sql.includes("current_user")) {
+                    return { rows: [{ current_user: "app" }] };
+                }
+                return { rows: [] };
+            }),
+        } as unknown as Client;
+
+        await expect(resetApplicationSchema(client)).resolves.toBeUndefined();
+
+        expect(queries).not.toContain(
+            'LOCK TABLE public."User" IN ACCESS EXCLUSIVE MODE',
+        );
+        expect(queries.some((sql) => sql.includes('FROM public."User"'))).toBe(
+            false,
+        );
+        expect(queries.at(-1)).toBe("COMMIT");
+    });
+
+    it("locks and resets an existing User table with no rows", async () => {
+        const queries: string[] = [];
+        const client = {
+            query: jest.fn(async (sql: string) => {
+                queries.push(sql);
+                if (sql.includes("to_regclass")) {
+                    return { rows: [{ present: true }] };
+                }
+                if (sql.includes("count(*)")) {
+                    return { rows: [{ count: "0" }] };
+                }
+                if (sql.includes("current_user")) {
+                    return { rows: [{ current_user: "app" }] };
+                }
+                return { rows: [] };
+            }),
+        } as unknown as Client;
+
+        await expect(resetApplicationSchema(client)).resolves.toBeUndefined();
+
+        expect(queries).toContain(
+            'LOCK TABLE public."User" IN ACCESS EXCLUSIVE MODE',
+        );
+        expect(queries.at(-1)).toBe("COMMIT");
     });
 
     it("drops owned objects and routines in dependency-safe order", async () => {

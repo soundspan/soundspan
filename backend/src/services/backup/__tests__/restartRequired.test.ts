@@ -227,4 +227,64 @@ describe("restart-required middleware", () => {
         await expect(pending).resolves.toBe(false);
         jest.useRealTimers();
     });
+
+    it("shares the raw marker timestamp between normal and forced reads", async () => {
+        let resolveRead: ((value: string) => void) | undefined;
+        mockRedis.sendCommand.mockReturnValueOnce(
+            new Promise<string>((resolve) => {
+                resolveRead = resolve;
+            }),
+        );
+        const { readRestartMarker } = await import("../restartRequired");
+
+        const normal = readRestartMarker(false, 40_000);
+        const forced = readRestartMarker(true, 40_001);
+        resolveRead?.("1234");
+
+        await expect(normal).resolves.toBe(1234);
+        await expect(forced).resolves.toBe(1234);
+        expect(mockRedis.sendCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it("stores and matches a restore-specific marker", async () => {
+        mockRedis.set.mockResolvedValue("OK");
+        const restoreId = "98e4582e-e030-4ae8-8aa9-63c8de4f707f";
+        const { markRestartRequired, readRestartMarkerForRestore } =
+            await import("../restartRequired");
+
+        await markRestartRequired(12_345, restoreId);
+
+        expect(mockRedis.set).toHaveBeenCalledWith(
+            "restore:restart-required",
+            `12345:${restoreId}`,
+        );
+        await expect(
+            readRestartMarkerForRestore(restoreId, false, 12_346),
+        ).resolves.toBe(12_345);
+        await expect(
+            readRestartMarkerForRestore(
+                "0e717451-202e-4bf2-bdff-07fa5a477c95",
+                false,
+                12_346,
+            ),
+        ).resolves.toBe(0);
+    });
+
+    it("parses a restore-specific marker read from Redis", async () => {
+        const restoreId = "98e4582e-e030-4ae8-8aa9-63c8de4f707f";
+        mockRedis.sendCommand.mockResolvedValue(`12345:${restoreId}`);
+        const { readRestartMarkerForRestore } =
+            await import("../restartRequired");
+
+        await expect(
+            readRestartMarkerForRestore(restoreId, true, 50_000),
+        ).resolves.toBe(12_345);
+        await expect(
+            readRestartMarkerForRestore(
+                "0e717451-202e-4bf2-bdff-07fa5a477c95",
+                false,
+                50_001,
+            ),
+        ).resolves.toBe(0);
+    });
 });

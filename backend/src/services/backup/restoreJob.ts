@@ -80,6 +80,7 @@ async function executeRestoreJob(
                 state,
                 settled.failure,
                 handle.backendPid,
+                handle.backendStart,
             );
         }
     } finally {

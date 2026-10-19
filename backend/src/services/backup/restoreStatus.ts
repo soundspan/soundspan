@@ -4,7 +4,7 @@ import type { RestoreProgress } from "./restoreDataLoad";
 import { isRestoreLockHeld } from "./restoreLock";
 import { RestoreError } from "./backupErrors";
 import { logger as rootLogger } from "../../utils/logger";
-import { readRestartMarker } from "./restartRequired";
+import { readRestartMarkerForRestore } from "./restartRequired";
 
 const logger = rootLogger.child("BackupRestore");
 const STATUS_KEY = "restore:status";
@@ -210,11 +210,26 @@ function interruptedStatus(status: RestoreStatus): RestoreStatus {
     };
 }
 
+function incompleteFinishStatus(status: RestoreStatus): RestoreStatus {
+    return {
+        restoreId: status.restoreId,
+        state: "failed",
+        progress: null,
+        error: {
+            code: "RESTORE_FINISH_INCOMPLETE",
+            message:
+                "Your data was restored, but the last steps didn't finish. Restart soundspan; startup applies any remaining database changes. Check stored service connections afterwards.",
+        },
+        summary: null,
+    };
+}
+
 async function effectiveStoredStatus(
     stored: z.infer<typeof storedRestoreStatusSchema>,
     knownLockHeld: boolean | undefined,
 ): Promise<RestoreStatus> {
     const { writtenAt, ...rawStatus } = stored;
+    void writtenAt;
     const status = sanitizeStatus(rawStatus);
     if (!isRestoreJobActive(status)) return status;
     const lockHeld =
@@ -222,10 +237,13 @@ async function effectiveStoredStatus(
         (knownLockHeld === undefined && (await isRestoreLockHeld()));
     if (lockHeld) return status;
     if (
-        writtenAt !== undefined &&
-        (await readRestartMarker(true)) > writtenAt
+        status.restoreId &&
+        (await readRestartMarkerForRestore(status.restoreId, true)) > 0
     ) {
         return { ...status, state: "complete", error: null };
+    }
+    if (status.state === "migrating" || status.state === "reencrypting") {
+        return incompleteFinishStatus(status);
     }
     return interruptedStatus(status);
 }

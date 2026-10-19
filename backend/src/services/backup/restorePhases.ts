@@ -234,5 +234,5 @@ export async function runRestorePhases(
     state.currentKey = getSettingsEncryptionKey();
     await loadRestoreData(client, restoreId, options, state, signal);
     assertRestoreConnection(signal, getConnectionError);
-    await finishCommittedRestore(client, restoreId, options, state, signal);
+    await finishCommittedRestore(client, restoreId, options, state);
 }

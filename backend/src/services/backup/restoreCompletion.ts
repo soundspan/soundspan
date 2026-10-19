@@ -56,9 +56,9 @@ async function migrateAndReencrypt(
     restoreId: string,
     options: StartRestoreJobOptions,
     state: RestoreExecutionState,
-    signal?: AbortSignal,
 ): Promise<ReencryptSummary> {
     if (!state.currentKey) throw new Error("Restore key was not prepared");
+    await markRestartRequired(Date.now(), restoreId);
     await setRestoreStatus({
         restoreId,
         state: "migrating",
@@ -66,7 +66,7 @@ async function migrateAndReencrypt(
         error: null,
         summary: null,
     });
-    await deployCurrentMigrations(config.databaseUrl, signal);
+    await deployCurrentMigrations(config.databaseUrl);
     const secondPass = await reencryptRestoredCredentials(
         client,
         options.backupKey,
@@ -100,16 +100,13 @@ export async function finishCommittedRestore(
     restoreId: string,
     options: StartRestoreJobOptions,
     state: RestoreExecutionState,
-    signal?: AbortSignal,
 ): Promise<void> {
     const credentials = await migrateAndReencrypt(
         client,
         restoreId,
         options,
         state,
-        signal,
     );
     const summary = buildSummary(options, state, credentials);
-    await markRestartRequired();
     await publishCompleteStatus(restoreId, summary);
 }

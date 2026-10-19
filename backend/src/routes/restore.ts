@@ -65,8 +65,12 @@ async function usersExist(): Promise<boolean> {
     }
 }
 
-function isDirtyRestoreFailure(code: string | undefined): boolean {
-    return code === "RESTORE_INTERRUPTED" || code === "RESTORE_CLEANUP_FAILED";
+function isVisibleRestoreFailure(code: string | undefined): boolean {
+    return [
+        "RESTORE_INTERRUPTED",
+        "RESTORE_CLEANUP_FAILED",
+        "RESTORE_FINISH_INCOMPLETE",
+    ].includes(code ?? "");
 }
 
 function statusForError(error: BackupError): number {
@@ -122,13 +126,13 @@ router.get(
         const state =
             status.state === "uploading" && !upload ? "idle" : status.state;
         if (userExists && !restartRequired) {
-            const dirtyFailure = isDirtyRestoreFailure(jobFailure?.code);
+            const visibleFailure = isVisibleRestoreFailure(jobFailure?.code);
             return res.json({
                 available: false,
-                state: dirtyFailure ? "failed" : state,
+                state: visibleFailure ? "failed" : state,
                 restartRequired: false,
                 progress: null,
-                error: dirtyFailure ? jobFailure : null,
+                error: visibleFailure ? jobFailure : null,
                 summary: null,
                 upload: null,
             });

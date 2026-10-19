@@ -355,8 +355,7 @@ describe("restore job", () => {
         expect(mockFreshClient.end).toHaveBeenCalledTimes(1);
     });
 
-    it("recovers a completed migrated restore after the load connection drops", async () => {
-        mockClientQueue.push(mockClient, mockFreshClient);
+    it("lets the post-commit migration finish after the load connection drops", async () => {
         mockReadImageMigrations.mockResolvedValue([
             { name: "001_init", checksum: "image" },
         ]);
@@ -388,47 +387,34 @@ describe("restore job", () => {
                 afterCommit();
             },
         );
-        let deploySignal: AbortSignal | undefined;
-        mockDeployMigrations
-            .mockImplementationOnce(
-                async (_url: string, signal?: AbortSignal) => {
-                    deploySignal = signal;
-                    await new Promise<void>((_resolve, reject) => {
-                        signal?.addEventListener(
-                            "abort",
-                            () => reject(signal.reason),
-                            { once: true },
-                        );
-                    });
-                },
-            )
-            .mockResolvedValueOnce(undefined);
-        mockFreshClient.query.mockImplementation(async (sql: string) => {
-            if (sql.includes("_prisma_migrations")) {
-                return { rows: [{ migration_name: "001_init" }] };
-            }
-            if (sql.includes('FROM public."User"')) {
-                return { rows: [{ present: true }] };
-            }
-            return { rows: [] };
+        let finishDeploy: (() => void) | undefined;
+        mockDeployMigrations.mockImplementationOnce(async () => {
+            await new Promise<void>((resolve) => {
+                finishDeploy = resolve;
+            });
         });
 
         await startRestoreJob(jobOptions);
-        for (let attempt = 0; attempt < 20 && !deploySignal; attempt += 1) {
+        for (let attempt = 0; attempt < 20 && !finishDeploy; attempt += 1) {
             await new Promise<void>((resolve) => setImmediate(resolve));
         }
+        expect(finishDeploy).toBeDefined();
         mockClient.emit("error", new Error("connection terminated"));
+        finishDeploy?.();
         await waitForTerminalStatus();
 
-        expect(deploySignal?.aborted).toBe(true);
-        expect(mockDeployMigrations).toHaveBeenCalledTimes(2);
+        expect(mockDeployMigrations).toHaveBeenCalledWith(
+            "postgresql://user:password@database/soundspan",
+        );
+        expect(mockDeployMigrations).toHaveBeenCalledTimes(1);
         expect(mockResetSchema).toHaveBeenCalledTimes(1);
         expect(mockReencrypt).toHaveBeenCalledWith(
-            mockFreshClient,
+            mockClient,
             "backup-key",
             "current-key",
             expect.any(Set),
         );
+        expect(Client).toHaveBeenCalledTimes(1);
         expect(mockSetStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({ state: "complete" }),
         );

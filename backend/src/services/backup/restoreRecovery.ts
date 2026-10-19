@@ -75,6 +75,7 @@ async function reportCleanupResult(
     client: Client,
     restoreId: string,
     failure: unknown,
+    restartRequired: boolean,
 ): Promise<void> {
     let reported = safeFailure(failure);
     try {
@@ -88,12 +89,15 @@ async function reportCleanupResult(
                 "The restore failed and the database could not be reset to a fresh install. Check the server logs.",
         };
     }
+    if (restartRequired) await markRestartAfterIncompleteFinish(restoreId);
     await reportFailure(restoreId, reported);
 }
 
-async function markRestartAfterIncompleteFinish(): Promise<void> {
+async function markRestartAfterIncompleteFinish(
+    restoreId: string,
+): Promise<void> {
     try {
-        await markRestartRequired();
+        await markRestartRequired(Date.now(), restoreId);
     } catch (markerFailure) {
         logger.error(
             "Restore finish failed and restart-marker publication also failed",
@@ -112,7 +116,7 @@ async function finishPreservingData(
         await finishCommittedRestore(client, restoreId, options, state);
     } catch (finishFailure) {
         logger.error("Restore post-commit finishing failed", finishFailure);
-        await markRestartAfterIncompleteFinish();
+        await markRestartAfterIncompleteFinish(restoreId);
         await reportFailure(restoreId, {
             code: "RESTORE_FINISH_INCOMPLETE",
             message: FINISH_INCOMPLETE_MESSAGE,
@@ -131,7 +135,7 @@ async function recoverWithLock(
         await finishPreservingData(client, restoreId, options, state);
         return;
     }
-    await reportCleanupResult(client, restoreId, failure);
+    await reportCleanupResult(client, restoreId, failure, state.loadCommitted);
 }
 
 /** Recover a failed restore without ever resetting a committed data load. */
@@ -141,6 +145,7 @@ export async function handleRestoreFailure(
     state: RestoreExecutionState,
     failure: unknown,
     originalBackendPid: number | null,
+    originalBackendStart: Date | null = null,
 ): Promise<void> {
     logFailure(failure);
     if (!state.resetStarted && !state.loadCommitted) {
@@ -148,16 +153,22 @@ export async function handleRestoreFailure(
         return;
     }
     try {
-        await withRecoveryRestoreClient(originalBackendPid, (client) =>
-            recoverWithLock(client, restoreId, options, state, failure),
+        await withRecoveryRestoreClient(
+            originalBackendPid,
+            (client) =>
+                recoverWithLock(client, restoreId, options, state, failure),
+            originalBackendStart,
         );
     } catch (recoveryFailure) {
         logger.error("Restore failure recovery failed", recoveryFailure);
+        if (state.loadCommitted) {
+            await markRestartAfterIncompleteFinish(restoreId);
+        }
         await reportFailure(restoreId, {
-            code: state.loadCommitConfirmed
+            code: state.loadCommitted
                 ? "RESTORE_FINISH_INCOMPLETE"
                 : "RESTORE_CLEANUP_FAILED",
-            message: state.loadCommitConfirmed
+            message: state.loadCommitted
                 ? FINISH_INCOMPLETE_MESSAGE
                 : "The restore failed and the database could not be reset to a fresh install. Check the server logs.",
         });

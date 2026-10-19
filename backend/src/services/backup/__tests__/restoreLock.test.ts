@@ -32,6 +32,8 @@ describe("restore advisory lock probe", () => {
             expect.objectContaining({
                 connectionString: "postgresql://target/database",
                 query_timeout: 1_000,
+                keepAlive: true,
+                keepAliveInitialDelayMillis: 30_000,
             }),
         );
     });

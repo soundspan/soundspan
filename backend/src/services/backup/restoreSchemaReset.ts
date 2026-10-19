@@ -100,6 +100,27 @@ function dropRoutineSql(routine: OwnedRoutine): string {
     )}(${routine.arguments}) CASCADE`;
 }
 
+async function userTableExists(client: Client): Promise<boolean> {
+    const result = await client.query<{ present: boolean }>(`
+        SELECT to_regclass('public."User"') IS NOT NULL AS present
+    `);
+    return result.rows[0]?.present === true;
+}
+
+async function requireNoUsers(client: Client): Promise<void> {
+    if (!(await userTableExists(client))) return;
+    await client.query('LOCK TABLE public."User" IN ACCESS EXCLUSIVE MODE');
+    const users = await client.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM public."User"',
+    );
+    if (users.rows[0]?.count !== "0") {
+        throw new RestoreError(
+            "RESTORE_UNAVAILABLE",
+            "Restore is unavailable after a user has been created",
+        );
+    }
+}
+
 /** Drop only application-owned public objects while preserving extensions. */
 export async function resetApplicationSchema(
     client: Client,
@@ -111,18 +132,7 @@ export async function resetApplicationSchema(
     await client.query("BEGIN");
     try {
         if (!options.allowExistingUsers) {
-            await client.query(
-                'LOCK TABLE public."User" IN ACCESS EXCLUSIVE MODE',
-            );
-            const users = await client.query<{ count: string }>(
-                'SELECT count(*)::text AS count FROM public."User"',
-            );
-            if (users.rows[0]?.count !== "0") {
-                throw new RestoreError(
-                    "RESTORE_UNAVAILABLE",
-                    "Restore is unavailable after a user has been created",
-                );
-            }
+            await requireNoUsers(client);
         }
         const objects = await readObjects(client);
         const routines = await readRoutines(client);

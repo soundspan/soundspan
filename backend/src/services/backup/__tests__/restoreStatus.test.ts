@@ -7,7 +7,7 @@ const mockRedis = {
     set: jest.fn(),
 };
 const mockRestoreLockHeld = jest.fn();
-const mockReadRestartMarker = jest.fn();
+const mockReadRestartMarkerForRestore = jest.fn();
 const mockLoggerWarn = jest.fn();
 
 jest.mock("../../../utils/redis", () => ({
@@ -15,7 +15,7 @@ jest.mock("../../../utils/redis", () => ({
 }));
 jest.mock("../restoreLock", () => ({ isRestoreLockHeld: mockRestoreLockHeld }));
 jest.mock("../restartRequired", () => ({
-    readRestartMarker: mockReadRestartMarker,
+    readRestartMarkerForRestore: mockReadRestartMarkerForRestore,
 }));
 jest.mock("../../../utils/logger", () => ({
     logger: { child: () => ({ warn: mockLoggerWarn }) },
@@ -26,7 +26,7 @@ describe("effective restore status", () => {
         jest.resetModules();
         jest.clearAllMocks();
         mockRedis.isReady = true;
-        mockReadRestartMarker.mockResolvedValue(0);
+        mockReadRestartMarkerForRestore.mockResolvedValue(0);
     });
 
     it("preserves a running status while the database lock is held", async () => {
@@ -81,7 +81,7 @@ describe("effective restore status", () => {
         });
     });
 
-    it("maps a stale active status to complete when a newer restart marker exists", async () => {
+    it("maps a stale active status to complete when its restart marker exists", async () => {
         mockRedisGet.mockResolvedValue(
             JSON.stringify({
                 restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
@@ -93,15 +93,61 @@ describe("effective restore status", () => {
             }),
         );
         mockRestoreLockHeld.mockResolvedValue(false);
-        mockReadRestartMarker.mockResolvedValue(10_001);
+        mockReadRestartMarkerForRestore.mockResolvedValue(9_999);
         const { getRestoreStatus } = await import("../restoreStatus");
 
         await expect(getRestoreStatus()).resolves.toMatchObject({
             state: "complete",
             error: null,
         });
-        expect(mockReadRestartMarker).toHaveBeenCalledWith(true);
+        expect(mockReadRestartMarkerForRestore).toHaveBeenCalledWith(
+            "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+            true,
+        );
     });
+
+    it("does not complete a stale status from another restore's marker", async () => {
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+                state: "loading",
+                progress: null,
+                error: null,
+                summary: null,
+                writtenAt: 10_000,
+            }),
+        );
+        mockRestoreLockHeld.mockResolvedValue(false);
+        mockReadRestartMarkerForRestore.mockResolvedValue(0);
+        const { getRestoreStatus } = await import("../restoreStatus");
+
+        await expect(getRestoreStatus()).resolves.toMatchObject({
+            state: "failed",
+            error: { code: "RESTORE_INTERRUPTED" },
+        });
+    });
+
+    it.each(["migrating", "reencrypting"])(
+        "maps stale post-commit phase %s to incomplete finishing",
+        async (state) => {
+            mockRedisGet.mockResolvedValue(
+                JSON.stringify({
+                    restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+                    state,
+                    progress: null,
+                    error: null,
+                    summary: null,
+                }),
+            );
+            mockRestoreLockHeld.mockResolvedValue(false);
+            const { getRestoreStatus } = await import("../restoreStatus");
+
+            await expect(getRestoreStatus()).resolves.toMatchObject({
+                state: "failed",
+                error: { code: "RESTORE_FINISH_INCOMPLETE" },
+            });
+        },
+    );
 
     it("does not probe the database for a terminal status", async () => {
         mockRedisGet.mockResolvedValue(

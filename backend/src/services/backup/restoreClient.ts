@@ -15,6 +15,7 @@ const RECOVERY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 export interface RestoreClientHandle {
     client: Client;
     backendPid: number | null;
+    backendStart: Date | null;
     connectionFailure: Promise<Error>;
     detachClientError: () => void;
     getConnectionError: () => Error | null;
@@ -33,6 +34,7 @@ function newRestoreClient(): Client {
         connectionTimeoutMillis: 10_000,
         query_timeout: 2 * 60 * 60 * 1000,
         keepAlive: true,
+        keepAliveInitialDelayMillis: 30_000,
     });
 }
 
@@ -62,6 +64,13 @@ function backendPid(value: unknown): number | null {
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function backendStart(value: unknown): Date | null {
+    if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+        return null;
+    }
+    return value;
+}
+
 /** Connect and take the non-blocking restore lock for a new job. */
 export async function acquireRestoreClient(): Promise<RestoreClientHandle> {
     const monitored = monitorClient(newRestoreClient());
@@ -70,8 +79,13 @@ export async function acquireRestoreClient(): Promise<RestoreClientHandle> {
         const result = await monitored.client.query<{
             acquired: boolean;
             backend_pid: number;
+            backend_start: Date;
         }>(
-            "SELECT pg_try_advisory_lock($1) AS acquired, pg_backend_pid() AS backend_pid",
+            `SELECT pg_try_advisory_lock($1) AS acquired,
+                    pg_backend_pid() AS backend_pid,
+                    (SELECT backend_start
+                       FROM pg_stat_activity
+                      WHERE pid = pg_backend_pid()) AS backend_start`,
             [RESTORE_ADVISORY_LOCK],
         );
         if (result.rows[0]?.acquired !== true) {
@@ -84,13 +98,14 @@ export async function acquireRestoreClient(): Promise<RestoreClientHandle> {
         return {
             client: monitored.client,
             backendPid: backendPid(result.rows[0]?.backend_pid),
+            backendStart: backendStart(result.rows[0]?.backend_start),
             connectionFailure: monitored.failure,
             detachClientError: monitored.detach,
             getConnectionError: monitored.getError,
         };
     } catch (error) {
-        monitored.detach();
         await monitored.client.end().catch(() => undefined);
+        monitored.detach();
         throw error;
     }
 }
@@ -128,14 +143,21 @@ async function connectRecoveryClient(): Promise<MonitoredClient> {
 async function retakeRestoreLock(
     client: Client,
     originalBackendPid: number | null,
+    originalBackendStart: Date | null,
 ): Promise<void> {
-    if (originalBackendPid !== null) {
-        await client.query("SELECT pg_terminate_backend($1) AS terminated", [
-            originalBackendPid,
-        ]);
+    if (originalBackendPid !== null && originalBackendStart !== null) {
+        await client.query(
+            `SELECT pg_terminate_backend(pid) AS terminated
+               FROM pg_stat_activity
+              WHERE pid = $1
+                AND backend_start = $2
+                AND pid <> pg_backend_pid()`,
+            [originalBackendPid, originalBackendStart],
+        );
     }
     await client.query("SET lock_timeout = '30s'");
     await client.query("SELECT pg_advisory_lock($1)", [RESTORE_ADVISORY_LOCK]);
+    await client.query("RESET lock_timeout");
     recordRestoreLockState(true);
 }
 
@@ -143,14 +165,19 @@ async function retakeRestoreLock(
 export async function withRecoveryRestoreClient<T>(
     originalBackendPid: number | null,
     work: (client: Client) => Promise<T>,
+    originalBackendStart: Date | null = null,
 ): Promise<T> {
     const monitored = await connectRecoveryClient();
     try {
-        await retakeRestoreLock(monitored.client, originalBackendPid);
+        await retakeRestoreLock(
+            monitored.client,
+            originalBackendPid,
+            originalBackendStart,
+        );
         return await work(monitored.client);
     } finally {
-        monitored.detach();
         await monitored.client.end().catch(() => undefined);
+        monitored.detach();
     }
 }
 
@@ -158,10 +185,10 @@ export async function withRecoveryRestoreClient<T>(
 export async function releaseRestoreClient(
     handle: RestoreClientHandle,
 ): Promise<void> {
-    handle.detachClientError();
     await handle.client
         .query("SELECT pg_advisory_unlock($1)", [RESTORE_ADVISORY_LOCK])
         .catch(() => undefined);
     await handle.client.end().catch(() => undefined);
+    handle.detachClientError();
     invalidateRestoreLockCache();
 }

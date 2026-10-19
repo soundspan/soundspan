@@ -14,9 +14,10 @@ const REDIS_WRITE_ATTEMPTS = 5;
 const WARN_INTERVAL_MS = 60_000;
 let cachedAt = 0;
 let cachedCompletedAt = 0;
+let cachedRestoreId: string | null = null;
 let markedByProcess = false;
 let lastWarningAt = 0;
-let activeRead: Promise<boolean> | null = null;
+let activeRead: Promise<number | null> | null = null;
 
 export interface RestoreBarrier {
     code: "RESTORE_IN_PROGRESS" | "RESTART_REQUIRED";
@@ -25,9 +26,11 @@ export interface RestoreBarrier {
 
 export async function markRestartRequired(
     completedAt = Date.now(),
+    restoreId?: string,
 ): Promise<void> {
     markedByProcess = true;
     cachedCompletedAt = completedAt;
+    cachedRestoreId = restoreId ?? null;
     cachedAt = completedAt;
     let lastError: unknown = new Error("Restart marker write failed");
     for (let attempt = 0; attempt < REDIS_WRITE_ATTEMPTS; attempt += 1) {
@@ -41,7 +44,12 @@ export async function markRestartRequired(
                 timeoutId.unref();
             });
             await Promise.race([
-                redisClient.set(RESTART_KEY, String(completedAt)),
+                redisClient.set(
+                    RESTART_KEY,
+                    restoreId
+                        ? `${completedAt}:${restoreId}`
+                        : String(completedAt),
+                ),
                 timeout,
             ]);
             return;
@@ -67,17 +75,41 @@ export async function readRestartMarker(
 ): Promise<number> {
     if (!force && now - cachedAt < CACHE_MS) return cachedCompletedAt;
     if (!redisClient.isReady) return 0;
-    if (activeRead) return (await activeRead) ? cachedCompletedAt : 0;
-    activeRead = readRestartRequired(now);
+    if (activeRead) return (await activeRead) ?? 0;
+    activeRead = readRestartTimestamp(now);
     try {
-        await activeRead;
-        return cachedCompletedAt;
+        return (await activeRead) ?? 0;
     } finally {
         activeRead = null;
     }
 }
 
-async function readRestartRequired(now: number): Promise<boolean> {
+/** Read a marker only when it belongs to the specified restore. */
+export async function readRestartMarkerForRestore(
+    restoreId: string,
+    force = false,
+    now = Date.now(),
+): Promise<number> {
+    const completedAt = await readRestartMarker(force, now);
+    return cachedRestoreId === restoreId ? completedAt : 0;
+}
+
+function parseRestartMarker(value: unknown): {
+    completedAt: number;
+    restoreId: string | null;
+} | null {
+    if (typeof value !== "string") return null;
+    const separator = value.indexOf(":");
+    const timestamp = separator < 0 ? value : value.slice(0, separator);
+    const completedAt = Number(timestamp);
+    if (!Number.isFinite(completedAt) || completedAt < 0) return null;
+    return {
+        completedAt,
+        restoreId: separator < 0 ? null : value.slice(separator + 1) || null,
+    };
+}
+
+async function readRestartTimestamp(now: number): Promise<number | null> {
     try {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_resolve, reject) => {
@@ -95,18 +127,20 @@ async function readRestartRequired(now: number): Promise<boolean> {
         ]).finally(() => {
             if (timeoutId) clearTimeout(timeoutId);
         });
-        const completedAt = Number(value ?? 0);
-        cachedCompletedAt = Number.isFinite(completedAt) ? completedAt : 0;
+        const marker = parseRestartMarker(value);
+        cachedCompletedAt = marker?.completedAt ?? 0;
+        cachedRestoreId = marker?.restoreId ?? null;
         cachedAt = now;
-        return cachedCompletedAt > PROCESS_STARTED_AT;
+        return marker?.completedAt ?? null;
     } catch (error) {
         cachedCompletedAt = 0;
+        cachedRestoreId = null;
         cachedAt = now;
         if (now - lastWarningAt >= WARN_INTERVAL_MS) {
             lastWarningAt = now;
             logger.warn("Could not read the restore restart marker", error);
         }
-        return false;
+        return null;
     }
 }
 

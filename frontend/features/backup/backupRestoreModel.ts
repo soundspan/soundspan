@@ -131,14 +131,19 @@ export function isRestoreRunning(state: RestoreState): boolean {
 
 /**
  * True when the first-run page must show the restore instead of account
- * creation: a restore is running, it finished and waits for a restart, or it
- * failed in a way that left the database between states.
+ * creation: a restore is running, it finished (fully, or with its last steps
+ * left to the restart) and waits for a restart, or it failed in a way that
+ * left the database between states.
  */
 export function restoreHoldsFirstRun(status: RestoreStatus): boolean {
+    const code = status.error?.code;
     return (
         isRestoreRunning(status.state) ||
         (status.state === "complete" && status.restartRequired) ||
-        (status.state === "failed" && !isFreshInstallIntact(status.error?.code))
+        (status.state === "failed" && !isFreshInstallIntact(code)) ||
+        (status.state === "failed" &&
+            code === RESTORE_FINISH_INCOMPLETE &&
+            status.restartRequired)
     );
 }
 

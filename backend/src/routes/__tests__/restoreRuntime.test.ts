@@ -236,31 +236,32 @@ describe("restore routes", () => {
         });
     });
 
-    it.each(["RESTORE_INTERRUPTED", "RESTORE_CLEANUP_FAILED"])(
-        "preserves dirty failure %s after setup",
-        async (code) => {
-            mockUserCount.mockResolvedValue(1);
-            mockGetStatus.mockResolvedValue({
-                state: "failed",
-                progress: null,
-                error: { code, message: "Operator action is required" },
-                summary: null,
-            });
-            const res = response();
+    it.each([
+        "RESTORE_INTERRUPTED",
+        "RESTORE_CLEANUP_FAILED",
+        "RESTORE_FINISH_INCOMPLETE",
+    ])("preserves dirty failure %s after setup", async (code) => {
+        mockUserCount.mockResolvedValue(1);
+        mockGetStatus.mockResolvedValue({
+            state: "failed",
+            progress: null,
+            error: { code, message: "Operator action is required" },
+            summary: null,
+        });
+        const res = response();
 
-            await handler("/status", "get")({}, res, jest.fn());
+        await handler("/status", "get")({}, res, jest.fn());
 
-            expect(res.body).toEqual({
-                available: false,
-                state: "failed",
-                restartRequired: false,
-                progress: null,
-                error: { code, message: "Operator action is required" },
-                summary: null,
-                upload: null,
-            });
-        },
-    );
+        expect(res.body).toEqual({
+            available: false,
+            state: "failed",
+            restartRequired: false,
+            progress: null,
+            error: { code, message: "Operator action is required" },
+            summary: null,
+            upload: null,
+        });
+    });
 
     it("returns stored status when cleanup left no User relation", async () => {
         mockUserCount.mockRejectedValue(
@@ -311,6 +312,40 @@ describe("restore routes", () => {
             error: "Restore is unavailable after setup",
             code: "RESTORE_UNAVAILABLE",
         });
+    });
+
+    it("allows upload creation when the User table is absent", async () => {
+        mockUserCount.mockRejectedValue(
+            Object.assign(new Error('relation "User" does not exist'), {
+                code: "P2021",
+            }),
+        );
+        const res = response();
+
+        await handler("/uploads", "post")(
+            { body: { sizeBytes: 1 } },
+            res,
+            jest.fn(),
+        );
+
+        expect(res.statusCode).toBe(201);
+        expect(mockCreateRestoreUpload).toHaveBeenCalledWith(1);
+    });
+
+    it("does not hide unexpected upload availability failures", async () => {
+        mockUserCount.mockRejectedValue(new Error("database unavailable"));
+        const next = jest.fn();
+
+        await handler("/uploads", "post")(
+            { body: { sizeBytes: 1 } },
+            response(),
+            next,
+        );
+
+        expect(next).toHaveBeenCalledWith(
+            expect.objectContaining({ message: "database unavailable" }),
+        );
+        expect(mockCreateRestoreUpload).not.toHaveBeenCalled();
     });
 
     it("checks the restore lock before the fresh-install user count", async () => {

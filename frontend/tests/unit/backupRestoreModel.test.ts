@@ -391,4 +391,14 @@ test("a restore whose last steps didn't finish reads as restored, not failed", (
         ),
         false,
     );
+    assert.equal(
+        restoreHoldsFirstRun(
+            status({
+                state: "failed",
+                restartRequired: true,
+                error: { code: "RESTORE_FINISH_INCOMPLETE", message: "x" },
+            }),
+        ),
+        true,
+    );
 });

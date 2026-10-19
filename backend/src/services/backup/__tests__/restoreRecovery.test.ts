@@ -157,6 +157,7 @@ describe("restore failure recovery", () => {
 
         expect(mockResetSchema).toHaveBeenCalledTimes(1);
         expect(mockFinishCommitted).not.toHaveBeenCalled();
+        expect(mockMarkRestart).toHaveBeenCalledTimes(1);
     });
 
     it("finishes a confirmed load after migrate-to-head fails", async () => {
@@ -224,6 +225,32 @@ describe("restore failure recovery", () => {
                 }),
             }),
         );
+        expect(mockMarkRestart).not.toHaveBeenCalled();
+    });
+
+    it("marks restart before reporting cleanup failure after a possible commit", async () => {
+        mockResetSchema.mockRejectedValue(new Error("reset failed"));
+        const { handleRestoreFailure } = await import("../restoreRecovery");
+
+        await handleRestoreFailure(
+            "restore-id",
+            options,
+            state({ loadCommitted: true }),
+            new Error("commit acknowledgement lost"),
+            44,
+        );
+
+        expect(mockMarkRestart).toHaveBeenCalledTimes(1);
+        expect(mockMarkRestart.mock.invocationCallOrder[0]).toBeLessThan(
+            mockSetTerminalStatus.mock.invocationCallOrder[0]!,
+        );
+        expect(mockSetTerminalStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                error: expect.objectContaining({
+                    code: "RESTORE_CLEANUP_FAILED",
+                }),
+            }),
+        );
     });
 
     it("reports incomplete finishing when a confirmed load cannot reconnect", async () => {
@@ -238,6 +265,30 @@ describe("restore failure recovery", () => {
             44,
         );
 
+        expect(mockSetTerminalStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                error: expect.objectContaining({
+                    code: "RESTORE_FINISH_INCOMPLETE",
+                }),
+            }),
+        );
+        expect(mockResetSchema).not.toHaveBeenCalled();
+        expect(mockMarkRestart).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports incomplete finishing when an unconfirmed load cannot be checked", async () => {
+        mockWithRecoveryClient.mockRejectedValue(new Error("database down"));
+        const { handleRestoreFailure } = await import("../restoreRecovery");
+
+        await handleRestoreFailure(
+            "restore-id",
+            options,
+            state({ loadCommitted: true }),
+            new Error("commit acknowledgement lost"),
+            44,
+        );
+
+        expect(mockMarkRestart).toHaveBeenCalledTimes(1);
         expect(mockSetTerminalStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({
                 error: expect.objectContaining({

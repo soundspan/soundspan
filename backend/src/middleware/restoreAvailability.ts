@@ -5,7 +5,19 @@ import { sendRouteError } from "../utils/routeErrorResponse";
 
 /** Require the pre-onboarding database state used by anonymous restore routes. */
 export async function requireFreshInstall(res: Response): Promise<boolean> {
-    if ((await prisma.user.count()) === 0) return true;
+    try {
+        if ((await prisma.user.count()) === 0) return true;
+    } catch (error) {
+        if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "P2021"
+        ) {
+            return true;
+        }
+        throw error;
+    }
     sendRouteError(res, 403, "Restore is unavailable after setup", {
         code: "RESTORE_UNAVAILABLE",
     });

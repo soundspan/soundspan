@@ -69,6 +69,8 @@ async function connectProbe(now: number): Promise<ProbeConnection> {
         connectionString: config.databaseUrl,
         connectionTimeoutMillis: PROBE_TIMEOUT_MS,
         query_timeout: PROBE_TIMEOUT_MS,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 30_000,
     });
     const connection: ProbeConnection = {
         client,
