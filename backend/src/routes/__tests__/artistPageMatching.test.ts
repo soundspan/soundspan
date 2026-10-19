@@ -1,11 +1,14 @@
 import { filterDistinctDiscographyAlbums } from "../library/artistPageMatching";
 
 describe("artist page discography album matching", () => {
+    const musicBrainzAlbum = { title: "The Album", rgMbid: "rg-musicbrainz" };
+
     it("drops a release-group match from a differently titled placeholder", () => {
         const result = filterDistinctDiscographyAlbums(
             [
                 {
                     title: "Streaming title",
+                    source: "remote",
                     rgMbid: "remote:placeholder",
                     matchedRgMbid: "rg-held",
                 },
@@ -25,10 +28,51 @@ describe("artist page discography album matching", () => {
         expect(result).toEqual([]);
     });
 
+    it("keeps a MusicBrainz card that only matches a remote placeholder by title", () => {
+        const result = filterDistinctDiscographyAlbums(
+            [
+                {
+                    title: "The Album",
+                    source: "remote",
+                    rgMbid: "remote:placeholder",
+                    matchedRgMbid: null,
+                },
+            ],
+            [musicBrainzAlbum],
+        );
+
+        expect(result).toEqual([musicBrainzAlbum]);
+    });
+
+    it("keeps a same-title MusicBrainz card when the placeholder matched another release group", () => {
+        const result = filterDistinctDiscographyAlbums(
+            [
+                {
+                    title: "The Album",
+                    source: "remote",
+                    rgMbid: "remote:placeholder",
+                    matchedRgMbid: "rg-other-edition",
+                },
+            ],
+            [musicBrainzAlbum],
+        );
+
+        expect(result).toEqual([musicBrainzAlbum]);
+    });
+
+    it("hides a MusicBrainz card that matches a database album by title", () => {
+        const result = filterDistinctDiscographyAlbums(
+            [{ title: "The Album", source: "database" }],
+            [musicBrainzAlbum],
+        );
+
+        expect(result).toEqual([]);
+    });
+
     it("keeps the existing edition-stripped title rule", () => {
         const result = filterDistinctDiscographyAlbums(
-            [{ title: "The Album (Deluxe Edition)" }],
-            [{ title: "The Album", rgMbid: "rg-other" }],
+            [{ title: "The Album (Deluxe Edition)", source: "database" }],
+            [musicBrainzAlbum],
         );
 
         expect(result).toEqual([]);

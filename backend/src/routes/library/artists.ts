@@ -478,6 +478,7 @@ export async function handleGetArtist(
         readLibraryArtist({
             lookup: { id: idParam, name, mbid: idParam },
             albumLocations: LIBRARY_SURFACE_ALBUM_LOCATIONS,
+            likedRemoteAlbumsUserId: req.user?.id,
             requireVisibleAlbum: false,
             albumOrder: "year",
             maxTracksPerAlbum: 10,
