@@ -240,8 +240,14 @@ function expectedChunkSize(
 export async function writeRestoreChunk(
     uploadId: string,
     index: number,
-    bytes: Buffer,
+    bytes: unknown,
 ): Promise<void> {
+    if (!(bytes instanceof Buffer)) {
+        throw new RestoreError(
+            "RESTORE_CHUNK_SIZE",
+            "Restore chunk size is invalid",
+        );
+    }
     const session = await readSession(uploadId);
     if (
         !Number.isSafeInteger(index) ||
@@ -255,7 +261,7 @@ export async function writeRestoreChunk(
     }
     if (
         index >= session.totalChunks ||
-        bytes.length !== expectedChunkSize(session, index)
+        bytes.byteLength !== expectedChunkSize(session, index)
     ) {
         throw new RestoreError(
             "RESTORE_CHUNK_SIZE",
@@ -267,10 +273,10 @@ export async function writeRestoreChunk(
         const result = await handle.write(
             bytes,
             0,
-            bytes.length,
+            bytes.byteLength,
             index * RESTORE_CHUNK_SIZE_BYTES,
         );
-        if (result.bytesWritten !== bytes.length) {
+        if (result.bytesWritten !== bytes.byteLength) {
             throw new Error("Restore chunk write was incomplete");
         }
     } finally {

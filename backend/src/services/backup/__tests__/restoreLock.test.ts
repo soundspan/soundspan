@@ -101,7 +101,12 @@ describe("restore advisory lock probe", () => {
         const now = Date.now();
         await expect(isRestoreLockHeld(now)).resolves.toBe(false);
 
-        client.emit("error", new Error("idle connection dropped"));
+        const dateNow = jest.spyOn(Date, "now").mockReturnValue(now);
+        try {
+            client.emit("error", new Error("idle connection dropped"));
+        } finally {
+            dateNow.mockRestore();
+        }
         await new Promise<void>((resolve) => setImmediate(resolve));
         await expect(isRestoreLockHeld(now + 2_001)).resolves.toBe(false);
 

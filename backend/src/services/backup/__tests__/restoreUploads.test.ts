@@ -76,6 +76,7 @@ import {
     writeRestoreChunk,
     releaseRestoreCompletion,
     releaseRestoreUpload,
+    restoreStagingDirectory,
 } from "../restoreUploads";
 
 describe("restore uploads", () => {
@@ -125,6 +126,24 @@ describe("restore uploads", () => {
         await expect(
             writeRestoreChunk(created.uploadId, 0, Buffer.alloc(2)),
         ).rejects.toMatchObject({ code: "RESTORE_CHUNK_SIZE" });
+        expect(mockRedis.eval).not.toHaveBeenCalled();
+    });
+
+    it("rejects non-Buffer chunks without writing", async () => {
+        const created = await createRestoreUpload(1);
+        const stagedPath = path.join(
+            restoreStagingDirectory(),
+            `${created.uploadId}.upload`,
+        );
+
+        await expect(
+            writeRestoreChunk(created.uploadId, 0, "x"),
+        ).rejects.toMatchObject({ code: "RESTORE_CHUNK_SIZE" });
+        await expect(
+            writeRestoreChunk(created.uploadId, 0, [1]),
+        ).rejects.toMatchObject({ code: "RESTORE_CHUNK_SIZE" });
+
+        await expect(fs.readFile(stagedPath)).resolves.toHaveLength(0);
         expect(mockRedis.eval).not.toHaveBeenCalled();
     });
 
