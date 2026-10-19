@@ -404,11 +404,11 @@ jest.mock("../../services/libraryRadioCache", () => ({
 const mockPersistCatalogReleaseGroups = jest.fn();
 jest.mock("../../services/metadata/catalogPersistence", () => ({
     findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshArtistCatalogReleaseGroups: jest.fn(async () => null),
     findFreshCatalogReleaseGroups: jest.fn(async () => null),
     logCatalogPersistenceError: jest.fn(),
     persistCatalogReleaseGroups: mockPersistCatalogReleaseGroups,
     persistCatalogTracklist: jest.fn(async () => undefined),
-    readFreshCatalogReleaseGroups: jest.fn(() => null),
 }));
 
 const mockLidarrDeleteArtist = jest.fn();

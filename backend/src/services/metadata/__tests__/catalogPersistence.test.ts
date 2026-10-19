@@ -20,13 +20,18 @@ const config = {
 };
 
 const recordCatalogWrite = jest.fn();
+const mockCatalogWarn = jest.fn();
 
 jest.mock("../../../utils/db", () => ({ prisma }));
 jest.mock("../../../config", () => ({ config }));
 jest.mock("../../../metrics", () => ({ recordCatalogWrite }));
+jest.mock("../../../utils/logger", () => ({
+    logger: { child: jest.fn(() => ({ warn: mockCatalogWarn })) },
+}));
 
 import {
     findFreshCatalogAlbum,
+    findFreshArtistCatalogReleaseGroups,
     findFreshCatalogReleaseGroups,
     persistCatalogReleaseGroups,
     persistCatalogTracklist,
@@ -336,6 +341,114 @@ describe("catalog persistence", () => {
         await expect(
             findFreshCatalogReleaseGroups("artist-stale"),
         ).resolves.toBeNull();
+        expect(prisma.album.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("does not query artist catalog rows when persistence is disabled", async () => {
+        config.catalogPersistence.enabled = false;
+
+        await expect(
+            findFreshArtistCatalogReleaseGroups({
+                artistId: "artist-disabled",
+                catalogSyncedAt: new Date("2026-08-24T15:00:00.000Z"),
+            }),
+        ).resolves.toBeNull();
+
+        expect(prisma.album.findMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["missing", null],
+        [
+            "exactly seven days old",
+            new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000),
+        ],
+    ])(
+        "does not query artist catalog rows when the sync is %s",
+        async (_description, catalogSyncedAt) => {
+            await expect(
+                findFreshArtistCatalogReleaseGroups({
+                    artistId: "artist-stale",
+                    catalogSyncedAt,
+                }),
+            ).resolves.toBeNull();
+
+            expect(prisma.album.findMany).not.toHaveBeenCalled();
+        },
+    );
+
+    it("loads fresh artist catalog rows and touches them", async () => {
+        prisma.album.findMany.mockResolvedValueOnce([
+            {
+                id: "album-artist-catalog",
+                rgMbid: "rg-artist-catalog",
+                title: "Artist Catalog Album",
+                year: 2021,
+                primaryType: "EP",
+                location: "CATALOG",
+            },
+        ]);
+
+        const groups = await findFreshArtistCatalogReleaseGroups({
+            artistId: "artist-catalog",
+            catalogSyncedAt: new Date("2026-08-24T15:00:00.000Z"),
+        });
+
+        expect(prisma.album.findMany).toHaveBeenCalledWith({
+            where: { artistId: "artist-catalog", location: "CATALOG" },
+            orderBy: [{ year: "desc" }, { id: "asc" }],
+            select: {
+                id: true,
+                rgMbid: true,
+                title: true,
+                year: true,
+                primaryType: true,
+                location: true,
+            },
+        });
+        expect(groups).toEqual([
+            {
+                id: "rg-artist-catalog",
+                title: "Artist Catalog Album",
+                "first-release-date": "2021",
+                "primary-type": "EP",
+                "secondary-types": [],
+            },
+        ]);
+        expect(prisma.album.updateMany).toHaveBeenCalledWith({
+            where: { artistId: "artist-catalog", location: "CATALOG" },
+            data: { catalogTouchedAt: NOW },
+        });
+    });
+
+    it("returns an empty fresh artist catalog and still touches its rows", async () => {
+        await expect(
+            findFreshArtistCatalogReleaseGroups({
+                artistId: "artist-fully-owned",
+                catalogSyncedAt: new Date("2026-08-24T15:00:00.000Z"),
+            }),
+        ).resolves.toEqual([]);
+
+        expect(prisma.album.updateMany).toHaveBeenCalledWith({
+            where: { artistId: "artist-fully-owned", location: "CATALOG" },
+            data: { catalogTouchedAt: NOW },
+        });
+    });
+
+    it("treats an artist catalog query failure as a provider miss", async () => {
+        const error = new Error("catalog unavailable");
+        prisma.album.findMany.mockRejectedValueOnce(error);
+
+        await expect(
+            findFreshArtistCatalogReleaseGroups({
+                artistId: "artist-query-failure",
+                catalogSyncedAt: new Date("2026-08-24T15:00:00.000Z"),
+            }),
+        ).resolves.toBeNull();
+
+        expect(mockCatalogWarn).toHaveBeenCalledWith("Catalog read failed", {
+            error,
+        });
         expect(prisma.album.updateMany).not.toHaveBeenCalled();
     });
 
