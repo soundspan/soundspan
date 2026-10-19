@@ -385,3 +385,30 @@ test("first-byte timeout is cancelled when the client response closes first", (t
     assert.equal(res.writeHeadCalls.length, 0);
     assert.equal(proxyReq.destroyed, false);
 });
+
+test("resolveProxyTimeoutMs gives bulk music-request actions the long budget", () => {
+    assert.equal(
+        resolveProxyTimeoutMs("/api/requests/bulk/approve", {}),
+        90_000,
+    );
+    assert.equal(
+        resolveProxyTimeoutMs("/api/requests/bulk/deny-stale", {}),
+        90_000,
+    );
+    assert.equal(resolveProxyTimeoutMs("/requests/bulk/approve", {}), 90_000);
+    assert.equal(resolveProxyTimeoutMs("/api/requests", {}), 20_000);
+    assert.equal(resolveProxyTimeoutMs("/api/requests/bulkx", {}), 20_000);
+    assert.equal(
+        resolveProxyTimeoutMs("/api/requests/bulk/approve", {
+            PROXY_REQUEST_TIMEOUT_MS: "150000",
+        }),
+        150_000,
+    );
+    // The import-preview override never applies to bulk request actions.
+    assert.equal(
+        resolveProxyTimeoutMs("/api/requests/bulk/approve", {
+            PROXY_IMPORT_PREVIEW_TIMEOUT_MS: "5000",
+        }),
+        90_000,
+    );
+});

@@ -4,9 +4,14 @@ import { toast } from "sonner";
 import {
     openRequestRgMbids,
     useCreateMusicRequest,
-    useMyMusicRequests,
+    useMyOpenMusicRequests,
     useRequestsGate,
 } from "@/hooks/useMusicRequests";
+import {
+    albumRequestState,
+    describeRequestSubmitError,
+    formatRequestDate,
+} from "@/lib/musicRequests";
 import { isSyntheticRgMbid } from "../albumActionVisibility";
 import type { Album } from "../types";
 import type { CreateMusicRequestInput } from "@/lib/api/requests";
@@ -25,12 +30,9 @@ export async function submitAlbumRequest(
             { id: toastId },
         );
     } catch (error) {
-        toast.error(
-            error instanceof Error
-                ? error.message
-                : "Failed to submit the request",
-            { id: toastId },
-        );
+        toast.error(describeRequestSubmitError(error, formatRequestDate), {
+            id: toastId,
+        });
     }
 }
 
@@ -40,7 +42,7 @@ export async function submitAlbumRequest(
  */
 export function useAlbumRequest(album: Album | null | undefined) {
     const { requestsEnabled } = useRequestsGate();
-    const myRequests = useMyMusicRequests(requestsEnabled);
+    const myRequests = useMyOpenMusicRequests(requestsEnabled);
     const create = useCreateMusicRequest();
 
     const candidate = album?.rgMbid || album?.mbid || null;
@@ -49,6 +51,7 @@ export function useAlbumRequest(album: Album | null | undefined) {
     const isRequestedAlbum = Boolean(
         rgMbid && openRequestRgMbids(myRequests.data).has(rgMbid.toLowerCase()),
     );
+    const requestState = albumRequestState(myRequests.data, rgMbid);
 
     const requestAlbum = async () => {
         if (!album || !rgMbid || create.isPending) return;
@@ -63,6 +66,7 @@ export function useAlbumRequest(album: Album | null | undefined) {
     return {
         requestsEnabled,
         isRequestedAlbum,
+        requestState,
         isSubmittingRequest: create.isPending,
         requestAlbum,
     };

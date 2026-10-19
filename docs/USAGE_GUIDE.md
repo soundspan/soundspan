@@ -108,15 +108,50 @@ What gets sent: finished tracks (scrobbles) and now-playing updates, for music y
 
 ## Requesting Music
 
-Non-admin users cannot download music directly. Instead, they can ask for it:
+Non-admin users cannot download music directly. Instead, they can ask for it.
 
-- Open an album that is not in the library. A `Request` button appears where admins see `Download`.
-- Click `Request`. The button changes to `Requested` and an admin is notified.
-- Admins review requests on the `Requests` page (avatar menu -> `Requests`): approve to send the album into the download queue, or decline.
-- You get a notification when your request is approved, declined, or when the album lands in the library.
-- Visit `/requests` to see your own requests and cancel pending ones.
+### Asking for an album
 
-Limits: you cannot request an album that is already in the library, already requested, or already downloading, and there is a daily per-user cap (default 10, operators can change `REQUESTS_PER_USER_PER_DAY`). Operators can turn the whole feature off with `FEATURE_REQUESTS=false`.
+- Open an album that is not in the library. A `Request` button appears where admins see `Download`. Artist pages and Release Radar offer the same request.
+- Click `Request`. The button changes to `Requested`, and the admins are notified.
+
+### Following your request
+
+Open `My Requests` from the avatar menu, or from the side menu on a phone. Each request shows where it stands:
+
+| Status                   | What it means                                                       |
+| ------------------------ | ------------------------------------------------------------------- |
+| `Pending`                | No admin has reviewed it yet. You can cancel it.                    |
+| `Approved`               | An admin approved it. The status updates within a few minutes.      |
+| `Approved — queued`      | An admin approved it. The download waits for its turn.              |
+| `Approved — downloading` | The album is downloading now.                                       |
+| `In your library`        | The album arrived. `Open album` takes you to it.                    |
+| `Declined`               | An admin said no. Their reason shows on the row when they gave one. |
+| `Failed`                 | The download did not finish. An admin can retry it or decline it.   |
+| `Cancelled`              | You cancelled it.                                                   |
+
+The button on the album page follows along too: `Requested`, then `Approved`, then `Downloading`.
+
+You get a notification when your request is approved, declined, or failed, and when the album is in your library. The library notification opens the album page. A failure notification says whether the download failed or was stopped before it finished.
+
+### Reviewing requests (admins)
+
+The `Requests` entry in the avatar menu shows how many requests are waiting. On the `Requests` page:
+
+- `Approve` sends the album into the download queue. `Decline` asks for an optional reason, which the requester sees.
+- `Approve all from <user>` approves that user's pending requests, up to 25 at a time. Run it again to approve the rest.
+- `Decline stale` declines every pending request older than the age you pick (7, 14, 30, or 90 days), up to 200 at a time, with an optional reason.
+- A failed request shows `Retry` and `Decline`. `Retry` starts a new download. Admins also get a notification when an approved request fails.
+- Use the status filter and the page buttons to move through long lists.
+
+A download that starts when an admin approves a request gets only the album that was asked for. It never falls back to a different album by the same artist; when no source has the album, the request fails. If the album is already downloading for another reason when the request is approved, the request follows that download instead.
+
+### Limits
+
+- You cannot request an album that is already in the library, already requested, or already downloading.
+- Each user has a daily request cap (default 10). Operators can change it with `REQUESTS_PER_USER_PER_DAY`.
+- After an admin declines an album, nobody can request it again for 30 days. If you try too early, the message says when you can ask again. Operators can change the wait with `REQUESTS_DENIED_COOLDOWN_DAYS`, and `0` turns it off. Declining stale requests does not start this wait.
+- Operators can turn the whole feature off with `FEATURE_REQUESTS=false`.
 
 On the default recommendation mode, Discover Weekly playlists generate for everyone from music the server already has and never download albums. The legacy download-based mode is admin-only.
 

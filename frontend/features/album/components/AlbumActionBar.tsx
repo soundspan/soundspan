@@ -20,6 +20,7 @@ import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { ReleaseSelectionModal } from "@/components/ui/ReleaseSelectionModal";
 import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 import type { Album, AlbumSource } from "../types";
+import type { AlbumRequestState } from "@/lib/musicRequests";
 import {
     getAlbumActionVisibility,
     type AlbumActionVisibility,
@@ -48,6 +49,8 @@ interface AlbumActionBarProps {
     downloadsEnabled?: boolean;
     requestsEnabled?: boolean;
     isRequestedAlbum?: boolean;
+    /** Progress of the viewer's open request; defaults to "requested". */
+    requestState?: AlbumRequestState | null;
     isSubmittingRequest?: boolean;
     onRequestAlbum?: () => void;
     isInListenTogetherGroup?: boolean;
@@ -146,21 +149,41 @@ function AcquisitionControls(props: AcquisitionControlsProps) {
 
 interface RequestControlsProps {
     requested: boolean;
+    state: AlbumRequestState;
     submitting: boolean;
     onRequest: () => void;
 }
 
+const OPEN_REQUEST_COPY: Record<
+    AlbumRequestState,
+    { label: string; title: string }
+> = {
+    requested: {
+        label: "Requested",
+        title: "You already have an open request for this album",
+    },
+    approved: {
+        label: "Approved",
+        title: "An admin approved your request. It appears here once it downloads.",
+    },
+    downloading: {
+        label: "Downloading",
+        title: "An admin approved your request and the album is downloading.",
+    },
+};
+
 function RequestControls(props: RequestControlsProps) {
     if (props.requested) {
+        const copy = OPEN_REQUEST_COPY[props.state];
         return (
             <button
                 type="button"
                 disabled
                 className="flex items-center gap-2 px-5 py-2.5 rounded-full font-medium bg-white/5 text-white/50 cursor-not-allowed"
-                title="You already have an open request for this album"
+                title={copy.title}
             >
                 <Check className="w-4 h-4" />
-                <span>Requested</span>
+                <span>{copy.label}</span>
             </button>
         );
     }
@@ -422,6 +445,7 @@ function ActionControlRow(props: {
                     {visibility.showRequest && actions.onRequestAlbum && (
                         <RequestControls
                             requested={actions.isRequestedAlbum ?? false}
+                            state={actions.requestState ?? "requested"}
                             submitting={actions.isSubmittingRequest ?? false}
                             onRequest={actions.onRequestAlbum}
                         />

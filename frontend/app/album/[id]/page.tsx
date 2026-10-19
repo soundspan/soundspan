@@ -113,6 +113,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const {
         requestsEnabled,
         isRequestedAlbum,
+        requestState,
         isSubmittingRequest,
         requestAlbum,
     } = useAlbumRequest(rawAlbum);
@@ -265,6 +266,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     downloadsEnabled={downloadsEnabled}
                     requestsEnabled={requestsEnabled}
                     isRequestedAlbum={isRequestedAlbum}
+                    requestState={requestState}
                     isSubmittingRequest={isSubmittingRequest}
                     onRequestAlbum={() => void requestAlbum()}
                     isInListenTogetherGroup={isInGroup}

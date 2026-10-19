@@ -12,6 +12,8 @@ import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { queryKeys } from "@/lib/queryKeys";
+import { useRequestsNavEntry } from "@/hooks/useMusicRequests";
+import { NavCountBadge } from "./NavCountBadge";
 
 /**
  * Renders the UserAvatarMenu component.
@@ -20,6 +22,7 @@ export function UserAvatarMenu() {
     const { user, logout } = useAuth();
     const { toast } = useToast();
     const queryClient = useQueryClient();
+    const requestsNav = useRequestsNavEntry();
     const [isOpen, setIsOpen] = useState(false);
     const [imgError, setImgError] = useState(false);
     const [imgKey, setImgKey] = useState(0);
@@ -123,7 +126,11 @@ export function UserAvatarMenu() {
                         ? "ring-white/40"
                         : "ring-transparent hover:ring-white/20",
                 )}
-                aria-label="User menu"
+                aria-label={
+                    requestsNav?.badge
+                        ? `User menu, ${requestsNav.badge} ${requestsNav.badgeLabel}`
+                        : "User menu"
+                }
                 aria-haspopup="true"
                 aria-expanded={isOpen}
                 title={displayName}
@@ -145,6 +152,14 @@ export function UserAvatarMenu() {
                     </span>
                 )}
             </button>
+            {requestsNav?.badge && (
+                <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-hover px-1 text-[10px] font-bold text-black"
+                >
+                    {requestsNav.badge}
+                </span>
+            )}
 
             {isOpen && (
                 <div className="absolute right-0 top-full mt-2 w-48 bg-surface-hover border border-white/10 rounded-lg shadow-xl shadow-black/40 py-1 z-[100]">
@@ -174,14 +189,21 @@ export function UserAvatarMenu() {
                         <Settings className="w-4 h-4" />
                         Settings
                     </Link>
-                    {user?.role === "admin" && (
+                    {requestsNav && (
                         <Link
                             href="/requests"
                             onClick={() => setIsOpen(false)}
                             className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
                         >
                             <Inbox className="w-4 h-4" />
-                            Requests
+                            {requestsNav.label}
+                            {requestsNav.badge && (
+                                <NavCountBadge
+                                    value={requestsNav.badge}
+                                    label={requestsNav.badgeLabel}
+                                    className="ml-auto"
+                                />
+                            )}
                         </Link>
                     )}
                     {user?.role === "admin" && (

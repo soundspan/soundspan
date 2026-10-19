@@ -79,6 +79,20 @@ MusicBrainz matches for the albums of liked TIDAL and YouTube Music songs, 25
 albums an hour. It shares the normal MusicBrainz rate limit, so other metadata
 lookups can run a little slower while it works through a large backlog.
 
+**Heads-up, music requests:** declining an album request now starts a 30-day
+wait before anyone can request that album again. Set
+`REQUESTS_DENIED_COOLDOWN_DAYS` to change the wait, or to `0` to turn it off;
+the variable is available on Docker Compose, the all-in-one image, and Helm
+(`config.requestsDeniedCooldownDays`). Declines made before the upgrade do not
+start a wait. A small database migration adds the column that records it and
+runs automatically at startup.
+
+**Breaking for API-key clients of the request API:** `GET /api/requests` and
+`GET /api/requests/mine` now return one page as
+`{ requests, total, offset, limit }` (50 rows by default, `limit` up to 100,
+`offset` to move through pages) instead of a plain list. The soundspan web app
+is already updated.
+
 ---
 
 ## 2.6.0: scrobbling, AcoustID, and database changes

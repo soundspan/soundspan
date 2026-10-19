@@ -212,7 +212,7 @@ is an unused legacy column retained in the schema; nothing reads or writes it.
 | `ApiKey`                         | Subsonic/API key auth                                                                                                                |
 | `DeviceLinkCode`                 | Device pairing codes                                                                                                                 |
 | `InviteCode` / `InviteCodeUsage` | Invite system                                                                                                                        |
-| `MusicRequest`                   | Non-admin album request queue backing `/api/requests`: requester, `artistName`/`albumTitle`/`rgMbid`, `status` lifecycle (pending through fulfilled/denied), reviewer fields, optional `downloadJobId` |
+| `MusicRequest`                   | Non-admin album request queue backing `/api/requests`: requester, `artistName`/`albumTitle`/`rgMbid`, `status` lifecycle (`pending`, `approved`, `fulfilled`, `denied`, `failed`, `cancelled`), reviewer fields, optional `downloadJobId` (not a foreign key; several requests can share one job, and an admin retry relinks a failed request to a new job), and `cooldownUntil` (set by a single admin decline while `REQUESTS_DENIED_COOLDOWN_DAYS` is above 0, null for stale bulk declines; while it is in the future and the setting is above 0, nobody can request the same `rgMbid`) |
 
 `User.passwordHash` is nullable for OIDC-only accounts. The credential-stranding
 guard blocks unlinking an external identity when the account has no local

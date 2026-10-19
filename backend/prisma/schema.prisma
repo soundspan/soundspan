@@ -901,6 +901,7 @@ model MusicRequest {
   status        String    @default("pending")
   note          String?
   deniedReason  String?
+  cooldownUntil DateTime?
   reviewedById  String?
   reviewedAt    DateTime?
   downloadJobId String?
