@@ -68,6 +68,12 @@ jest.mock("../../services/tidal", () => ({
     },
 }));
 
+jest.mock("../../services/tidalTrackDownloadQueue", () => ({
+    __esModule: true,
+    default: { enqueue: jest.fn() },
+    TidalTrackDownloadQueueFullError: class extends Error {},
+}));
+
 jest.mock("../../services/lastfm", () => ({
     lastFmService: {
         getArtistCorrection: jest.fn(),

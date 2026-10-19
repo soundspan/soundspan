@@ -59,8 +59,8 @@ Open the song's menu (the `⋮` button at the end of the row). What it offers de
 
 - When the album has a MusicBrainz match, admins see `Add album to library`. It downloads the whole album, the same as the `Download` button on an album page.
 - When the album has a MusicBrainz match and music requests are turned on, other users see `Request album`. It asks an admin to add the album (see [Requesting Music](#requesting-music)).
-- When a YouTube Music song's album has no MusicBrainz match, admins see `Add song to library`. It downloads that one song.
-- Otherwise the menu has no add option. This is the case for a TIDAL song on an album with no MusicBrainz match.
+- When the album has no MusicBrainz match, admins see `Add song to library`. It downloads that one song. A TIDAL song needs TIDAL set up as a download source (see [TIDAL Downloads](INTEGRATIONS.md#tidal-downloads)).
+- Otherwise the menu has no add option. This is the case for users who are not admins when the album has no MusicBrainz match, and for admins on a TIDAL song when TIDAL is not set up as a download source.
 
 After the files arrive and the next library scan matches the song to them, only your own copy shows, without the badge.
 

@@ -100,13 +100,25 @@ Browser → GET /api/tidal-streaming/stream/:tidalId
 
 Each user authenticates their own TIDAL account via device-code OAuth flow. Stream quality is per-user configurable. The backend looks up the user's encrypted OAuth credentials from `UserSettings.tidalOAuthJson`.
 
-TIDAL has **two separate auth identities**: the per-user OAuth above (streaming only) and a single admin-owned download connection whose encrypted tokens live in `SystemSettings.tidalAccessToken`/`tidalRefreshToken`. Album downloads always use the admin connection (`backend/src/services/tidal.ts`), never per-user credentials. The admin connection is established exclusively through the `/api/system-settings/tidal-auth` device-code endpoints; the general settings API neither returns the token material (`GET` reports a `tidalConnected` boolean instead) nor accepts it on save, so a settings round-trip cannot overwrite the stored tokens.
+TIDAL has **two separate auth identities**: the per-user OAuth above (streaming only) and a single admin-owned download connection whose encrypted tokens live in `SystemSettings.tidalAccessToken`/`tidalRefreshToken`. Album and single-song downloads always use the admin connection (`backend/src/services/tidal.ts`), never per-user credentials. The admin connection is established exclusively through the `/api/system-settings/tidal-auth` device-code endpoints; the general settings API neither returns the token material (`GET` reports a `tidalConnected` boolean instead) nor accepts it on save, so a settings round-trip cannot overwrite the stored tokens.
 
 The TIDAL sidecar keeps `app.py` as a compatibility entrypoint and composition
 shim. Focused auth, browse, download, lifecycle, search, serialization, and
 stream modules own route behavior; `tidal_runtime.py` owns FastAPI composition,
 logging, paths, and client construction. Sidecar imports of shared helpers use
 the repository-qualified `services.common` prefix.
+
+### TIDAL Single-Song Download
+
+```
+Browser → POST /api/downloads/tidal-track (admin only)
+  → in-process queue in the backend API (one download at a time, up to 25 waiting)
+    → tidal-streamer /download/track writes the file under MUSIC_PATH
+      with the admin's TIDAL quality and naming template
+    → ONE coalesced library scan, the same as the YouTube URL download flow
+```
+
+The sidecar call blocks until the file is written, so the route answers `202` as soon as the song is queued. The queue lives in memory in each API process. Songs still waiting when the process restarts are dropped, and a song that was downloading can still land without its scan request. Two replicas can download the same song. While the naming template is unchanged, a repeat download is harmless: the sidecar reuses the existing file path whose embedded TIDAL id matches and replaces that file. After a template change, a repeat download lands at the new path as a second copy.
 
 ### Gap-Fill Playback (YouTube Music)
 

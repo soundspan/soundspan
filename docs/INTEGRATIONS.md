@@ -190,6 +190,15 @@ Use TIDAL as a download source for tracks/albums.
 4. Choose download quality and naming template
 5. Save
 
+### Single songs
+
+When a liked TIDAL song's album has no MusicBrainz match, a download job cannot fetch the album. Admins can still download that one song with `Add song to library` in the song's menu in the Library or in Search. The song uses the same quality and naming template as album downloads.
+
+- soundspan downloads these songs one at a time. Up to 25 more can wait in line; when the line is full, try again later. If you run more than one backend instance, each one has its own line.
+- The library scan after each download brings the song in.
+- If a download fails, the song stays a streaming song. The backend log records the failure and its HTTP status, and the TIDAL sidecar log has the cause. A download that timed out can still finish and arrive after the next library scan; if it does not, choose `Add song to library` again.
+- Songs still waiting when the backend restarts are dropped. A song that was downloading at that moment can still arrive, but it shows up only after the next library scan. Choose `Add song to library` again, or run a library scan.
+
 ### File naming template examples
 
 ```text

@@ -171,6 +171,7 @@ async function mountList(props: Record<string, unknown>) {
             React.createElement(StreamingLikesList, {
                 acquisitionPolicy: {
                     downloadsEnabled: false,
+                    tidalDownloadsEnabled: false,
                     requestsEnabled: true,
                 },
                 onAcquire: () => undefined,

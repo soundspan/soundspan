@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { logger } from "../utils/logger";
 import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
@@ -26,10 +27,22 @@ import {
     ACTIVE_DOWNLOAD_JOB_STATUSES,
     failDownloadJob,
 } from "../services/downloadJobStatus";
+import tidalTrackDownloadQueue, {
+    TidalTrackDownloadQueueFullError,
+} from "../services/tidalTrackDownloadQueue";
+import { tidalService } from "../services/tidal";
 
 const router = Router();
 
 router.use(requireAuthOrToken);
+
+const tidalTrackDownloadBodySchema = z.object({
+    tidalTrackId: z
+        .number()
+        .int("tidalTrackId must be an integer")
+        .positive("tidalTrackId must be positive")
+        .max(2147483647, "tidalTrackId must be at most 2147483647"),
+});
 
 /**
  * @openapi
@@ -68,6 +81,79 @@ router.get("/availability", async (req, res) => {
     } catch (error: any) {
         logger.error("Download availability check error:", error.message);
         sendInternalRouteError(res, "Failed to check download availability");
+    }
+});
+
+/**
+ * @openapi
+ * /api/downloads/tidal-track:
+ *   post:
+ *     summary: Queue one TIDAL track for download (admin only)
+ *     tags: [Downloads]
+ *     security:
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [tidalTrackId]
+ *             properties:
+ *               tidalTrackId:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 2147483647
+ *     responses:
+ *       202:
+ *         description: Track download queued or already queued
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       429:
+ *         description: Pending track download queue is full
+ *       503:
+ *         description: TIDAL downloads are unavailable
+ *       500:
+ *         description: Unexpected queue admission failure
+ */
+router.post("/tidal-track", requireAdmin, async (req, res) => {
+    try {
+        const { tidalTrackId } = tidalTrackDownloadBodySchema.parse(req.body);
+        if (!(await tidalService.isAvailable())) {
+            return sendRouteError(
+                res,
+                503,
+                "TIDAL downloads are not available",
+            );
+        }
+        const status = tidalTrackDownloadQueue.enqueue({
+            tidalTrackId,
+            userId: req.user!.id,
+        });
+        return res.status(202).json({ tidalTrackId, status });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return sendRouteError(res, 400, error.issues[0].message);
+        }
+        if (error instanceof TidalTrackDownloadQueueFullError) {
+            return sendRouteError(
+                res,
+                429,
+                "Too many TIDAL song downloads are waiting. Try again later.",
+            );
+        }
+        logger.error(
+            "TIDAL track download enqueue error:",
+            error instanceof Error ? error.message : String(error),
+        );
+        return sendInternalRouteError(
+            res,
+            "Failed to queue TIDAL track download",
+        );
     }
 });
 
