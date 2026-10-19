@@ -13,6 +13,7 @@ import {
     RestoreCompleteView,
     RestoreUnavailableView,
     RestoreFailedView,
+    RestoreIncompleteView,
     RestoreRunningView,
     UploadProgressView,
 } from "./RestoreProgressViews";
@@ -216,17 +217,22 @@ function RestoreFlowBody({ onBack }: { onBack?: () => void }) {
         case "unavailable":
             return <RestoreUnavailableView />;
         case "reconnecting":
-            return <ReconnectingView />;
+            return (
+                <ReconnectingView statusUnavailable={flow.statusUnavailable} />
+            );
         case "restoring":
             return <RestoreRunningView status={flow.status} />;
         case "complete":
             return <RestoreCompleteView status={flow.status} />;
+        case "restoredIncomplete":
+            return <RestoreIncompleteView message={flow.message} />;
         case "failed":
             return (
                 <>
                     <RestoreFailedView
                         message={flow.message}
                         freshInstallIntact={flow.freshInstallIntact}
+                        canRestoreAgain={flow.canRestoreAgain}
                         onRetry={reset}
                     />
                     {flow.freshInstallIntact && <BackLink onBack={onBack} />}

@@ -15,6 +15,7 @@ jest.mock("../../../config", () => ({
 }));
 
 interface FakeChild extends EventEmitter {
+    pid?: number;
     stdout: PassThrough;
     stderr: PassThrough;
     kill: jest.Mock;
@@ -22,6 +23,7 @@ interface FakeChild extends EventEmitter {
 
 function childProcess(onKill?: (child: FakeChild) => void): FakeChild {
     const child = Object.assign(new EventEmitter(), {
+        pid: 4321,
         stdout: new PassThrough(),
         stderr: new PassThrough(),
         kill: jest.fn(() => {
@@ -138,9 +140,13 @@ describe("restore migration replay", () => {
     });
 
     it("kills and waits for Prisma when migration execution is cancelled", async () => {
-        const child = childProcess((process) => {
-            queueMicrotask(() => process.emit("close", null, "SIGKILL"));
-        });
+        const child = childProcess();
+        const processKill = jest
+            .spyOn(process, "kill")
+            .mockImplementation(() => {
+                queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+                return true;
+            });
         spawn.mockReturnValue(child);
         const controller = new AbortController();
         const { deployCurrentMigrations } =
@@ -153,14 +159,23 @@ describe("restore migration replay", () => {
         controller.abort(new Error("connection lost"));
 
         await expect(pending).rejects.toThrow("connection lost");
-        expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(processKill).toHaveBeenCalledWith(-4321, "SIGKILL");
+        expect(spawn).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.any(Array),
+            expect.objectContaining({ detached: true }),
+        );
     });
 
     it("kills a migration that exceeds the fixed timeout", async () => {
         jest.useFakeTimers();
-        const child = childProcess((process) => {
-            queueMicrotask(() => process.emit("close", null, "SIGKILL"));
-        });
+        const child = childProcess();
+        const processKill = jest
+            .spyOn(process, "kill")
+            .mockImplementation(() => {
+                queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+                return true;
+            });
         spawn.mockReturnValue(child);
         const { deployCurrentMigrations } =
             await import("../restoreMigrationReplay");
@@ -174,7 +189,29 @@ describe("restore migration replay", () => {
             code: "RESTORE_MIGRATION_FAILED",
             outputTail: expect.stringContaining("timed out"),
         });
-        expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(processKill).toHaveBeenCalledWith(-4321, "SIGKILL");
+    });
+
+    it("guards process-group cancellation when spawn has no pid", async () => {
+        const child = childProcess();
+        child.pid = undefined;
+        const processKill = jest
+            .spyOn(process, "kill")
+            .mockImplementation(() => true);
+        spawn.mockReturnValue(child);
+        const controller = new AbortController();
+        const { deployCurrentMigrations } =
+            await import("../restoreMigrationReplay");
+        const pending = deployCurrentMigrations(
+            "postgresql://database/soundspan",
+            controller.signal,
+        );
+
+        controller.abort(new Error("connection lost"));
+        child.emit("close", null, "SIGKILL");
+
+        await expect(pending).rejects.toThrow("connection lost");
+        expect(processKill).not.toHaveBeenCalled();
     });
 
     it("wraps Prisma process start failures", async () => {

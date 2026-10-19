@@ -143,10 +143,7 @@ async function advanceSession(uploadId: string, index: number): Promise<void> {
     await redisClient.expire(RESTORE_UPLOAD_ACTIVE_KEY, SESSION_TTL_SECONDS);
 }
 
-/** Reserve the only active upload and create its sparse staging file. */
-export async function createRestoreUpload(
-    sizeBytes: number,
-): Promise<RestoreUploadCreated> {
+function validateRestoreSize(sizeBytes: number): void {
     if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1) {
         throw new RestoreError("BACKUP_FORMAT_INVALID", "Invalid backup size");
     }
@@ -156,21 +153,14 @@ export async function createRestoreUpload(
             "Backup exceeds the size limit",
         );
     }
-    await sweepRestoreStaging();
-    await ensureRestoreStorage(sizeBytes);
-    const uploadId = crypto.randomBytes(32).toString("base64url");
-    const locked = await redisClient.set(RESTORE_UPLOAD_ACTIVE_KEY, uploadId, {
-        EX: SESSION_TTL_SECONDS,
-        NX: true,
-    });
-    if (locked !== "OK") {
-        throw new RestoreError(
-            "RESTORE_IN_PROGRESS",
-            "A restore is already in progress",
-        );
-    }
+}
+
+function newUploadSession(
+    uploadId: string,
+    sizeBytes: number,
+): RestoreUploadSession {
     const createdAt = Date.now();
-    const session: RestoreUploadSession = {
+    return {
         uploadId,
         replicaId: RESTORE_REPLICA_ID,
         sizeBytes,
@@ -179,6 +169,21 @@ export async function createRestoreUpload(
         createdAt,
         expiresAt: createdAt + SESSION_TTL_SECONDS * 1000,
     };
+}
+
+async function reserveUpload(uploadId: string): Promise<void> {
+    const locked = await redisClient.set(RESTORE_UPLOAD_ACTIVE_KEY, uploadId, {
+        EX: SESSION_TTL_SECONDS,
+        NX: true,
+    });
+    if (locked === "OK") return;
+    throw new RestoreError(
+        "RESTORE_IN_PROGRESS",
+        "A restore is already in progress",
+    );
+}
+
+async function createUploadFile(uploadId: string): Promise<void> {
     try {
         const handle = await fs.open(uploadPath(uploadId), "wx", 0o600);
         await handle.close();
@@ -191,13 +196,30 @@ export async function createRestoreUpload(
             { cause: error },
         );
     }
+}
+
+async function saveNewUpload(session: RestoreUploadSession): Promise<void> {
     try {
         await saveSession(session);
     } catch (error) {
         await redisClient.del(RESTORE_UPLOAD_ACTIVE_KEY);
-        await fs.unlink(uploadPath(uploadId)).catch(() => undefined);
+        await fs.unlink(uploadPath(session.uploadId)).catch(() => undefined);
         throw error;
     }
+}
+
+/** Reserve the only active upload and create its sparse staging file. */
+export async function createRestoreUpload(
+    sizeBytes: number,
+): Promise<RestoreUploadCreated> {
+    validateRestoreSize(sizeBytes);
+    await sweepRestoreStaging();
+    await ensureRestoreStorage(sizeBytes);
+    const uploadId = crypto.randomBytes(32).toString("base64url");
+    const session = newUploadSession(uploadId, sizeBytes);
+    await reserveUpload(uploadId);
+    await createUploadFile(uploadId);
+    await saveNewUpload(session);
     return {
         uploadId,
         chunkSizeBytes: RESTORE_CHUNK_SIZE_BYTES,

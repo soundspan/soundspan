@@ -71,6 +71,12 @@ export interface RestoreChunkError extends Error {
 
 /** Longest a single chunk request may take before it is retried. */
 const CHUNK_REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Client budget for creating an upload and starting the restore: both may
+ * check disk space or read the staged file, and the proxies give these
+ * paths 120 seconds too.
+ */
+const RESTORE_REQUEST_TIMEOUT_MS = 120_000;
 
 /**
  * Parse an HTTP `Retry-After` value (delay seconds or an HTTP date) into a
@@ -145,6 +151,7 @@ export function WithBackup<TBase extends ApiClientConstructor>(Base: TBase) {
             return this.request<RestoreUploadSession>("/restore/uploads", {
                 method: "POST",
                 body: JSON.stringify({ sizeBytes }),
+                timeoutMs: RESTORE_REQUEST_TIMEOUT_MS,
             });
         }
 
@@ -183,6 +190,7 @@ export function WithBackup<TBase extends ApiClientConstructor>(Base: TBase) {
                 {
                     method: "POST",
                     body: JSON.stringify({ passphrase }),
+                    timeoutMs: RESTORE_REQUEST_TIMEOUT_MS,
                 },
             );
         }

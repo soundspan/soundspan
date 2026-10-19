@@ -107,6 +107,22 @@ describe("restore uploads", () => {
             claimCompletedRestoreUpload(created.uploadId),
         ).resolves.toContain(created.uploadId);
         await expect(hasActiveRestoreUpload()).resolves.toBe(false);
+        expect(mockRedis.eval).toHaveBeenCalledWith(
+            `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return -1 end
+local session = cjson.decode(raw)
+local completed = tonumber(ARGV[1]) + 1
+session.nextIndex = math.max(tonumber(session.nextIndex), completed)
+session.expiresAt = tonumber(ARGV[2])
+redis.call("SET", KEYS[1], cjson.encode(session), "EX", ARGV[3])
+return session.nextIndex
+`,
+            {
+                keys: [`restore:upload:${created.uploadId}`],
+                arguments: ["0", expect.any(String), "900"],
+            },
+        );
         await expect(
             claimCompletedRestoreUpload(created.uploadId),
         ).rejects.toMatchObject({ code: "RESTORE_UPLOAD_NOT_FOUND" });

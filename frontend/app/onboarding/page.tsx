@@ -44,14 +44,15 @@ export default function OnboardingPage() {
     const [restoreAvailable, setRestoreAvailable] = useState(false);
 
     // Guard: redirect away if onboarding is not needed (users already exist),
-    // unless a restore is running or waiting for its restart.
+    // unless a restore holds this page (running, waiting for its restart, or
+    // failed between states).
     useEffect(() => {
         let cancelled = false;
         async function checkOnboarding() {
             // Both checks run at once, so the slower one sets the wait; the
-            // restore check must finish first because a restore that is
-            // running or waiting for its restart keeps this page. Failures
-            // are ignored (fail open) so first-time setup still works.
+            // restore answer decides first because a restore that holds this
+            // page keeps it. Failures are ignored (fail open) so first-time
+            // setup still works.
             const [restoreResult, onboardingResult] = await Promise.allSettled([
                 api.getRestoreStatus(),
                 api.getOnboardingStatus(),

@@ -103,8 +103,11 @@ describe("restore schema reset", () => {
         );
     });
 
-    it("calls the commit observer at the reset transaction boundary", async () => {
-        const committed = jest.fn();
+    it("calls the commit observer immediately before sending COMMIT", async () => {
+        const queries: string[] = [];
+        const commitStarting = jest.fn(() => {
+            expect(queries.at(-1)).toContain("current_user");
+        });
         const results = [
             { rows: [] },
             { rows: [] },
@@ -113,17 +116,22 @@ describe("restore schema reset", () => {
             { rows: [{ current_user: "app" }] },
         ];
         const client = {
-            query: jest.fn(async () => results.shift() ?? { rows: [] }),
+            query: jest.fn(async (sql: string) => {
+                queries.push(sql);
+                if (sql === "COMMIT") throw new Error("commit ack lost");
+                return results.shift() ?? { rows: [] };
+            }),
         } as unknown as Client;
 
-        await resetApplicationSchema(client, {
-            allowExistingUsers: true,
-            onCommitted: committed,
-        });
+        await expect(
+            resetApplicationSchema(client, {
+                allowExistingUsers: true,
+                onCommitStarting: commitStarting,
+            }),
+        ).rejects.toThrow("commit ack lost");
 
-        expect(committed).toHaveBeenCalledTimes(1);
-        expect((client.query as jest.Mock).mock.calls.at(-1)?.[0]).toBe(
-            "COMMIT",
-        );
+        expect(commitStarting).toHaveBeenCalledTimes(1);
+        expect(queries.at(-2)).toBe("COMMIT");
+        expect(queries.at(-1)).toBe("ROLLBACK");
     });
 });

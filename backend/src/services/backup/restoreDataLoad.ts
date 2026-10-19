@@ -160,7 +160,7 @@ async function insertArchiveRows(
         0,
     );
     let completedRows = 0;
-    for await (const record of readBackupRecords(filePath)) {
+    for await (const record of readBackupRecords(filePath, undefined, signal)) {
         signal?.throwIfAborted();
         if (record.type !== "rows") continue;
         const table = targetByName.get(record.table);
@@ -276,7 +276,7 @@ export async function loadBackupData(
     header: BackupHeader,
     onProgress: (progress: RestoreProgress) => void | Promise<void>,
     beforeCommit?: (client: Client) => void | Promise<void>,
-    afterCommit?: () => void,
+    onCommitStarting?: () => void,
     signal?: AbortSignal,
 ): Promise<void> {
     signal?.throwIfAborted();
@@ -290,8 +290,8 @@ export async function loadBackupData(
             beforeCommit,
             signal,
         );
+        onCommitStarting?.();
         await client.query("COMMIT");
-        afterCommit?.();
     } catch (error) {
         if (!signal?.aborted) {
             await client.query("ROLLBACK").catch(() => undefined);

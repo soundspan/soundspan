@@ -27,7 +27,7 @@ export function restoreUploadPath(uploadId: string): string {
     return path.join(restoreStagingDirectory(), `${uploadId}.upload`);
 }
 
-/** Require free space for the declared archive plus a ten-percent margin. */
+/** Require the archive size plus the larger of ten percent or one GiB free. */
 export async function ensureRestoreStorage(sizeBytes: number): Promise<void> {
     const directory = restoreStagingDirectory();
     try {

@@ -31,6 +31,8 @@ let probeConnection: ProbeConnection | null = null;
 let reconnectAfter = 0;
 let lastWarningAt = Number.NEGATIVE_INFINITY;
 let ownedByProcess = false;
+let previouslyReportedHeld = false;
+let releaseObserved = false;
 
 function fallbackAfterFailure(now: number, error: unknown): boolean {
     if (now - lastWarningAt >= WARNING_INTERVAL_MS) {
@@ -142,19 +144,32 @@ export function invalidateRestoreLockCache(): void {
     lastSuccessfulProbe = null;
 }
 
+function recordReportedResult(held: boolean): boolean {
+    if (previouslyReportedHeld && !held) releaseObserved = true;
+    previouslyReportedHeld = held;
+    return held;
+}
+
+/** Consume one observed transition from a held restore lock to no lock. */
+export function consumeRestoreLockRelease(): boolean {
+    const observed = releaseObserved;
+    releaseObserved = false;
+    return observed;
+}
+
 /** Check pg_locks for the granted bigint restore lock without application reads. */
 export async function isRestoreLockHeld(now = Date.now()): Promise<boolean> {
-    if (ownedByProcess) return true;
+    if (ownedByProcess) return recordReportedResult(true);
     if (cachedProbe && now - cachedProbe.checkedAt < PROBE_CACHE_MS) {
-        return cachedProbe.held;
+        return recordReportedResult(cachedProbe.held);
     }
-    if (activeProbe) return activeProbe;
+    if (activeProbe) return recordReportedResult(await activeProbe);
     activeProbe = queryRestoreLock(now).then((result) => {
         cachedProbe = { checkedAt: now, held: result.held };
         return result.held;
     });
     try {
-        return await activeProbe;
+        return recordReportedResult(await activeProbe);
     } finally {
         activeProbe = null;
     }

@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
-import { RESTORE_STATUS_POLL_MS } from "../backupRestoreModel";
+import {
+    RESTORE_STATUS_POLL_MS,
+    readApiErrorCode,
+} from "../backupRestoreModel";
 import {
     POLLING_FLOW_KINDS,
     flowFromStatus,
@@ -59,7 +62,12 @@ export function useRestoreStatusPolling(setFlow: (flow: RestoreFlow) => void) {
             logger.warn("Restore status check failed", error);
             if (!mounted.current) return;
             if (failures.current >= FAILURES_BEFORE_RECONNECTING) {
-                setFlow({ kind: "reconnecting" });
+                setFlow({
+                    kind: "reconnecting",
+                    statusUnavailable:
+                        readApiErrorCode(error) ===
+                        "RESTORE_STATUS_UNAVAILABLE",
+                });
             }
             schedule(nextStatusCheckDelayMs(failures.current));
         },

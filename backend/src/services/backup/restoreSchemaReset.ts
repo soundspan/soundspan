@@ -105,7 +105,7 @@ export async function resetApplicationSchema(
     client: Client,
     options: {
         allowExistingUsers?: boolean;
-        onCommitted?: () => void;
+        onCommitStarting?: () => void;
     } = {},
 ): Promise<void> {
     await client.query("BEGIN");
@@ -152,8 +152,8 @@ export async function resetApplicationSchema(
         for (const object of objects.filter((entry) => entry.kind === "type")) {
             await client.query(dropObjectSql(object));
         }
+        options.onCommitStarting?.();
         await client.query("COMMIT");
-        options.onCommitted?.();
     } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw error;

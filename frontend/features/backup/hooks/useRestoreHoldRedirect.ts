@@ -10,10 +10,11 @@ const RESTORE_HOLD_QUERY_KEY = ["restore", "status", "hold"] as const;
 
 /**
  * While a restore runs or waits for its restart, the server answers sign-in
- * requests with 503. When `enabled` (a sign-in request failed), check the
- * restore status and send the visitor to the first-run screen, which shows
- * the restore's progress or its restart prompt. Returns true while that
- * redirect is in progress.
+ * requests with 503, and a restore that failed between states leaves a
+ * database nobody should sign in to. When `enabled` (a sign-in request
+ * failed), check the restore status and send the visitor to the first-run
+ * screen, which shows the restore's progress, its restart prompt, or its
+ * failure. Returns true while that redirect is in progress.
  */
 export function useRestoreHoldRedirect(enabled: boolean): boolean {
     const router = useRouter();

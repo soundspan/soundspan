@@ -75,17 +75,21 @@ const ERROR_MESSAGES: Record<string, string> = {
     RESTORE_MIGRATION_FAILED:
         "Upgrading the restored data to this version failed. Check the server logs for the database error.",
     RESTORE_STAGING_UNAVAILABLE:
-        "The server can't write the upload next to its caches. Check that the cache volume is writable.",
+        "The server can't write the upload where it stages restores (next to its transcode cache). Check that that location is writable and its free space can be read.",
     RESTORE_FAILED:
         "The restore failed. Check the server logs, then try again.",
     RESTORE_INTERRUPTED:
         "The restore stopped before it finished, for example because the server restarted. Reset the database, then restore again.",
+    RESTORE_FINISH_INCOMPLETE: `Your data was restored, but the last steps didn't finish. Restart ${BRAND_NAME}; startup applies any remaining database changes. Check stored service connections afterwards.`,
     RESTORE_CLEANUP_FAILED:
         "The restore failed, and the server couldn't return to a fresh install. Reset the database, then restore again.",
     RESTART_REQUIRED: `Restart ${BRAND_NAME} to finish the restore.`,
     [PROXY_BODY_TOO_LARGE]:
         "A reverse proxy in front of the server rejected the upload as too large. Let it accept request bodies of at least 6 MB.",
 };
+
+/** Failure code of a restore whose data is in place but whose last steps need a restart. */
+export const RESTORE_FINISH_INCOMPLETE = "RESTORE_FINISH_INCOMPLETE";
 
 /** Failure codes that leave the database in a state other than a fresh install. */
 const DIRTY_FAILURE_CODES: ReadonlySet<string> = new Set([

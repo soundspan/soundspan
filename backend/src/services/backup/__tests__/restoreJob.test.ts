@@ -95,6 +95,7 @@ jest.mock("../restartRequired", () => ({
 }));
 jest.mock("../restoreStatus", () => ({
     setRestoreStatus: mockSetStatus,
+    setTerminalRestoreStatus: mockSetStatus,
 }));
 
 import { startRestoreJob } from "../restoreJob";
@@ -135,6 +136,8 @@ async function waitForTerminalStatus(): Promise<void> {
 describe("restore job", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockClient.removeAllListeners();
+        mockFreshClient.removeAllListeners();
         mockClientQueue.splice(0, mockClientQueue.length);
         mockClientConnect.mockResolvedValue(undefined);
         mockClientEnd.mockResolvedValue(undefined);
@@ -144,7 +147,9 @@ describe("restore job", () => {
         mockClientQuery.mockImplementation(async (sql: string) =>
             sql.includes("pg_try_advisory_lock")
                 ? { rows: [{ acquired: true }] }
-                : { rows: [{ pg_advisory_unlock: true }] },
+                : sql.includes("SELECT EXISTS")
+                  ? { rows: [{ present: true }] }
+                  : { rows: [{ pg_advisory_unlock: true }] },
         );
         mockSetStatus.mockResolvedValue(undefined);
         mockValidate.mockResolvedValue(validation);
@@ -158,14 +163,26 @@ describe("restore job", () => {
         mockResetSchema.mockImplementation(
             async (
                 _client: unknown,
-                options?: { onCommitted?: () => void },
+                options?: { onCommitStarting?: () => void },
             ) => {
-                options?.onCommitted?.();
+                options?.onCommitStarting?.();
             },
         );
         mockReplayMigrations.mockResolvedValue(undefined);
         mockDeployMigrations.mockResolvedValue(undefined);
-        mockLoadData.mockResolvedValue(undefined);
+        mockLoadData.mockImplementation(
+            async (
+                client: typeof mockClient,
+                _file: unknown,
+                _header: unknown,
+                _progress: unknown,
+                beforeCommit?: (client: typeof mockClient) => Promise<void>,
+                onCommitStarting?: () => void,
+            ) => {
+                await beforeCommit?.(client);
+                onCommitStarting?.();
+            },
+        );
         mockReencrypt.mockResolvedValue({
             credentialsReencrypted: 1,
             credentialsUndecryptable: 0,
@@ -184,12 +201,25 @@ describe("restore job", () => {
             code: "RESTORE_IN_PROGRESS",
         });
         expect(Client).toHaveBeenCalledWith(
-            expect.objectContaining({ query_timeout: 2 * 60 * 60 * 1000 }),
+            expect.objectContaining({
+                keepAlive: true,
+                query_timeout: 2 * 60 * 60 * 1000,
+            }),
         );
         expect(mockSetStatus).not.toHaveBeenCalled();
         expect(mockResetSchema).not.toHaveBeenCalled();
         expect(mockClientEnd).toHaveBeenCalledTimes(1);
         expect(mockUnlink).toHaveBeenCalledWith("/tmp/restore.upload");
+    });
+
+    it("releases the upload before publishing validating status", async () => {
+        mockReleaseUpload.mockRejectedValueOnce(new Error("redis unavailable"));
+
+        await expect(startRestoreJob(jobOptions)).rejects.toThrow(
+            "redis unavailable",
+        );
+
+        expect(mockSetStatus).not.toHaveBeenCalled();
     });
 
     it("reports the original failure when fresh-install cleanup succeeds", async () => {
@@ -257,6 +287,34 @@ describe("restore job", () => {
         expect(mockSetStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({ state: "failed" }),
         );
+    });
+
+    it("does not run failure recovery when work resolves after the error race", async () => {
+        let finishStatus: (() => void) | undefined;
+        mockSetStatus.mockImplementation(async (status) => {
+            if (status.state === "complete") {
+                await new Promise<void>((resolve) => {
+                    finishStatus = resolve;
+                });
+            }
+        });
+        await startRestoreJob(jobOptions);
+        for (let attempt = 0; attempt < 20 && !finishStatus; attempt += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        mockClient.emit("error", new Error("late connection loss"));
+        finishStatus?.();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(
+            mockSetStatus.mock.calls.some(
+                ([status]) => status.state === "failed",
+            ),
+        ).toBe(false);
+        expect(mockResetSchema).toHaveBeenCalledTimes(1);
+        expect(Client).toHaveBeenCalledTimes(1);
     });
 
     it("cancels an in-flight migration and cleans up through a fresh client", async () => {
@@ -440,8 +498,8 @@ describe("restore job", () => {
             .mockImplementationOnce(
                 async (
                     _client: unknown,
-                    options?: { onCommitted?: () => void },
-                ) => options?.onCommitted?.(),
+                    options?: { onCommitStarting?: () => void },
+                ) => options?.onCommitStarting?.(),
             )
             .mockRejectedValueOnce(new Error("cleanup failed"));
         await startRestoreJob(jobOptions);
@@ -503,6 +561,10 @@ describe("restore job", () => {
         expect(loading).toHaveLength(3);
         expect(loading[0].progress.completedRows).toBe(0);
         expect(loading.at(-1).progress.completedRows).toBe(2);
+        const states = mockSetStatus.mock.calls.map(([status]) => status.state);
+        expect(states.lastIndexOf("loading")).toBeLessThan(
+            states.indexOf("reencrypting"),
+        );
     });
 
     it("does not await progress persistence inside the load transaction", async () => {
@@ -527,7 +589,38 @@ describe("restore job", () => {
         );
     });
 
-    it("does not clean up restored data when restart-marker publication fails", async () => {
+    it("does not delay the load commit on a stalled progress write", async () => {
+        let loadingWrites = 0;
+        let commitReached = false;
+        mockSetStatus.mockImplementation((status) => {
+            if (status.state !== "loading") return Promise.resolve();
+            loadingWrites += 1;
+            return loadingWrites === 1
+                ? Promise.resolve()
+                : new Promise<void>(() => undefined);
+        });
+        mockLoadData.mockImplementation(
+            async (_client, _path, _header, report, beforeCommit, onCommit) => {
+                report({
+                    completedTables: 1,
+                    totalTables: 1,
+                    completedRows: 2,
+                    totalRows: 2,
+                });
+                await beforeCommit(mockClient);
+                onCommit();
+                commitReached = true;
+            },
+        );
+
+        await startRestoreJob(jobOptions);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(commitReached).toBe(true);
+        expect(loadingWrites).toBe(2);
+    });
+
+    it("reports an incomplete finish without cleaning data when restart marking fails", async () => {
         mockMarkRestart.mockRejectedValue(new Error("redis unavailable"));
 
         await startRestoreJob(jobOptions);
@@ -535,10 +628,15 @@ describe("restore job", () => {
 
         expect(mockResetSchema).toHaveBeenCalledTimes(1);
         expect(mockSetStatus).toHaveBeenLastCalledWith(
-            expect.objectContaining({ state: "complete" }),
+            expect.objectContaining({
+                state: "failed",
+                error: expect.objectContaining({
+                    code: "RESTORE_FINISH_INCOMPLETE",
+                }),
+            }),
         );
         expect(mockLoggerError).toHaveBeenCalledWith(
-            "Restore completed but restart-marker publication failed; restart soundspan before serving application traffic",
+            "Restore post-commit finishing failed",
             expect.any(Error),
         );
     });

@@ -136,3 +136,31 @@ test("stops before the next chunk once cancelled", async () => {
     );
     assert.deepEqual(sent, [0]);
 });
+
+test("the built-in retry wait stops as soon as the upload is cancelled", async () => {
+    const abort = new AbortController();
+    let attempts = 0;
+    const started = Date.now();
+    const upload = uploadBackupFile({
+        file: new Blob(["abcd"]),
+        session: session(4, 1),
+        uploadChunk: async () => {
+            attempts += 1;
+            throw Object.assign(new Error("slow down"), {
+                status: 429,
+                data: {},
+                retryAfterMs: 30_000,
+            });
+        },
+        onProgress: () => undefined,
+        signal: abort.signal,
+    });
+    setTimeout(() => abort.abort(), 20);
+    await assert.rejects(
+        upload,
+        (error: unknown) =>
+            error instanceof DOMException && error.name === "AbortError",
+    );
+    assert.equal(attempts, 1);
+    assert.ok(Date.now() - started < 5_000);
+});

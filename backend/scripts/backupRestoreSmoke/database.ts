@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import { randomBytes } from "node:crypto";
 import { assertSmoke, runCommand } from "./support";
 
 export const SOURCE_DATABASE = "smoke_source";
@@ -84,6 +85,12 @@ export async function seedLibrary(sourceUrl: string): Promise<void> {
                 ('smoke-track', 'smoke-album', 'Smoke Track', 1, 180,
                  '/music/smoke.flac', now(), 1234, now())
         `);
+        const lyrics = randomBytes(5 * 1024 * 1024).toString("base64");
+        await client.query(
+            `INSERT INTO "TrackLyrics" (id, "trackId", "plainLyrics", source, "updatedAt")
+             VALUES ('smoke-lyrics', 'smoke-track', $1, 'embedded', now())`,
+            [lyrics],
+        );
         await seedEmbedding(client);
         process.stdout.write("Seeded one track embedding.\n");
     } finally {

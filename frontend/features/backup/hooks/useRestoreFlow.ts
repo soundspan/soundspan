@@ -15,6 +15,14 @@ export type { RestoreFlow } from "../restoreFlowModel";
 
 const logger = createFrontendLogger("Backup.useRestoreFlow");
 
+/** Status steps that show the start went through (or ended already). */
+const STARTED_KINDS: ReadonlySet<RestoreFlow["kind"]> = new Set([
+    "restoring",
+    "complete",
+    "restoredIncomplete",
+    "failed",
+]);
+
 const START_UNCLEAR =
     "Couldn't confirm that the restore started. The file is still uploaded; type the passphrase to try again.";
 
@@ -102,14 +110,14 @@ export function useRestoreFlow(): RestoreFlowControls {
             try {
                 await api.completeRestoreUpload(id, passphrase);
             } catch (error) {
-                run.startSent = false;
                 throw new StartRequestError(error);
             }
             run.uploadId = null;
+            if (!mounted.current || activeRun.current !== run) return;
             setFlow({ kind: "restoring", status: null });
             pollNow();
         },
-        [pollNow],
+        [mounted, pollNow],
     );
 
     // A start that failed without a clear answer may still have started the
@@ -117,14 +125,19 @@ export function useRestoreFlow(): RestoreFlowControls {
     // and ask for the passphrase again.
     const recheckAfterUnclearStart = useCallback(
         (run: RestoreRun) => {
-            const keepUpload = () =>
+            // The start request counts as sent until the re-check decides,
+            // so leaving the page meanwhile doesn't cancel an upload the
+            // server may be restoring.
+            const keepUpload = () => {
+                run.startSent = false;
                 setFlow({ kind: "passphrase", error: START_UNCLEAR });
+            };
             void api
                 .getRestoreStatus()
                 .then((status) => {
                     if (!mounted.current || activeRun.current !== run) return;
                     const next = flowFromStatus(status);
-                    if (next.kind !== "restoring" && next.kind !== "complete") {
+                    if (!STARTED_KINDS.has(next.kind)) {
                         keepUpload();
                         return;
                     }
@@ -142,7 +155,12 @@ export function useRestoreFlow(): RestoreFlowControls {
 
     const handleRunError = useCallback(
         (run: RestoreRun, error: unknown) => {
-            if (!mounted.current || activeRun.current !== run) return;
+            if (!mounted.current || activeRun.current !== run) {
+                // A cancelled or superseded attempt still releases the upload
+                // it may have opened after it was cancelled.
+                if (!run.startSent) discardRunUpload(run);
+                return;
+            }
             if (abortedByUser(error)) {
                 discardRunUpload(run);
                 setFlow({ kind: "form", error: null });
@@ -156,6 +174,7 @@ export function useRestoreFlow(): RestoreFlowControls {
                 recheckAfterUnclearStart(run);
                 return;
             }
+            run.startSent = false;
             if (outcome.kind === "form") discardRunUpload(run);
             setFlow(outcome);
         },
@@ -167,6 +186,12 @@ export function useRestoreFlow(): RestoreFlowControls {
             setFlow({ kind: "uploading", sentBytes: 0, totalBytes: file.size });
             const session = await api.startRestoreUpload(file.size);
             run.uploadId = session.uploadId;
+            if (run.abort.signal.aborted) {
+                throw new DOMException(
+                    "The upload was cancelled.",
+                    "AbortError",
+                );
+            }
             await uploadBackupFile({
                 file,
                 session,

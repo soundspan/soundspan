@@ -72,6 +72,19 @@ describe("backup archive reader", () => {
         });
     });
 
+    it("stops validation when its abort signal is already cancelled", async () => {
+        const filePath = await write(
+            "cancelled",
+            archive(encodeBackupRecord(header)),
+        );
+        const controller = new AbortController();
+        controller.abort(new Error("connection lost"));
+
+        await expect(
+            validateBackupArchive(filePath, macKey, controller.signal),
+        ).rejects.toThrow("connection lost");
+    });
+
     it("rejects a truncated gzip stream", async () => {
         const complete = gzipSync(encodeBackupRecord(header));
         const filePath = await write(

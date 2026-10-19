@@ -104,6 +104,43 @@ export async function downloadBackup(
     return sizeBytes;
 }
 
+async function readUploadChunk(
+    handle: Awaited<ReturnType<typeof fs.open>>,
+    index: number,
+    chunkSize: number,
+    sizeBytes: number,
+): Promise<Buffer> {
+    const offset = index * chunkSize;
+    const length = Math.min(chunkSize, sizeBytes - offset);
+    const bytes = Buffer.alloc(length);
+    const result = await handle.read(bytes, 0, length, offset);
+    assertSmoke(
+        result.bytesRead === length,
+        `Could not read upload chunk ${index}`,
+    );
+    return bytes;
+}
+
+async function sendUploadChunk(
+    baseUrl: string,
+    uploadId: string,
+    index: number,
+    bytes: Buffer,
+): Promise<void> {
+    const response = await fetchBounded(
+        `${baseUrl}/api/restore/uploads/${uploadId}/chunks/${index}`,
+        {
+            method: "PUT",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: bytes,
+        },
+    );
+    assertSmoke(
+        response.status === 204,
+        `Upload chunk ${index} returned ${response.status}`,
+    );
+}
+
 export async function uploadArchive(
     baseUrl: string,
     archivePath: string,
@@ -127,32 +164,25 @@ export async function uploadArchive(
     );
     assertSmoke(
         typeof created.totalChunks === "number" &&
+            created.totalChunks >= 2 &&
             created.totalChunks <= MAX_UPLOAD_CHUNKS,
         "Upload chunk count is invalid",
     );
     const handle = await fs.open(archivePath, "r");
+    let firstChunk: Buffer | null = null;
     try {
         for (let index = 0; index < created.totalChunks; index += 1) {
-            const offset = index * created.chunkSizeBytes;
-            const length = Math.min(created.chunkSizeBytes, sizeBytes - offset);
-            const bytes = Buffer.alloc(length);
-            const result = await handle.read(bytes, 0, length, offset);
-            assertSmoke(
-                result.bytesRead === length,
-                `Could not read upload chunk ${index}`,
+            const bytes = await readUploadChunk(
+                handle,
+                index,
+                created.chunkSizeBytes,
+                sizeBytes,
             );
-            const response = await fetchBounded(
-                `${baseUrl}/api/restore/uploads/${created.uploadId}/chunks/${index}`,
-                {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/octet-stream" },
-                    body: bytes,
-                },
-            );
-            assertSmoke(
-                response.status === 204,
-                `Upload chunk ${index} returned ${response.status}`,
-            );
+            await sendUploadChunk(baseUrl, created.uploadId, index, bytes);
+            if (index === 0) firstChunk = bytes;
+            if (index === 1 && firstChunk) {
+                await sendUploadChunk(baseUrl, created.uploadId, 0, firstChunk);
+            }
         }
     } finally {
         await handle.close();

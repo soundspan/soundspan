@@ -31,7 +31,19 @@ function startPrisma(
         shell: false,
         env: buildChildProcessEnvironment({ DATABASE_URL: databaseUrl }),
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
     });
+}
+
+function killPrismaGroup(
+    child: ChildProcessByStdio<null, Readable, Readable>,
+): void {
+    if (child.pid === undefined) return;
+    try {
+        process.kill(-child.pid, "SIGKILL");
+    } catch {
+        // The process may already have exited before cancellation reached it.
+    }
 }
 
 function migrationCloseError(
@@ -55,6 +67,14 @@ function migrationCloseError(
     );
 }
 
+function observePrismaOutput(
+    child: ChildProcessByStdio<null, Readable, Readable>,
+    observe: (chunk: Buffer) => void,
+): void {
+    child.stdout.on("data", observe);
+    child.stderr.on("data", observe);
+}
+
 async function runPrisma(
     configPath: string,
     databaseUrl: string,
@@ -67,15 +87,12 @@ async function runPrisma(
         let abortReason: unknown;
         let timedOut = false;
         let settled = false;
-        child.stdout.on("data", (chunk: Buffer) => {
-            tail = appendTail(tail, chunk);
-        });
-        child.stderr.on("data", (chunk: Buffer) => {
+        observePrismaOutput(child, (chunk) => {
             tail = appendTail(tail, chunk);
         });
         const timeout = setTimeout(() => {
             timedOut = true;
-            child.kill("SIGKILL");
+            killPrismaGroup(child);
         }, MIGRATION_TIMEOUT_MS);
         timeout.unref();
         const cleanup = (): void => {
@@ -91,7 +108,7 @@ async function runPrisma(
         const onAbort = (): void => {
             if (abortReason) return;
             abortReason = signal?.reason ?? new Error("Migration cancelled");
-            child.kill("SIGKILL");
+            killPrismaGroup(child);
         };
         signal?.addEventListener("abort", onAbort, { once: true });
         if (signal?.aborted) onAbort();

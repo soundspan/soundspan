@@ -119,4 +119,18 @@ describe("restore advisory lock probe", () => {
         await expect(isRestoreLockHeld(50_001)).resolves.toBe(false);
         expect(client.query).toHaveBeenCalledTimes(1);
     });
+
+    it("reports one held-to-released transition to marker readers", async () => {
+        client.query
+            .mockResolvedValueOnce({ rows: [{ held: true }] })
+            .mockResolvedValueOnce({ rows: [{ held: false }] });
+        const { consumeRestoreLockRelease, isRestoreLockHeld } =
+            await import("../restoreLock");
+
+        await expect(isRestoreLockHeld(70_000)).resolves.toBe(true);
+        await expect(isRestoreLockHeld(72_001)).resolves.toBe(false);
+
+        expect(consumeRestoreLockRelease()).toBe(true);
+        expect(consumeRestoreLockRelease()).toBe(false);
+    });
 });

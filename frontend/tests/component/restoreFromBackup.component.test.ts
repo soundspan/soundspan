@@ -363,3 +363,195 @@ test("leaving the page mid-upload cancels the upload on the server", async (t) =
     );
     releaseChunk();
 });
+
+test("an unclear start answer follows a restore that did start", async (t) => {
+    completeFailures = [
+        Object.assign(new Error("gateway timeout"), {
+            status: 504,
+            data: { code: "UPSTREAM_TIMEOUT" },
+        }),
+    ];
+    const loading: RestoreStatus = {
+        ...idle,
+        available: false,
+        state: "loading",
+        progress: null,
+    };
+    // Mount check, the re-check, then the polling that follows the restore.
+    statusQueue = [idle, loading, loading, loading];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    await chooseFile("abcdefghij");
+    await typePassphrase("correct horse battery");
+    await clickButton("Restore");
+
+    assert.match(harness.container.textContent ?? "", /Restoring your data/);
+    assert.equal(cancelRestoreUpload.mock.callCount(), 0);
+});
+
+test("an unclear start answer with no restore running keeps the upload", async (t) => {
+    completeFailures = [new TypeError("network down")];
+    statusQueue = [idle, { ...idle, state: "uploading" }];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    await chooseFile("abcdefghij");
+    await typePassphrase("correct horse battery");
+    await clickButton("Restore");
+
+    assert.match(
+        harness.container.textContent ?? "",
+        /Couldn't confirm that the restore started/,
+    );
+    assert.equal(cancelRestoreUpload.mock.callCount(), 0);
+    assert.equal(startRestoreUpload.mock.callCount(), 1);
+});
+
+test("leaving the page after the start request is sent keeps the upload", async (t) => {
+    let releaseStart: () => void = () => undefined;
+    completeRestoreUpload.mock.mockImplementation(
+        () =>
+            new Promise((resolve) => {
+                releaseStart = () =>
+                    resolve({
+                        restoreId: "r1",
+                        backupCreatedAt: "2026-10-01T10:00:00.000Z",
+                        backupAppVersion: "2.6.1",
+                        appVersion: "2.7.0",
+                    });
+            }),
+    );
+    t.after(() => completeRestoreUpload.mock.restore());
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    await chooseFile("abcdefghij");
+    await typePassphrase("correct horse battery");
+    await clickButton("Restore");
+    window.dispatchEvent(new Event("pagehide"));
+
+    assert.equal(cancelRestoreUploadOnExit.mock.callCount(), 0);
+    releaseStart();
+});
+
+test("cancelling while the upload is being opened releases it once it opens", async (t) => {
+    let openSession: () => void = () => undefined;
+    startRestoreUpload.mock.mockImplementation(
+        () =>
+            new Promise((resolve) => {
+                openSession = () => resolve(uploadSession);
+            }),
+    );
+    t.after(() => startRestoreUpload.mock.restore());
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    await chooseFile("abcdefghij");
+    await typePassphrase("correct horse battery");
+    await clickButton("Restore");
+    await clickButton("Cancel upload");
+    await React.act(async () => {
+        openSession();
+        await flush();
+    });
+
+    assert.deepEqual(
+        cancelRestoreUpload.mock.calls.map((call) => call.arguments),
+        [["upload-7"]],
+    );
+    assert.equal(uploadRestoreChunk.mock.callCount(), 0);
+    assert.ok(document.getElementById("restore-file"));
+});
+
+test("a server that can't take a restore is shown and followed", async (t) => {
+    statusQueue = [{ ...idle, available: false }];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    assert.match(
+        harness.container.textContent ?? "",
+        /can't take a restore right now/,
+    );
+    assert.equal(document.getElementById("restore-file"), null);
+});
+
+test("an interrupted restore on an available server offers restoring again", async (t) => {
+    statusQueue = [
+        {
+            ...idle,
+            state: "failed",
+            error: { code: "RESTORE_INTERRUPTED", message: "stopped" },
+        },
+    ];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    const text = harness.container.textContent ?? "";
+    assert.match(text, /stopped before it finished/);
+    assert.match(text, /Restoring again replaces it/);
+    await clickButton("Restore again");
+    assert.ok(document.getElementById("restore-file"));
+});
+
+test("an interrupted restore on a held server shows reset steps and no retry", async (t) => {
+    statusQueue = [
+        {
+            ...idle,
+            available: false,
+            state: "failed",
+            error: { code: "RESTORE_CLEANUP_FAILED", message: "cleanup" },
+        },
+    ];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    assert.match(harness.container.textContent ?? "", /Reset the database/);
+    const buttons = Array.from(document.querySelectorAll("button")).map(
+        (button) => button.textContent?.trim(),
+    );
+    assert.equal(buttons.includes("Try again"), false);
+    assert.equal(buttons.includes("Restore again"), false);
+});
+
+test("repeated failed status checks show a non-final reconnecting notice", async (t) => {
+    const unavailable = Object.assign(new Error("status down"), {
+        status: 503,
+        data: { code: "RESTORE_STATUS_UNAVAILABLE" },
+    });
+    getRestoreStatus.mock.mockImplementation(async () => {
+        throw unavailable;
+    });
+    t.after(() => getRestoreStatus.mock.restore());
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    await React.act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 4_500));
+        await flush();
+    });
+
+    assert.match(
+        harness.container.textContent ?? "",
+        /can't report the restore's progress right now/,
+    );
+    assert.ok(getRestoreStatus.mock.callCount() >= 3);
+});
+
+test("a restore whose last steps didn't finish asks for a restart", async (t) => {
+    statusQueue = [
+        {
+            ...idle,
+            available: false,
+            state: "failed",
+            error: { code: "RESTORE_FINISH_INCOMPLETE", message: "x" },
+        },
+    ];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    const text = harness.container.textContent ?? "";
+    assert.match(text, /Your data was restored/);
+    assert.match(text, /docker restart soundspan/);
+    assert.doesNotMatch(text, /Reset the database/);
+});

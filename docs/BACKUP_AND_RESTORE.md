@@ -125,7 +125,8 @@ account yet. It never overwrites a server that is in use.
   public address, update that address on your federation peers.
 - **Disk space for the upload:** the server stages the uploaded file next to
   its transcode cache, so that location must be writable and needs free space
-  of the file's size plus 10% or 1 GiB, whichever is larger. That location is
+  of the file's size plus a margin: 10% of the file's size, or 1 GiB when that
+  is more. That location is
   the backend cache volume on Docker Compose, the data volume on the
   all-in-one container and in the Helm chart's default all-in-one mode, and
   by default the music volume (`/music/.soundspan/`) in the Helm chart's
@@ -184,11 +185,15 @@ passphrase again.
 5. It applies the database changes from newer versions, then re-protects any
    stored credentials those changes added.
 
-If a step fails, the restore removes what it loaded and returns the server to
-a fresh install, so you can fix the problem and retry. Two failures can leave
-the database in between: the restore stopping part-way (for example because
-the server restarted), and the cleanup itself failing. The page says which
-one happened; reset the database as described below, then restore again.
+If a step fails before the data is loaded, the restore removes what it
+changed and returns the server to a fresh install, so you can fix the problem
+and retry. Once your data is loaded, the restore never removes it: if a later
+step fails, the page says that your data was restored and asks for a restart,
+which applies any remaining database changes. Two failures can leave the
+database in between: the restore stopping part-way (for example because the
+server itself restarted), and the cleanup failing. The page says which one
+happened; restore again when it offers to, or reset the database as described
+below first.
 
 ### Why the file holds data only
 
@@ -201,7 +206,9 @@ loaded as a value, never as code.
 ## Reset the database
 
 Resetting deletes everything in the database. Do it only on a server you are
-restoring into.
+restoring into. Afterwards the first-run screen may still show the earlier
+failure, because the restore's status lives in Redis; select **Restore
+again** there.
 
 - **All-in-one container:** `docker compose -f docker-compose.aio.yml down -v`,
   then `docker compose -f docker-compose.aio.yml up -d`. This deletes the
@@ -213,8 +220,9 @@ restoring into.
   mode that is the `<fullname>-data` claim, which also holds the caches; in
   individual mode it is `<fullname>-postgresql`. `<fullname>` is
   `<release>-soundspan`, or just the release name when it already contains
-  `soundspan`. With an external PostgreSQL server, drop and recreate the
-  database there instead.
+  `soundspan`, unless you set `fullnameOverride` or `nameOverride`; with
+  `existingClaim` set, it is that claim. `kubectl get pvc` lists them. With an
+  external PostgreSQL server, drop and recreate the database there instead.
 
 ## Troubleshooting
 
@@ -233,8 +241,9 @@ restoring into.
 | Another upload of a backup is in progress                              | Wait for it to finish. An upload whose page was closed expires after 15 minutes without activity. |
 | Part of the upload reached a different backend process                 | The backend restarted during the upload, or more than one backend replica runs. Run one replica, then restore again. |
 | The server doesn't have enough free disk space                         | Free space where the server stages uploads (see [Before you start](#before-you-start)), then restore again. |
-| The server can't write the upload next to its caches                   | Make the location in [Before you start](#before-you-start) writable, then restore again.       |
+| The server can't write the upload where it stages restores             | Make the location in [Before you start](#before-you-start) writable, then restore again.       |
 | A reverse proxy rejected the upload as too large                       | Let the proxy accept request bodies of at least 6 MB.                                          |
-| Can't reach the server right now                                       | The page keeps trying, and a running restore continues on the server. Check that the server is up. |
-| The restore stopped before it finished, or couldn't return to a fresh install | [Reset the database](#reset-the-database), then restore again.                                 |
+| Can't reach the server right now, or it can't report the restore's progress | The page keeps trying, and a running restore continues on the server. Check that the server and its Redis are up. |
+| The restore stopped before it finished, or couldn't return to a fresh install | Select **Restore again** when the page offers it; otherwise [reset the database](#reset-the-database) first. |
+| Your data was restored, but the last steps didn't finish               | Restart every soundspan container or pod; startup applies any remaining database changes. Then check the service connections on the Admin page. |
 | Restart soundspan to finish the restore                                | Restart every soundspan container or pod.                                                      |

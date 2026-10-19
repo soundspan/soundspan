@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { redisClient } from "../../utils/redis";
 import { logger as rootLogger } from "../../utils/logger";
 import { sendRouteError } from "../../utils/routeErrorResponse";
-import { isRestoreLockHeld } from "./restoreLock";
+import { consumeRestoreLockRelease, isRestoreLockHeld } from "./restoreLock";
 
 const logger = rootLogger.child("BackupRestore");
 const RESTART_KEY = "restore:restart-required";
@@ -13,7 +13,7 @@ const REDIS_WRITE_TIMEOUT_MS = 1_000;
 const REDIS_WRITE_ATTEMPTS = 5;
 const WARN_INTERVAL_MS = 60_000;
 let cachedAt = 0;
-let cachedValue = false;
+let cachedCompletedAt = 0;
 let markedByProcess = false;
 let lastWarningAt = 0;
 let activeRead: Promise<boolean> | null = null;
@@ -27,7 +27,7 @@ export async function markRestartRequired(
     completedAt = Date.now(),
 ): Promise<void> {
     markedByProcess = true;
-    cachedValue = true;
+    cachedCompletedAt = completedAt;
     cachedAt = completedAt;
     let lastError: unknown = new Error("Restart marker write failed");
     for (let attempt = 0; attempt < REDIS_WRITE_ATTEMPTS; attempt += 1) {
@@ -57,12 +57,21 @@ export async function markRestartRequired(
 /** Check whether another completed restore requires this process to restart. */
 export async function isRestartRequired(now = Date.now()): Promise<boolean> {
     if (markedByProcess) return true;
-    if (now - cachedAt < CACHE_MS) return cachedValue;
-    if (!redisClient.isReady) return false;
-    if (activeRead) return activeRead;
+    return (await readRestartMarker(false, now)) > PROCESS_STARTED_AT;
+}
+
+/** Read the last completed-restore marker, optionally bypassing its cache. */
+export async function readRestartMarker(
+    force = false,
+    now = Date.now(),
+): Promise<number> {
+    if (!force && now - cachedAt < CACHE_MS) return cachedCompletedAt;
+    if (!redisClient.isReady) return 0;
+    if (activeRead) return (await activeRead) ? cachedCompletedAt : 0;
     activeRead = readRestartRequired(now);
     try {
-        return await activeRead;
+        await activeRead;
+        return cachedCompletedAt;
     } finally {
         activeRead = null;
     }
@@ -87,12 +96,11 @@ async function readRestartRequired(now: number): Promise<boolean> {
             if (timeoutId) clearTimeout(timeoutId);
         });
         const completedAt = Number(value ?? 0);
-        cachedValue =
-            Number.isFinite(completedAt) && completedAt > PROCESS_STARTED_AT;
+        cachedCompletedAt = Number.isFinite(completedAt) ? completedAt : 0;
         cachedAt = now;
-        return cachedValue;
+        return cachedCompletedAt > PROCESS_STARTED_AT;
     } catch (error) {
-        cachedValue = false;
+        cachedCompletedAt = 0;
         cachedAt = now;
         if (now - lastWarningAt >= WARN_INTERVAL_MS) {
             lastWarningAt = now;
@@ -131,6 +139,15 @@ export async function getRestoreBarrier(): Promise<RestoreBarrier | null> {
         return {
             code: "RESTORE_IN_PROGRESS",
             message: "A restore is in progress.",
+        };
+    }
+    if (
+        consumeRestoreLockRelease() &&
+        (await readRestartMarker(true)) > PROCESS_STARTED_AT
+    ) {
+        return {
+            code: "RESTART_REQUIRED",
+            message: "Restart soundspan to finish the restore.",
         };
     }
     return null;

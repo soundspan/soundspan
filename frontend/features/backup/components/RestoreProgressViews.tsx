@@ -173,6 +173,48 @@ function RestoreSummaryList({ status }: { status: RestoreStatus }) {
     );
 }
 
+function RestartInstructions() {
+    return (
+        <div className="space-y-2">
+            <p className="text-sm text-white/70">
+                Restart every {BRAND_NAME} container or pod. For example:
+            </p>
+            <ul className="space-y-2">
+                {RESTART_COMMANDS.map(({ label, command }) => (
+                    <li key={label}>
+                        <p className="text-xs text-white/50">{label}</p>
+                        <code className="block text-xs text-white/90 bg-black/40 border border-white/10 rounded px-3 py-2 break-all">
+                            {command}
+                        </code>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+/** The data is restored, but the last steps need a restart to finish. */
+export function RestoreIncompleteView({ message }: { message: string }) {
+    return (
+        <div className="space-y-4">
+            <div
+                role="alert"
+                className="flex items-start gap-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4"
+            >
+                <AlertTriangle
+                    className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5"
+                    aria-hidden="true"
+                />
+                <p className="text-sm text-yellow-200">{message}</p>
+            </div>
+            <RestartInstructions />
+            <p className="text-sm text-white/70">
+                After the restart, sign in with an account from your backup.
+            </p>
+        </div>
+    );
+}
+
 /** Restore finished: explain the restart that completes it. */
 export function RestoreCompleteView({ status }: { status: RestoreStatus }) {
     return (
@@ -189,24 +231,7 @@ export function RestoreCompleteView({ status }: { status: RestoreStatus }) {
                 </h3>
             </div>
             <RestoreSummaryList status={status} />
-            {status.restartRequired && (
-                <div className="space-y-2">
-                    <p className="text-sm text-white/70">
-                        Restart every {BRAND_NAME} container or pod. For
-                        example:
-                    </p>
-                    <ul className="space-y-2">
-                        {RESTART_COMMANDS.map(({ label, command }) => (
-                            <li key={label}>
-                                <p className="text-xs text-white/50">{label}</p>
-                                <code className="block text-xs text-white/90 bg-black/40 border border-white/10 rounded px-3 py-2 break-all">
-                                    {command}
-                                </code>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
+            {status.restartRequired && <RestartInstructions />}
             <p className="text-sm text-white/70">
                 {status.restartRequired
                     ? "After the restart, sign in with an account from your backup."
@@ -220,10 +245,12 @@ export function RestoreCompleteView({ status }: { status: RestoreStatus }) {
 export function RestoreFailedView({
     message,
     freshInstallIntact,
+    canRestoreAgain,
     onRetry,
 }: {
     message: string;
     freshInstallIntact: boolean;
+    canRestoreAgain: boolean;
     onRetry: () => void;
 }) {
     return (
@@ -243,6 +270,11 @@ export function RestoreFailedView({
                             Nothing was restored. This server is still a fresh
                             install.
                         </p>
+                    ) : canRestoreAgain ? (
+                        <p className="text-red-300/80">
+                            The database may hold part of the backup. Restoring
+                            again replaces it.
+                        </p>
                     ) : (
                         <p className="text-red-300/80">
                             The database may hold part of the backup. Reset the
@@ -253,13 +285,13 @@ export function RestoreFailedView({
                     )}
                 </div>
             </div>
-            {freshInstallIntact && (
+            {canRestoreAgain && (
                 <button
                     type="button"
                     onClick={onRetry}
                     className="px-4 py-2 text-sm text-white border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
                 >
-                    Try again
+                    {freshInstallIntact ? "Try again" : "Restore again"}
                 </button>
             )}
         </div>
@@ -277,12 +309,17 @@ export function RestoreUnavailableView() {
 }
 
 /** Status checks keep failing; the page keeps retrying with backoff. */
-export function ReconnectingView() {
+export function ReconnectingView({
+    statusUnavailable,
+}: {
+    statusUnavailable: boolean;
+}) {
     return (
         <div className="flex items-center gap-3 text-white/70" role="status">
             <GradientSpinner size="sm" />
-            Can&apos;t reach the server right now. Still trying; a restore that
-            is running keeps going on the server.
+            {statusUnavailable
+                ? "The server can't report the restore's progress right now (its Redis may be down). Still trying; a restore that is running keeps going."
+                : "Can't reach the server right now. Still trying; a restore that is running keeps going on the server."}
         </div>
     );
 }

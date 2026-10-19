@@ -7,12 +7,16 @@ const mockRedis = {
     set: jest.fn(),
 };
 const mockRestoreLockHeld = jest.fn();
+const mockReadRestartMarker = jest.fn();
 const mockLoggerWarn = jest.fn();
 
 jest.mock("../../../utils/redis", () => ({
     redisClient: mockRedis,
 }));
 jest.mock("../restoreLock", () => ({ isRestoreLockHeld: mockRestoreLockHeld }));
+jest.mock("../restartRequired", () => ({
+    readRestartMarker: mockReadRestartMarker,
+}));
 jest.mock("../../../utils/logger", () => ({
     logger: { child: () => ({ warn: mockLoggerWarn }) },
 }));
@@ -22,6 +26,7 @@ describe("effective restore status", () => {
         jest.resetModules();
         jest.clearAllMocks();
         mockRedis.isReady = true;
+        mockReadRestartMarker.mockResolvedValue(0);
     });
 
     it("preserves a running status while the database lock is held", async () => {
@@ -74,6 +79,28 @@ describe("effective restore status", () => {
             },
             summary: null,
         });
+    });
+
+    it("maps a stale active status to complete when a newer restart marker exists", async () => {
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+                state: "migrating",
+                progress: null,
+                error: null,
+                summary: null,
+                writtenAt: 10_000,
+            }),
+        );
+        mockRestoreLockHeld.mockResolvedValue(false);
+        mockReadRestartMarker.mockResolvedValue(10_001);
+        const { getRestoreStatus } = await import("../restoreStatus");
+
+        await expect(getRestoreStatus()).resolves.toMatchObject({
+            state: "complete",
+            error: null,
+        });
+        expect(mockReadRestartMarker).toHaveBeenCalledWith(true);
     });
 
     it("does not probe the database for a terminal status", async () => {
@@ -156,6 +183,27 @@ describe("effective restore status", () => {
             "Could not persist restore status",
             expect.any(Error),
         );
+        jest.useRealTimers();
+    });
+
+    it("retries a terminal status write three times with bounded delay", async () => {
+        jest.useFakeTimers();
+        mockRedis.set
+            .mockRejectedValueOnce(new Error("redis down"))
+            .mockRejectedValueOnce(new Error("redis down"))
+            .mockResolvedValueOnce("OK");
+        const { setTerminalRestoreStatus } = await import("../restoreStatus");
+        const pending = setTerminalRestoreStatus({
+            state: "failed",
+            progress: null,
+            error: { code: "RESTORE_FAILED", message: "failed" },
+            summary: null,
+        });
+
+        await jest.advanceTimersByTimeAsync(1_000);
+
+        await expect(pending).resolves.toBeUndefined();
+        expect(mockRedis.set).toHaveBeenCalledTimes(3);
         jest.useRealTimers();
     });
 });

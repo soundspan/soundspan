@@ -165,6 +165,7 @@ test("flowFromStatus maps server states to page steps", () => {
         kind: "failed",
         message: "Tables differ.",
         freshInstallIntact: true,
+        canRestoreAgain: true,
     });
     const dirty = flowFromStatus(
         status({
@@ -259,8 +260,18 @@ test("classifyStartError: code-less 400 on the start keeps the upload; unclear f
     );
     assert.equal(
         classifyStartError(apiError(503, "RESTORE_IN_PROGRESS"), true).kind,
-        "form",
+        "recheck",
     );
+    assert.equal(
+        classifyStartError(apiError(504, "UPSTREAM_TIMEOUT"), true).kind,
+        "recheck",
+    );
+    assert.equal(
+        classifyStartError(apiError(503, "API_PROXY_UNAVAILABLE"), true).kind,
+        "recheck",
+    );
+    assert.equal(classifyStartError(apiError(408), true).kind, "recheck");
+    assert.equal(classifyStartError(apiError(429), true).kind, "passphrase");
 });
 
 test("idle status on a server that can't take a restore keeps waiting", () => {
@@ -332,4 +343,52 @@ test("status polling backs off while the server can't be reached, capped", () =>
     assert.equal(nextStatusCheckDelayMs(3), 4000);
     assert.equal(nextStatusCheckDelayMs(4), 8000);
     assert.equal(nextStatusCheckDelayMs(20), 30_000);
+});
+
+test("a dirty failure on an available server offers restoring again", () => {
+    const dirtyAvailable = flowFromStatus(
+        status({
+            state: "failed",
+            available: true,
+            error: { code: "RESTORE_INTERRUPTED", message: "x" },
+        }),
+    );
+    assert.equal(
+        dirtyAvailable.kind === "failed" && dirtyAvailable.canRestoreAgain,
+        true,
+    );
+    const dirtyHeld = flowFromStatus(
+        status({
+            state: "failed",
+            available: false,
+            error: { code: "RESTORE_CLEANUP_FAILED", message: "x" },
+        }),
+    );
+    assert.equal(
+        dirtyHeld.kind === "failed" && dirtyHeld.canRestoreAgain,
+        false,
+    );
+});
+
+test("a restore whose last steps didn't finish reads as restored, not failed", () => {
+    const flow = flowFromStatus(
+        status({
+            state: "failed",
+            error: { code: "RESTORE_FINISH_INCOMPLETE", message: "x" },
+        }),
+    );
+    assert.equal(flow.kind, "restoredIncomplete");
+    assert.match(
+        flow.kind === "restoredIncomplete" ? flow.message : "",
+        /Your data was restored/,
+    );
+    assert.equal(
+        restoreHoldsFirstRun(
+            status({
+                state: "failed",
+                error: { code: "RESTORE_FINISH_INCOMPLETE", message: "x" },
+            }),
+        ),
+        false,
+    );
 });

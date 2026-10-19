@@ -7,9 +7,13 @@ const mockRedis = {
     isReady: true,
 };
 const mockRestoreLockHeld = jest.fn();
+const mockConsumeLockRelease = jest.fn();
 
 jest.mock("../../../utils/redis", () => ({ redisClient: mockRedis }));
-jest.mock("../restoreLock", () => ({ isRestoreLockHeld: mockRestoreLockHeld }));
+jest.mock("../restoreLock", () => ({
+    consumeRestoreLockRelease: mockConsumeLockRelease,
+    isRestoreLockHeld: mockRestoreLockHeld,
+}));
 jest.mock("../../../utils/logger", () => ({
     logger: {
         child: jest.fn().mockReturnValue({
@@ -46,6 +50,8 @@ describe("restart-required middleware", () => {
         mockRedis.isReady = true;
         mockRestoreLockHeld.mockReset();
         mockRestoreLockHeld.mockResolvedValue(false);
+        mockConsumeLockRelease.mockReset();
+        mockConsumeLockRelease.mockReturnValue(false);
     });
 
     it.each(["/api/restore/status", "/health", "/api/health/ready"])(
@@ -171,6 +177,25 @@ describe("restart-required middleware", () => {
         await isRestartRequired(10_000);
         await isRestartRequired(10_001);
         expect(mockRedis.sendCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-reads the marker after observing the restore lock release", async () => {
+        mockRedis.sendCommand
+            .mockResolvedValueOnce("0")
+            .mockResolvedValueOnce(String(Number.MAX_SAFE_INTEGER));
+        mockRestoreLockHeld
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false);
+        mockConsumeLockRelease.mockReturnValueOnce(true);
+        const { getRestoreBarrier } = await import("../restartRequired");
+
+        await expect(getRestoreBarrier()).resolves.toMatchObject({
+            code: "RESTORE_IN_PROGRESS",
+        });
+        await expect(getRestoreBarrier()).resolves.toMatchObject({
+            code: "RESTART_REQUIRED",
+        });
+        expect(mockRedis.sendCommand).toHaveBeenCalledTimes(2);
     });
 
     it("fails open when Redis cannot be read", async () => {

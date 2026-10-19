@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { resolveAppVersion } from "../config/appVersion";
 import {
@@ -71,6 +71,107 @@ function downloadKey(downloadId: string): string {
     return `backup:download:${downloadId}`;
 }
 
+interface DownloadIdentity {
+    downloadId: string;
+    userId: string;
+}
+
+async function authenticateDownload(
+    req: Request,
+): Promise<DownloadIdentity | null> {
+    const token = readCookie(req, cookieName());
+    if (!token) return null;
+    let payload;
+    try {
+        payload = verifyAuthToken(token);
+    } catch {
+        return null;
+    }
+    if (
+        payload.purpose !== BACKUP_DOWNLOAD_TOKEN_PURPOSE ||
+        !payload.downloadId ||
+        payload.tokenVersion === undefined
+    ) {
+        return null;
+    }
+    const user = await prisma.user.findUnique({
+        where: { id: payload.userId },
+    });
+    if (
+        !user ||
+        user.role !== "admin" ||
+        user.tokenVersion !== payload.tokenVersion
+    ) {
+        return null;
+    }
+    return { downloadId: payload.downloadId, userId: user.id };
+}
+
+async function consumeDownloadSession(
+    identity: DownloadIdentity,
+): Promise<DownloadSession | null> {
+    const stored = downloadSessionSchema.safeParse(
+        await takeOnce(downloadKey(identity.downloadId)),
+    );
+    if (!stored.success || stored.data.userId !== identity.userId) return null;
+    return stored.data;
+}
+
+function setDownloadHeaders(res: Response): void {
+    const stamp = new Date()
+        .toISOString()
+        .replace(
+            /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/,
+            "$1$2$3-$4$5$6Z",
+        );
+    res.status(200);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${BRAND_SLUG}-backup-${stamp}.soundspan-backup"`,
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.flushHeaders();
+}
+
+async function downloadBackup(req: Request, res: Response): Promise<void> {
+    const identity = await authenticateDownload(req);
+    if (!identity) {
+        sendRouteError(res, 401, "Backup session is invalid");
+        return;
+    }
+    const stored = await consumeDownloadSession(identity);
+    res.clearCookie(cookieName(), cookieOptions());
+    if (!stored) {
+        sendRouteError(res, 401, "Backup session is invalid");
+        return;
+    }
+    let exporter;
+    try {
+        exporter = await openBackupExport({
+            wrappedKey: stored.wrapped,
+            macKey: Buffer.from(stored.macKey, "base64"),
+            appVersion: resolveAppVersion(),
+        });
+    } catch (error) {
+        if (error instanceof BackupBusyError) {
+            sendRouteError(res, 409, error.clientMessage, { code: error.code });
+            return;
+        }
+        throw error;
+    }
+    setDownloadHeaders(res);
+    try {
+        await exporter.streamTo(res);
+    } catch (error) {
+        logger.error("Backup streaming failed", error);
+        res.destroy();
+    } finally {
+        await exporter.close();
+    }
+}
+
 /**
  * @openapi
  * /api/backup/session:
@@ -140,82 +241,6 @@ router.post(
  *       401: { description: Invalid or used download session }
  *       409: { description: Backup already in progress }
  */
-router.get(
-    "/download",
-    backupLimiter,
-    asyncHandler(async (req, res) => {
-        const token = readCookie(req, cookieName());
-        if (!token)
-            return sendRouteError(res, 401, "Backup session is invalid");
-        let payload;
-        try {
-            payload = verifyAuthToken(token);
-        } catch {
-            return sendRouteError(res, 401, "Backup session is invalid");
-        }
-        if (
-            payload.purpose !== BACKUP_DOWNLOAD_TOKEN_PURPOSE ||
-            !payload.downloadId ||
-            payload.tokenVersion === undefined
-        ) {
-            return sendRouteError(res, 401, "Backup session is invalid");
-        }
-        const user = await prisma.user.findUnique({
-            where: { id: payload.userId },
-        });
-        if (
-            !user ||
-            user.role !== "admin" ||
-            user.tokenVersion !== payload.tokenVersion
-        ) {
-            return sendRouteError(res, 401, "Backup session is invalid");
-        }
-        const stored = downloadSessionSchema.safeParse(
-            await takeOnce(downloadKey(payload.downloadId)),
-        );
-        res.clearCookie(cookieName(), cookieOptions());
-        if (!stored.success || stored.data.userId !== user.id) {
-            return sendRouteError(res, 401, "Backup session is invalid");
-        }
-        let exporter;
-        try {
-            exporter = await openBackupExport({
-                wrappedKey: stored.data.wrapped,
-                macKey: Buffer.from(stored.data.macKey, "base64"),
-                appVersion: resolveAppVersion(),
-            });
-        } catch (error) {
-            if (error instanceof BackupBusyError) {
-                return sendRouteError(res, 409, error.clientMessage, {
-                    code: error.code,
-                });
-            }
-            throw error;
-        }
-        const stamp = new Date()
-            .toISOString()
-            .replace(
-                /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/,
-                "$1$2$3-$4$5$6Z",
-            );
-        res.status(200);
-        res.setHeader("Content-Type", "application/octet-stream");
-        res.setHeader(
-            "Content-Disposition",
-            `attachment; filename="${BRAND_SLUG}-backup-${stamp}.soundspan-backup"`,
-        );
-        res.setHeader("Cache-Control", "no-store");
-        res.setHeader("X-Content-Type-Options", "nosniff");
-        res.flushHeaders();
-        try {
-            await exporter.streamTo(res);
-        } catch (error) {
-            logger.error("Backup streaming failed", error);
-            res.destroy();
-        } finally {
-            await exporter.close();
-        }
-    }),
-);
+router.get("/download", backupLimiter, asyncHandler(downloadBackup));
 
 export default router;

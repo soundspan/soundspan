@@ -169,6 +169,30 @@ describe("restore data load", () => {
         });
     });
 
+    it("records the commit attempt immediately before sending COMMIT", async () => {
+        const { client, queries } = createClient("COMMIT");
+        const onCommitStarting = jest.fn(() => {
+            expect(queries.at(-1)?.sql).toBe("SELECT admin_check");
+        });
+
+        await expect(
+            loadBackupData(
+                client,
+                "/tmp/archive",
+                header,
+                jest.fn(),
+                async (transactionClient) => {
+                    await transactionClient.query("SELECT admin_check");
+                },
+                onCommitStarting,
+            ),
+        ).rejects.toThrow("COMMIT");
+
+        expect(onCommitStarting).toHaveBeenCalledTimes(1);
+        expect(queries.at(-2)?.sql).toBe("COMMIT");
+        expect(queries.at(-1)?.sql).toBe("ROLLBACK");
+    });
+
     it("rejects type drift before locking or loading tables", async () => {
         readApplicationTables.mockResolvedValue([
             {

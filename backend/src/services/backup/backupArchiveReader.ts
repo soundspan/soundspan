@@ -85,10 +85,13 @@ class BoundedLineSplitter extends Transform {
 export async function* readBackupRecords(
     filePath: string,
     maximumRecordBytes = MAX_BACKUP_RECORD_BYTES,
+    signal?: AbortSignal,
 ): AsyncGenerator<BackupRecord> {
+    signal?.throwIfAborted();
     for await (const item of readBackupRecordLines(
         filePath,
         maximumRecordBytes,
+        signal,
     )) {
         yield item.record;
     }
@@ -97,14 +100,17 @@ export async function* readBackupRecords(
 async function* readBackupRecordLines(
     filePath: string,
     maximumRecordBytes: number,
+    signal?: AbortSignal,
 ): AsyncGenerator<{ record: BackupRecord; bytes: Buffer }> {
+    signal?.throwIfAborted();
     const source = fs.createReadStream(filePath);
     const gunzip = createGunzip();
     const stream = new BoundedLineSplitter(maximumRecordBytes);
-    const completion = pipeline(source, gunzip, stream);
+    const completion = pipeline(source, gunzip, stream, { signal });
     let consumed = false;
     try {
         for await (const line of stream) {
+            signal?.throwIfAborted();
             const text = String(line);
             yield {
                 record: parseBackupRecord(text),
@@ -144,11 +150,36 @@ export interface ArchiveValidation {
     rows: number;
 }
 
+function verifyArchiveCounts(
+    header: BackupHeader,
+    counts: Map<string, number>,
+): number {
+    let totalRows = 0;
+    for (const table of header.tables) {
+        const actual = counts.get(table.name) ?? 0;
+        if (actual !== table.rowCount) {
+            throw new BackupFormatError(
+                `Backup row count mismatch for ${table.name}`,
+            );
+        }
+        totalRows += actual;
+        counts.delete(table.name);
+    }
+    if (counts.size !== 0) {
+        throw new BackupFormatError(
+            "Backup contains rows for an unknown table",
+        );
+    }
+    return totalRows;
+}
+
 /** Validate full framing and exact per-table row counts before destructive work. */
 export async function validateBackupArchive(
     filePath: string,
     macKey: Buffer,
+    signal?: AbortSignal,
 ): Promise<ArchiveValidation> {
+    signal?.throwIfAborted();
     let header: BackupHeader | null = null;
     let ended = false;
     const counts = new Map<string, number>();
@@ -156,6 +187,7 @@ export async function validateBackupArchive(
     for await (const item of readBackupRecordLines(
         filePath,
         MAX_BACKUP_RECORD_BYTES,
+        signal,
     )) {
         const { record } = item;
         if (ended) throw new BackupFormatError("Backup has trailing data");
@@ -186,23 +218,7 @@ export async function validateBackupArchive(
     }
     if (!header || !ended)
         throw new BackupFormatError("Backup end record is missing");
-    let totalRows = 0;
-    for (const table of header.tables) {
-        const actual = counts.get(table.name) ?? 0;
-        if (actual !== table.rowCount) {
-            throw new BackupFormatError(
-                `Backup row count mismatch for ${table.name}`,
-            );
-        }
-        totalRows += actual;
-        counts.delete(table.name);
-    }
-    if (counts.size !== 0) {
-        throw new BackupFormatError(
-            "Backup contains rows for an unknown table",
-        );
-    }
-    return { header, rows: totalRows };
+    return { header, rows: verifyArchiveCounts(header, counts) };
 }
 
 function verifyArchiveMac(actual: Buffer, encoded: string): void {

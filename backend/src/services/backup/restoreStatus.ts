@@ -4,11 +4,14 @@ import type { RestoreProgress } from "./restoreDataLoad";
 import { isRestoreLockHeld } from "./restoreLock";
 import { RestoreError } from "./backupErrors";
 import { logger as rootLogger } from "../../utils/logger";
+import { readRestartMarker } from "./restartRequired";
 
 const logger = rootLogger.child("BackupRestore");
 const STATUS_KEY = "restore:status";
 const STATUS_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STATUS_READ_TIMEOUT_MS = 250;
+const TERMINAL_WRITE_ATTEMPTS = 3;
+const TERMINAL_RETRY_DELAY_MS = 500;
 const progressSchema = z
     .object({
         completedTables: z.number().int().safe().nonnegative(),
@@ -62,6 +65,9 @@ const restoreStatusSchema = z
         summary: summarySchema.nullable(),
     })
     .strict();
+const storedRestoreStatusSchema = restoreStatusSchema.extend({
+    writtenAt: z.number().int().safe().nonnegative().optional(),
+});
 
 export type RestoreState =
     | "idle"
@@ -103,7 +109,7 @@ const idleStatus: RestoreStatus = {
     summary: null,
 };
 
-export async function setRestoreStatus(status: RestoreStatus): Promise<void> {
+async function persistRestoreStatus(status: RestoreStatus): Promise<void> {
     let timeoutId: NodeJS.Timeout | undefined;
     try {
         const timeout = new Promise<never>((_resolve, reject) => {
@@ -116,22 +122,52 @@ export async function setRestoreStatus(status: RestoreStatus): Promise<void> {
         await Promise.race([
             redisClient.set(
                 STATUS_KEY,
-                JSON.stringify(sanitizeStatus(status)),
+                JSON.stringify({
+                    ...sanitizeStatus(status),
+                    writtenAt: Date.now(),
+                }),
                 { EX: STATUS_TTL_SECONDS },
             ),
             timeout,
         ]);
-    } catch (error) {
-        logger.warn("Could not persist restore status", error);
     } finally {
         if (timeoutId) clearTimeout(timeoutId);
     }
 }
 
-export async function getRestoreStatus(
-    knownLockHeld?: boolean,
-): Promise<RestoreStatus> {
-    let value: string | null;
+export async function setRestoreStatus(status: RestoreStatus): Promise<void> {
+    await persistRestoreStatus(status).catch((error) => {
+        logger.warn("Could not persist restore status", error);
+    });
+}
+
+function waitForTerminalRetry(): Promise<void> {
+    return new Promise((resolve) => {
+        const timeout = setTimeout(resolve, TERMINAL_RETRY_DELAY_MS);
+        timeout.unref();
+    });
+}
+
+/** Persist a terminal state with bounded retries before giving up. */
+export async function setTerminalRestoreStatus(
+    status: RestoreStatus,
+): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < TERMINAL_WRITE_ATTEMPTS; attempt += 1) {
+        try {
+            await persistRestoreStatus(status);
+            return;
+        } catch (error) {
+            lastError = error;
+            if (attempt + 1 < TERMINAL_WRITE_ATTEMPTS) {
+                await waitForTerminalRetry();
+            }
+        }
+    }
+    logger.warn("Could not persist terminal restore status", lastError);
+}
+
+async function readStatusValue(): Promise<string | null> {
     try {
         if (!redisClient.isReady) throw new Error("Redis is not ready");
         let timeoutId: NodeJS.Timeout | undefined;
@@ -150,7 +186,7 @@ export async function getRestoreStatus(
         ]).finally(() => {
             if (timeoutId) clearTimeout(timeoutId);
         });
-        value = typeof result === "string" ? result : null;
+        return typeof result === "string" ? result : null;
     } catch (cause) {
         throw new RestoreError(
             "RESTORE_STATUS_UNAVAILABLE",
@@ -158,29 +194,52 @@ export async function getRestoreStatus(
             { cause },
         );
     }
+}
+
+function interruptedStatus(status: RestoreStatus): RestoreStatus {
+    return {
+        restoreId: status.restoreId,
+        state: "failed",
+        progress: null,
+        error: {
+            code: "RESTORE_INTERRUPTED",
+            message:
+                "The restore stopped before it finished. Check the server logs, then reset the database and restore again.",
+        },
+        summary: null,
+    };
+}
+
+async function effectiveStoredStatus(
+    stored: z.infer<typeof storedRestoreStatusSchema>,
+    knownLockHeld: boolean | undefined,
+): Promise<RestoreStatus> {
+    const { writtenAt, ...rawStatus } = stored;
+    const status = sanitizeStatus(rawStatus);
+    if (!isRestoreJobActive(status)) return status;
+    const lockHeld =
+        knownLockHeld === true ||
+        (knownLockHeld === undefined && (await isRestoreLockHeld()));
+    if (lockHeld) return status;
+    if (
+        writtenAt !== undefined &&
+        (await readRestartMarker(true)) > writtenAt
+    ) {
+        return { ...status, state: "complete", error: null };
+    }
+    return interruptedStatus(status);
+}
+
+export async function getRestoreStatus(
+    knownLockHeld?: boolean,
+): Promise<RestoreStatus> {
+    const value = await readStatusValue();
     try {
         if (!value) return idleStatus;
-        const status = sanitizeStatus(
-            restoreStatusSchema.parse(JSON.parse(value) as unknown),
+        const stored = storedRestoreStatusSchema.parse(
+            JSON.parse(value) as unknown,
         );
-        if (
-            !isRestoreJobActive(status) ||
-            knownLockHeld === true ||
-            (knownLockHeld === undefined && (await isRestoreLockHeld()))
-        ) {
-            return status;
-        }
-        return {
-            restoreId: status.restoreId,
-            state: "failed",
-            progress: null,
-            error: {
-                code: "RESTORE_INTERRUPTED",
-                message:
-                    "The restore stopped before it finished. Check the server logs, then reset the database and restore again.",
-            },
-            summary: null,
-        };
+        return await effectiveStoredStatus(stored, knownLockHeld);
     } catch (error) {
         if (error instanceof RestoreError) throw error;
         return idleStatus;

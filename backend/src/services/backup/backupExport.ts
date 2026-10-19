@@ -11,7 +11,6 @@ import {
     encodeBackupRecord,
     type BackupHeader,
     type BackupMigration,
-    type BackupRowsRecord,
     type WrappedEncryptionKey,
     MAX_BACKUP_RECORD_BYTES,
 } from "./backupFormat";
@@ -119,6 +118,81 @@ async function declareTableCursor(
     );
 }
 
+interface TableBatch {
+    rows: string[];
+    bytes: number;
+    count: number;
+}
+
+async function flushTableBatch(
+    gzip: Writable,
+    outputFinished: Promise<void>,
+    table: CatalogTable,
+    hmac: crypto.Hmac,
+    batch: TableBatch,
+): Promise<void> {
+    if (batch.rows.length === 0) return;
+    const encoded = encodeBackupRecord({
+        type: "rows",
+        table: table.name,
+        rowCount: batch.rows.length,
+        rows: `[${batch.rows.join(",")}]`,
+    });
+    hmac.update(encoded, "utf8");
+    await writeCompressed(gzip, outputFinished, encoded);
+    batch.rows = [];
+    batch.bytes = 2;
+    batch.count += 1;
+    if (batch.count > MAX_BATCHES_PER_TABLE) {
+        throw new Error("Table exceeds the supported backup batch limit");
+    }
+}
+
+async function appendCursorRow(
+    item: { row: string },
+    batch: TableBatch,
+    flush: () => Promise<void>,
+): Promise<void> {
+    const rowBytes = Buffer.byteLength(item.row, "utf8");
+    const separator = batch.rows.length === 0 ? 0 : 1;
+    if (
+        batch.rows.length >= QUERY_ROW_LIMIT ||
+        (batch.rows.length > 0 &&
+            batch.bytes + separator + rowBytes > QUERY_BYTE_TARGET)
+    ) {
+        await flush();
+    }
+    batch.rows.push(item.row);
+    batch.bytes += (batch.rows.length === 1 ? 0 : 1) + rowBytes;
+    if (batch.rows.length === 1 && batch.bytes > QUERY_BYTE_TARGET) {
+        await flush();
+    }
+}
+
+async function writeCursorRows(
+    client: Client,
+    batch: TableBatch,
+    flush: () => Promise<void>,
+): Promise<void> {
+    for (
+        let fetchCount = 0;
+        fetchCount < MAX_BATCHES_PER_TABLE;
+        fetchCount += 1
+    ) {
+        const result = await client.query<{ row: string }>(
+            "FETCH FORWARD 500 FROM backup_rows",
+        );
+        for (const item of result.rows) {
+            await appendCursorRow(item, batch, flush);
+        }
+        if (result.rows.length < 500) {
+            await flush();
+            return;
+        }
+    }
+    throw new Error("Table cursor exceeded the supported fetch limit");
+}
+
 async function writeTableRows(
     client: Client,
     gzip: Writable,
@@ -127,57 +201,11 @@ async function writeTableRows(
     hmac: crypto.Hmac,
 ): Promise<void> {
     await declareTableCursor(client, table);
-    let rows: string[] = [];
-    let bytes = 2;
-    let batchCount = 0;
-    const flush = async (): Promise<void> => {
-        if (rows.length === 0) return;
-        const record: BackupRowsRecord = {
-            type: "rows",
-            table: table.name,
-            rowCount: rows.length,
-            rows: `[${rows.join(",")}]`,
-        };
-        const encoded = encodeBackupRecord(record);
-        hmac.update(encoded, "utf8");
-        await writeCompressed(gzip, outputFinished, encoded);
-        rows = [];
-        bytes = 2;
-        batchCount += 1;
-        if (batchCount > MAX_BATCHES_PER_TABLE) {
-            throw new Error("Table exceeds the supported backup batch limit");
-        }
-    };
+    const batch: TableBatch = { rows: [], bytes: 2, count: 0 };
+    const flush = () =>
+        flushTableBatch(gzip, outputFinished, table, hmac, batch);
     try {
-        for (
-            let fetchCount = 0;
-            fetchCount < MAX_BATCHES_PER_TABLE;
-            fetchCount += 1
-        ) {
-            const result = await client.query<{ row: string }>(
-                "FETCH FORWARD 500 FROM backup_rows",
-            );
-            for (const item of result.rows) {
-                const rowBytes = Buffer.byteLength(item.row, "utf8");
-                const separator = rows.length === 0 ? 0 : 1;
-                if (
-                    rows.length >= QUERY_ROW_LIMIT ||
-                    (rows.length > 0 &&
-                        bytes + separator + rowBytes > QUERY_BYTE_TARGET)
-                ) {
-                    await flush();
-                }
-                rows.push(item.row);
-                bytes += (rows.length === 1 ? 0 : 1) + rowBytes;
-                if (rows.length === 1 && bytes > QUERY_BYTE_TARGET)
-                    await flush();
-            }
-            if (result.rows.length < 500) {
-                await flush();
-                return;
-            }
-        }
-        throw new Error("Table cursor exceeded the supported fetch limit");
+        await writeCursorRows(client, batch, flush);
     } finally {
         await client.query("CLOSE backup_rows").catch(() => undefined);
     }
@@ -250,10 +278,14 @@ async function streamSnapshot(
     }
 }
 
-/** Acquire the database-wide export lock before the HTTP response is committed. */
-export async function openBackupExport(
-    options: ExportOptions,
-): Promise<OpenBackupExport> {
+interface ExportConnection {
+    client: Client;
+    clientFailure: Promise<Error>;
+    setActiveOutput: (output: Writable | null) => void;
+    detach: () => void;
+}
+
+async function acquireExportConnection(): Promise<ExportConnection> {
     const client = new Client({
         connectionString: config.databaseUrl,
         connectionTimeoutMillis: 10_000,
@@ -281,10 +313,25 @@ export async function openBackupExport(
         client.off("error", onClientError);
         throw error;
     }
+    return {
+        client,
+        clientFailure,
+        setActiveOutput: (output) => {
+            activeOutput = output;
+        },
+        detach: () => client.off("error", onClientError),
+    };
+}
+
+function createExportHandle(
+    connection: ExportConnection,
+    options: ExportOptions,
+): OpenBackupExport {
+    const { client, clientFailure, setActiveOutput, detach } = connection;
     let closed = false;
     return {
         async streamTo(output) {
-            activeOutput = output;
+            setActiveOutput(output);
             const timeout = setTimeout(
                 () => client.end().catch(() => undefined),
                 EXPORT_TIMEOUT_MS,
@@ -304,7 +351,7 @@ export async function openBackupExport(
                     }),
                 ]);
             } finally {
-                activeOutput = null;
+                setActiveOutput(null);
                 clearTimeout(timeout);
                 output.off("close", abort);
             }
@@ -316,9 +363,16 @@ export async function openBackupExport(
                 .query("SELECT pg_advisory_unlock($1)", [BACKUP_ADVISORY_LOCK])
                 .catch(() => undefined);
             await client.end().catch(() => undefined);
-            client.off("error", onClientError);
+            detach();
         },
     };
+}
+
+/** Acquire the database-wide export lock before the HTTP response is committed. */
+export async function openBackupExport(
+    options: ExportOptions,
+): Promise<OpenBackupExport> {
+    return createExportHandle(await acquireExportConnection(), options);
 }
 
 /** Probe the export lock without retaining it. */
