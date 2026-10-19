@@ -89,6 +89,7 @@ spec:
             "SCAN_FILE_CONCURRENCY" true
             "CATALOG_PERSISTENCE" true
             "CATALOG_RETENTION_DAYS" true
+            "REQUESTS_PER_USER_PER_DAY" true
             "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
             "PROVIDER_TRACK_RETENTION_DAYS" true
             "FEDERATION_SYNC_INTERVAL_MINUTES" true
@@ -223,6 +224,13 @@ spec:
             {{- else if not (kindIs "invalid" .Values.config.catalogRetentionDays) }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ .Values.config.catalogRetentionDays | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "REQUESTS_PER_USER_PER_DAY" }}
+            - name: REQUESTS_PER_USER_PER_DAY
+              value: {{ index $aioEnv "REQUESTS_PER_USER_PER_DAY" | quote }}
+            {{- else if not (kindIs "invalid" .Values.config.requestsPerUserPerDay) }}
+            - name: REQUESTS_PER_USER_PER_DAY
+              value: {{ .Values.config.requestsPerUserPerDay | quote }}
             {{- end }}
             {{- if hasKey $aioEnv "FEDERATION_TOMBSTONE_RETENTION_DAYS" }}
             - name: FEDERATION_TOMBSTONE_RETENTION_DAYS
