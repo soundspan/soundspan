@@ -228,6 +228,7 @@ test("resolveProxyTimeoutMs gives restore chunk uploads at least 120s", () => {
         }),
         300_000,
     );
+    assert.equal(resolveProxyTimeoutMs("/api/restore/uploads", {}), 120_000);
     assert.equal(resolveProxyTimeoutMs("/api/restore/status", {}), 20_000);
     assert.equal(resolveProxyTimeoutMs("/api/restore/uploadsx", {}), 20_000);
 });

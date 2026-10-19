@@ -1,6 +1,7 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcessByStdio } from "child_process";
 import fs from "fs/promises";
 import path from "path";
+import type { Readable } from "stream";
 import type { BackupMigration } from "./backupFormat";
 import { RestoreMigrationError } from "./backupErrors";
 import { buildChildProcessEnvironment } from "../../config";
@@ -21,52 +22,97 @@ function appendTail(
     return combined.subarray(Math.max(0, combined.length - OUTPUT_TAIL_BYTES));
 }
 
+function startPrisma(
+    configPath: string,
+    databaseUrl: string,
+): ChildProcessByStdio<null, Readable, Readable> {
+    return spawn(PRISMA_BIN, ["migrate", "deploy", "--config", configPath], {
+        cwd: BACKEND_ROOT,
+        shell: false,
+        env: buildChildProcessEnvironment({ DATABASE_URL: databaseUrl }),
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+}
+
+function migrationCloseError(
+    code: number | null,
+    abortReason: unknown,
+    timedOut: boolean,
+    tail: Buffer<ArrayBufferLike>,
+    databaseUrl: string,
+): Error | null {
+    if (abortReason) {
+        return abortReason instanceof Error
+            ? abortReason
+            : new Error("Migration cancelled");
+    }
+    if (timedOut) {
+        return new RestoreMigrationError("Migration process timed out");
+    }
+    if (code === 0) return null;
+    return new RestoreMigrationError(
+        tail.toString("utf8").replaceAll(databaseUrl, "[REDACTED]"),
+    );
+}
+
 async function runPrisma(
     configPath: string,
     databaseUrl: string,
+    signal?: AbortSignal,
 ): Promise<void> {
+    signal?.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
-        const child = spawn(
-            PRISMA_BIN,
-            ["migrate", "deploy", "--config", configPath],
-            {
-                cwd: BACKEND_ROOT,
-                shell: false,
-                env: buildChildProcessEnvironment({
-                    DATABASE_URL: databaseUrl,
-                }),
-                stdio: ["ignore", "pipe", "pipe"],
-            },
-        );
+        const child = startPrisma(configPath, databaseUrl);
         let tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+        let abortReason: unknown;
+        let timedOut = false;
+        let settled = false;
         child.stdout.on("data", (chunk: Buffer) => {
             tail = appendTail(tail, chunk);
         });
         child.stderr.on("data", (chunk: Buffer) => {
             tail = appendTail(tail, chunk);
         });
-        const timeout = setTimeout(
-            () => child.kill("SIGKILL"),
-            MIGRATION_TIMEOUT_MS,
-        );
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            child.kill("SIGKILL");
+        }, MIGRATION_TIMEOUT_MS);
         timeout.unref();
-        child.once("error", (cause) => {
+        const cleanup = (): void => {
             clearTimeout(timeout);
-            reject(
+            signal?.removeEventListener("abort", onAbort);
+        };
+        const rejectOnce = (error: unknown): void => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(error);
+        };
+        const onAbort = (): void => {
+            if (abortReason) return;
+            abortReason = signal?.reason ?? new Error("Migration cancelled");
+            child.kill("SIGKILL");
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+        child.once("error", (cause) => {
+            rejectOnce(
                 new RestoreMigrationError("Process could not start", { cause }),
             );
         });
         child.once("close", (code) => {
-            clearTimeout(timeout);
-            if (code === 0) {
-                resolve();
-                return;
-            }
-            reject(
-                new RestoreMigrationError(
-                    tail.toString("utf8").replaceAll(databaseUrl, "[REDACTED]"),
-                ),
+            if (settled) return;
+            settled = true;
+            cleanup();
+            const error = migrationCloseError(
+                code,
+                abortReason,
+                timedOut,
+                tail,
+                databaseUrl,
             );
+            if (error) reject(error);
+            else resolve();
         });
     });
 }
@@ -92,6 +138,7 @@ export async function replayBackupMigrations(
     stagingDir: string,
     migrations: BackupMigration[],
     databaseUrl: string,
+    signal?: AbortSignal,
 ): Promise<string> {
     const replayDir = path.join(stagingDir, "migration-replay");
     const migrationDir = path.join(replayDir, "migrations");
@@ -112,13 +159,14 @@ export async function replayBackupMigrations(
     await fs.writeFile(configPath, generatedConfig(migrationDir), {
         mode: 0o600,
     });
-    await runPrisma(configPath, databaseUrl);
+    await runPrisma(configPath, databaseUrl, signal);
     return replayDir;
 }
 
 /** Deploy the image's complete migration history. */
 export async function deployCurrentMigrations(
     databaseUrl: string,
+    signal?: AbortSignal,
 ): Promise<void> {
-    await runPrisma(REAL_CONFIG, databaseUrl);
+    await runPrisma(REAL_CONFIG, databaseUrl, signal);
 }

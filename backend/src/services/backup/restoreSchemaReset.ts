@@ -103,7 +103,10 @@ function dropRoutineSql(routine: OwnedRoutine): string {
 /** Drop only application-owned public objects while preserving extensions. */
 export async function resetApplicationSchema(
     client: Client,
-    options: { allowExistingUsers?: boolean } = {},
+    options: {
+        allowExistingUsers?: boolean;
+        onCommitted?: () => void;
+    } = {},
 ): Promise<void> {
     await client.query("BEGIN");
     try {
@@ -150,6 +153,7 @@ export async function resetApplicationSchema(
             await client.query(dropObjectSql(object));
         }
         await client.query("COMMIT");
+        options.onCommitted?.();
     } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw error;

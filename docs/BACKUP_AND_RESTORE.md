@@ -25,13 +25,13 @@ Two things stay your own job:
 | System settings and service connections (Lidarr, Audiobookshelf, TIDAL, YouTube Music, scrobbling, and the rest of the Admin page) | Yes           | Stored passwords and tokens work: the restore re-protects them with the new server's key.                 |
 | Links between accounts and single sign-on identities                     | Yes           | They work when the new server uses the same single sign-on provider address. See below.                   |
 | Playlists, likes, play history, listening state, podcast and audiobook progress | Yes           | Back as they were.                                                                                        |
-| Share links and invite codes                                             | Yes           | They keep working.                                                                                        |
+| Share links and invite codes                                             | Yes           | They keep working at the same address. Links you sent out point at the old server's address.             |
 | Library metadata: artists, albums, tracks, enrichment, lyrics            | Yes           | Back as they were. Tracks match your files by their path inside the music folder.                        |
 | Audio analysis and vibe embeddings                                       | Yes           | Back as they were. Nothing is analyzed again.                                                             |
 | Federation peers                                                         | Yes           | Outgoing connections work. Peers that connect to you may need new credentials; see below.                 |
 | API keys and linked devices                                              | Yes           | They may need issuing again; see below.                                                                   |
 | Music files                                                              | **No**        | Mount the same music folder. Its location on the host can change; its layout inside must not.            |
-| Caches: covers, transcodes, podcast downloads, browse images             | **No**        | Rebuilt as needed. A missing album cover downloads again from your cover sources, or is read again from the album's embedded art, when it's shown. |
+| Caches: covers, transcodes, podcast downloads, browse images             | **No**        | Rebuilt as needed. A missing album cover downloads again from your cover sources when it's shown; when they have none, it is read from the album's embedded art. |
 | Redis (job queues and short-lived state)                                 | **No**        | Rebuilt at startup. See [Why Redis is not backed up](#why-redis-is-not-backed-up).                        |
 | Deployment config (`.env`, compose files, Helm values)                   | **No**        | Use any config you like for the new deployment.                                                           |
 
@@ -65,7 +65,8 @@ A new deployment usually has a new `SETTINGS_ENCRYPTION_KEY`, a new
 the encryption key for you. Three things depend on the others:
 
 - **Sign-in sessions.** Everyone signs in again after a restore, because the
-  new server signs sessions with its own secret.
+  new server signs sessions with its own `JWT_SECRET` (or `SESSION_SECRET`
+  when `JWT_SECRET` is not set).
 - **API keys, linked devices, and incoming federation peers.** These are
   stored as one-way hashes keyed by the API-key pepper, and a one-way hash
   can't be moved to a new key. The pepper is the first of `API_KEY_PEPPER`,
@@ -123,14 +124,17 @@ account yet. It never overwrites a server that is in use.
   backup share one federation identity. If the new server has a different
   public address, update that address on your federation peers.
 - **Disk space for the upload:** the server stages the uploaded file next to
-  its transcode cache, so that location needs free space of at least the
-  file's size plus 10%, and it must be writable. That is the backend cache
-  volume on Docker Compose, the data volume on the all-in-one container, and
-  by default the music volume (`/music/.soundspan/`) on Helm. A backup can be
-  up to 256 GiB.
+  its transcode cache, so that location must be writable and needs free space
+  of the file's size plus 10% or 1 GiB, whichever is larger. That location is
+  the backend cache volume on Docker Compose, the data volume on the
+  all-in-one container and in the Helm chart's default all-in-one mode, and
+  by default the music volume (`/music/.soundspan/`) in the Helm chart's
+  individual mode. A backup can be up to 256 GiB.
 - **Disk space for the database:** the restore loads everything in one
   transaction, so give the database volume at least as much free space as the
-  old server's database used, with room to spare.
+  old server's database used, with room to spare. On the all-in-one container
+  the database and the staged upload share the data volume, and the upload
+  stays until the restore ends, so that volume needs room for both.
 - **One backend replica:** the upload goes to one backend process. If you run
   more than one backend replica (Kubernetes HA, scaled Compose), scale the
   backend to one replica for the restore.
@@ -167,17 +171,18 @@ passphrase again.
 
 1. It checks the whole file before it changes anything: the format, the
    passphrase and integrity check, that every row the backup lists is present,
-   that the backup has an admin account, and the version.
+   and the version.
 2. It removes the fresh install's application tables, types, and functions.
    Database extensions stay.
 3. It rebuilds the database structure of the backup's version from this
    version's own migration files.
 4. It loads your data with triggers and links between tables switched off,
-   switches them back on, rebuilds the vector indexes, and checks every
-   table's row count.
-5. It applies the database changes from newer versions.
-6. It re-protects stored passwords and service connections with this
-   server's encryption key.
+   switches them back on, rebuilds the vector indexes, checks every table's
+   row count, checks that the backup has an admin account, and re-protects
+   stored passwords and service connections with this server's encryption
+   key. If any of these checks fails, nothing from the load is kept.
+5. It applies the database changes from newer versions, then re-protects any
+   stored credentials those changes added.
 
 If a step fails, the restore removes what it loaded and returns the server to
 a fresh install, so you can fix the problem and retry. Two failures can leave
@@ -203,22 +208,33 @@ restoring into.
   whole data volume, including the caches and generated secrets.
 - **Docker Compose:** `docker compose down -v`, then `docker compose up -d`.
   This deletes every named volume of the stack.
-- **Kubernetes:** delete and recreate the database: the chart's
-  `<release>-postgresql` volume claim, or the database on your external
-  PostgreSQL server. Then restart soundspan.
+- **Kubernetes:** stop the pods that use the database, delete the database's
+  volume claim, then start soundspan again. In the chart's default all-in-one
+  mode that is the `<fullname>-data` claim, which also holds the caches; in
+  individual mode it is `<fullname>-postgresql`. `<fullname>` is
+  `<release>-soundspan`, or just the release name when it already contains
+  `soundspan`. With an external PostgreSQL server, drop and recreate the
+  database there instead.
 
 ## Troubleshooting
 
 | Message                                                                | What to do                                                                                     |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | This server already has an account                                     | Restore into a fresh install, or [reset the database](#reset-the-database) first.              |
+| Another restore is already running on this server                      | Wait for it to finish, then reload the page.                                                   |
 | This backup comes from a newer version                                 | Update this server to the backup's version or later, then restore.                             |
 | That passphrase doesn't match this backup                              | Type the passphrase you chose when you downloaded the backup.                                  |
 | This file isn't a complete backup, or the backup file is damaged       | The download was cut short or the file is damaged. Use another backup.                         |
+| This backup has no admin account                                       | Use a backup from a server that has an admin account.                                          |
+| The backup's tables don't match what this version expects              | The old server's database was changed outside soundspan. Use a backup from an unmodified server. |
+| The database holds objects owned by another database user              | [Reset the database](#reset-the-database) so that soundspan's database user owns everything.   |
+| Upgrading the restored data to this version failed                     | Check the server logs for the database error, then restore into the backup's own version.      |
 | The upload expired or was cancelled                                    | Start the restore again and keep the page open until the upload finishes.                      |
 | Another upload of a backup is in progress                              | Wait for it to finish. An upload whose page was closed expires after 15 minutes without activity. |
-| Part of the upload reached a different backend replica                 | Scale the backend to one replica, then restore again.                                          |
+| Part of the upload reached a different backend process                 | The backend restarted during the upload, or more than one backend replica runs. Run one replica, then restore again. |
 | The server doesn't have enough free disk space                         | Free space where the server stages uploads (see [Before you start](#before-you-start)), then restore again. |
+| The server can't write the upload next to its caches                   | Make the location in [Before you start](#before-you-start) writable, then restore again.       |
 | A reverse proxy rejected the upload as too large                       | Let the proxy accept request bodies of at least 6 MB.                                          |
+| Can't reach the server right now                                       | The page keeps trying, and a running restore continues on the server. Check that the server is up. |
 | The restore stopped before it finished, or couldn't return to a fresh install | [Reset the database](#reset-the-database), then restore again.                                 |
 | Restart soundspan to finish the restore                                | Restart every soundspan container or pod.                                                      |

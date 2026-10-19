@@ -50,7 +50,23 @@ const passphraseSchema = z.object({
 });
 
 async function usersExist(): Promise<boolean> {
-    return (await prisma.user.count()) !== 0;
+    try {
+        return (await prisma.user.count()) !== 0;
+    } catch (error) {
+        if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "P2021"
+        ) {
+            return false;
+        }
+        throw error;
+    }
+}
+
+function isDirtyRestoreFailure(code: string | undefined): boolean {
+    return code === "RESTORE_INTERRUPTED" || code === "RESTORE_CLEANUP_FAILED";
 }
 
 function statusForError(error: BackupError): number {
@@ -106,12 +122,13 @@ router.get(
         const state =
             status.state === "uploading" && !upload ? "idle" : status.state;
         if (userExists && !restartRequired) {
+            const dirtyFailure = isDirtyRestoreFailure(jobFailure?.code);
             return res.json({
                 available: false,
-                state,
+                state: dirtyFailure ? "failed" : state,
                 restartRequired: false,
                 progress: null,
-                error: null,
+                error: dirtyFailure ? jobFailure : null,
                 summary: null,
                 upload: null,
             });

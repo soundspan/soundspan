@@ -16,9 +16,11 @@ import {
     validateBackupPassphrase,
 } from "../../features/backup/backupRestoreModel";
 import {
-    flowFromStartError,
+    classifyStartError,
     flowFromStatus,
 } from "../../features/backup/restoreFlowModel";
+import { nextStatusCheckDelayMs } from "../../features/backup/hooks/useRestoreStatusPolling";
+import { parseRetryAfterMs } from "../../lib/api/backup";
 import type { RestoreStatus } from "../../lib/api/backup";
 
 function apiError(status: number, code?: string, message = "failed"): Error {
@@ -138,7 +140,10 @@ test("isRetryableChunkError retries only transient failures", () => {
 });
 
 test("flowFromStatus maps server states to page steps", () => {
-    assert.equal(flowFromStatus(status({ state: "idle" })).kind, "form");
+    assert.equal(
+        flowFromStatus(status({ state: "idle", available: true })).kind,
+        "form",
+    );
     assert.equal(
         flowFromStatus(status({ state: "loading" })).kind,
         "restoring",
@@ -173,19 +178,16 @@ test("flowFromStatus maps server states to page steps", () => {
     assert.equal(dirty.kind === "failed" && dirty.freshInstallIntact, false);
 });
 
-test("flowFromStartError keeps the upload only for a wrong passphrase", () => {
+test("classifyStartError keeps the upload only for a rejected start", () => {
     const wrong = apiError(400, "BACKUP_PASSPHRASE_INVALID");
-    assert.equal(flowFromStartError(wrong, true).kind, "passphrase");
-    assert.equal(flowFromStartError(wrong, false).kind, "form");
-    const newer = flowFromStartError(
+    assert.equal(classifyStartError(wrong, true).kind, "passphrase");
+    assert.equal(classifyStartError(wrong, false).kind, "form");
+    const newer = classifyStartError(
         apiError(409, "BACKUP_NEWER_THAN_APP"),
         true,
     );
     assert.equal(newer.kind, "form");
-    assert.match(
-        newer.kind === "form" ? (newer.error ?? "") : "",
-        /newer version/,
-    );
+    assert.match(newer.kind === "form" ? newer.error : "", /newer version/);
 });
 
 test("coded 503 barriers are not retried, proxy 413s get their own code", () => {
@@ -247,7 +249,87 @@ test("flowFromStatus: wiped server shows the form; foreign upload its expiry", (
     );
 });
 
-test("flowFromStartError keeps the upload for a code-less 400", () => {
-    assert.equal(flowFromStartError(apiError(400), true).kind, "passphrase");
-    assert.equal(flowFromStartError(apiError(500), true).kind, "form");
+test("classifyStartError: code-less 400 on the start keeps the upload; unclear failures recheck", () => {
+    assert.equal(classifyStartError(apiError(400), true).kind, "passphrase");
+    assert.equal(classifyStartError(apiError(400), false).kind, "form");
+    assert.equal(classifyStartError(apiError(502), true).kind, "recheck");
+    assert.equal(
+        classifyStartError(new TypeError("network"), true).kind,
+        "recheck",
+    );
+    assert.equal(
+        classifyStartError(apiError(503, "RESTORE_IN_PROGRESS"), true).kind,
+        "form",
+    );
+});
+
+test("idle status on a server that can't take a restore keeps waiting", () => {
+    assert.equal(
+        flowFromStatus(status({ state: "idle", available: false })).kind,
+        "unavailable",
+    );
+    assert.equal(
+        flowFromStatus(status({ state: "idle", available: true })).kind,
+        "form",
+    );
+});
+
+test("a dirty failure holds the first-run screen; a clean one doesn't", () => {
+    assert.equal(
+        restoreHoldsFirstRun(
+            status({
+                state: "failed",
+                error: { code: "RESTORE_INTERRUPTED", message: "x" },
+            }),
+        ),
+        true,
+    );
+    assert.equal(
+        restoreHoldsFirstRun(
+            status({
+                state: "failed",
+                error: { code: "BACKUP_FORMAT_INVALID", message: "x" },
+            }),
+        ),
+        false,
+    );
+});
+
+test("proxy 503s are retried; restore barriers are not", () => {
+    assert.equal(
+        isRetryableChunkError(apiError(503, "API_PROXY_UNAVAILABLE")),
+        true,
+    );
+    assert.equal(
+        isRetryableChunkError(apiError(503, "UPSTREAM_UNAVAILABLE")),
+        true,
+    );
+    assert.equal(
+        isRetryableChunkError(apiError(503, "RESTORE_IN_PROGRESS")),
+        false,
+    );
+});
+
+test("parseRetryAfterMs handles missing, blank, seconds, and dates", () => {
+    assert.equal(parseRetryAfterMs(null), null);
+    assert.equal(parseRetryAfterMs("  "), null);
+    assert.equal(parseRetryAfterMs("abc"), null);
+    assert.equal(parseRetryAfterMs("7"), 7000);
+    const now = Date.parse("2030-01-01T00:00:00Z");
+    assert.equal(
+        parseRetryAfterMs("Tue, 01 Jan 2030 00:00:30 GMT", now),
+        30_000,
+    );
+    assert.equal(
+        parseRetryAfterMs("Tue, 01 Jan 2030 00:00:00 GMT", now + 5000),
+        0,
+    );
+});
+
+test("status polling backs off while the server can't be reached, capped", () => {
+    assert.equal(nextStatusCheckDelayMs(0), 2000);
+    assert.equal(nextStatusCheckDelayMs(2), 2000);
+    assert.equal(nextStatusCheckDelayMs(3), 4000);
+    assert.equal(nextStatusCheckDelayMs(4), 8000);
+    assert.equal(nextStatusCheckDelayMs(20), 30_000);
 });

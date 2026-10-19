@@ -43,8 +43,12 @@ export const resolveProxyTimeoutMs = (
         DEFAULT_PROXY_TIMEOUT_MS;
 
     const normalizedPath = normalizeTargetPath(targetPath);
-    if (normalizedPath.startsWith(`${RESTORE_UPLOAD_PROXY_PATH}/`)) {
-        // Restore chunk uploads spend part of the budget sending the body.
+    if (
+        normalizedPath === RESTORE_UPLOAD_PROXY_PATH ||
+        normalizedPath.startsWith(`${RESTORE_UPLOAD_PROXY_PATH}/`)
+    ) {
+        // Restore uploads (creating one, its chunks, starting the restore)
+        // spend part of the budget sending a body or checking the file.
         return Math.max(globalTimeout, DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS);
     }
 

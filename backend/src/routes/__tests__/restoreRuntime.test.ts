@@ -11,6 +11,14 @@ const mockParseRestoreChunk = jest.fn(
 const mockBeginRestoreCompletion = jest.fn();
 const mockUnwrapEncryptionKey = jest.fn();
 const mockCreateRestoreUpload = jest.fn();
+const mockWriteRestoreChunk = jest.fn();
+const mockCompleteRestoreUpload = jest.fn();
+const mockClaimCompletedUpload = jest.fn();
+const mockReleaseRestoreCompletion = jest.fn();
+const mockReadBackupHeader = jest.fn();
+const mockEvaluateCompatibility = jest.fn();
+const mockReadImageMigrations = jest.fn();
+const mockStartRestoreJob = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: { user: { count: mockUserCount } },
@@ -37,19 +45,19 @@ jest.mock("../../services/backup/restoreJob", () => ({
             "reencrypting",
         ].includes(status.state),
     setRestoreStatus: mockSetStatus,
-    startRestoreJob: jest.fn(),
+    startRestoreJob: mockStartRestoreJob,
 }));
 jest.mock("../../services/backup/restoreUploads", () => ({
     beginRestoreCompletion: mockBeginRestoreCompletion,
     cancelRestoreUpload: mockCancelUpload,
-    claimCompletedRestoreUpload: jest.fn(),
-    completeRestoreUpload: jest.fn(),
+    claimCompletedRestoreUpload: mockClaimCompletedUpload,
+    completeRestoreUpload: mockCompleteRestoreUpload,
     createRestoreUpload: mockCreateRestoreUpload,
     getActiveRestoreUpload: mockUploadActive,
-    releaseRestoreCompletion: jest.fn(),
+    releaseRestoreCompletion: mockReleaseRestoreCompletion,
     MAX_RESTORE_SIZE_BYTES: 256 * 1024 * 1024 * 1024,
     RESTORE_CHUNK_SIZE_BYTES: 4 * 1024 * 1024,
-    writeRestoreChunk: jest.fn(),
+    writeRestoreChunk: mockWriteRestoreChunk,
 }));
 jest.mock("../../services/backup/restoreLock", () => ({
     isRestoreLockHeld: mockRestoreLockHeld,
@@ -58,14 +66,14 @@ jest.mock("../../services/backup/restartRequired", () => ({
     isRestartRequired: mockRestartRequired,
 }));
 jest.mock("../../services/backup/backupArchiveReader", () => ({
-    readBackupHeader: jest.fn(),
+    readBackupHeader: mockReadBackupHeader,
 }));
 jest.mock("../../services/backup/backupKeyWrap", () => ({
     unwrapEncryptionKey: mockUnwrapEncryptionKey,
 }));
 jest.mock("../../services/backup/restoreCompatibility", () => ({
-    evaluateRestoreCompatibility: jest.fn(),
-    readImageMigrations: jest.fn(),
+    evaluateRestoreCompatibility: mockEvaluateCompatibility,
+    readImageMigrations: mockReadImageMigrations,
 }));
 jest.mock("../../config/appVersion", () => ({
     resolveAppVersion: () => "2.6.1",
@@ -73,7 +81,7 @@ jest.mock("../../config/appVersion", () => ({
 
 import router from "../restore";
 
-function handler(path: string, method: "get" | "post" | "delete") {
+function handler(path: string, method: "get" | "post" | "put" | "delete") {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route.methods[method],
@@ -116,6 +124,31 @@ describe("restore routes", () => {
             totalChunks: 1,
             expiresAt: "2026-10-19T12:15:00.000Z",
         });
+        mockWriteRestoreChunk.mockResolvedValue(undefined);
+        mockCompleteRestoreUpload.mockResolvedValue("/tmp/restore.upload");
+        mockClaimCompletedUpload.mockResolvedValue("/tmp/restore.upload");
+        mockReleaseRestoreCompletion.mockResolvedValue(undefined);
+        mockReadBackupHeader.mockResolvedValue({
+            createdAt: "2026-10-19T12:00:00.000Z",
+            appVersion: "2.5.0",
+            wrappedKey: {},
+            migrations: [],
+        });
+        mockUnwrapEncryptionKey.mockResolvedValue({
+            key: "backup-key",
+            pepperFingerprint: "pepper",
+            macKey: Buffer.alloc(32),
+        });
+        mockReadImageMigrations.mockResolvedValue([]);
+        mockEvaluateCompatibility.mockReturnValue({
+            outcome: "ok",
+            migrationsToReplay: [],
+            pendingAfterLoad: 0,
+            checksumWarnings: [],
+        });
+        mockStartRestoreJob.mockResolvedValue(
+            "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+        );
         mockGetStatus.mockResolvedValue({
             state: "idle",
             progress: null,
@@ -203,6 +236,68 @@ describe("restore routes", () => {
         });
     });
 
+    it.each(["RESTORE_INTERRUPTED", "RESTORE_CLEANUP_FAILED"])(
+        "preserves dirty failure %s after setup",
+        async (code) => {
+            mockUserCount.mockResolvedValue(1);
+            mockGetStatus.mockResolvedValue({
+                state: "failed",
+                progress: null,
+                error: { code, message: "Operator action is required" },
+                summary: null,
+            });
+            const res = response();
+
+            await handler("/status", "get")({}, res, jest.fn());
+
+            expect(res.body).toEqual({
+                available: false,
+                state: "failed",
+                restartRequired: false,
+                progress: null,
+                error: { code, message: "Operator action is required" },
+                summary: null,
+                upload: null,
+            });
+        },
+    );
+
+    it("returns stored status when cleanup left no User relation", async () => {
+        mockUserCount.mockRejectedValue(
+            Object.assign(new Error('relation "User" does not exist'), {
+                code: "P2021",
+            }),
+        );
+        mockGetStatus.mockResolvedValue({
+            state: "failed",
+            progress: null,
+            error: {
+                code: "RESTORE_CLEANUP_FAILED",
+                message: "Database cleanup failed",
+            },
+            summary: null,
+        });
+        const res = response();
+
+        await handler("/status", "get")({}, res, jest.fn());
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({
+            available: true,
+            state: "failed",
+            error: { code: "RESTORE_CLEANUP_FAILED" },
+        });
+    });
+
+    it("does not hide unexpected user-count failures", async () => {
+        mockUserCount.mockRejectedValue(new Error("database unavailable"));
+        const next = jest.fn();
+        await handler("/status", "get")({}, response(), next);
+        expect(next).toHaveBeenCalledWith(
+            expect.objectContaining({ message: "database unavailable" }),
+        );
+    });
+
     it("returns 403 when upload creation is unavailable after setup", async () => {
         mockUserCount.mockResolvedValue(1);
         const res = response();
@@ -243,6 +338,20 @@ describe("restore routes", () => {
         expect(next).not.toHaveBeenCalled();
         expect(mockParseRestoreChunk).not.toHaveBeenCalled();
         expect(mockUserCount).not.toHaveBeenCalled();
+    });
+
+    it("stops chunk parsing when setup is already complete", async () => {
+        mockUserCount.mockResolvedValue(1);
+        const layer = (router as any).stack.find(
+            (entry: any) =>
+                entry.route?.path === "/uploads/:uploadId/chunks/:index",
+        );
+        const precondition = layer.route.stack[1].handle;
+        const res = response();
+        const next = jest.fn();
+        await precondition({}, res, next);
+        expect(next).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(403);
     });
 
     it("rejects a concurrent completion before passphrase derivation", async () => {
@@ -301,6 +410,178 @@ describe("restore routes", () => {
             error: "Restore staging storage is unavailable",
             code: "RESTORE_STAGING_UNAVAILABLE",
         });
+    });
+
+    it("maps invalid backup-size service failures to 400", async () => {
+        const { RestoreError } =
+            await import("../../services/backup/backupErrors");
+        mockCreateRestoreUpload.mockRejectedValue(
+            new RestoreError("BACKUP_FORMAT_INVALID", "Invalid backup size"),
+        );
+        const res = response();
+        await handler("/uploads", "post")(
+            { body: { sizeBytes: 1 } },
+            res,
+            jest.fn(),
+        );
+        expect(res.statusCode).toBe(400);
+    });
+
+    it("creates an upload and publishes uploading status", async () => {
+        const res = response();
+        await handler("/uploads", "post")(
+            { body: { sizeBytes: 123 } },
+            res,
+            jest.fn(),
+        );
+        expect(mockCreateRestoreUpload).toHaveBeenCalledWith(123);
+        expect(mockSetStatus).toHaveBeenCalledWith({
+            state: "uploading",
+            progress: null,
+            error: null,
+            summary: null,
+        });
+        expect(res.statusCode).toBe(201);
+    });
+
+    it("rejects malformed upload creation input", async () => {
+        const res = response();
+        await handler("/uploads", "post")(
+            { body: { sizeBytes: 0 } },
+            res,
+            jest.fn(),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(mockCreateRestoreUpload).not.toHaveBeenCalled();
+    });
+
+    it("validates and stores a binary chunk", async () => {
+        const res = response();
+        const body = Buffer.from([1, 2, 3]);
+        await handler("/uploads/:uploadId/chunks/:index", "put")(
+            { params: { uploadId: "x".repeat(43), index: "2" }, body },
+            res,
+            jest.fn(),
+        );
+        expect(mockWriteRestoreChunk).toHaveBeenCalledWith(
+            "x".repeat(43),
+            2,
+            body,
+        );
+        expect(res.statusCode).toBe(204);
+    });
+
+    it("rejects malformed chunk input", async () => {
+        const res = response();
+        await handler("/uploads/:uploadId/chunks/:index", "put")(
+            { params: { uploadId: "bad", index: "-1" }, body: "not-bytes" },
+            res,
+            jest.fn(),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(mockWriteRestoreChunk).not.toHaveBeenCalled();
+    });
+
+    it("maps chunk service failures", async () => {
+        const { RestoreError } =
+            await import("../../services/backup/backupErrors");
+        mockWriteRestoreChunk.mockRejectedValue(
+            new RestoreError(
+                "RESTORE_CHUNK_OUT_OF_ORDER",
+                "Restore chunk is out of order",
+            ),
+        );
+        const res = response();
+        await handler("/uploads/:uploadId/chunks/:index", "put")(
+            {
+                params: { uploadId: "x".repeat(43), index: "0" },
+                body: Buffer.from([1]),
+            },
+            res,
+            jest.fn(),
+        );
+        expect(res.statusCode).toBe(409);
+    });
+
+    it("validates and starts a completed upload", async () => {
+        const res = response();
+        await handler("/uploads/:uploadId/complete", "post")(
+            {
+                params: { uploadId: "x".repeat(43) },
+                body: { passphrase: "long-enough-passphrase" },
+            },
+            res,
+            jest.fn(),
+        );
+        expect(mockClaimCompletedUpload).toHaveBeenCalledWith("x".repeat(43));
+        expect(mockStartRestoreJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                uploadId: "x".repeat(43),
+                filePath: "/tmp/restore.upload",
+                backupKey: "backup-key",
+            }),
+        );
+        expect(res.statusCode).toBe(202);
+        expect(res.body).toMatchObject({
+            restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+            appVersion: "2.6.1",
+        });
+    });
+
+    it("rejects malformed completion input", async () => {
+        const res = response();
+        await handler("/uploads/:uploadId/complete", "post")(
+            { params: { uploadId: "bad" }, body: { passphrase: "short" } },
+            res,
+            jest.fn(),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(mockBeginRestoreCompletion).not.toHaveBeenCalled();
+    });
+
+    it("releases completion reservation for an incompatible backup", async () => {
+        mockEvaluateCompatibility.mockReturnValue({
+            outcome: "BACKUP_NEWER_THAN_APP",
+            migrationsToReplay: [],
+            pendingAfterLoad: 0,
+            checksumWarnings: [],
+        });
+        const res = response();
+        await handler("/uploads/:uploadId/complete", "post")(
+            {
+                params: { uploadId: "x".repeat(43) },
+                body: { passphrase: "long-enough-passphrase" },
+            },
+            res,
+            jest.fn(),
+        );
+        expect(mockReleaseRestoreCompletion).toHaveBeenCalledWith(
+            "x".repeat(43),
+        );
+        expect(res.statusCode).toBe(409);
+        expect(res.body.code).toBe("BACKUP_NEWER_THAN_APP");
+    });
+
+    it("ignores completion-reservation release failure while returning the original error", async () => {
+        mockEvaluateCompatibility.mockReturnValue({
+            outcome: "BACKUP_NEWER_THAN_APP",
+            migrationsToReplay: [],
+            pendingAfterLoad: 0,
+            checksumWarnings: [],
+        });
+        mockReleaseRestoreCompletion.mockRejectedValue(
+            new Error("redis unavailable"),
+        );
+        const res = response();
+        await handler("/uploads/:uploadId/complete", "post")(
+            {
+                params: { uploadId: "x".repeat(43) },
+                body: { passphrase: "long-enough-passphrase" },
+            },
+            res,
+            jest.fn(),
+        );
+        expect(res.body.code).toBe("BACKUP_NEWER_THAN_APP");
     });
 
     it("resets uploading status only when that upload was cancelled", async () => {

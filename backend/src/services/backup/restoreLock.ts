@@ -16,8 +16,19 @@ interface LockProbeCache {
     held: boolean;
 }
 
+interface ProbeConnection {
+    client: Client;
+    error: Error | null;
+    closing: boolean;
+    onError: (error: Error) => void;
+}
+
 let cachedProbe: LockProbeCache | null = null;
+let lastSuccessfulProbe: LockProbeCache | null = null;
 let activeProbe: Promise<boolean> | null = null;
+let activeConnect: Promise<ProbeConnection> | null = null;
+let probeConnection: ProbeConnection | null = null;
+let reconnectAfter = 0;
 let lastWarningAt = Number.NEGATIVE_INFINITY;
 let ownedByProcess = false;
 
@@ -26,28 +37,77 @@ function fallbackAfterFailure(now: number, error: unknown): boolean {
         lastWarningAt = now;
         logger.warn("Could not probe the restore advisory lock", error);
     }
-    if (cachedProbe && now - cachedProbe.checkedAt < STALE_FALLBACK_MS) {
-        return cachedProbe.held;
+    if (
+        lastSuccessfulProbe &&
+        now - lastSuccessfulProbe.checkedAt < STALE_FALLBACK_MS
+    ) {
+        return lastSuccessfulProbe.held;
     }
     return false;
 }
 
-async function queryRestoreLock(
+async function discardProbeConnection(
+    connection: ProbeConnection,
     now: number,
-): Promise<{ held: boolean; fresh: boolean }> {
+): Promise<void> {
+    if (connection.closing) return;
+    connection.closing = true;
+    if (probeConnection === connection) probeConnection = null;
+    reconnectAfter = Math.max(reconnectAfter, now + PROBE_CACHE_MS);
+    await connection.client.end().catch(() => undefined);
+    connection.client.off("error", connection.onError);
+}
+
+async function connectProbe(now: number): Promise<ProbeConnection> {
+    if (probeConnection && !probeConnection.error) return probeConnection;
+    if (activeConnect) return activeConnect;
+    if (now < reconnectAfter)
+        throw new Error("Restore lock probe is backing off");
     const client = new Client({
         connectionString: config.databaseUrl,
         connectionTimeoutMillis: PROBE_TIMEOUT_MS,
         query_timeout: PROBE_TIMEOUT_MS,
     });
-    let connectionError: Error | null = null;
-    const onError = (error: Error): void => {
-        connectionError = error;
+    const connection: ProbeConnection = {
+        client,
+        error: null,
+        closing: false,
+        onError: () => undefined,
     };
-    client.on("error", onError);
+    connection.onError = (error: Error): void => {
+        connection.error = error;
+        void discardProbeConnection(connection, Date.now());
+    };
+    client.on("error", connection.onError);
+    activeConnect = client
+        .connect()
+        .then(() => {
+            if (connection.error || connection.closing) {
+                throw (
+                    connection.error ?? new Error("Restore lock probe closed")
+                );
+            }
+            probeConnection = connection;
+            return connection;
+        })
+        .catch(async (error: unknown) => {
+            await discardProbeConnection(connection, now);
+            throw error;
+        });
     try {
-        await client.connect();
-        const result = await client.query<{ held: boolean }>(`
+        return await activeConnect;
+    } finally {
+        activeConnect = null;
+    }
+}
+
+async function queryRestoreLock(
+    now: number,
+): Promise<{ held: boolean; fresh: boolean }> {
+    let connection: ProbeConnection | null = null;
+    try {
+        connection = await connectProbe(now);
+        const result = await connection.client.query<{ held: boolean }>(`
             SELECT EXISTS (
                 SELECT 1
                   FROM pg_locks
@@ -59,13 +119,13 @@ async function queryRestoreLock(
                    AND granted
             ) AS held
         `);
-        if (connectionError) throw connectionError;
-        return { held: result.rows[0]?.held === true, fresh: true };
+        if (connection.error) throw connection.error;
+        const held = result.rows[0]?.held === true;
+        lastSuccessfulProbe = { checkedAt: now, held };
+        return { held, fresh: true };
     } catch (error) {
+        if (connection) await discardProbeConnection(connection, now);
         return { held: fallbackAfterFailure(now, error), fresh: false };
-    } finally {
-        await client.end().catch(() => undefined);
-        client.off("error", onError);
     }
 }
 
@@ -79,6 +139,7 @@ export function recordRestoreLockState(held: boolean, now = Date.now()): void {
 export function invalidateRestoreLockCache(): void {
     ownedByProcess = false;
     cachedProbe = null;
+    lastSuccessfulProbe = null;
 }
 
 /** Check pg_locks for the granted bigint restore lock without application reads. */
@@ -89,7 +150,7 @@ export async function isRestoreLockHeld(now = Date.now()): Promise<boolean> {
     }
     if (activeProbe) return activeProbe;
     activeProbe = queryRestoreLock(now).then((result) => {
-        if (result.fresh) cachedProbe = { checkedAt: now, held: result.held };
+        cachedProbe = { checkedAt: now, held: result.held };
         return result.held;
     });
     try {

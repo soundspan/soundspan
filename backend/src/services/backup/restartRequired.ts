@@ -9,9 +9,12 @@ const RESTART_KEY = "restore:restart-required";
 const PROCESS_STARTED_AT = Date.now();
 const CACHE_MS = 1_500;
 const REDIS_TIMEOUT_MS = 250;
+const REDIS_WRITE_TIMEOUT_MS = 1_000;
+const REDIS_WRITE_ATTEMPTS = 5;
 const WARN_INTERVAL_MS = 60_000;
 let cachedAt = 0;
 let cachedValue = false;
+let markedByProcess = false;
 let lastWarningAt = 0;
 let activeRead: Promise<boolean> | null = null;
 
@@ -23,12 +26,37 @@ export interface RestoreBarrier {
 export async function markRestartRequired(
     completedAt = Date.now(),
 ): Promise<void> {
-    await redisClient.set(RESTART_KEY, String(completedAt));
-    cachedAt = 0;
+    markedByProcess = true;
+    cachedValue = true;
+    cachedAt = completedAt;
+    let lastError: unknown = new Error("Restart marker write failed");
+    for (let attempt = 0; attempt < REDIS_WRITE_ATTEMPTS; attempt += 1) {
+        let timeoutId: NodeJS.Timeout | undefined;
+        try {
+            const timeout = new Promise<never>((_resolve, reject) => {
+                timeoutId = setTimeout(
+                    () => reject(new Error("Restart marker write timed out")),
+                    REDIS_WRITE_TIMEOUT_MS,
+                );
+                timeoutId.unref();
+            });
+            await Promise.race([
+                redisClient.set(RESTART_KEY, String(completedAt)),
+                timeout,
+            ]);
+            return;
+        } catch (error) {
+            lastError = error;
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+        }
+    }
+    throw lastError;
 }
 
 /** Check whether another completed restore requires this process to restart. */
 export async function isRestartRequired(now = Date.now()): Promise<boolean> {
+    if (markedByProcess) return true;
     if (now - cachedAt < CACHE_MS) return cachedValue;
     if (!redisClient.isReady) return false;
     if (activeRead) return activeRead;
@@ -93,16 +121,16 @@ function isRestorePath(path: string): boolean {
 
 /** Return the process-wide barrier that protects application data access. */
 export async function getRestoreBarrier(): Promise<RestoreBarrier | null> {
-    if (await isRestoreLockHeld()) {
-        return {
-            code: "RESTORE_IN_PROGRESS",
-            message: "A restore is in progress.",
-        };
-    }
     if (await isRestartRequired()) {
         return {
             code: "RESTART_REQUIRED",
             message: "Restart soundspan to finish the restore.",
+        };
+    }
+    if (await isRestoreLockHeld()) {
+        return {
+            code: "RESTORE_IN_PROGRESS",
+            message: "A restore is in progress.",
         };
     }
     return null;

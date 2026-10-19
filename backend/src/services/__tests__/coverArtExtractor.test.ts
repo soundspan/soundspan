@@ -139,6 +139,26 @@ describe("CoverArtExtractor", () => {
         );
     });
 
+    it("logs a missing music file at debug level", async () => {
+        mockExistsSync.mockImplementation((target: string) => {
+            if (target === "/tmp/covers") return true;
+            return false;
+        });
+        mockParseFile.mockRejectedValueOnce(
+            Object.assign(new Error("missing"), { code: "ENOENT" }),
+        );
+
+        const extractor = new CoverArtExtractor("/tmp/covers");
+        await expect(
+            extractor.extractCoverArt("/music/missing.flac", "missing"),
+        ).resolves.toBeNull();
+
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "[COVER-ART] Audio file is unavailable for embedded cover extraction: /music/missing.flac",
+        );
+        expect(mockLoggerError).not.toHaveBeenCalled();
+    });
+
     it("serializes concurrent embedded-cover extraction", async () => {
         const events: string[] = [];
         let releaseFirst!: () => void;

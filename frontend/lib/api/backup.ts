@@ -72,9 +72,19 @@ export interface RestoreChunkError extends Error {
 /** Longest a single chunk request may take before it is retried. */
 const CHUNK_REQUEST_TIMEOUT_MS = 120_000;
 
-function readRetryAfterMs(response: Response): number | null {
-    const seconds = Number(response.headers.get("Retry-After"));
-    return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null;
+/**
+ * Parse an HTTP `Retry-After` value (delay seconds or an HTTP date) into a
+ * wait in milliseconds; null when the header is missing, blank, or invalid.
+ */
+export function parseRetryAfterMs(
+    value: string | null,
+    now: number = Date.now(),
+): number | null {
+    const trimmed = value?.trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+    const date = Date.parse(trimmed);
+    return Number.isNaN(date) ? null : Math.max(0, date - now);
 }
 
 async function toChunkError(response: Response): Promise<RestoreChunkError> {
@@ -87,7 +97,7 @@ async function toChunkError(response: Response): Promise<RestoreChunkError> {
     ) as RestoreChunkError;
     error.status = response.status;
     error.data = data;
-    error.retryAfterMs = readRetryAfterMs(response);
+    error.retryAfterMs = parseRetryAfterMs(response.headers.get("Retry-After"));
     return error;
 }
 

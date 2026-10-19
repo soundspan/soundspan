@@ -48,9 +48,20 @@ function validateSchema(header: BackupHeader, target: CatalogTable[]): void {
         const targetColumns = new Set(
             targetTable.columns.map((column) => column.name),
         );
+        const targetTypes = new Map(
+            targetTable.columns.map((column) => [column.name, column.type]),
+        );
         for (const name of archiveColumns) {
             if (!targetColumns.has(name))
                 mismatches.push(`${table.name}.${name} absent`);
+        }
+        for (const column of table.columns) {
+            const targetType = targetTypes.get(column.name);
+            if (targetType && targetType !== column.type) {
+                mismatches.push(
+                    `${table.name}.${column.name} type ${column.type} != ${targetType}`,
+                );
+            }
         }
         for (const name of targetColumns) {
             if (!archiveColumns.has(name))
@@ -68,8 +79,10 @@ function validateSchema(header: BackupHeader, target: CatalogTable[]): void {
 async function prepareTables(
     client: Client,
     tables: CatalogTable[],
+    signal?: AbortSignal,
 ): Promise<void> {
     if (tables.length === 0) return;
+    signal?.throwIfAborted();
     const names = tables.map((table) => `public.${quoteIdent(table.name)}`);
     await client.query(
         `LOCK TABLE ${names.join(", ")} IN ACCESS EXCLUSIVE MODE`,
@@ -81,8 +94,10 @@ async function setUserTriggers(
     client: Client,
     tables: CatalogTable[],
     enabled: boolean,
+    signal?: AbortSignal,
 ): Promise<void> {
     for (const table of tables) {
+        signal?.throwIfAborted();
         await client.query(
             `ALTER TABLE public.${quoteIdent(table.name)} ${
                 enabled ? "ENABLE" : "DISABLE"
@@ -95,11 +110,13 @@ async function restoreSequences(
     client: Client,
     target: Awaited<ReturnType<typeof readOwnedSequences>>,
     archive: BackupSequence[],
+    signal?: AbortSignal,
 ): Promise<void> {
     const archiveByName = new Map(
         archive.map((sequence) => [sequence.name, sequence]),
     );
     for (const sequence of target) {
+        signal?.throwIfAborted();
         const saved = archiveByName.get(sequence.name);
         if (
             !saved ||
@@ -133,6 +150,7 @@ async function insertArchiveRows(
     header: BackupHeader,
     target: CatalogTable[],
     onProgress: (progress: RestoreProgress) => void | Promise<void>,
+    signal?: AbortSignal,
 ): Promise<Map<string, number>> {
     const targetByName = new Map(target.map((table) => [table.name, table]));
     const inserted = new Map<string, number>();
@@ -143,6 +161,7 @@ async function insertArchiveRows(
     );
     let completedRows = 0;
     for await (const record of readBackupRecords(filePath)) {
+        signal?.throwIfAborted();
         if (record.type !== "rows") continue;
         const table = targetByName.get(record.table);
         if (!table)
@@ -155,12 +174,13 @@ async function insertArchiveRows(
                 const key = quoteLiteral(column.name);
                 return `CASE WHEN e->${key} = 'null'::jsonb THEN NULL ELSE ((e->${key})->0)::${column.type} END`;
             }
-            return `(jsonb_populate_record(NULL::public.${tableIdent}, e)).${columnIdent}`;
+            return `r.${columnIdent}`;
         });
         const result = await client.query(
             `INSERT INTO public.${tableIdent} (${columns.join(", ")}) OVERRIDING SYSTEM VALUE
              SELECT ${values.join(", ")}
-               FROM jsonb_array_elements($1::jsonb) AS e`,
+               FROM jsonb_array_elements($1::jsonb) AS e
+               CROSS JOIN LATERAL jsonb_populate_record(NULL::public.${tableIdent}, e) AS r`,
             [record.rows],
         );
         const rowCount = result.rowCount ?? 0;
@@ -199,6 +219,56 @@ function verifyCounts(
     }
 }
 
+async function loadTransactionData(
+    client: Client,
+    filePath: string,
+    header: BackupHeader,
+    onProgress: (progress: RestoreProgress) => void | Promise<void>,
+    beforeCommit: ((client: Client) => void | Promise<void>) | undefined,
+    signal: AbortSignal | undefined,
+): Promise<void> {
+    const tables = await readApplicationTables(client);
+    signal?.throwIfAborted();
+    validateSchema(header, tables);
+    const foreignKeys = await readForeignKeys(client);
+    signal?.throwIfAborted();
+    const vectorIndexes = await readVectorIndexes(client);
+    signal?.throwIfAborted();
+    const sequences = await readOwnedSequences(client, tables);
+    await prepareTables(client, tables, signal);
+    for (const foreignKey of foreignKeys) {
+        signal?.throwIfAborted();
+        await client.query(
+            `ALTER TABLE public.${quoteIdent(foreignKey.table)} DROP CONSTRAINT ${quoteIdent(foreignKey.name)}`,
+        );
+    }
+    await setUserTriggers(client, tables, false, signal);
+    const inserted = await insertArchiveRows(
+        client,
+        filePath,
+        header,
+        tables,
+        onProgress,
+        signal,
+    );
+    await setUserTriggers(client, tables, true, signal);
+    for (const foreignKey of foreignKeys) {
+        signal?.throwIfAborted();
+        await client.query(
+            `ALTER TABLE public.${quoteIdent(foreignKey.table)} ADD CONSTRAINT ${quoteIdent(foreignKey.name)} ${foreignKey.definition}`,
+        );
+    }
+    await restoreSequences(client, sequences, header.sequences, signal);
+    for (const index of vectorIndexes) {
+        signal?.throwIfAborted();
+        await client.query(`REINDEX INDEX public.${quoteIdent(index.name)}`);
+    }
+    verifyCounts(header, inserted);
+    signal?.throwIfAborted();
+    if (beforeCommit) await beforeCommit(client);
+    signal?.throwIfAborted();
+}
+
 /** Load a validated data-only archive in one all-or-nothing transaction. */
 export async function loadBackupData(
     client: Client,
@@ -206,45 +276,26 @@ export async function loadBackupData(
     header: BackupHeader,
     onProgress: (progress: RestoreProgress) => void | Promise<void>,
     beforeCommit?: (client: Client) => void | Promise<void>,
+    afterCommit?: () => void,
+    signal?: AbortSignal,
 ): Promise<void> {
+    signal?.throwIfAborted();
     await client.query("BEGIN");
     try {
-        const tables = await readApplicationTables(client);
-        validateSchema(header, tables);
-        const foreignKeys = await readForeignKeys(client);
-        const vectorIndexes = await readVectorIndexes(client);
-        const sequences = await readOwnedSequences(client, tables);
-        await prepareTables(client, tables);
-        for (const foreignKey of foreignKeys) {
-            await client.query(
-                `ALTER TABLE public.${quoteIdent(foreignKey.table)} DROP CONSTRAINT ${quoteIdent(foreignKey.name)}`,
-            );
-        }
-        await setUserTriggers(client, tables, false);
-        const inserted = await insertArchiveRows(
+        await loadTransactionData(
             client,
             filePath,
             header,
-            tables,
             onProgress,
+            beforeCommit,
+            signal,
         );
-        await setUserTriggers(client, tables, true);
-        for (const foreignKey of foreignKeys) {
-            await client.query(
-                `ALTER TABLE public.${quoteIdent(foreignKey.table)} ADD CONSTRAINT ${quoteIdent(foreignKey.name)} ${foreignKey.definition}`,
-            );
-        }
-        await restoreSequences(client, sequences, header.sequences);
-        for (const index of vectorIndexes) {
-            await client.query(
-                `REINDEX INDEX public.${quoteIdent(index.name)}`,
-            );
-        }
-        verifyCounts(header, inserted);
-        if (beforeCommit) await beforeCommit(client);
         await client.query("COMMIT");
+        afterCommit?.();
     } catch (error) {
-        await client.query("ROLLBACK").catch(() => undefined);
+        if (!signal?.aborted) {
+            await client.query("ROLLBACK").catch(() => undefined);
+        }
         throw error;
     }
 }

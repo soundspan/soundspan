@@ -3,6 +3,24 @@ import os from "os";
 import path from "path";
 
 const mockValues = new Map<string, string>();
+function advanceSession(options: {
+    keys: string[];
+    arguments: string[];
+}): number {
+    const [key] = options.keys;
+    const [indexValue, expiresAtValue] = options.arguments;
+    const raw = key ? mockValues.get(key) : undefined;
+    if (!key || !raw) return -1;
+    const session = JSON.parse(raw) as {
+        nextIndex: number;
+        expiresAt: number;
+    };
+    const index = Number(indexValue);
+    session.nextIndex = Math.max(session.nextIndex, index + 1);
+    session.expiresAt = Number(expiresAtValue);
+    mockValues.set(key, JSON.stringify(session));
+    return session.nextIndex;
+}
 const mockRedis = {
     isReady: true,
     set: jest.fn(
@@ -21,6 +39,12 @@ const mockRedis = {
     del: jest.fn(async (key: string) => (mockValues.delete(key) ? 1 : 0)),
     expire: jest.fn(async () => true),
     exists: jest.fn(async (key: string) => (mockValues.has(key) ? 1 : 0)),
+    eval: jest.fn(
+        async (
+            _script: string,
+            options: Parameters<typeof advanceSession>[0],
+        ) => advanceSession(options),
+    ),
     sendCommand: jest.fn(async (args: readonly string[]) => {
         if (args[0] !== "GET") return null;
         return mockValues.get(args[1]!) ?? null;
@@ -51,6 +75,7 @@ import {
     RESTORE_CHUNK_SIZE_BYTES,
     writeRestoreChunk,
     releaseRestoreCompletion,
+    releaseRestoreUpload,
 } from "../restoreUploads";
 
 describe("restore uploads", () => {
@@ -97,6 +122,12 @@ describe("restore uploads", () => {
         ).rejects.toMatchObject({ code: "RESTORE_CHUNK_SIZE" });
     });
 
+    it("rejects invalid declared sizes", async () => {
+        await expect(createRestoreUpload(0)).rejects.toMatchObject({
+            code: "BACKUP_FORMAT_INVALID",
+        });
+    });
+
     it("rejects a session owned by another replica", async () => {
         const created = await createRestoreUpload(1);
         const key = `restore:upload:${created.uploadId}`;
@@ -118,6 +149,36 @@ describe("restore uploads", () => {
         mockValues.delete(`restore:upload:${created.uploadId}`);
         await expect(
             writeRestoreChunk(created.uploadId, 0, Buffer.from([1])),
+        ).rejects.toMatchObject({ code: "RESTORE_UPLOAD_NOT_FOUND" });
+    });
+
+    it("rejects malformed, mismatched, and inactive sessions", async () => {
+        const malformed = await createRestoreUpload(1);
+        mockValues.set(`restore:upload:${malformed.uploadId}`, "not-json");
+        await expect(
+            writeRestoreChunk(malformed.uploadId, 0, Buffer.from([1])),
+        ).rejects.toMatchObject({ code: "RESTORE_UPLOAD_NOT_FOUND" });
+
+        mockValues.clear();
+        const mismatched = await createRestoreUpload(1);
+        const key = `restore:upload:${mismatched.uploadId}`;
+        const session = JSON.parse(mockValues.get(key)!) as Record<
+            string,
+            unknown
+        >;
+        mockValues.set(
+            key,
+            JSON.stringify({ ...session, uploadId: "y".repeat(43) }),
+        );
+        await expect(
+            writeRestoreChunk(mismatched.uploadId, 0, Buffer.from([1])),
+        ).rejects.toMatchObject({ code: "RESTORE_UPLOAD_NOT_FOUND" });
+
+        mockValues.clear();
+        const inactive = await createRestoreUpload(1);
+        mockValues.delete("restore:upload:active");
+        await expect(
+            writeRestoreChunk(inactive.uploadId, 0, Buffer.from([1])),
         ).rejects.toMatchObject({ code: "RESTORE_UPLOAD_NOT_FOUND" });
     });
 
@@ -159,13 +220,46 @@ describe("restore uploads", () => {
         ).rejects.toMatchObject({ code: "BACKUP_TOO_LARGE" });
     });
 
-    it("maps statfs failure to insufficient storage", async () => {
+    it("maps statfs failure to unavailable staging storage", async () => {
         jest.spyOn(fs, "statfs").mockRejectedValueOnce(
             new Error("statfs failed"),
         );
         await expect(createRestoreUpload(1)).rejects.toMatchObject({
-            code: "INSUFFICIENT_STORAGE",
+            code: "RESTORE_STAGING_UNAVAILABLE",
         });
+    });
+
+    it("does not roll nextIndex backward when an older chunk attempt finishes late", async () => {
+        const created = await createRestoreUpload(RESTORE_CHUNK_SIZE_BYTES + 1);
+        const firstChunk = Buffer.alloc(RESTORE_CHUNK_SIZE_BYTES, 1);
+        let releaseSlowUpdate: (() => void) | undefined;
+        let markEvalReached: (() => void) | undefined;
+        const evalReached = new Promise<void>((resolve) => {
+            markEvalReached = resolve;
+        });
+        mockRedis.eval.mockImplementationOnce(
+            (_script: string, options: Parameters<typeof advanceSession>[0]) =>
+                new Promise<number>((resolve) => {
+                    markEvalReached?.();
+                    releaseSlowUpdate = () => resolve(advanceSession(options));
+                }),
+        );
+
+        const slowFirst = writeRestoreChunk(created.uploadId, 0, firstChunk);
+        await evalReached;
+        expect(releaseSlowUpdate).toBeDefined();
+        await writeRestoreChunk(created.uploadId, 0, firstChunk);
+        await writeRestoreChunk(created.uploadId, 1, Buffer.from([2]));
+        releaseSlowUpdate?.();
+        await slowFirst;
+
+        await expect(
+            completeRestoreUpload(created.uploadId),
+        ).resolves.toContain(created.uploadId);
+        const session = JSON.parse(
+            mockValues.get(`restore:upload:${created.uploadId}`)!,
+        ) as { nextIndex: number };
+        expect(session.nextIndex).toBe(2);
     });
 
     it("uses a fifteen-minute idle expiry", async () => {
@@ -195,7 +289,20 @@ describe("restore uploads", () => {
         });
     });
 
+    it("cleans up the active reservation when staging file creation fails", async () => {
+        jest.spyOn(fs, "open").mockRejectedValueOnce(new Error("open failed"));
+        jest.spyOn(fs, "unlink").mockRejectedValueOnce(new Error("missing"));
+
+        await expect(createRestoreUpload(1)).rejects.toMatchObject({
+            code: "RESTORE_STAGING_UNAVAILABLE",
+        });
+        expect(mockValues.has("restore:upload:active")).toBe(false);
+    });
+
     it("does not relabel Redis session failures as staging failures", async () => {
+        jest.spyOn(fs, "unlink").mockRejectedValueOnce(
+            new Error("unlink failed"),
+        );
         mockRedis.set.mockResolvedValueOnce("OK").mockRejectedValueOnce(
             Object.assign(new Error("redis unavailable"), {
                 code: "ECONNRESET",
@@ -206,6 +313,48 @@ describe("restore uploads", () => {
             message: "redis unavailable",
             code: "ECONNRESET",
         });
+    });
+
+    it("reports incomplete completion and atomic advancement expiry", async () => {
+        const created = await createRestoreUpload(1);
+        await expect(
+            completeRestoreUpload(created.uploadId),
+        ).rejects.toMatchObject({ code: "RESTORE_INCOMPLETE_UPLOAD" });
+
+        mockRedis.eval.mockResolvedValueOnce(-1);
+        await expect(
+            writeRestoreChunk(created.uploadId, 0, Buffer.from([1])),
+        ).rejects.toMatchObject({ code: "RESTORE_UPLOAD_NOT_FOUND" });
+    });
+
+    it("returns active upload metadata and registration liveness", async () => {
+        const created = await createRestoreUpload(1);
+        await expect(hasActiveRestoreUpload()).resolves.toBe(true);
+        await expect(hasActiveRestoreUploadForRegistration()).resolves.toBe(
+            true,
+        );
+        expect(created.expiresAt).toMatch(/Z$/);
+    });
+
+    it("releases upload completion, session, and active reservation", async () => {
+        const created = await createRestoreUpload(1);
+        await beginRestoreCompletion(created.uploadId);
+
+        await releaseRestoreUpload(created.uploadId);
+
+        expect(mockValues.has(`restore:complete:${created.uploadId}`)).toBe(
+            false,
+        );
+        expect(mockValues.has(`restore:upload:${created.uploadId}`)).toBe(
+            false,
+        );
+        expect(mockValues.has("restore:upload:active")).toBe(false);
+    });
+
+    it("ignores a missing staged file while cancelling a valid session", async () => {
+        const created = await createRestoreUpload(1);
+        jest.spyOn(fs, "unlink").mockRejectedValueOnce(new Error("missing"));
+        await expect(cancelRestoreUpload(created.uploadId)).resolves.toBe(true);
     });
 
     it("fails open when the registration upload check stalls", async () => {

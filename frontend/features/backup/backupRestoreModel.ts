@@ -50,7 +50,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     RESTORE_UPLOAD_NOT_FOUND:
         "The upload expired or was cancelled. Start the restore again.",
     RESTORE_UPLOAD_WRONG_REPLICA:
-        "Part of the upload reached a different backend replica. Run a single backend replica while you restore, then try again.",
+        "Part of the upload reached a different backend process: either the backend restarted during the upload, or more than one backend replica is running. Run a single backend replica while you restore, then try again.",
     RESTORE_CHUNK_OUT_OF_ORDER:
         "The upload got out of step with the server. Start the restore again.",
     RESTORE_CHUNK_SIZE:
@@ -127,12 +127,14 @@ export function isRestoreRunning(state: RestoreState): boolean {
 
 /**
  * True when the first-run page must show the restore instead of account
- * creation: a restore is running, or it finished and waits for a restart.
+ * creation: a restore is running, it finished and waits for a restart, or it
+ * failed in a way that left the database between states.
  */
 export function restoreHoldsFirstRun(status: RestoreStatus): boolean {
     return (
         isRestoreRunning(status.state) ||
-        (status.state === "complete" && status.restartRequired)
+        (status.state === "complete" && status.restartRequired) ||
+        (status.state === "failed" && !isFreshInstallIntact(status.error?.code))
     );
 }
 
@@ -192,15 +194,17 @@ export function readApiErrorStatus(error: unknown): number | undefined {
 
 /**
  * A failed chunk is worth retrying only for network failures, timeouts, and
- * transient server answers; contract errors (wrong replica, out of order,
- * expired) and restore barriers never fix themselves.
+ * transient server or proxy answers (including the frontend proxy's own 503
+ * when the backend connection drops); contract errors (wrong replica, out of
+ * order, expired) and restore barriers never fix themselves.
  */
 export function isRetryableChunkError(error: unknown): boolean {
     const status = readApiErrorStatus(error);
     if (status === undefined) {
         return !(error instanceof DOMException && error.name === "AbortError");
     }
-    if (status === 503 && readApiErrorCode(error) !== undefined) {
+    const code = readApiErrorCode(error);
+    if (code === "RESTORE_IN_PROGRESS" || code === "RESTART_REQUIRED") {
         return false;
     }
     return status === 429 || status === 502 || status === 503 || status === 504;

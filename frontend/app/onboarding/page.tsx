@@ -48,9 +48,10 @@ export default function OnboardingPage() {
     useEffect(() => {
         let cancelled = false;
         async function checkOnboarding() {
-            // Both checks run at once so a slow restore check never delays
-            // the redirect of an installed server to sign-in. Failures are
-            // ignored (fail open) so first-time setup still works.
+            // Both checks run at once, so the slower one sets the wait; the
+            // restore check must finish first because a restore that is
+            // running or waiting for its restart keeps this page. Failures
+            // are ignored (fail open) so first-time setup still works.
             const [restoreResult, onboardingResult] = await Promise.allSettled([
                 api.getRestoreStatus(),
                 api.getOnboardingStatus(),

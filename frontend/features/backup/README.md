@@ -17,10 +17,11 @@ start, and status endpoints.
 | `backupRestoreModel.ts`                | Pure rules shared by backup and restore: passphrase limits, chunk byte ranges, phase labels, error-code messages, retryable-error policy |
 | `restoreFlowModel.ts`                  | Pure mapping from server status snapshots and start errors to the restore page's flow steps          |
 | `restoreUploader.ts`                   | Sends a file in the chunks the upload session planned, in order, with bounded retries               |
-| `hooks/useRestoreFlow.ts`              | Upload, start, and status-polling state machine for the restore page; cancels its upload when the page unloads |
+| `hooks/useRestoreFlow.ts`              | Upload and start state machine for the restore page; each attempt owns its upload, which is cancelled when the page unloads before the start |
+| `hooks/useRestoreStatusPolling.ts`     | Follows the restore status while the flow needs it, backing off behind a "reconnecting" step when the server can't be reached |
 | `hooks/useRestoreHoldRedirect.ts`      | Sends a visitor whose sign-in request failed to the first-run screen while a restore runs or waits for its restart |
 | `components/RestoreFromBackup.tsx`     | First-run restore form and flow container                                                             |
-| `components/RestoreProgressViews.tsx`  | Upload progress, restore progress, restart prompt with summary, and failure views                    |
+| `components/RestoreProgressViews.tsx`  | Upload progress, another page's upload, unavailable and reconnecting notices, restore progress, restart prompt with summary, and failure views |
 
 ## Targeted verification commands
 

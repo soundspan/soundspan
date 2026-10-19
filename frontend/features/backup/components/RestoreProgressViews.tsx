@@ -238,21 +238,51 @@ export function RestoreFailedView({
                 />
                 <div className="text-sm text-red-300 space-y-1">
                     <p>{message}</p>
-                    {freshInstallIntact && (
+                    {freshInstallIntact ? (
                         <p className="text-red-300/80">
                             Nothing was restored. This server is still a fresh
                             install.
                         </p>
+                    ) : (
+                        <p className="text-red-300/80">
+                            The database may hold part of the backup. Reset the
+                            database (see Reset the database in the Backup and
+                            Restore guide), restart {BRAND_NAME}, then reload
+                            this page and restore again.
+                        </p>
                     )}
                 </div>
             </div>
-            <button
-                type="button"
-                onClick={onRetry}
-                className="px-4 py-2 text-sm text-white border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-            >
-                Try again
-            </button>
+            {freshInstallIntact && (
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    className="px-4 py-2 text-sm text-white border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                    Try again
+                </button>
+            )}
+        </div>
+    );
+}
+
+/** The server can't take a restore right now; the page keeps checking. */
+export function RestoreUnavailableView() {
+    return (
+        <p className="text-sm text-white/70" role="status">
+            This server can&apos;t take a restore right now: it already has an
+            account, or a restore holds it. This page keeps checking.
+        </p>
+    );
+}
+
+/** Status checks keep failing; the page keeps retrying with backoff. */
+export function ReconnectingView() {
+    return (
+        <div className="flex items-center gap-3 text-white/70" role="status">
+            <GradientSpinner size="sm" />
+            Can&apos;t reach the server right now. Still trying; a restore that
+            is running keeps going on the server.
         </div>
     );
 }

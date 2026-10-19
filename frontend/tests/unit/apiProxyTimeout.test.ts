@@ -51,6 +51,11 @@ describe("resolveProxyTimeoutMs", () => {
             }),
             300_000,
         );
+        assert.equal(resolveProxyTimeoutMs("api/restore/uploads", {}), 120_000);
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploads/abc/complete", {}),
+            120_000,
+        );
         assert.equal(resolveProxyTimeoutMs("api/restore/status", {}), 20_000);
         assert.equal(
             resolveProxyTimeoutMs("api/restore/uploadsx/abc", {}),

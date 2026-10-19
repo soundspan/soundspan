@@ -115,7 +115,42 @@ describe("restart-required middleware", () => {
             error: "A restore is in progress.",
             code: "RESTORE_IN_PROGRESS",
         });
+        expect(mockRedis.sendCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it("prefers the local restart marker over a still-held restore lock", async () => {
+        mockRedis.set.mockResolvedValue("OK");
+        mockRestoreLockHeld.mockResolvedValue(true);
+        const { getRestoreBarrier, markRestartRequired } =
+            await import("../restartRequired");
+
+        await markRestartRequired(Number.MAX_SAFE_INTEGER);
+
+        await expect(getRestoreBarrier()).resolves.toEqual({
+            code: "RESTART_REQUIRED",
+            message: "Restart soundspan to finish the restore.",
+        });
+        expect(mockRestoreLockHeld).not.toHaveBeenCalled();
+    });
+
+    it("retries a bounded restart-marker write and keeps the local barrier", async () => {
+        mockRedis.set.mockRejectedValue(new Error("redis unavailable"));
+        mockRedis.sendCommand.mockRejectedValue(new Error("redis unavailable"));
+        const { getRestoreBarrier, isRestartRequired, markRestartRequired } =
+            await import("../restartRequired");
+        const completedAt = Date.now();
+
+        await expect(markRestartRequired(completedAt)).rejects.toThrow(
+            "redis unavailable",
+        );
+        expect(mockRedis.set).toHaveBeenCalledTimes(5);
+        await expect(isRestartRequired(completedAt + 2_000)).resolves.toBe(
+            true,
+        );
         expect(mockRedis.sendCommand).not.toHaveBeenCalled();
+        await expect(getRestoreBarrier()).resolves.toMatchObject({
+            code: "RESTART_REQUIRED",
+        });
     });
 
     it("keeps restore routes available while a restore is active", async () => {

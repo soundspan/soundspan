@@ -27,6 +27,16 @@ export {
 
 const SESSION_TTL_SECONDS = 15 * 60;
 const REGISTRATION_REDIS_TIMEOUT_MS = 250;
+const ADVANCE_SESSION_SCRIPT = `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return -1 end
+local session = cjson.decode(raw)
+local completed = tonumber(ARGV[1]) + 1
+session.nextIndex = math.max(tonumber(session.nextIndex), completed)
+session.expiresAt = tonumber(ARGV[2])
+redis.call("SET", KEYS[1], cjson.encode(session), "EX", ARGV[3])
+return session.nextIndex
+`;
 const logger = rootLogger.child("BackupRestore");
 
 export interface RestoreUploadCreated {
@@ -111,6 +121,25 @@ async function saveSession(session: RestoreUploadSession): Promise<void> {
             EX: SESSION_TTL_SECONDS,
         },
     );
+    await redisClient.expire(RESTORE_UPLOAD_ACTIVE_KEY, SESSION_TTL_SECONDS);
+}
+
+async function advanceSession(uploadId: string, index: number): Promise<void> {
+    const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
+    const nextIndex = await redisClient.eval(ADVANCE_SESSION_SCRIPT, {
+        keys: [restoreUploadSessionKey(uploadId)],
+        arguments: [
+            String(index),
+            String(expiresAt),
+            String(SESSION_TTL_SECONDS),
+        ],
+    });
+    if (Number(nextIndex) < 0) {
+        throw new RestoreError(
+            "RESTORE_UPLOAD_NOT_FOUND",
+            "Restore upload was not found",
+        );
+    }
     await redisClient.expire(RESTORE_UPLOAD_ACTIVE_KEY, SESSION_TTL_SECONDS);
 }
 
@@ -225,8 +254,7 @@ export async function writeRestoreChunk(
     } finally {
         await handle.close();
     }
-    if (index === session.nextIndex) session.nextIndex += 1;
-    await saveSession(session);
+    await advanceSession(uploadId, index);
 }
 
 /** Resolve a complete upload to its local staged path. */

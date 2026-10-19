@@ -21,11 +21,23 @@ export interface UploadBackupFileOptions {
     uploadChunk: UploadChunk;
     onProgress: (sentBytes: number) => void;
     signal: AbortSignal;
-    wait?: (ms: number) => Promise<void>;
+    wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
-function defaultWait(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+/** Wait `ms`, or reject with an AbortError as soon as `signal` aborts. */
+function defaultWait(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const abort = () => {
+            clearTimeout(timer);
+            reject(new DOMException("The upload was cancelled.", "AbortError"));
+        };
+        const timer = setTimeout(() => {
+            signal.removeEventListener("abort", abort);
+            resolve();
+        }, ms);
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+    });
 }
 
 async function uploadOneChunk(
@@ -52,7 +64,7 @@ async function uploadOneChunk(
             ) {
                 throw error;
             }
-            await wait(chunkRetryWaitMs(error, attempt));
+            await wait(chunkRetryWaitMs(error, attempt), options.signal);
         }
     }
 }

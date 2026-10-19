@@ -3,22 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
-import { RESTORE_STATUS_POLL_MS } from "../backupRestoreModel";
 import {
-    flowFromStartError,
+    classifyStartError,
     flowFromStatus,
     type RestoreFlow,
 } from "../restoreFlowModel";
 import { uploadBackupFile } from "../restoreUploader";
+import { useRestoreStatusPolling } from "./useRestoreStatusPolling";
 
 export type { RestoreFlow } from "../restoreFlowModel";
 
 const logger = createFrontendLogger("Backup.useRestoreFlow");
 
-/** Consecutive failed status checks before the page stops asking. */
-const MAX_STATUS_FAILURES = 30;
-const LOST_CONTACT =
-    "Lost contact with the server. Reload this page to check on the restore.";
+const START_UNCLEAR =
+    "Couldn't confirm that the restore started. The file is still uploaded; type the passphrase to try again.";
 
 /** The restore flow plus the actions the page can take. */
 export interface RestoreFlowControls {
@@ -29,92 +27,56 @@ export interface RestoreFlowControls {
     reset: () => void;
 }
 
+/** One upload-and-start attempt; a newer attempt never touches an older one. */
+interface RestoreRun {
+    abort: AbortController;
+    uploadId: string | null;
+    startSent: boolean;
+}
+
+/** Marks an error thrown by the start (`/complete`) request. */
+class StartRequestError extends Error {
+    constructor(readonly cause: unknown) {
+        super("The restore start request failed");
+    }
+}
+
 function abortedByUser(error: unknown): boolean {
     return error instanceof DOMException && error.name === "AbortError";
 }
 
-/** Ask the server to drop a half-finished upload; failures only log. */
-function discardUpload(uploadId: { current: string | null }): void {
-    const id = uploadId.current;
-    uploadId.current = null;
-    if (!id) return;
+/** Ask the server to drop a run's half-finished upload; failures only log. */
+function discardRunUpload(run: RestoreRun | null): void {
+    const id = run?.uploadId;
+    if (!run || !id) return;
+    run.uploadId = null;
     void api.cancelRestoreUpload(id).catch((error: unknown) => {
         logger.warn("Could not cancel the restore upload", error);
     });
 }
 
 /**
- * Follow `GET /api/restore/status` until the restore stops running. Each
- * check is scheduled on a timer through a ref, so a check can queue the next
- * one without the callback referring to itself.
+ * Leaving the page mid-upload (close, reload, navigate) cancels the upload
+ * on the server, so the fresh install's single upload slot is not held until
+ * it expires. Once the start request is sent the upload belongs to the
+ * restore, so it is left alone.
  */
-function useRestoreStatusPolling(setFlow: (flow: RestoreFlow) => void) {
-    const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const failures = useRef(0);
-    const mounted = useRef(true);
-    const runCheck = useRef<() => void>(() => undefined);
-
-    const stop = useCallback(() => {
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = null;
-    }, []);
-
-    const schedule = useCallback(
-        (delayMs: number) => {
-            stop();
-            timer.current = setTimeout(() => runCheck.current(), delayMs);
-        },
-        [stop],
-    );
-
-    const handleFailure = useCallback(
-        (error: unknown) => {
-            failures.current += 1;
-            logger.warn("Restore status check failed", error);
-            if (!mounted.current) return;
-            if (failures.current >= MAX_STATUS_FAILURES) {
-                setFlow({
-                    kind: "failed",
-                    message: LOST_CONTACT,
-                    freshInstallIntact: false,
-                });
-                return;
-            }
-            schedule(RESTORE_STATUS_POLL_MS);
-        },
-        [schedule, setFlow],
-    );
-
-    const check = useCallback(async () => {
-        try {
-            const status = await api.getRestoreStatus();
-            failures.current = 0;
-            if (!mounted.current) return;
-            const next = flowFromStatus(status);
-            setFlow(next);
-            if (next.kind === "restoring" || next.kind === "otherUpload") {
-                schedule(RESTORE_STATUS_POLL_MS);
-            }
-        } catch (error) {
-            handleFailure(error);
-        }
-    }, [handleFailure, schedule, setFlow]);
-
+function useReleaseUploadOnExit(getRun: () => RestoreRun | null) {
     useEffect(() => {
-        runCheck.current = () => void check();
-    }, [check]);
-
-    useEffect(() => {
-        mounted.current = true;
-        schedule(0);
-        return () => {
-            mounted.current = false;
-            stop();
+        const releaseOnExit = () => {
+            const run = getRun();
+            if (run?.uploadId && !run.startSent) {
+                api.cancelRestoreUploadOnExit(run.uploadId);
+            }
         };
-    }, [schedule, stop]);
-
-    const pollNow = useCallback(() => schedule(0), [schedule]);
-    return { pollNow, stop, mounted };
+        window.addEventListener("pagehide", releaseOnExit);
+        return () => {
+            window.removeEventListener("pagehide", releaseOnExit);
+            const run = getRun();
+            run?.abort.abort();
+            if (!run?.startSent) discardRunUpload(run);
+        };
+    }, [getRun]);
 }
 
 /**
@@ -127,75 +89,100 @@ function useRestoreStatusPolling(setFlow: (flow: RestoreFlow) => void) {
 export function useRestoreFlow(): RestoreFlowControls {
     const [flow, setFlow] = useState<RestoreFlow>({ kind: "checking" });
     const { pollNow, stop, mounted } = useRestoreStatusPolling(setFlow);
-    const uploadAbort = useRef<AbortController | null>(null);
-    const uploadId = useRef<string | null>(null);
-
-    // Leaving the page mid-upload (close, reload, navigate) cancels the
-    // upload on the server, so the fresh install's single upload slot is not
-    // held until it expires.
-    useEffect(() => {
-        const releaseOnExit = () => {
-            const id = uploadId.current;
-            if (id) api.cancelRestoreUploadOnExit(id);
-        };
-        window.addEventListener("pagehide", releaseOnExit);
-        return () => {
-            window.removeEventListener("pagehide", releaseOnExit);
-            uploadAbort.current?.abort();
-            discardUpload(uploadId);
-        };
-    }, []);
+    const activeRun = useRef<RestoreRun | null>(null);
+    const getActiveRun = useCallback(() => activeRun.current, []);
+    useReleaseUploadOnExit(getActiveRun);
 
     const finishStart = useCallback(
-        async (id: string, passphrase: string) => {
+        async (run: RestoreRun, passphrase: string) => {
+            const id = run.uploadId;
+            if (!id) throw new Error("The upload is no longer available.");
+            run.startSent = true;
             setFlow({ kind: "starting" });
-            await api.completeRestoreUpload(id, passphrase);
-            uploadId.current = null;
+            try {
+                await api.completeRestoreUpload(id, passphrase);
+            } catch (error) {
+                run.startSent = false;
+                throw new StartRequestError(error);
+            }
+            run.uploadId = null;
             setFlow({ kind: "restoring", status: null });
             pollNow();
         },
         [pollNow],
     );
 
-    const handleStartError = useCallback(
-        (error: unknown) => {
-            if (!mounted.current) return;
+    // A start that failed without a clear answer may still have started the
+    // restore: follow it if the status says so, otherwise keep the upload
+    // and ask for the passphrase again.
+    const recheckAfterUnclearStart = useCallback(
+        (run: RestoreRun) => {
+            const keepUpload = () =>
+                setFlow({ kind: "passphrase", error: START_UNCLEAR });
+            void api
+                .getRestoreStatus()
+                .then((status) => {
+                    if (!mounted.current || activeRun.current !== run) return;
+                    const next = flowFromStatus(status);
+                    if (next.kind !== "restoring" && next.kind !== "complete") {
+                        keepUpload();
+                        return;
+                    }
+                    run.uploadId = null;
+                    setFlow(next);
+                    pollNow();
+                })
+                .catch(() => {
+                    if (mounted.current && activeRun.current === run)
+                        keepUpload();
+                });
+        },
+        [mounted, pollNow],
+    );
+
+    const handleRunError = useCallback(
+        (run: RestoreRun, error: unknown) => {
+            if (!mounted.current || activeRun.current !== run) return;
             if (abortedByUser(error)) {
-                discardUpload(uploadId);
+                discardRunUpload(run);
                 setFlow({ kind: "form", error: null });
                 return;
             }
             logger.error("Restore did not start", error);
-            const next = flowFromStartError(error, uploadId.current !== null);
-            if (next.kind === "form") discardUpload(uploadId);
-            setFlow(next);
+            const fromStart = error instanceof StartRequestError;
+            const cause = fromStart ? error.cause : error;
+            const outcome = classifyStartError(cause, fromStart);
+            if (outcome.kind === "recheck") {
+                recheckAfterUnclearStart(run);
+                return;
+            }
+            if (outcome.kind === "form") discardRunUpload(run);
+            setFlow(outcome);
         },
-        [mounted],
+        [mounted, recheckAfterUnclearStart],
     );
 
     const runUpload = useCallback(
-        async (file: File, passphrase: string) => {
-            const abort = new AbortController();
-            uploadAbort.current = abort;
+        async (run: RestoreRun, file: File, passphrase: string) => {
             setFlow({ kind: "uploading", sentBytes: 0, totalBytes: file.size });
             const session = await api.startRestoreUpload(file.size);
-            uploadId.current = session.uploadId;
+            run.uploadId = session.uploadId;
             await uploadBackupFile({
                 file,
                 session,
                 uploadChunk: (id, index, chunk, signal) =>
                     api.uploadRestoreChunk(id, index, chunk, signal),
                 onProgress: (sentBytes) => {
-                    if (!mounted.current) return;
+                    if (!mounted.current || activeRun.current !== run) return;
                     setFlow({
                         kind: "uploading",
                         sentBytes,
                         totalBytes: file.size,
                     });
                 },
-                signal: abort.signal,
+                signal: run.abort.signal,
             });
-            await finishStart(session.uploadId, passphrase);
+            await finishStart(run, passphrase);
         },
         [finishStart, mounted],
     );
@@ -203,26 +190,38 @@ export function useRestoreFlow(): RestoreFlowControls {
     const start = useCallback(
         (file: File, passphrase: string) => {
             stop();
-            void runUpload(file, passphrase).catch(handleStartError);
+            const run: RestoreRun = {
+                abort: new AbortController(),
+                uploadId: null,
+                startSent: false,
+            };
+            activeRun.current = run;
+            void runUpload(run, file, passphrase).catch((error: unknown) =>
+                handleRunError(run, error),
+            );
         },
-        [handleStartError, runUpload, stop],
+        [handleRunError, runUpload, stop],
     );
 
     const retryPassphrase = useCallback(
         (passphrase: string) => {
-            const id = uploadId.current;
-            if (!id) {
+            const run = activeRun.current;
+            if (!run?.uploadId) {
                 setFlow({ kind: "form", error: null });
                 return;
             }
-            void finishStart(id, passphrase).catch(handleStartError);
+            void finishStart(run, passphrase).catch((error: unknown) =>
+                handleRunError(run, error),
+            );
         },
-        [finishStart, handleStartError],
+        [finishStart, handleRunError],
     );
 
     const cancel = useCallback(() => {
-        uploadAbort.current?.abort();
-        discardUpload(uploadId);
+        const run = activeRun.current;
+        activeRun.current = null;
+        run?.abort.abort();
+        discardRunUpload(run);
         setFlow({ kind: "form", error: null });
     }, []);
 

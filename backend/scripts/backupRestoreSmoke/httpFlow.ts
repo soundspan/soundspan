@@ -243,14 +243,19 @@ export async function verifyRestartBarrier(
     baseUrl: string,
     token: string,
 ): Promise<void> {
-    const response = await fetchBounded(`${baseUrl}/api/playlists`, {
-        headers: bearer(token),
-    });
-    const body = await expectJson(response, 503);
-    assertSmoke(
-        body.code === "RESTART_REQUIRED",
-        "Post-restore API was not restart-blocked",
-    );
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await fetchBounded(`${baseUrl}/api/playlists`, {
+            headers: bearer(token),
+        });
+        const body = await expectJson(response, 503);
+        if (body.code === "RESTART_REQUIRED") return;
+        if (attempt === 0 && body.code === "RESTORE_IN_PROGRESS") {
+            await new Promise<void>((resolve) => setTimeout(resolve, 250));
+            continue;
+        }
+        throw new Error("Post-restore API was not restart-blocked");
+    }
+    throw new Error("Post-restore API remained restore-in-progress");
 }
 
 export async function loginAndVerify(baseUrl: string): Promise<void> {

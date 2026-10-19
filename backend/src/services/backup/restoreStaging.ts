@@ -39,11 +39,7 @@ export async function ensureRestoreStorage(sizeBytes: number): Promise<void> {
     try {
         stats = await fs.statfs(directory);
     } catch (cause) {
-        throw new RestoreError(
-            "INSUFFICIENT_STORAGE",
-            "Available restore storage could not be determined",
-            { cause },
-        );
+        throw stagingUnavailable(cause);
     }
     const required =
         sizeBytes +

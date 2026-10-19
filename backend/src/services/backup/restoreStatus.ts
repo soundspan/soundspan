@@ -3,7 +3,9 @@ import { z } from "zod";
 import type { RestoreProgress } from "./restoreDataLoad";
 import { isRestoreLockHeld } from "./restoreLock";
 import { RestoreError } from "./backupErrors";
+import { logger as rootLogger } from "../../utils/logger";
 
+const logger = rootLogger.child("BackupRestore");
 const STATUS_KEY = "restore:status";
 const STATUS_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STATUS_READ_TIMEOUT_MS = 250;
@@ -102,9 +104,28 @@ const idleStatus: RestoreStatus = {
 };
 
 export async function setRestoreStatus(status: RestoreStatus): Promise<void> {
-    await redisClient.set(STATUS_KEY, JSON.stringify(sanitizeStatus(status)), {
-        EX: STATUS_TTL_SECONDS,
-    });
+    let timeoutId: NodeJS.Timeout | undefined;
+    try {
+        const timeout = new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(
+                () => reject(new Error("Restore status write timed out")),
+                STATUS_READ_TIMEOUT_MS,
+            );
+            timeoutId.unref();
+        });
+        await Promise.race([
+            redisClient.set(
+                STATUS_KEY,
+                JSON.stringify(sanitizeStatus(status)),
+                { EX: STATUS_TTL_SECONDS },
+            ),
+            timeout,
+        ]);
+    } catch (error) {
+        logger.warn("Could not persist restore status", error);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
 }
 
 export async function getRestoreStatus(

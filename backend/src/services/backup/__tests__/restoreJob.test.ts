@@ -20,14 +20,21 @@ const mockUserCount = jest.fn();
 const mockRm = jest.fn();
 const mockUnlink = jest.fn();
 const mockLoggerError = jest.fn();
+const mockLoggerWarn = jest.fn();
 const mockClient = Object.assign(new EventEmitter(), {
     connect: mockClientConnect,
     end: mockClientEnd,
     query: mockClientQuery,
 });
+const mockFreshClient = Object.assign(new EventEmitter(), {
+    connect: jest.fn(),
+    end: jest.fn(),
+    query: jest.fn(),
+});
+const mockClientQueue: Array<typeof mockClient> = [];
 
 jest.mock("pg", () => ({
-    Client: jest.fn(() => mockClient),
+    Client: jest.fn(() => mockClientQueue.shift() ?? mockClient),
 }));
 jest.mock("fs/promises", () => ({
     __esModule: true,
@@ -56,7 +63,7 @@ jest.mock("../../../utils/logger", () => ({
         child: () => ({
             error: mockLoggerError,
             info: jest.fn(),
-            warn: jest.fn(),
+            warn: mockLoggerWarn,
             debug: jest.fn(),
         }),
     },
@@ -128,8 +135,12 @@ async function waitForTerminalStatus(): Promise<void> {
 describe("restore job", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockClientQueue.splice(0, mockClientQueue.length);
         mockClientConnect.mockResolvedValue(undefined);
         mockClientEnd.mockResolvedValue(undefined);
+        mockFreshClient.connect.mockResolvedValue(undefined);
+        mockFreshClient.end.mockResolvedValue(undefined);
+        mockFreshClient.query.mockResolvedValue({ rows: [] });
         mockClientQuery.mockImplementation(async (sql: string) =>
             sql.includes("pg_try_advisory_lock")
                 ? { rows: [{ acquired: true }] }
@@ -144,7 +155,14 @@ describe("restore job", () => {
             pendingAfterLoad: 0,
             checksumWarnings: [],
         });
-        mockResetSchema.mockResolvedValue(undefined);
+        mockResetSchema.mockImplementation(
+            async (
+                _client: unknown,
+                options?: { onCommitted?: () => void },
+            ) => {
+                options?.onCommitted?.();
+            },
+        );
         mockReplayMigrations.mockResolvedValue(undefined);
         mockDeployMigrations.mockResolvedValue(undefined);
         mockLoadData.mockResolvedValue(undefined);
@@ -199,7 +217,11 @@ describe("restore job", () => {
                 _header: unknown,
                 _progress: unknown,
                 beforeCommit: (client: typeof mockClient) => Promise<void>,
-            ) => beforeCommit(mockClient),
+                afterCommit: () => void,
+            ) => {
+                await beforeCommit(mockClient);
+                afterCommit();
+            },
         );
         mockClientQuery.mockImplementation(async (sql: string) => {
             if (sql.includes("pg_try_advisory_lock")) {
@@ -234,6 +256,123 @@ describe("restore job", () => {
         resolveLoad?.();
         expect(mockSetStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({ state: "failed" }),
+        );
+    });
+
+    it("cancels an in-flight migration and cleans up through a fresh client", async () => {
+        mockClientQueue.push(mockClient, mockFreshClient);
+        let replaySignal: AbortSignal | undefined;
+        mockReplayMigrations.mockImplementation(
+            async (
+                _directory: string,
+                _migrations: unknown[],
+                _databaseUrl: string,
+                signal?: AbortSignal,
+            ) => {
+                replaySignal = signal;
+                await new Promise<void>((_resolve, reject) => {
+                    signal?.addEventListener(
+                        "abort",
+                        () => reject(signal.reason),
+                        { once: true },
+                    );
+                });
+            },
+        );
+
+        await startRestoreJob(jobOptions);
+        for (let attempt = 0; attempt < 20 && !replaySignal; attempt += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        mockClient.emit("error", new Error("connection terminated"));
+        await waitForTerminalStatus();
+
+        expect(replaySignal?.aborted).toBe(true);
+        expect(mockResetSchema).toHaveBeenNthCalledWith(
+            2,
+            mockFreshClient,
+            expect.objectContaining({ allowExistingUsers: true }),
+        );
+        expect(mockFreshClient.connect).toHaveBeenCalledTimes(1);
+        expect(mockFreshClient.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("recovers a completed migrated restore after the load connection drops", async () => {
+        mockClientQueue.push(mockClient, mockFreshClient);
+        mockReadImageMigrations.mockResolvedValue([
+            { name: "001_init", checksum: "image" },
+        ]);
+        mockEvaluateCompatibility.mockReturnValue({
+            outcome: "ok",
+            migrationsToReplay: [{ name: "001_init", checksum: "image" }],
+            pendingAfterLoad: 0,
+            checksumWarnings: [],
+        });
+        mockClientQuery.mockImplementation(async (sql: string) => {
+            if (sql.includes("pg_try_advisory_lock")) {
+                return { rows: [{ acquired: true }] };
+            }
+            if (sql.includes("SELECT EXISTS")) {
+                return { rows: [{ present: true }] };
+            }
+            return { rows: [] };
+        });
+        mockLoadData.mockImplementation(
+            async (
+                _client: unknown,
+                _file: unknown,
+                _header: unknown,
+                _progress: unknown,
+                beforeCommit: (client: typeof mockClient) => Promise<void>,
+                afterCommit: () => void,
+            ) => {
+                await beforeCommit(mockClient);
+                afterCommit();
+            },
+        );
+        let deploySignal: AbortSignal | undefined;
+        mockDeployMigrations
+            .mockImplementationOnce(
+                async (_url: string, signal?: AbortSignal) => {
+                    deploySignal = signal;
+                    await new Promise<void>((_resolve, reject) => {
+                        signal?.addEventListener(
+                            "abort",
+                            () => reject(signal.reason),
+                            { once: true },
+                        );
+                    });
+                },
+            )
+            .mockResolvedValueOnce(undefined);
+        mockFreshClient.query.mockImplementation(async (sql: string) => {
+            if (sql.includes("_prisma_migrations")) {
+                return { rows: [{ migration_name: "001_init" }] };
+            }
+            if (sql.includes('FROM public."User"')) {
+                return { rows: [{ present: true }] };
+            }
+            return { rows: [] };
+        });
+
+        await startRestoreJob(jobOptions);
+        for (let attempt = 0; attempt < 20 && !deploySignal; attempt += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        mockClient.emit("error", new Error("connection terminated"));
+        await waitForTerminalStatus();
+
+        expect(deploySignal?.aborted).toBe(true);
+        expect(mockDeployMigrations).toHaveBeenCalledTimes(2);
+        expect(mockResetSchema).toHaveBeenCalledTimes(1);
+        expect(mockReencrypt).toHaveBeenCalledWith(
+            mockFreshClient,
+            "backup-key",
+            "current-key",
+            expect.any(Set),
+        );
+        expect(mockSetStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({ state: "complete" }),
         );
     });
 
@@ -298,7 +437,12 @@ describe("restore job", () => {
     it("reports cleanup failure when the database cannot be reset", async () => {
         mockLoadData.mockRejectedValue(new Error("load failed"));
         mockResetSchema
-            .mockResolvedValueOnce(undefined)
+            .mockImplementationOnce(
+                async (
+                    _client: unknown,
+                    options?: { onCommitted?: () => void },
+                ) => options?.onCommitted?.(),
+            )
             .mockRejectedValueOnce(new Error("cleanup failed"));
         await startRestoreJob(jobOptions);
         await waitForTerminalStatus();
@@ -359,6 +503,44 @@ describe("restore job", () => {
         expect(loading).toHaveLength(3);
         expect(loading[0].progress.completedRows).toBe(0);
         expect(loading.at(-1).progress.completedRows).toBe(2);
+    });
+
+    it("does not await progress persistence inside the load transaction", async () => {
+        mockLoadData.mockImplementation(
+            async (_client, _path, _header, report) => {
+                expect(
+                    report({
+                        completedTables: 0,
+                        totalTables: 1,
+                        completedRows: 1,
+                        totalRows: 2,
+                    }),
+                ).toBeUndefined();
+            },
+        );
+
+        await startRestoreJob(jobOptions);
+        await waitForTerminalStatus();
+
+        expect(mockSetStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({ state: "complete" }),
+        );
+    });
+
+    it("does not clean up restored data when restart-marker publication fails", async () => {
+        mockMarkRestart.mockRejectedValue(new Error("redis unavailable"));
+
+        await startRestoreJob(jobOptions);
+        await waitForTerminalStatus();
+
+        expect(mockResetSchema).toHaveBeenCalledTimes(1);
+        expect(mockSetStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({ state: "complete" }),
+        );
+        expect(mockLoggerError).toHaveBeenCalledWith(
+            "Restore completed but restart-marker publication failed; restart soundspan before serving application traffic",
+            expect.any(Error),
+        );
     });
 
     it("logs the redacted Prisma output tail for migration failures", async () => {

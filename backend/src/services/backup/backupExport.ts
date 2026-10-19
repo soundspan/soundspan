@@ -40,14 +40,18 @@ export interface OpenBackupExport {
     close(): Promise<void>;
 }
 
-async function writeCompressed(gzip: Writable, value: string): Promise<void> {
+async function writeCompressed(
+    gzip: Writable,
+    outputFinished: Promise<void>,
+    value: string,
+): Promise<void> {
     if (Buffer.byteLength(value, "utf8") > MAX_BACKUP_RECORD_BYTES) {
         throw new Error("Backup record exceeds the restore reader limit");
     }
     if (!gzip.write(value)) {
         await Promise.race([
             once(gzip, "drain"),
-            finished(gzip).then(() => {
+            outputFinished.then(() => {
                 throw new Error("Backup output closed before draining");
             }),
         ]);
@@ -118,6 +122,7 @@ async function declareTableCursor(
 async function writeTableRows(
     client: Client,
     gzip: Writable,
+    outputFinished: Promise<void>,
     table: CatalogTable,
     hmac: crypto.Hmac,
 ): Promise<void> {
@@ -135,7 +140,7 @@ async function writeTableRows(
         };
         const encoded = encodeBackupRecord(record);
         hmac.update(encoded, "utf8");
-        await writeCompressed(gzip, encoded);
+        await writeCompressed(gzip, outputFinished, encoded);
         rows = [];
         bytes = 2;
         batchCount += 1;
@@ -211,20 +216,24 @@ async function streamSnapshot(
 ): Promise<void> {
     const gzip = createGzip();
     const outputPipeline = pipeline(gzip, output);
-    await client.query("SET statement_timeout = '10min'");
-    await client.query("SET idle_in_transaction_session_timeout = '30min'");
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    void outputPipeline.catch(() => undefined);
+    const outputFinished = finished(gzip);
+    void outputFinished.catch(() => undefined);
     try {
+        await client.query("SET statement_timeout = '10min'");
+        await client.query("SET idle_in_transaction_session_timeout = '30min'");
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
         const { header, tables } = await buildHeader(client, options);
         const hmac = crypto.createHmac("sha256", options.macKey);
         const encodedHeader = encodeBackupRecord(header);
         hmac.update(encodedHeader, "utf8");
-        await writeCompressed(gzip, encodedHeader);
+        await writeCompressed(gzip, outputFinished, encodedHeader);
         for (const table of tables) {
-            await writeTableRows(client, gzip, table, hmac);
+            await writeTableRows(client, gzip, outputFinished, table, hmac);
         }
         await writeCompressed(
             gzip,
+            outputFinished,
             encodeBackupRecord({
                 type: "end",
                 mac: hmac.digest("base64"),
@@ -250,14 +259,14 @@ export async function openBackupExport(
         connectionTimeoutMillis: 10_000,
         query_timeout: 10 * 60 * 1000,
     });
-    let resolveClientFailure: (error: Error) => void = () => undefined;
+    let resolveClientFailure: ((error: Error) => void) | null = null;
     const clientFailure = new Promise<Error>((resolve) => {
         resolveClientFailure = resolve;
     });
     let activeOutput: Writable | null = null;
     const onClientError = (error: Error): void => {
         activeOutput?.destroy(error);
-        resolveClientFailure(error);
+        resolveClientFailure?.(error);
     };
     client.on("error", onClientError);
     try {

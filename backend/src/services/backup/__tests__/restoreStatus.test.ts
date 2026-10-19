@@ -7,11 +7,15 @@ const mockRedis = {
     set: jest.fn(),
 };
 const mockRestoreLockHeld = jest.fn();
+const mockLoggerWarn = jest.fn();
 
 jest.mock("../../../utils/redis", () => ({
     redisClient: mockRedis,
 }));
 jest.mock("../restoreLock", () => ({ isRestoreLockHeld: mockRestoreLockHeld }));
+jest.mock("../../../utils/logger", () => ({
+    logger: { child: () => ({ warn: mockLoggerWarn }) },
+}));
 
 describe("effective restore status", () => {
     beforeEach(() => {
@@ -127,5 +131,31 @@ describe("effective restore status", () => {
         await expect(getRestoreStatus()).resolves.toMatchObject({
             error: { message: "y".repeat(500) },
         });
+    });
+
+    it("bounds a stalled status write and treats it as best effort", async () => {
+        jest.useFakeTimers();
+        mockRedis.set.mockReturnValueOnce(new Promise(() => undefined));
+        const { setRestoreStatus } = await import("../restoreStatus");
+        const pending = setRestoreStatus({
+            state: "loading",
+            progress: {
+                completedTables: 0,
+                totalTables: 1,
+                completedRows: 0,
+                totalRows: 1,
+            },
+            error: null,
+            summary: null,
+        });
+
+        await jest.advanceTimersByTimeAsync(251);
+
+        await expect(pending).resolves.toBeUndefined();
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Could not persist restore status",
+            expect.any(Error),
+        );
+        jest.useRealTimers();
     });
 });

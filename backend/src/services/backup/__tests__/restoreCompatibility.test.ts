@@ -1,4 +1,11 @@
-import { evaluateRestoreCompatibility } from "../restoreCompatibility";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {
+    evaluateRestoreCompatibility,
+    readImageMigrations,
+} from "../restoreCompatibility";
 
 const a = { name: "001_a", checksum: "aaa" };
 const b = { name: "002_b", checksum: "bbb" };
@@ -56,5 +63,43 @@ describe("restore compatibility", () => {
             pendingAfterLoad: 1,
             checksumWarnings: [a.name],
         });
+    });
+
+    it("reads sorted migration directories and hashes migration bytes", async () => {
+        const directory = await fs.mkdtemp(
+            path.join(os.tmpdir(), "image-migrations-"),
+        );
+        try {
+            await fs.mkdir(path.join(directory, "002_second"));
+            await fs.mkdir(path.join(directory, "001_first"));
+            await fs.writeFile(path.join(directory, "README"), "ignored");
+            await fs.writeFile(
+                path.join(directory, "002_second", "migration.sql"),
+                "SELECT 2;\n",
+            );
+            await fs.writeFile(
+                path.join(directory, "001_first", "migration.sql"),
+                "SELECT 1;\n",
+            );
+
+            await expect(readImageMigrations(directory)).resolves.toEqual([
+                {
+                    name: "001_first",
+                    checksum: crypto
+                        .createHash("sha256")
+                        .update("SELECT 1;\n")
+                        .digest("hex"),
+                },
+                {
+                    name: "002_second",
+                    checksum: crypto
+                        .createHash("sha256")
+                        .update("SELECT 2;\n")
+                        .digest("hex"),
+                },
+            ]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
     });
 });

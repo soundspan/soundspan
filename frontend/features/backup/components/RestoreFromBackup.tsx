@@ -9,7 +9,9 @@ import {
 import { useRestoreFlow } from "../hooks/useRestoreFlow";
 import {
     OtherUploadView,
+    ReconnectingView,
     RestoreCompleteView,
+    RestoreUnavailableView,
     RestoreFailedView,
     RestoreRunningView,
     UploadProgressView,
@@ -211,6 +213,10 @@ function RestoreFlowBody({ onBack }: { onBack?: () => void }) {
             );
         case "otherUpload":
             return <OtherUploadView expiresAt={flow.expiresAt} />;
+        case "unavailable":
+            return <RestoreUnavailableView />;
+        case "reconnecting":
+            return <ReconnectingView />;
         case "restoring":
             return <RestoreRunningView status={flow.status} />;
         case "complete":
@@ -223,7 +229,7 @@ function RestoreFlowBody({ onBack }: { onBack?: () => void }) {
                         freshInstallIntact={flow.freshInstallIntact}
                         onRetry={reset}
                     />
-                    <BackLink onBack={onBack} />
+                    {flow.freshInstallIntact && <BackLink onBack={onBack} />}
                 </>
             );
     }

@@ -23,7 +23,7 @@ jest.mock("../../utils/redis", () => ({
 }));
 
 jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn() },
+    logger: { warn: jest.fn(), debug: jest.fn() },
 }));
 
 jest.mock("../metadata/albumCoverResolver", () => ({
@@ -42,6 +42,7 @@ jest.mock("../coverArtExtractor", () => ({
 }));
 
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { resolveAlbumCover } from "../metadata/albumCoverResolver";
 import { downloadAndStoreImage } from "../imageStorage";
 import {
@@ -91,6 +92,36 @@ describe("native cover healing", () => {
             data: { coverUrl: "native:embedded-album.jpg" },
         });
         expect(result).toContain("native%3Aembedded-album.jpg");
+    });
+
+    it("negative-caches a failed embedded-art fallback per album", async () => {
+        mockAlbumFindUnique.mockResolvedValue({
+            id: "missing-file-album",
+            title: "Missing file album",
+            rgMbid: null,
+            coverUrl: "native:missing-file-album.jpg",
+            location: "LIBRARY",
+            artist: { name: "Local artist" },
+        });
+        mockResolveAlbumCover.mockResolvedValue(null);
+        mockTrackFindFirst.mockResolvedValue({
+            filePath: "Artist/Album/missing.flac",
+        });
+        mockExtractCoverArt.mockResolvedValue(null);
+
+        await expect(
+            tryHealMissingNativeAlbumCover("missing-file-album.jpg"),
+        ).resolves.toBeNull();
+        await expect(
+            tryHealMissingNativeAlbumCover("missing-file-album.jpg"),
+        ).resolves.toBeNull();
+
+        expect(mockExtractCoverArt).toHaveBeenCalledTimes(1);
+        expect(logger.debug).toHaveBeenCalledTimes(1);
+        expect(logger.debug).toHaveBeenCalledWith(
+            "Embedded cover fallback unavailable for album",
+            { albumId: "missing-file-album" },
+        );
     });
 
     it("conditionally clears stale native cover state before routing a federated album through the proxy endpoint", async () => {

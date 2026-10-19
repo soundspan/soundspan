@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
-// Time-to-first-byte budgets for backend requests, matching the retired
-// Next route-handler proxy (lib/apiProxy.ts): 20s for regular API calls,
-// 90s for the long-running import preview, both overridable via env, and at
-// least 120s for backup-restore chunk uploads, whose budget includes sending
-// a multi-megabyte request body over a possibly slow link.
+// Time-to-first-byte budgets for backend requests, matching the Next
+// route-handler proxy (lib/apiProxy.ts): 20s for regular API calls, 90s for
+// the long-running import preview, both overridable via env, and at least
+// 120s for every backup-restore upload request under /api/restore/uploads
+// (creating an upload, its multi-megabyte chunks, and starting the restore).
 const DEFAULT_PROXY_TIMEOUT_MS = 20000;
 const DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS = 90000;
 const DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS = 120000;
@@ -54,8 +54,8 @@ function isRestoreUploadPath(pathname) {
  * Resolve the time-to-first-byte budget for a proxied backend request.
  * Honors PROXY_REQUEST_TIMEOUT_MS globally and
  * PROXY_IMPORT_PREVIEW_TIMEOUT_MS for the import-preview path prefix
- * (which otherwise never drops below its 90s default); restore chunk
- * uploads never drop below 120s.
+ * (which otherwise never drops below its 90s default); restore upload
+ * requests never drop below 120s.
  *
  * @param {string} pathname
  * @param {Record<string, string | undefined>} [env]

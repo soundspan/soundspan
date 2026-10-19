@@ -64,6 +64,49 @@ interface StartJobOptions {
     macKey: Buffer;
 }
 
+type CompatibleRestore = Extract<CompatibilityResult, { outcome: "ok" }>;
+type CredentialResult = Awaited<
+    ReturnType<typeof reencryptRestoredCredentials>
+>;
+
+interface PreparedRestore {
+    validated: ArchiveValidation;
+    compatibility: CompatibleRestore;
+    imageMigrations: Awaited<ReturnType<typeof readImageMigrations>>;
+}
+
+interface RestoreExecutionState {
+    prepared: PreparedRestore | null;
+    progress: RestoreProgress | null;
+    firstPass: CredentialResult;
+    currentKey: string | null;
+    resetStarted: boolean;
+    loadCommitted: boolean;
+    migrateStarted: boolean;
+    replayDir: string | null;
+}
+
+function emptyCredentialResult(): CredentialResult {
+    return {
+        credentialsReencrypted: 0,
+        credentialsUndecryptable: 0,
+        processedColumns: [],
+    };
+}
+
+function createExecutionState(): RestoreExecutionState {
+    return {
+        prepared: null,
+        progress: null,
+        firstPass: emptyCredentialResult(),
+        currentKey: null,
+        resetStarted: false,
+        loadCommitted: false,
+        migrateStarted: false,
+        replayDir: null,
+    };
+}
+
 async function cleanupFreshInstall(client: Client): Promise<void> {
     await resetApplicationSchema(client, { allowExistingUsers: true });
     await deployCurrentMigrations(config.databaseUrl);
@@ -79,8 +122,6 @@ function safeFailure(error: unknown): { code: string; message: string } {
             "The restore failed. The instance was reset to a fresh install.",
     };
 }
-
-type CompatibleRestore = Extract<CompatibilityResult, { outcome: "ok" }>;
 
 async function updatePhase(
     restoreId: string,
@@ -102,6 +143,7 @@ async function prepareRestore(
 ): Promise<{
     validated: ArchiveValidation;
     compatibility: CompatibleRestore;
+    imageMigrations: Awaited<ReturnType<typeof readImageMigrations>>;
 }> {
     const validated = await validateBackupArchive(filePath, macKey);
     const imageMigrations = await readImageMigrations(
@@ -122,7 +164,7 @@ async function prepareRestore(
             migrations: compatibility.checksumWarnings,
         });
     }
-    return { validated, compatibility };
+    return { validated, compatibility, imageMigrations };
 }
 
 function initialProgress(validated: ArchiveValidation): RestoreProgress {
@@ -134,77 +176,106 @@ function initialProgress(validated: ArchiveValidation): RestoreProgress {
     };
 }
 
-async function loadAndMigrate(
+async function reencryptBeforeCommit(
     client: Client,
     restoreId: string,
-    filePath: string,
-    validated: ArchiveValidation,
     options: StartJobOptions,
     currentKey: string,
-): Promise<{ progress: RestoreProgress; credentials: ReencryptSummary }> {
-    const progress = initialProgress(validated);
+): Promise<CredentialResult> {
+    const admin = await client.query<{ present: boolean }>(`
+        SELECT EXISTS (
+            SELECT 1 FROM public."User" WHERE role = 'admin'
+        ) AS present
+    `);
+    if (admin.rows[0]?.present !== true) {
+        throw new RestoreError(
+            "BACKUP_HAS_NO_ADMIN",
+            "This backup has no admin account.",
+        );
+    }
+    await updatePhase(restoreId, "reencrypting");
+    return reencryptRestoredCredentials(client, options.backupKey, currentKey);
+}
+
+async function loadRestoreData(
+    client: Client,
+    restoreId: string,
+    options: StartJobOptions,
+    state: RestoreExecutionState,
+    signal: AbortSignal,
+): Promise<void> {
+    const prepared = state.prepared;
+    const currentKey = state.currentKey;
+    if (!prepared || !currentKey) throw new Error("Restore was not prepared");
+    const progress = initialProgress(prepared.validated);
+    state.progress = progress;
     const reportProgress = createProgressWriter(restoreId);
     await reportProgress(progress, true);
-    let firstPass: Awaited<ReturnType<typeof reencryptRestoredCredentials>> = {
-        credentialsReencrypted: 0,
-        credentialsUndecryptable: 0,
-        processedColumns: [],
-    };
     await loadBackupData(
         client,
-        filePath,
-        validated.header,
-        async (latest) => {
-            await reportProgress(latest).catch((error) =>
+        options.filePath,
+        prepared.validated.header,
+        (latest) => {
+            void reportProgress(latest).catch((error) =>
                 logger.warn("Could not update restore progress", error),
             );
         },
         async (transactionClient) => {
-            const admin = await transactionClient.query<{ present: boolean }>(
-                `SELECT EXISTS (
-                    SELECT 1 FROM public."User" WHERE role = 'admin'
-                ) AS present`,
-            );
-            if (admin.rows[0]?.present !== true) {
-                throw new RestoreError(
-                    "BACKUP_HAS_NO_ADMIN",
-                    "This backup has no admin account.",
-                );
-            }
-            await updatePhase(restoreId, "reencrypting");
-            firstPass = await reencryptRestoredCredentials(
+            state.firstPass = await reencryptBeforeCommit(
                 transactionClient,
-                options.backupKey,
+                restoreId,
+                options,
                 currentKey,
             );
         },
+        () => {
+            state.loadCommitted = true;
+        },
+        signal,
     );
-    const completeProgress: RestoreProgress = {
+    state.progress = {
         completedTables: progress.totalTables,
         totalTables: progress.totalTables,
         completedRows: progress.totalRows,
         totalRows: progress.totalRows,
     };
-    await reportProgress(completeProgress, true);
-    await updatePhase(restoreId, "migrating", completeProgress);
-    await deployCurrentMigrations(config.databaseUrl);
+    await reportProgress(state.progress, true);
+}
+
+function combineCredentials(
+    firstPass: CredentialResult,
+    secondPass: ReencryptSummary,
+): ReencryptSummary {
+    return {
+        credentialsReencrypted:
+            firstPass.credentialsReencrypted +
+            secondPass.credentialsReencrypted,
+        credentialsUndecryptable:
+            firstPass.credentialsUndecryptable +
+            secondPass.credentialsUndecryptable,
+    };
+}
+
+async function migrateLoadedData(
+    client: Client,
+    restoreId: string,
+    options: StartJobOptions,
+    state: RestoreExecutionState,
+    signal?: AbortSignal,
+): Promise<ReencryptSummary> {
+    if (!state.progress || !state.currentKey) {
+        throw new Error("Restore data was not loaded");
+    }
+    await updatePhase(restoreId, "migrating", state.progress);
+    state.migrateStarted = true;
+    await deployCurrentMigrations(config.databaseUrl, signal);
     const secondPass = await reencryptRestoredCredentials(
         client,
         options.backupKey,
-        currentKey,
-        new Set(firstPass.processedColumns),
+        state.currentKey,
+        new Set(state.firstPass.processedColumns),
     );
-    return {
-        progress: completeProgress,
-        credentials: {
-            credentialsReencrypted:
-                firstPass.credentialsReencrypted +
-                secondPass.credentialsReencrypted,
-            credentialsUndecryptable:
-                firstPass.credentialsUndecryptable +
-                secondPass.credentialsUndecryptable,
-        },
-    };
+    return combineCredentials(state.firstPass, secondPass);
 }
 
 function createProgressWriter(
@@ -248,7 +319,14 @@ async function finishRestore(
         apiKeysNeedReissue:
             options.backupPepperFingerprint !== getPepperFingerprint(),
     };
-    await markRestartRequired();
+    try {
+        await markRestartRequired();
+    } catch (error) {
+        logger.error(
+            "Restore completed but restart-marker publication failed; restart soundspan before serving application traffic",
+            error,
+        );
+    }
     await setRestoreStatus({
         restoreId,
         state: "complete",
@@ -263,10 +341,98 @@ async function finishRestore(
     });
 }
 
-async function handleRestoreFailure(
+function newRestoreClient(): Client {
+    return new Client({
+        connectionString: config.databaseUrl,
+        connectionTimeoutMillis: 10_000,
+        query_timeout: 2 * 60 * 60 * 1000,
+    });
+}
+
+async function withFreshRestoreClient<T>(
+    work: (client: Client) => Promise<T>,
+): Promise<T> {
+    const client = newRestoreClient();
+    const onError = (error: Error): void => {
+        logger.warn("Fresh restore database connection failed", error);
+    };
+    client.on("error", onError);
+    try {
+        await client.connect();
+        return await work(client);
+    } finally {
+        client.off("error", onError);
+        await client.end().catch(() => undefined);
+    }
+}
+
+async function restoredDatabaseIsComplete(
     client: Client,
+    state: RestoreExecutionState,
+): Promise<boolean> {
+    if (!state.prepared) return false;
+    const applied = await client.query<{ migration_name: string }>(`
+        SELECT migration_name
+          FROM public._prisma_migrations
+         WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
+    `);
+    const appliedNames = new Set(applied.rows.map((row) => row.migration_name));
+    const migrationsComplete = state.prepared.imageMigrations.every((entry) =>
+        appliedNames.has(entry.name),
+    );
+    if (!migrationsComplete) return false;
+    const users = await client.query<{ present: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM public."User") AS present
+    `);
+    return users.rows[0]?.present === true;
+}
+
+async function tryRecoverCommittedRestore(
     restoreId: string,
-    resetStarted: boolean,
+    options: StartJobOptions,
+    state: RestoreExecutionState,
+): Promise<boolean> {
+    const prepared = state.prepared;
+    const progress = state.progress;
+    if (
+        !state.loadCommitted ||
+        !state.migrateStarted ||
+        !prepared ||
+        !progress ||
+        !state.currentKey
+    ) {
+        return false;
+    }
+    try {
+        return await withFreshRestoreClient(async (client) => {
+            if (!(await restoredDatabaseIsComplete(client, state)))
+                return false;
+            const credentials = await migrateLoadedData(
+                client,
+                restoreId,
+                options,
+                state,
+            );
+            await finishRestore(
+                restoreId,
+                options,
+                prepared.validated,
+                prepared.compatibility,
+                progress,
+                credentials,
+            );
+            return true;
+        });
+    } catch (error) {
+        logger.error("Restore recovery after connection loss failed", error);
+        return false;
+    }
+}
+
+async function handleRestoreFailure(
+    restoreId: string,
+    options: StartJobOptions,
+    state: RestoreExecutionState,
     failure: unknown,
 ): Promise<void> {
     logger.error("Restore job failed", failure);
@@ -275,10 +441,11 @@ async function handleRestoreFailure(
             outputTail: failure.outputTail,
         });
     }
+    if (await tryRecoverCommittedRestore(restoreId, options, state)) return;
     let reportedFailure = safeFailure(failure);
-    if (resetStarted) {
+    if (state.resetStarted) {
         try {
-            await cleanupFreshInstall(client);
+            await withFreshRestoreClient(cleanupFreshInstall);
             logger.info("Restore failure cleanup completed");
         } catch (cleanupFailure) {
             logger.error("Restore failure cleanup failed", cleanupFailure);
@@ -295,7 +462,7 @@ async function handleRestoreFailure(
         progress: null,
         error: reportedFailure,
         summary: null,
-    });
+    }).catch((error) => logger.warn("Could not report restore failure", error));
 }
 
 async function releaseRestoreResources(
@@ -317,6 +484,63 @@ async function releaseRestoreResources(
     invalidateRestoreLockCache();
 }
 
+function assertRestoreConnection(
+    signal: AbortSignal,
+    getConnectionError: () => Error | null,
+): void {
+    signal.throwIfAborted();
+    const error = getConnectionError();
+    if (error) throw error;
+}
+
+async function runRestorePhases(
+    client: Client,
+    restoreId: string,
+    options: StartJobOptions,
+    state: RestoreExecutionState,
+    signal: AbortSignal,
+    getConnectionError: () => Error | null,
+): Promise<void> {
+    state.prepared = await prepareRestore(options.filePath, options.macKey);
+    assertRestoreConnection(signal, getConnectionError);
+    state.replayDir = path.join(restoreStagingDirectory(), "migration-replay");
+    await updatePhase(restoreId, "resetting");
+    await resetApplicationSchema(client, {
+        onCommitted: () => {
+            state.resetStarted = true;
+        },
+    });
+    assertRestoreConnection(signal, getConnectionError);
+    await updatePhase(restoreId, "replaying");
+    await replayBackupMigrations(
+        restoreStagingDirectory(),
+        state.prepared.compatibility.migrationsToReplay,
+        config.databaseUrl,
+        signal,
+    );
+    assertRestoreConnection(signal, getConnectionError);
+    state.currentKey = getSettingsEncryptionKey();
+    await loadRestoreData(client, restoreId, options, state, signal);
+    assertRestoreConnection(signal, getConnectionError);
+    const credentials = await migrateLoadedData(
+        client,
+        restoreId,
+        options,
+        state,
+        signal,
+    );
+    assertRestoreConnection(signal, getConnectionError);
+    if (!state.progress) throw new Error("Restore progress was not recorded");
+    await finishRestore(
+        restoreId,
+        options,
+        state.prepared.validated,
+        state.prepared.compatibility,
+        state.progress,
+        credentials,
+    );
+}
+
 async function executeRestoreJob(
     client: Client,
     restoreId: string,
@@ -325,62 +549,30 @@ async function executeRestoreJob(
     detachClientError: () => void,
     getConnectionError: () => Error | null,
 ): Promise<void> {
-    let resetStarted = false;
-    let replayDir: string | null = null;
+    const state = createExecutionState();
+    const controller = new AbortController();
+    const work = runRestorePhases(
+        client,
+        restoreId,
+        options,
+        state,
+        controller.signal,
+        getConnectionError,
+    );
     try {
         await Promise.race([
-            (async () => {
-                const { validated, compatibility } = await prepareRestore(
-                    options.filePath,
-                    options.macKey,
-                );
-                const assertConnected = (): void => {
-                    const error = getConnectionError();
-                    if (error) throw error;
-                };
-                assertConnected();
-                replayDir = path.join(
-                    restoreStagingDirectory(),
-                    "migration-replay",
-                );
-                await updatePhase(restoreId, "resetting");
-                await resetApplicationSchema(client);
-                assertConnected();
-                resetStarted = true;
-                await updatePhase(restoreId, "replaying");
-                await replayBackupMigrations(
-                    restoreStagingDirectory(),
-                    compatibility.migrationsToReplay,
-                    config.databaseUrl,
-                );
-                assertConnected();
-                const currentKey = getSettingsEncryptionKey();
-                const loaded = await loadAndMigrate(
-                    client,
-                    restoreId,
-                    options.filePath,
-                    validated,
-                    options,
-                    currentKey,
-                );
-                assertConnected();
-                await finishRestore(
-                    restoreId,
-                    options,
-                    validated,
-                    compatibility,
-                    loaded.progress,
-                    loaded.credentials,
-                );
-            })(),
+            work,
             connectionFailure.then((error) => {
+                controller.abort(error);
                 throw error;
             }),
         ]);
     } catch (error) {
-        await handleRestoreFailure(client, restoreId, resetStarted, error);
+        controller.abort(error);
+        await work.catch(() => undefined);
+        await handleRestoreFailure(restoreId, options, state, error);
     } finally {
-        await releaseRestoreResources(client, options, replayDir);
+        await releaseRestoreResources(client, options, state.replayDir);
         detachClientError();
     }
 }
@@ -393,11 +585,7 @@ interface RestoreClientHandle {
 }
 
 async function acquireRestoreClient(): Promise<RestoreClientHandle> {
-    const client = new Client({
-        connectionString: config.databaseUrl,
-        connectionTimeoutMillis: 10_000,
-        query_timeout: 2 * 60 * 60 * 1000,
-    });
+    const client = newRestoreClient();
     let resolveFailure: (error: Error) => void = () => undefined;
     let connectionError: Error | null = null;
     const connectionFailure = new Promise<Error>((resolve) => {
