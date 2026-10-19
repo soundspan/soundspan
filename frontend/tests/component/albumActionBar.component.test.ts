@@ -237,3 +237,57 @@ test("AlbumActionBar hides acquisition controls for a synthetic remote release g
     assert.doesNotMatch(html, />Download</);
     assert.doesNotMatch(html, />Search</);
 });
+
+const matchedPlaceholderAlbum = {
+    ...baseProps.album,
+    owned: false,
+    rgMbid: "remote:generated-hash",
+    matchedRgMbid: "8e8a6f1c-0000-4000-8000-000000000002",
+};
+
+test("AlbumActionBar offers Download and Request for a streaming-only album with a MusicBrainz match", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const adminHtml = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: matchedPlaceholderAlbum,
+            source: "remote" as const,
+        }),
+    );
+    assert.match(adminHtml, />Download</);
+    assert.match(adminHtml, />Search</);
+
+    const memberHtml = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: matchedPlaceholderAlbum,
+            source: "remote" as const,
+            downloadsEnabled: false,
+            requestsEnabled: true,
+            onRequestAlbum: noop,
+        }),
+    );
+    assert.match(memberHtml, />Request</);
+});
+
+test("AlbumActionBar hides Download and Request once the library holds the matched album", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const html = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: { ...matchedPlaceholderAlbum, matchedInLibrary: true },
+            source: "remote" as const,
+            requestsEnabled: true,
+            onRequestAlbum: noop,
+        }),
+    );
+
+    assert.match(html, />Play All</);
+    assert.doesNotMatch(html, />Download</);
+    assert.doesNotMatch(html, />Search</);
+    assert.doesNotMatch(html, />Request</);
+});

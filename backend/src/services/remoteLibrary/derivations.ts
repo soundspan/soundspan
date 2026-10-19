@@ -60,7 +60,12 @@ function addArtistAlbum(
     stats: Map<string, RemoteLibraryArtistStats>,
     row: RemoteLibraryTrack,
 ): void {
-    if (row.albumLocation !== "REMOTE" || !row.albumId || !row.albumArtistId) {
+    if (
+        row.albumLocation !== "REMOTE" ||
+        row.albumMatchedInLibrary ||
+        !row.albumId ||
+        !row.albumArtistId
+    ) {
         return;
     }
     const current = artistStats(stats, row.albumArtistId);
@@ -84,7 +89,11 @@ export function deriveRemoteLibraryLookups(
     const albumProviders = new Map<string, Set<RemoteLibraryProvider>>();
     for (const row of tracks) {
         addArtistRow(byArtistId, row);
-        if (row.albumLocation !== "REMOTE" || !row.albumId) {
+        if (
+            row.albumLocation !== "REMOTE" ||
+            row.albumMatchedInLibrary ||
+            !row.albumId
+        ) {
             continue;
         }
         const providers = albumProviders.get(row.albumId) ?? new Set();

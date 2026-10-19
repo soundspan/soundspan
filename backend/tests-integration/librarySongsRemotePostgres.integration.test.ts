@@ -1,4 +1,6 @@
+import type { Request, Response } from "express";
 import { Client } from "pg";
+import { handleGetAlbums } from "../src/routes/library/albums";
 import {
     loadLibrarySongsPage,
     loadRemoteLibrarySet,
@@ -17,6 +19,43 @@ const describeWithPostgres =
     integrationDatabaseUrl && databaseName ? describe : describe.skip;
 const USER_ID = "remote-songs-user";
 const OTHER_USER_ID = "remote-songs-other";
+const HELD_PLACEHOLDER_ID = "remote-songs-held-placeholder";
+const UNHELD_PLACEHOLDER_ID = "remote-songs-unheld-placeholder";
+const HELD_RELEASE_GROUP = "remote-songs-held-release-group";
+
+type RouteResponse = {
+    statusCode: number;
+    body: unknown;
+    status(code: number): RouteResponse;
+    json(body: unknown): RouteResponse;
+};
+
+function createRouteResponse(): RouteResponse {
+    return {
+        statusCode: 200,
+        body: undefined,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        },
+    };
+}
+
+async function getAllAlbums(): Promise<RouteResponse> {
+    const response = createRouteResponse();
+    await handleGetAlbums(
+        {
+            query: { origin: "all", filter: "all" },
+            user: { id: USER_ID },
+        } as unknown as Request,
+        response as unknown as Response,
+    );
+    return response;
+}
 
 async function seedTrack(input: {
     id: string;
@@ -53,6 +92,7 @@ async function seedTidal(input: {
     title: string;
     userId: string;
     mappedTrackId?: string;
+    albumId?: string;
 }): Promise<void> {
     await prisma.trackTidal.create({
         data: {
@@ -62,6 +102,8 @@ async function seedTidal(input: {
             artist: "Integration Artist",
             album: "Integration Album",
             duration: 180,
+            artistId: input.albumId ? "remote-songs-artist" : undefined,
+            albumId: input.albumId,
         },
     });
     await prisma.likedRemoteTrack.create({
@@ -137,6 +179,32 @@ async function seedFixture(): Promise<void> {
                 peerId: "remote-songs-peer",
                 remoteId: "peer-album",
             },
+            {
+                id: "remote-songs-held-library-album",
+                rgMbid: HELD_RELEASE_GROUP,
+                artistId: "remote-songs-artist",
+                title: "Held Library Album",
+                primaryType: "Album",
+                location: "LIBRARY",
+            },
+            {
+                id: HELD_PLACEHOLDER_ID,
+                rgMbid: "remote:songs-held-placeholder",
+                matchedRgMbid: HELD_RELEASE_GROUP,
+                artistId: "remote-songs-artist",
+                title: "Held Placeholder",
+                primaryType: "Album",
+                location: "REMOTE",
+            },
+            {
+                id: UNHELD_PLACEHOLDER_ID,
+                rgMbid: "remote:songs-unheld-placeholder",
+                matchedRgMbid: "remote-songs-unheld-release-group",
+                artistId: "remote-songs-artist",
+                title: "Unheld Placeholder",
+                primaryType: "Album",
+                location: "REMOTE",
+            },
         ],
     });
     await seedTrack({
@@ -169,6 +237,11 @@ async function seedFixture(): Promise<void> {
         origin: "FEDERATED",
         peerId: "remote-songs-peer",
         dedupOfTrackId: "local-visible",
+    });
+    await seedTrack({
+        id: "remote-songs-held-local-track",
+        albumId: "remote-songs-held-library-album",
+        title: "Held local track",
     });
     await seedTidal({
         id: "tidal-visible-local",
@@ -229,6 +302,20 @@ async function seedFixture(): Promise<void> {
         title: "Other User",
         userId: OTHER_USER_ID,
     });
+    await seedTidal({
+        id: "tidal-held-placeholder",
+        tidalId: 8108,
+        title: "Held placeholder song",
+        userId: USER_ID,
+        albumId: HELD_PLACEHOLDER_ID,
+    });
+    await seedTidal({
+        id: "tidal-unheld-placeholder",
+        tidalId: 8109,
+        title: "Unheld placeholder song",
+        userId: USER_ID,
+        albumId: UNHELD_PLACEHOLDER_ID,
+    });
 }
 
 describeWithPostgres("remote Library Songs PostgreSQL behavior", () => {
@@ -252,9 +339,11 @@ describeWithPostgres("remote Library Songs PostgreSQL behavior", () => {
         const remote = await loadRemoteLibrarySet(USER_ID);
 
         expect(remote.tracks.map((row) => row.providerRowId).sort()).toEqual([
+            "tidal-held-placeholder",
             "tidal-removed",
             "tidal-tie-a",
             "tidal-tie-b",
+            "tidal-unheld-placeholder",
             "youtube-tie",
         ]);
     });
@@ -264,23 +353,29 @@ describeWithPostgres("remote Library Songs PostgreSQL behavior", () => {
             "name",
             [
                 "local-alpha",
+                "remote-songs-held-local-track",
+                "tidal:8108",
                 "local-visible",
                 "peer-visible",
                 "tidal:8103",
                 "tidal:8106",
                 "tidal:8107",
                 "yt:youtube-tie-video",
+                "tidal:8109",
             ],
         ],
         [
             "name-desc",
             [
+                "tidal:8109",
                 "tidal:8106",
                 "tidal:8107",
                 "yt:youtube-tie-video",
                 "tidal:8103",
                 "peer-visible",
                 "local-visible",
+                "tidal:8108",
+                "remote-songs-held-local-track",
                 "local-alpha",
             ],
         ],
@@ -297,7 +392,7 @@ describeWithPostgres("remote Library Songs PostgreSQL behavior", () => {
             });
 
             expect(page.tracks.map((track) => track.id)).toEqual(expected);
-            expect(page.total).toBe(7);
+            expect(page.total).toBe(10);
         },
     );
 
@@ -311,7 +406,7 @@ describeWithPostgres("remote Library Songs PostgreSQL behavior", () => {
             offset: 0,
         });
         const pages = await Promise.all(
-            [0, 2, 4, 6].map((offset) =>
+            [0, 2, 4, 6, 8].map((offset) =>
                 loadLibrarySongsPage({
                     origin: "all",
                     remoteLibrary,
@@ -326,8 +421,46 @@ describeWithPostgres("remote Library Songs PostgreSQL behavior", () => {
         );
 
         expect(pagedIds).toEqual(full.tracks.map((track) => track.id));
-        expect(full.total).toBe(7);
-        expect(pages.every((page) => page.total === 7)).toBe(true);
+        expect(full.total).toBe(10);
+        expect(pages.every((page) => page.total === 10)).toBe(true);
         expect(new Set(pagedIds).size).toBe(pagedIds.length);
+    });
+
+    it("marks held song albums and filters only held placeholders from albums", async () => {
+        const remoteLibrary = await loadRemoteLibrarySet(USER_ID);
+        const page = await loadLibrarySongsPage({
+            origin: "all",
+            remoteLibrary,
+            sortBy: "name",
+            limit: 20,
+            offset: 0,
+        });
+        const heldSong = page.tracks.find((track) => track.id === "tidal:8108");
+        const albumsResponse = await getAllAlbums();
+        const albums = (
+            albumsResponse.body as {
+                albums: Array<{ id: string }>;
+            }
+        ).albums;
+
+        expect(heldSong).toEqual(
+            expect.objectContaining({
+                album: expect.objectContaining({
+                    id: HELD_PLACEHOLDER_ID,
+                    matchedInLibrary: true,
+                }),
+            }),
+        );
+        expect(albumsResponse.statusCode).toBe(200);
+        expect(albums).not.toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: HELD_PLACEHOLDER_ID }),
+            ]),
+        );
+        expect(albums).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: UNHELD_PLACEHOLDER_ID }),
+            ]),
+        );
     });
 });

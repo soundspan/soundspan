@@ -17,6 +17,8 @@ function row(
         albumId,
         albumLocation: albumId ? albumLocation : null,
         albumArtistId: albumId ? albumArtistId : null,
+        albumMatchedRgMbid: null,
+        albumMatchedInLibrary: false,
         likedAt: new Date("2026-01-01T00:00:00.000Z"),
         mappings: [],
     } as RemoteLibraryTrack;
@@ -91,5 +93,35 @@ describe("remote library derivations", () => {
             albumIds: new Set(["remote-album"]),
             providers: ["tidal"],
         });
+    });
+
+    it("counts a held placeholder track but excludes its remote album", () => {
+        const held = {
+            ...row("tidal", "t1", "artist-1", "remote-held"),
+            albumMatchedRgMbid: "rg-held",
+            albumMatchedInLibrary: true,
+        };
+
+        const lookups = deriveRemoteLibraryLookups([held]);
+
+        expect(lookups.byArtistId.get("artist-1")).toEqual({
+            trackCount: 1,
+            albumCount: 0,
+            albumIds: new Set(),
+            providers: ["tidal"],
+        });
+        expect(lookups.byAlbumId.has("remote-held")).toBe(false);
+    });
+
+    it("includes an unheld matched placeholder as a remote album", () => {
+        const unheld = {
+            ...row("tidal", "t1", "artist-1", "remote-unheld"),
+            albumMatchedRgMbid: "rg-unheld",
+        };
+
+        const lookups = deriveRemoteLibraryLookups([unheld]);
+
+        expect(lookups.byArtistId.get("artist-1")?.albumCount).toBe(1);
+        expect(lookups.byAlbumId.get("remote-unheld")).toEqual(["tidal"]);
     });
 });

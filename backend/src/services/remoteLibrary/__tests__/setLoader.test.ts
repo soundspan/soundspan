@@ -8,6 +8,10 @@ jest.mock("../providers", () => ({
     loadRemoteLibraryAccess: jest.fn(),
 }));
 
+jest.mock("../matchedLibraryAlbums", () => ({
+    findLibraryHeldReleaseGroups: jest.fn(),
+}));
+
 jest.mock("../../../metrics", () => ({
     recordRemoteLibraryRowsCapped: jest.fn(),
 }));
@@ -22,10 +26,13 @@ jest.mock("../../../utils/logger", () => ({
 import { prisma } from "../../../utils/db";
 import { recordRemoteLibraryRowsCapped } from "../../../metrics";
 import { loadRemoteLibraryAccess } from "../providers";
+import { findLibraryHeldReleaseGroups } from "../matchedLibraryAlbums";
 import { loadRemoteLibrarySet, REMOTE_LIBRARY_ROW_CAP } from "../setLoader";
 
 const mockFindMany = prisma.likedRemoteTrack.findMany as jest.Mock;
 const mockAccess = loadRemoteLibraryAccess as jest.Mock;
+const mockFindLibraryHeldReleaseGroups =
+    findLibraryHeldReleaseGroups as jest.Mock;
 const mockRecordCapped = recordRemoteLibraryRowsCapped as jest.Mock;
 
 function tidalEntry(index: number) {
@@ -50,6 +57,7 @@ describe("remote library set loader", () => {
             playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
         });
         mockFindMany.mockResolvedValue([]);
+        mockFindLibraryHeldReleaseGroups.mockResolvedValue(new Set());
     });
 
     it("issues no remote queries without a user or connected provider", async () => {
@@ -128,13 +136,108 @@ describe("remote library set loader", () => {
             artistId: true,
             albumId: true,
             albumEntity: {
-                select: { artistId: true, location: true },
+                select: {
+                    artistId: true,
+                    location: true,
+                    matchedRgMbid: true,
+                },
             },
             mappings: {
                 where: { stale: false },
                 select: { id: true, trackId: true },
             },
         });
+    });
+
+    it("marks a matched REMOTE placeholder when its release group is held", async () => {
+        mockAccess.mockResolvedValueOnce({
+            providers: { tidal: true, youtube: false },
+            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
+        });
+        const entry = tidalEntry(0);
+        entry.trackTidal.albumEntity = {
+            artistId: "artist-1",
+            location: "REMOTE",
+            matchedRgMbid: "rg-held",
+        } as never;
+        mockFindMany.mockResolvedValueOnce([entry]);
+        mockFindLibraryHeldReleaseGroups.mockResolvedValueOnce(
+            new Set(["rg-held"]),
+        );
+
+        const result = await loadRemoteLibrarySet("user-1");
+
+        expect(mockFindLibraryHeldReleaseGroups).toHaveBeenCalledWith([
+            "rg-held",
+        ]);
+        expect(result.tracks[0]).toEqual(
+            expect.objectContaining({
+                albumMatchedRgMbid: "rg-held",
+                albumMatchedInLibrary: true,
+            }),
+        );
+    });
+
+    it("skips the held lookup when no REMOTE row has a match", async () => {
+        mockAccess.mockResolvedValueOnce({
+            providers: { tidal: true, youtube: false },
+            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
+        });
+        mockFindMany.mockResolvedValueOnce([tidalEntry(0)]);
+
+        const result = await loadRemoteLibrarySet("user-1");
+
+        expect(mockFindLibraryHeldReleaseGroups).not.toHaveBeenCalled();
+        expect(result.tracks[0]).toEqual(
+            expect.objectContaining({
+                albumMatchedRgMbid: null,
+                albumMatchedInLibrary: false,
+            }),
+        );
+    });
+
+    it("marks any linked album as held and leaves unmatched albums unheld", async () => {
+        mockAccess.mockResolvedValueOnce({
+            providers: { tidal: true, youtube: true },
+            playbackSourceOrder: ["library", "peers", "tidal", "ytmusic"],
+        });
+        const libraryEntry = tidalEntry(0);
+        libraryEntry.trackTidal.albumEntity = {
+            artistId: "artist-1",
+            location: "LIBRARY",
+            matchedRgMbid: "rg-held",
+        } as never;
+        const remoteEntry = {
+            likedAt: new Date(),
+            trackYtMusic: {
+                id: "youtube-unmatched",
+                title: "Unmatched",
+                artistId: "artist-1",
+                albumId: "album-2",
+                albumEntity: {
+                    artistId: "artist-1",
+                    location: "REMOTE",
+                    matchedRgMbid: null,
+                },
+                mappings: [],
+            },
+        };
+        mockFindMany
+            .mockResolvedValueOnce([libraryEntry])
+            .mockResolvedValueOnce([remoteEntry]);
+        mockFindLibraryHeldReleaseGroups.mockResolvedValueOnce(
+            new Set(["rg-held"]),
+        );
+
+        const result = await loadRemoteLibrarySet("user-1");
+
+        expect(mockFindLibraryHeldReleaseGroups).toHaveBeenCalledWith([
+            "rg-held",
+        ]);
+        expect(result.tracks).toEqual([
+            expect.objectContaining({ albumMatchedInLibrary: true }),
+            expect.objectContaining({ albumMatchedInLibrary: false }),
+        ]);
     });
 
     it("adds provider and album artist scope to both provider queries", async () => {

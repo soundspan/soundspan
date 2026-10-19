@@ -13,6 +13,7 @@ export {
     collapseProviderDuplicateSets,
 } from "./providerDuplicateCollapse";
 export { loadRemoteLibraryAccess } from "./providers";
+export { findLibraryHeldReleaseGroups } from "./matchedLibraryAlbums";
 export { toLibraryRemoteTrack } from "./responseRow";
 export { loadLibrarySongsPage } from "./librarySongsPage";
 export { loadPrismaLibraryTrackPage } from "./libraryTrackRows";

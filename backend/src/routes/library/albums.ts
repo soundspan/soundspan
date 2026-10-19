@@ -58,6 +58,7 @@ import {
 import { bumpSearchCacheVersion } from "../../services/searchCacheVersion";
 import {
     collapseProviderDuplicateSets,
+    findLibraryHeldReleaseGroups,
     loadRemoteLibrarySet,
     mergeRemoteAlbumWhere,
     shouldLoadRemoteLibrary,
@@ -333,6 +334,19 @@ albumsBrowseRouter.get("/albums", handleGetAlbums);
  *     responses:
  *       200:
  *         description: Album details with tracks and ownership info
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               description: Album record with tracks, owned state, source, and cover; only streaming-match fields are listed below.
+ *               properties:
+ *                 matchedRgMbid:
+ *                   type: string
+ *                   nullable: true
+ *                   description: MusicBrainz release group matched for a streaming-only album
+ *                 matchedInLibrary:
+ *                   type: boolean
+ *                   description: The library already holds the matched release group
  *       404:
  *         description: Album not found
  *       401:
@@ -551,6 +565,35 @@ function formatAlbumSource(location: string) {
     return "local" as const;
 }
 
+async function resolveAlbumMatchedInLibrary(album: {
+    matchedRgMbid: string | null;
+}): Promise<boolean> {
+    if (!album.matchedRgMbid) return false;
+    const heldRgMbids = await findLibraryHeldReleaseGroups([
+        album.matchedRgMbid,
+    ]);
+    return heldRgMbids.has(album.matchedRgMbid);
+}
+
+async function loadAlbumLibraryState(album: {
+    artistId: string;
+    rgMbid: string;
+    matchedRgMbid: string | null;
+}): Promise<{ owned: boolean; matchedInLibrary: boolean }> {
+    const [ownedAlbum, matchedInLibrary] = await Promise.all([
+        prisma.ownedAlbum.findUnique({
+            where: {
+                artistId_rgMbid: {
+                    artistId: album.artistId,
+                    rgMbid: album.rgMbid,
+                },
+            },
+        }),
+        resolveAlbumMatchedInLibrary(album),
+    ]);
+    return { owned: Boolean(ownedAlbum), matchedInLibrary };
+}
+
 function publicAlbumFields(
     albumWithTracks: AlbumWithTracks | null,
     albumWithoutTracks: Awaited<ReturnType<typeof findAlbumWithoutTracks>>,
@@ -602,14 +645,7 @@ export async function handleGetAlbum(req: AlbumDetailRequest, res: Response) {
     if (!album) {
         return sendRouteError(res, 404, "Album not found");
     }
-    const owned = await prisma.ownedAlbum.findUnique({
-        where: {
-            artistId_rgMbid: {
-                artistId: album.artistId,
-                rgMbid: album.rgMbid,
-            },
-        },
-    });
+    const { owned, matchedInLibrary } = await loadAlbumLibraryState(album);
     const publicFields = publicAlbumFields(albumWithTracks, albumWithoutTracks);
     if (!publicFields) {
         return sendRouteError(res, 404, "Album not found");
@@ -627,7 +663,8 @@ export async function handleGetAlbum(req: AlbumDetailRequest, res: Response) {
             : undefined,
         artist: album.artist,
         tracks: formatAlbumTracks(albumWithTracks),
-        owned: !!owned,
+        owned,
+        matchedInLibrary,
         coverArt: album.coverUrl,
     });
 }
