@@ -213,6 +213,25 @@ test("resolveProxyTimeoutMs applies the 20s default and 90s import-preview defau
     assert.equal(resolveProxyTimeoutMs("/import/previews", {}), 20_000);
 });
 
+test("resolveProxyTimeoutMs gives restore chunk uploads at least 120s", () => {
+    assert.equal(
+        resolveProxyTimeoutMs("/api/restore/uploads/abc/chunks/3", {}),
+        120_000,
+    );
+    assert.equal(
+        resolveProxyTimeoutMs("/restore/uploads/abc/chunks/3", {}),
+        120_000,
+    );
+    assert.equal(
+        resolveProxyTimeoutMs("/api/restore/uploads/abc/chunks/3", {
+            PROXY_REQUEST_TIMEOUT_MS: "300000",
+        }),
+        300_000,
+    );
+    assert.equal(resolveProxyTimeoutMs("/api/restore/status", {}), 20_000);
+    assert.equal(resolveProxyTimeoutMs("/api/restore/uploadsx", {}), 20_000);
+});
+
 test("resolveProxyTimeoutMs honors PROXY_REQUEST_TIMEOUT_MS and PROXY_IMPORT_PREVIEW_TIMEOUT_MS", () => {
     assert.equal(
         resolveProxyTimeoutMs("/api/library", {

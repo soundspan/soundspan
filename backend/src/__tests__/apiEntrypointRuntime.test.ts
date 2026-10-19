@@ -47,6 +47,8 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/federation",
         "../routes/federationAdmin",
         "../routes/libraryHealthDashboard",
+        "../routes/backup",
+        "../routes/restore",
     ];
 
     const flushPromises = async (): Promise<void> => {
@@ -114,6 +116,7 @@ describe("api entrypoint runtime behavior", () => {
         };
         const expressFn = jest.fn(() => app);
         (expressFn as any).json = jest.fn(() => "json-middleware");
+        (expressFn as any).raw = jest.fn(() => "raw-middleware");
         (expressFn as any).urlencoded = jest.fn(() => "urlencoded-middleware");
         (expressFn as any).Router = jest.fn(() => router);
 
@@ -217,6 +220,7 @@ describe("api entrypoint runtime behavior", () => {
         const requireQueueDashboardAccess = jest.fn((_req, _res, next) =>
             next?.(),
         );
+        const requireNoPendingRestart = jest.fn((_req, _res, next) => next?.());
         const errorHandler = jest.fn((_err, _req, _res, _next) => undefined);
         const authLimiter = "auth-limiter";
         const refreshLimiter = "refresh-limiter";
@@ -323,6 +327,9 @@ describe("api entrypoint runtime behavior", () => {
             ensureFederationIdentity,
         }));
         jest.doMock("../middleware/errorHandler", () => ({ errorHandler }));
+        jest.doMock("../services/backup/restartRequired", () => ({
+            requireNoPendingRestart,
+        }));
         jest.doMock("../middleware/auth", () => ({
             requireAuth,
             requireAdmin,
@@ -756,6 +763,8 @@ describe("api entrypoint runtime behavior", () => {
         // its expected limiter fails this test. Router-level auth for the
         // routers themselves is asserted by their per-router authz tests.
         const expectedMounts: Record<string, unknown[]> = {
+            "/api/restore": [route("../routes/restore")],
+            "/api/backup": [route("../routes/backup")],
             "/api/auth/login": ["auth-limiter"],
             "/api/auth/register": ["auth-limiter"],
             "/api/auth/refresh": ["refresh-limiter"],

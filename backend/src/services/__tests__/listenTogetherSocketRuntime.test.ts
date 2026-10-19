@@ -49,6 +49,12 @@ describe("listen together socket runtime behavior", () => {
             tokenVersion: 1,
             pendingDeletionAt: null,
         }));
+        const getRestoreBarrier = jest.fn(
+            async (): Promise<{
+                code: string;
+                message: string;
+            } | null> => null,
+        );
 
         class MockServer {
             public adapter = jest.fn();
@@ -270,6 +276,9 @@ describe("listen together socket runtime behavior", () => {
             logger,
         }));
         jest.doMock("../../utils/ioredis", () => ({ createIORedisClient }));
+        jest.doMock("../backup/restartRequired", () => ({
+            getRestoreBarrier,
+        }));
         jest.doMock("../socialPresenceEvents", () => ({
             subscribeSocialPresenceUpdates,
         }));
@@ -341,6 +350,7 @@ describe("listen together socket runtime behavior", () => {
             logger,
             jwtVerify,
             prismaUserFindUnique,
+            getRestoreBarrier,
             MockGroupError,
         };
     }
@@ -398,7 +408,7 @@ describe("listen together socket runtime behavior", () => {
         } as any);
         expect(io).toBeTruthy();
         expect(socketService.getListenTogetherIO()).toBe(io);
-        expect(mocks.namespace.use).toHaveBeenCalledTimes(1);
+        expect(mocks.namespace.use).toHaveBeenCalledTimes(2);
         expect(mocks.namespace.on).toHaveBeenCalledWith(
             "connection",
             expect.any(Function),
@@ -415,6 +425,36 @@ describe("listen together socket runtime behavior", () => {
         expect(mocks.adapterSubClient.disconnect).toHaveBeenCalledTimes(1);
         expect(mocks.mutationLockClient.disconnect).toHaveBeenCalledTimes(1);
         expect(socketService.getListenTogetherIO()).toBeNull();
+    });
+
+    it("rejects socket handshakes while restore access is blocked", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        mocks.getRestoreBarrier.mockResolvedValue({
+            code: "RESTORE_IN_PROGRESS",
+            message: "A restore is in progress.",
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const socketService = require("../listenTogetherSocket");
+        socketService.setupListenTogetherSocket({
+            on: () => undefined,
+        } as any);
+
+        const availabilityGuard = mocks.namespace.use.mock.calls[0][0];
+        const next = jest.fn();
+        await availabilityGuard({}, next);
+
+        expect(next).toHaveBeenCalledWith(
+            expect.objectContaining({
+                message: "A restore is in progress.",
+                data: { code: "RESTORE_IN_PROGRESS" },
+            }),
+        );
     });
 
     it("enforces the Express ALLOWED_ORIGINS allowlist semantics for socket CORS", () => {
@@ -849,7 +889,7 @@ describe("listen together socket runtime behavior", () => {
             on: () => undefined,
         } as any);
 
-        const authMiddleware = mocks.namespace.use.mock.calls[0][0];
+        const authMiddleware = mocks.namespace.use.mock.calls[1][0];
         const makeSocket = (token?: string) => ({
             handshake: { auth: token ? { token } : {} },
             data: {},

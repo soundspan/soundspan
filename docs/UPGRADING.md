@@ -28,7 +28,9 @@ docker compose -f docker-compose.aio.yml up -d
 
 Before any upgrade that this file marks **Breaking**, also back up your
 database first. For the AIO image, the simplest full backup is copying the
-data volume while the container is stopped.
+data volume while the container is stopped. On any install, `Admin → Backup`
+downloads a backup that a fresh install of the same or a newer version can
+restore; see [`BACKUP_AND_RESTORE.md`](BACKUP_AND_RESTORE.md).
 
 ## Which versions need action?
 

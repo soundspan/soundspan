@@ -50,6 +50,7 @@ let generateRefreshToken: typeof import("../auth").generateRefreshToken;
 let requireAuth: typeof import("../auth").requireAuth;
 let requireAdmin: typeof import("../auth").requireAdmin;
 let requireAuthOrToken: typeof import("../auth").requireAuthOrToken;
+let verifyAccessToken: typeof import("../auth").verifyAccessToken;
 
 type TestRequest = {
     session?: Record<string, unknown>;
@@ -118,6 +119,7 @@ describe("auth middleware", () => {
         requireAuth = authModule.requireAuth;
         requireAdmin = authModule.requireAdmin;
         requireAuthOrToken = authModule.requireAuthOrToken;
+        verifyAccessToken = authModule.verifyAccessToken;
     });
 
     beforeEach(() => {
@@ -132,6 +134,18 @@ describe("auth middleware", () => {
         mockJwtVerify.mockImplementation(() => {
             throw new Error("invalid token");
         });
+    });
+
+    it("rejects backup-purpose JWTs as ordinary access tokens", () => {
+        mockJwtVerify.mockReturnValue({
+            userId: "u1",
+            purpose: "backup-download",
+            downloadId: "download-1",
+        });
+
+        expect(() => verifyAccessToken("backup-token")).toThrow(
+            "Token is not an access token",
+        );
     });
 
     afterAll(() => {

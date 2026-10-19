@@ -20,6 +20,7 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/AIServicesSection.tsx` | components |
 | `components/sections/APIKeysSection.tsx` | components |
 | `components/sections/AudiobookshelfSection.tsx` | components |
+| `components/sections/BackupSection.tsx` | components |
 | `components/sections/CacheSection.tsx` | components |
 | `components/sections/DownloadPreferencesSection.tsx` | components |
 | `components/sections/downloadSourceConfig.ts` | components |

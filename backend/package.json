@@ -31,6 +31,7 @@
         "test:smoke": "tsx scripts/smoke.ts",
         "test:smoke:mbid-auth": "tsx scripts/smoke-mbid-release-auth.ts",
         "test:smoke:subsonic-proxy": "tsx scripts/smoke-subsonic-proxy.ts",
+        "smoke:backup-restore": "tsx scripts/backupRestoreSmoke.ts",
         "test:analyzer:phase4": "tsx scripts/smoke-analyzer-phase4-regressions.ts",
         "test:manual:artist-normalization": "tsx scripts/manual-tests/artistNormalization.ts",
         "test:manual:download-dedup": "tsx scripts/manual-tests/downloadDedup.ts",

@@ -40,6 +40,24 @@ describe("resolveProxyTimeoutMs", () => {
         assert.equal(timeoutMs, 20_000);
     });
 
+    test("gives restore chunk uploads at least 120s", () => {
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploads/abc/chunks/0", {}),
+            120_000,
+        );
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploads/abc/chunks/0", {
+                PROXY_REQUEST_TIMEOUT_MS: "300000",
+            }),
+            300_000,
+        );
+        assert.equal(resolveProxyTimeoutMs("api/restore/status", {}), 20_000);
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploadsx/abc", {}),
+            20_000,
+        );
+    });
+
     test("falls back to max(global, import default) when import override is invalid", () => {
         const timeoutMs = resolveProxyTimeoutMs("api/import/preview", {
             PROXY_REQUEST_TIMEOUT_MS: "120000",

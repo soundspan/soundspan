@@ -1,0 +1,215 @@
+"use client";
+
+import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import type { RestoreStatus } from "@/lib/api/backup";
+import { BRAND_NAME, BRAND_SLUG } from "@/lib/brand";
+import { formatBytes } from "@/features/library-health/format";
+import {
+    restorePhaseLabel,
+    restoreProgressPercent,
+} from "../backupRestoreModel";
+
+/** Restart commands shown after a restore, one per deployment type. */
+export const RESTART_COMMANDS: ReadonlyArray<{
+    label: string;
+    command: string;
+}> = [
+    {
+        label: "All-in-one container",
+        command: `docker restart ${BRAND_SLUG}`,
+    },
+    { label: "Docker Compose", command: "docker compose restart" },
+    {
+        label: "Kubernetes (Helm)",
+        command: `kubectl rollout restart deployment -l app.kubernetes.io/instance=${BRAND_SLUG}`,
+    },
+];
+
+function ProgressBar({ percent }: { percent: number | null }) {
+    return (
+        <div
+            className="h-2 w-full rounded-full bg-white/10 overflow-hidden"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent ?? undefined}
+        >
+            <div
+                className={`h-full bg-brand transition-all ${percent === null ? "w-1/3 animate-pulse" : ""}`}
+                style={percent === null ? undefined : { width: `${percent}%` }}
+            />
+        </div>
+    );
+}
+
+/** Upload progress while the backup file goes to the server. */
+export function UploadProgressView({
+    sentBytes,
+    totalBytes,
+    onCancel,
+}: {
+    sentBytes: number;
+    totalBytes: number;
+    onCancel: () => void;
+}) {
+    const percent =
+        totalBytes > 0 ? Math.floor((sentBytes / totalBytes) * 100) : 0;
+    return (
+        <div className="space-y-4" role="status">
+            <p className="text-white/80 text-sm">
+                Uploading the backup: {formatBytes(sentBytes)} of{" "}
+                {formatBytes(totalBytes)}. Keep this page open until the upload
+                finishes.
+            </p>
+            <ProgressBar percent={percent} />
+            <button
+                type="button"
+                onClick={onCancel}
+                className="px-4 py-2 text-sm text-white/70 border border-white/10 rounded-lg hover:text-white hover:bg-white/10 transition-colors"
+            >
+                Cancel upload
+            </button>
+        </div>
+    );
+}
+
+/** Server-side restore progress. */
+export function RestoreRunningView({
+    status,
+}: {
+    status: RestoreStatus | null;
+}) {
+    const state = status?.state ?? "validating";
+    const progress = status?.progress ?? null;
+    return (
+        <div className="space-y-4" role="status">
+            <div className="flex items-center gap-3">
+                <GradientSpinner size="sm" />
+                <p className="text-white font-medium">
+                    {restorePhaseLabel(state)}
+                </p>
+            </div>
+            <ProgressBar percent={restoreProgressPercent(progress)} />
+            {progress && progress.totalRows > 0 && (
+                <p className="text-xs text-white/50">
+                    {progress.completedRows.toLocaleString()} of{" "}
+                    {progress.totalRows.toLocaleString()} rows in{" "}
+                    {progress.completedTables} of {progress.totalTables} tables
+                </p>
+            )}
+            <p className="text-sm text-white/60">
+                The restore runs on the server. You can close this page and come
+                back; it keeps going.
+            </p>
+        </div>
+    );
+}
+
+function RestoreSummaryList({ status }: { status: RestoreStatus }) {
+    const summary = status.summary;
+    if (!summary) return null;
+    return (
+        <ul className="text-sm text-white/70 space-y-1 list-disc pl-5">
+            <li>
+                Restored {summary.rows.toLocaleString()} rows in{" "}
+                {summary.tables} tables from a backup taken{" "}
+                {new Date(summary.backupCreatedAt).toLocaleString()} on version{" "}
+                {summary.backupAppVersion}.
+            </li>
+            {summary.migrationsAppliedAfterLoad > 0 && (
+                <li>
+                    Upgraded the restored data to version {summary.appVersion}.
+                </li>
+            )}
+            {summary.credentialsUndecryptable > 0 && (
+                <li>
+                    {summary.credentialsUndecryptable} stored credentials
+                    couldn&apos;t be read and need to be entered again.
+                </li>
+            )}
+            {summary.apiKeysNeedReissue && (
+                <li>
+                    API keys, linked devices, and incoming federation peers need
+                    new credentials, because this server signs them with a
+                    different key.
+                </li>
+            )}
+        </ul>
+    );
+}
+
+/** Restore finished: explain the restart that completes it. */
+export function RestoreCompleteView({ status }: { status: RestoreStatus }) {
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-6 h-6 text-green-400" />
+                <h3 className="text-lg font-semibold text-white">
+                    {status.restartRequired
+                        ? `Restore complete. Restart ${BRAND_NAME} to finish.`
+                        : "Restore complete."}
+                </h3>
+            </div>
+            <RestoreSummaryList status={status} />
+            {status.restartRequired && (
+                <div className="space-y-2">
+                    <p className="text-sm text-white/70">
+                        Restart every {BRAND_NAME} container or pod. For
+                        example:
+                    </p>
+                    <ul className="space-y-2">
+                        {RESTART_COMMANDS.map(({ label, command }) => (
+                            <li key={label}>
+                                <p className="text-xs text-white/50">{label}</p>
+                                <code className="block text-xs text-white/90 bg-black/40 border border-white/10 rounded px-3 py-2 break-all">
+                                    {command}
+                                </code>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            <p className="text-sm text-white/70">
+                {status.restartRequired
+                    ? "After the restart, sign in with an account from your backup."
+                    : "Sign in with an account from your backup."}
+            </p>
+        </div>
+    );
+}
+
+/** Restore stopped with an error; says whether the fresh install is intact. */
+export function RestoreFailedView({
+    message,
+    freshInstallIntact,
+    onRetry,
+}: {
+    message: string;
+    freshInstallIntact: boolean;
+    onRetry: () => void;
+}) {
+    return (
+        <div className="space-y-4">
+            <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div className="text-sm text-red-300 space-y-1">
+                    <p>{message}</p>
+                    {freshInstallIntact && (
+                        <p className="text-red-300/80">
+                            Nothing was restored. This server is still a fresh
+                            install.
+                        </p>
+                    )}
+                </div>
+            </div>
+            <button
+                type="button"
+                onClick={onRetry}
+                className="px-4 py-2 text-sm text-white border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+            >
+                Try again
+            </button>
+        </div>
+    );
+}

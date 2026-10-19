@@ -47,6 +47,7 @@ Repository contract for soundspan.
     - **PostgreSQL full-text search** — `tsvector`/`to_tsquery`/`ts_rank` ranking (e.g. `backend/src/services/search.ts`).
     - **Row-level & advisory locking** — `FOR UPDATE SKIP LOCKED` job claiming and `pg_advisory_*` locks (e.g. `backend/src/routes/downloads.ts`, worker claim loops).
     - **Ordered pagination across tables** — one `UNION ALL` id page sorted and paged in SQL when a list merges rows from several tables (e.g. the Library Songs merge of `Track`, `TrackTidal`, and `TrackYtMusic` in `backend/src/services/remoteLibrary/librarySongsPage.ts`). Select only ids and sort keys in the union, then hydrate the rows with Prisma.
+    - **Whole-database backup and restore** — catalog introspection, a repeatable-read snapshot export, schema reset, and bulk row loading with foreign keys and triggers suspended (`backend/src/services/backup/`). Every identifier comes from the target database's own catalog, never from a backup file, and row data is always a bound parameter.
 
     Constraints on any permitted raw SQL: use Prisma tagged-template `$queryRaw`/`$executeRaw` so every value is bound as a parameter; **never** `$queryRawUnsafe`/`$executeRawUnsafe` with interpolated external input (dynamic identifiers must come from code-owned allowlists); back it with a behavioral test against real PostgreSQL, not a source-text assertion (see Testing below). Anything a Prisma query can express — plain filters, counts, existence checks — must use Prisma, not raw SQL.
 

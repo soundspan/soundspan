@@ -11,6 +11,12 @@ import {
     requireAdmin,
     verifyAccessToken,
 } from "../middleware/auth";
+import {
+    getRestoreStatus,
+    isRestoreJobActive,
+} from "../services/backup/restoreJob";
+import { hasActiveRestoreUpload } from "../services/backup/restoreUploads";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 const router = Router();
 
@@ -76,6 +82,15 @@ const enrichmentConfigSchema = z.object({
  */
 router.post("/register", async (req, res) => {
     try {
+        const [restoreStatus, uploadActive] = await Promise.all([
+            getRestoreStatus(),
+            hasActiveRestoreUpload(),
+        ]);
+        if (uploadActive || isRestoreJobActive(restoreStatus)) {
+            return sendRouteError(res, 409, "A restore is in progress", {
+                code: "RESTORE_IN_PROGRESS",
+            });
+        }
         logger.debug(
             "[ONBOARDING] Register attempt for user:",
             req.body?.username,

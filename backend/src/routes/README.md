@@ -75,6 +75,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/artists.ts`            | `/api/artists`                                                                                        |
 | `backend/src/routes/audiobooks.ts`         | `/api/audiobooks`                                                                                     |
 | `backend/src/routes/auth.ts`               | `/api/auth` (compatibility re-export of `auth/index.ts`)                                              |
+| `backend/src/routes/backup.ts`             | `/api/backup` (admin backup download session and the cookie-scoped streaming download)               |
 | `backend/src/routes/browse.ts`             | `/api/browse`                                                                                         |
 | `backend/src/routes/browseYtMusicErrors.ts` | Shared YouTube Music browse error mapping; not a router                                              |
 | `backend/src/routes/deviceLink.ts`         | `/api/device-link`                                                                                    |
@@ -104,6 +105,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/recommendations.ts`    | `/api/recommendations`                                                                                |
 | `backend/src/routes/releases.ts`           | `/api/releases`                                                                                       |
 | `backend/src/routes/requests.ts`           | `/api/requests` (feature-gated album request queue and administrator review)                          |
+| `backend/src/routes/restore.ts`            | `/api/restore` (anonymous fresh-install restore: chunked upload, start, and status)                   |
 | `backend/src/routes/audiobookRouteResponses.ts` | Audiobook response serializers; not a router                                                          |
 | `backend/src/routes/routeParamName.ts`     | Shared route-parameter name helper; not a router                                                      |
 | `backend/src/routes/search.ts`             | `/api/search`                                                                                         |

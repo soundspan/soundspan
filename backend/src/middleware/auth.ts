@@ -12,6 +12,8 @@ export const QUEUE_DASHBOARD_TOKEN_PURPOSE = "queue-dashboard";
 
 /** Queue-dashboard session lifetime in seconds. */
 export const QUEUE_DASHBOARD_TTL_SECONDS = 15 * 60;
+export const BACKUP_DOWNLOAD_TOKEN_PURPOSE = "backup-download";
+export const BACKUP_DOWNLOAD_TTL_SECONDS = 5 * 60;
 
 // JWT_SECRET is required - SESSION_SECRET (a required, stable deploy secret;
 // docker-entrypoint.sh fails fast when it is missing) is the fallback.
@@ -60,6 +62,7 @@ export interface JWTPayload {
     tokenVersion?: number;
     type?: string;
     purpose?: string;
+    downloadId?: string;
 }
 
 function isJwtPayloadShape(value: unknown): value is { userId: string } {
@@ -103,6 +106,26 @@ export function generateQueueDashboardToken(user: {
         },
         JWT_SECRET_VALIDATED,
         { expiresIn: QUEUE_DASHBOARD_TTL_SECONDS },
+    );
+}
+
+/** Create a one-use token accepted only by the backup download route. */
+export function generateBackupDownloadToken(
+    user: {
+        id: string;
+        tokenVersion: number;
+    },
+    downloadId: string,
+): string {
+    return jwt.sign(
+        {
+            userId: user.id,
+            tokenVersion: user.tokenVersion,
+            purpose: BACKUP_DOWNLOAD_TOKEN_PURPOSE,
+            downloadId,
+        },
+        JWT_SECRET_VALIDATED,
+        { expiresIn: BACKUP_DOWNLOAD_TTL_SECONDS },
     );
 }
 

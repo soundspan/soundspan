@@ -25,6 +25,7 @@ const baseSidebarItems: SidebarItem[] = [
     { id: "library-insights", label: "Library Insights" },
     { id: "cache", label: "Cache & Automation" },
     { id: "queue-dashboard", label: "Queue Dashboard" },
+    { id: "backup", label: "Backup" },
     { id: "users", label: "Users" },
 ];
 
@@ -112,6 +113,14 @@ const QueueDashboardSection = dynamic(
     () =>
         import("@/features/settings/components/sections/QueueDashboardSection").then(
             (mod) => mod.QueueDashboardSection,
+        ),
+    { loading: renderSectionFallback },
+);
+
+const BackupSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/BackupSection").then(
+            (mod) => mod.BackupSection,
         ),
     { loading: renderSectionFallback },
 );
@@ -353,6 +362,7 @@ export default function AdminPage() {
                 />
 
                 <QueueDashboardSection />
+                <BackupSection />
 
                 <UserManagementSection />
 

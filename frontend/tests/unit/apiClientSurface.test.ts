@@ -13,6 +13,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "backfillMoodBuckets",
     "approveMusicRequest",
     "cancelImportJob",
+    "cancelRestoreUpload",
     "cancelMusicRequest",
     "cancelYouTubeDownload",
     "cleanupStaleJobs",
@@ -30,7 +31,9 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "clearToken",
     "clearYtMusicAuth",
     "confirmOidcLink",
+    "completeRestoreUpload",
     "createAppPassword",
+    "createBackupDownloadSession",
     "createApiKey",
     "createFederationPeer",
     "createInviteCode",
@@ -124,6 +127,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getMusicRequests",
     "getNotifications",
     "getRequestAvailability",
+    "getRestoreStatus",
     "getOnboardingStatus",
     "getPlayHistorySummary",
     "getPlaybackState",
@@ -274,6 +278,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "setToken",
     "setTrackPreference",
     "startOidcLink",
+    "startRestoreUpload",
     "startLibraryEnrichment",
     "submitImportJob",
     "subscribePodcast",
@@ -304,6 +309,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "updateSystemSettings",
     "updateTrackMetadata",
     "uploadProfilePicture",
+    "uploadRestoreChunk",
     "vibeAlchemy",
     "vibeSearch",
 ];
@@ -317,5 +323,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 297);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 303);
 });

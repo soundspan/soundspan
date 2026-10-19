@@ -11,6 +11,7 @@
  * that model.
  */
 export const ENCRYPTED_SETTINGS_COLUMNS = {
+    appPassword: ["encryptedSecret"],
     // twoFactorSecret / twoFactorRecoveryCodes use the same settings cipher via
     // the `encrypt2FASecret = encrypt` alias in routes/auth/shared.ts — they must be
     // migrated and counted too, or `migrationComplete` would falsely report done
@@ -18,6 +19,7 @@ export const ENCRYPTED_SETTINGS_COLUMNS = {
     user: ["subsonicPassword", "twoFactorSecret", "twoFactorRecoveryCodes"],
     userSettings: ["ytMusicOAuthJson", "tidalOAuthJson"],
     federationPeer: ["outboundToken"],
+    scrobbleConnection: ["encryptedCredential", "encryptedPendingToken"],
     systemSettings: [
         "lidarrApiKey",
         "lidarrWebhookSecret",
@@ -43,7 +45,9 @@ export type EncryptedModelName = keyof typeof ENCRYPTED_SETTINGS_COLUMNS;
  */
 export const ENCRYPTED_MODEL_PRIMARY_KEYS: Record<EncryptedModelName, string> =
     {
+        appPassword: "id",
         federationPeer: "id",
+        scrobbleConnection: "id",
         user: "id",
         userSettings: "userId",
         systemSettings: "id",

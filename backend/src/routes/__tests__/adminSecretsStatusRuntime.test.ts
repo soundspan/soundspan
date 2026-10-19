@@ -36,6 +36,8 @@ jest.mock("../../utils/db", () => ({
         user: { findMany: jest.fn() },
         userSettings: { findMany: jest.fn() },
         federationPeer: { findMany: jest.fn() },
+        appPassword: { findMany: jest.fn() },
+        scrobbleConnection: { findMany: jest.fn() },
         systemSettings: { findMany: jest.fn() },
         apiKey: { findMany: jest.fn() },
     },
@@ -52,6 +54,10 @@ const mockUserFindMany = prisma.user.findMany as unknown as jest.Mock;
 const mockUserSettingsFindMany = prisma.userSettings
     .findMany as unknown as jest.Mock;
 const mockFederationPeerFindMany = prisma.federationPeer
+    .findMany as unknown as jest.Mock;
+const mockAppPasswordFindMany = prisma.appPassword
+    .findMany as unknown as jest.Mock;
+const mockScrobbleConnectionFindMany = prisma.scrobbleConnection
     .findMany as unknown as jest.Mock;
 const mockSystemSettingsFindMany = prisma.systemSettings
     .findMany as unknown as jest.Mock;
@@ -90,6 +96,8 @@ describe("admin secrets-status route", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockFederationPeerFindMany.mockResolvedValue([]);
+        mockAppPasswordFindMany.mockResolvedValue([]);
+        mockScrobbleConnectionFindMany.mockResolvedValue([]);
     });
 
     it("counts legacy vs v2 encrypted settings values per model", async () => {
@@ -134,7 +142,9 @@ describe("admin secrets-status route", () => {
                 legacy: 4,
                 migrationComplete: false,
                 byModel: {
+                    appPassword: { total: 0, v2: 0, legacy: 0 },
                     federationPeer: { total: 1, v2: 1, legacy: 0 },
+                    scrobbleConnection: { total: 0, v2: 0, legacy: 0 },
                     // subsonicPassword (v2 + legacy) + twoFactorSecret (v2) +
                     // twoFactorRecoveryCodes (legacy)
                     user: { total: 4, v2: 2, legacy: 2 },

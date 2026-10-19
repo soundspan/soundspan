@@ -59,6 +59,24 @@ jest.mock("../../utils/systemSettings", () => ({
     encryptField: mockEncryptField,
 }));
 
+const mockGetRestoreStatus = jest.fn();
+const mockHasActiveRestoreUpload = jest.fn();
+jest.mock("../../services/backup/restoreJob", () => ({
+    getRestoreStatus: mockGetRestoreStatus,
+    isRestoreJobActive: (status: { state: string }) =>
+        [
+            "validating",
+            "resetting",
+            "replaying",
+            "loading",
+            "migrating",
+            "reencrypting",
+        ].includes(status.state),
+}));
+jest.mock("../../services/backup/restoreUploads", () => ({
+    hasActiveRestoreUpload: mockHasActiveRestoreUpload,
+}));
+
 class MockEnvFileSyncSkippedError extends Error {}
 const mockWriteEnvFile = jest.fn();
 jest.mock("../../utils/envWriter", () => ({
@@ -128,12 +146,30 @@ describe("onboarding route runtime", () => {
         prisma.systemSettings.findFirst.mockResolvedValue({ id: "default" });
         prisma.systemSettings.update.mockResolvedValue({});
         prisma.systemSettings.upsert.mockResolvedValue({});
+        mockGetRestoreStatus.mockResolvedValue({ state: "idle" });
+        mockHasActiveRestoreUpload.mockResolvedValue(false);
 
         mockWriteEnvFile.mockResolvedValue(undefined);
         mockGenerateToken.mockReturnValue("jwt-token");
         mockBcryptHash.mockResolvedValue("hash-1");
         mockAxiosGet.mockResolvedValue({ status: 200 });
         mockVerifyAccessToken.mockReturnValue({ userId: "u1" });
+    });
+
+    it("rejects initial registration while a restore upload is active", async () => {
+        mockHasActiveRestoreUpload.mockResolvedValue(true);
+        const res = createRes();
+
+        await register(
+            { body: { username: "alice", password: "password" } },
+            res,
+        );
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body).toEqual({
+            error: "A restore is in progress",
+            code: "RESTORE_IN_PROGRESS",
+        });
     });
 
     afterAll(() => {

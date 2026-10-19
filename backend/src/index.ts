@@ -57,6 +57,8 @@ import playlistImportRoutes from "./routes/playlistImport";
 import streamingRoutes from "./routes/streaming";
 import lyricsRoutes from "./routes/lyrics";
 import listenTogetherRoutes from "./routes/listenTogether";
+import backupRoutes from "./routes/backup";
+import restoreRoutes from "./routes/restore";
 import subsonicRoutes from "./routes/subsonic";
 import {
     setupListenTogetherSocket,
@@ -95,6 +97,7 @@ import { createMetricsRouter } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
 import { backfillFederationOutboundTokens } from "./services/federationCredentials";
 import { warnIfLegacyDiscoveryMode } from "./utils/legacyDiscoveryDeprecation";
+import { requireNoPendingRestart } from "./services/backup/restartRequired";
 
 const app = express();
 
@@ -234,7 +237,72 @@ app.use((req, res, next) => {
 // client can't spoof X-Forwarded-For to evade per-IP rate limits.
 app.set("trust proxy", config.trustProxy);
 
+function buildHealthPayload() {
+    return {
+        status: "ok",
+        role: backendProcessRole,
+        version: process.env.npm_package_version || "unknown",
+        uptimeSeconds: Math.floor(process.uptime()),
+        startupComplete: isStartupComplete,
+        draining: getRuntimeDrainState(),
+        dependencies: dependencyReadiness.getSnapshot(),
+    };
+}
+
+async function isReadyForTraffic(): Promise<boolean> {
+    try {
+        await dependencyReadiness.probe();
+        if (!isStartupComplete || getRuntimeDrainState()) {
+            return false;
+        }
+        return dependencyReadiness.isHealthy();
+    } catch (error) {
+        logger.error("[Startup] readiness probe failed:", error);
+        return false;
+    }
+}
+
+// Legacy health endpoint (kept for backward compatibility).
+app.get("/health", async (req, res) => {
+    if (!(await isReadyForTraffic())) {
+        return res.status(503).json(buildHealthPayload());
+    }
+    return res.json(buildHealthPayload());
+});
+app.get("/api/health", async (req, res) => {
+    if (!(await isReadyForTraffic())) {
+        return res.status(503).json(buildHealthPayload());
+    }
+    return res.json(buildHealthPayload());
+});
+
+// Dedicated liveness/readiness endpoints for K8s probes.
+app.get("/health/live", (req, res) => {
+    res.json(buildHealthPayload());
+});
+app.get("/api/health/live", (req, res) => {
+    res.json(buildHealthPayload());
+});
+app.get("/health/ready", async (req, res) => {
+    if (!(await isReadyForTraffic())) {
+        return res.status(503).json(buildHealthPayload());
+    }
+    return res.json(buildHealthPayload());
+});
+app.get("/api/health/ready", async (req, res) => {
+    if (!(await isReadyForTraffic())) {
+        return res.status(503).json(buildHealthPayload());
+    }
+    return res.json(buildHealthPayload());
+});
+
+// A completed restore replaces process-cached state. Keep only status and
+// health probes available until every replica has restarted.
+app.use(requireNoPendingRestart);
+
 // Routes - All API routes prefixed with /api for clear separation from frontend
+app.use("/api/restore", restoreRoutes);
+app.use("/api/backup", backupRoutes);
 // Apply rate limiting to auth routes
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
@@ -369,65 +437,6 @@ app.use(
     express.urlencoded({ extended: false, limit: "1mb" }),
     subsonicRoutes,
 );
-
-function buildHealthPayload() {
-    return {
-        status: "ok",
-        role: backendProcessRole,
-        version: process.env.npm_package_version || "unknown",
-        uptimeSeconds: Math.floor(process.uptime()),
-        startupComplete: isStartupComplete,
-        draining: getRuntimeDrainState(),
-        dependencies: dependencyReadiness.getSnapshot(),
-    };
-}
-
-async function isReadyForTraffic(): Promise<boolean> {
-    try {
-        await dependencyReadiness.probe();
-        if (!isStartupComplete || getRuntimeDrainState()) {
-            return false;
-        }
-        return dependencyReadiness.isHealthy();
-    } catch (error) {
-        logger.error("[Startup] readiness probe failed:", error);
-        return false;
-    }
-}
-
-// Legacy health endpoint (kept for backward compatibility).
-app.get("/health", async (req, res) => {
-    if (!(await isReadyForTraffic())) {
-        return res.status(503).json(buildHealthPayload());
-    }
-    return res.json(buildHealthPayload());
-});
-app.get("/api/health", async (req, res) => {
-    if (!(await isReadyForTraffic())) {
-        return res.status(503).json(buildHealthPayload());
-    }
-    return res.json(buildHealthPayload());
-});
-
-// Dedicated liveness/readiness endpoints for K8s probes.
-app.get("/health/live", (req, res) => {
-    res.json(buildHealthPayload());
-});
-app.get("/api/health/live", (req, res) => {
-    res.json(buildHealthPayload());
-});
-app.get("/health/ready", async (req, res) => {
-    if (!(await isReadyForTraffic())) {
-        return res.status(503).json(buildHealthPayload());
-    }
-    return res.json(buildHealthPayload());
-});
-app.get("/api/health/ready", async (req, res) => {
-    if (!(await isReadyForTraffic())) {
-        return res.status(503).json(buildHealthPayload());
-    }
-    return res.json(buildHealthPayload());
-});
 
 // Swagger API Documentation
 // The UI itself is always accessible so HTML/CSS/JS assets load correctly.

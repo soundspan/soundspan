@@ -19,7 +19,9 @@ const getBackendUrl = (): string => {
 
 const DEFAULT_PROXY_TIMEOUT_MS = 20_000;
 const DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS = 90_000;
+const DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS = 120_000;
 const IMPORT_PREVIEW_PROXY_PATH = "api/import/preview";
+const RESTORE_UPLOAD_PROXY_PATH = "api/restore/uploads";
 
 const parsePositiveTimeoutMs = (value: string | undefined): number | null => {
     const parsed = Number(value);
@@ -40,7 +42,13 @@ export const resolveProxyTimeoutMs = (
         parsePositiveTimeoutMs(env.PROXY_REQUEST_TIMEOUT_MS) ??
         DEFAULT_PROXY_TIMEOUT_MS;
 
-    if (normalizeTargetPath(targetPath) !== IMPORT_PREVIEW_PROXY_PATH) {
+    const normalizedPath = normalizeTargetPath(targetPath);
+    if (normalizedPath.startsWith(`${RESTORE_UPLOAD_PROXY_PATH}/`)) {
+        // Restore chunk uploads spend part of the budget sending the body.
+        return Math.max(globalTimeout, DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS);
+    }
+
+    if (normalizedPath !== IMPORT_PREVIEW_PROXY_PATH) {
         return globalTimeout;
     }
 

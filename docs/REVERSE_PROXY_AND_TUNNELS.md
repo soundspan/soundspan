@@ -71,12 +71,20 @@ OIDC_WEB_BASE_URL=https://music.example.com
 
 Set `SECURE_COOKIES=true` when the browser uses HTTPS, including when Cloudflare or another edge terminates TLS.
 
+## Request body size
+
+Two uploads send request bodies of several megabytes: profile pictures (up to
+5 MB) and backup restores, which upload the file in 4 MiB pieces. Your proxy
+must accept bodies of at least 5 MB. NGINX accepts 1 MB by default, so the
+examples below set `client_max_body_size 8m;`.
+
 ## NGINX example (Docker/Kubernetes edge)
 
 ```nginx
 server {
     listen 443 ssl http2;
     server_name soundspan.example.com;
+    client_max_body_size 8m;
 
     # Everything -> frontend (frontend proxies Listen Together socket path)
     location / {
@@ -95,6 +103,7 @@ Optional direct path-split variant:
 server {
     listen 443 ssl http2;
     server_name soundspan.example.com;
+    client_max_body_size 8m;
 
     location /api/ {
         proxy_pass http://soundspan-backend:3006;
