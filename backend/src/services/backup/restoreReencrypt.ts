@@ -54,16 +54,20 @@ export interface ReencryptSummary {
     credentialsUndecryptable: number;
 }
 
+export interface ReencryptResult extends ReencryptSummary {
+    processedColumns: string[];
+}
+
 async function reencryptModel(
     client: Client,
     model: EncryptedModelName,
     backupKey: string,
     currentKey: string,
     summary: ReencryptSummary,
+    columns: string[],
 ): Promise<void> {
     const table = TABLE_NAMES[model];
     const primaryKey = ENCRYPTED_MODEL_PRIMARY_KEYS[model];
-    const columns = ENCRYPTED_SETTINGS_COLUMNS[model];
     let cursor: string | null = null;
     for (
         let batchNumber = 0;
@@ -112,16 +116,46 @@ export async function reencryptRestoredCredentials(
     client: Client,
     backupKey: string,
     currentKey: string,
-): Promise<ReencryptSummary> {
-    const summary: ReencryptSummary = {
+    skippedColumns: ReadonlySet<string> = new Set(),
+): Promise<ReencryptResult> {
+    const summary: ReencryptResult = {
         credentialsReencrypted: 0,
         credentialsUndecryptable: 0,
+        processedColumns: [],
     };
     if (backupKey === currentKey) return summary;
+    const available = await client.query<{
+        table_name: string;
+        column_name: string;
+    }>(
+        `SELECT table_name, column_name FROM information_schema.columns
+          WHERE table_schema = 'public'`,
+    );
+    const availableColumns = new Set(
+        available.rows.map((row) => `${row.table_name}.${row.column_name}`),
+    );
     for (const model of Object.keys(
         ENCRYPTED_SETTINGS_COLUMNS,
     ) as EncryptedModelName[]) {
-        await reencryptModel(client, model, backupKey, currentKey, summary);
+        const table = TABLE_NAMES[model];
+        const primaryKey = ENCRYPTED_MODEL_PRIMARY_KEYS[model];
+        if (!availableColumns.has(`${table}.${primaryKey}`)) continue;
+        const columns = ENCRYPTED_SETTINGS_COLUMNS[model].filter((column) => {
+            const key = `${table}.${column}`;
+            return availableColumns.has(key) && !skippedColumns.has(key);
+        });
+        if (columns.length === 0) continue;
+        await reencryptModel(
+            client,
+            model,
+            backupKey,
+            currentKey,
+            summary,
+            columns,
+        );
+        summary.processedColumns.push(
+            ...columns.map((column) => `${table}.${column}`),
+        );
     }
     return summary;
 }

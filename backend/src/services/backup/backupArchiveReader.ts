@@ -1,5 +1,7 @@
 import fs from "fs";
+import crypto from "crypto";
 import { Transform, type TransformCallback } from "stream";
+import { pipeline } from "stream/promises";
 import { createGunzip } from "zlib";
 import {
     MAX_BACKUP_RECORD_BYTES,
@@ -84,21 +86,43 @@ export async function* readBackupRecords(
     filePath: string,
     maximumRecordBytes = MAX_BACKUP_RECORD_BYTES,
 ): AsyncGenerator<BackupRecord> {
+    for await (const item of readBackupRecordLines(
+        filePath,
+        maximumRecordBytes,
+    )) {
+        yield item.record;
+    }
+}
+
+async function* readBackupRecordLines(
+    filePath: string,
+    maximumRecordBytes: number,
+): AsyncGenerator<{ record: BackupRecord; bytes: Buffer }> {
     const source = fs.createReadStream(filePath);
     const gunzip = createGunzip();
     const stream = new BoundedLineSplitter(maximumRecordBytes);
-    source.on("error", (error) => stream.destroy(error));
-    gunzip.on("error", (error) => stream.destroy(error));
-    source.pipe(gunzip).pipe(stream);
+    const completion = pipeline(source, gunzip, stream);
+    let consumed = false;
     try {
         for await (const line of stream) {
-            yield parseBackupRecord(String(line));
+            const text = String(line);
+            yield {
+                record: parseBackupRecord(text),
+                bytes: Buffer.from(`${text}\n`, "utf8"),
+            };
         }
+        await completion;
+        consumed = true;
     } catch (cause) {
         if (cause instanceof BackupFormatError) throw cause;
         throw new BackupFormatError("Backup archive is truncated or invalid", {
             cause,
         });
+    } finally {
+        source.destroy();
+        gunzip.destroy();
+        stream.destroy();
+        if (!consumed) await completion.catch(() => undefined);
     }
 }
 
@@ -106,7 +130,7 @@ export async function* readBackupRecords(
 export async function readBackupHeader(
     filePath: string,
 ): Promise<BackupHeader> {
-    for await (const record of readBackupRecords(filePath)) {
+    for await (const record of readBackupRecords(filePath, 4 * 1024 * 1024)) {
         if (record.type !== "header") {
             throw new BackupFormatError("Backup header is missing");
         }
@@ -123,26 +147,35 @@ export interface ArchiveValidation {
 /** Validate full framing and exact per-table row counts before destructive work. */
 export async function validateBackupArchive(
     filePath: string,
+    macKey: Buffer,
 ): Promise<ArchiveValidation> {
     let header: BackupHeader | null = null;
     let ended = false;
     const counts = new Map<string, number>();
-    for await (const record of readBackupRecords(filePath)) {
+    const hmac = crypto.createHmac("sha256", macKey);
+    for await (const item of readBackupRecordLines(
+        filePath,
+        MAX_BACKUP_RECORD_BYTES,
+    )) {
+        const { record } = item;
         if (ended) throw new BackupFormatError("Backup has trailing data");
         if (!header) {
             if (record.type !== "header") {
                 throw new BackupFormatError("Backup header is missing");
             }
             header = record;
+            hmac.update(item.bytes);
             continue;
         }
         if (record.type === "header") {
             throw new BackupFormatError("Backup contains multiple headers");
         }
         if (record.type === "end") {
+            verifyArchiveMac(hmac.digest(), record.mac);
             ended = true;
             continue;
         }
+        hmac.update(item.bytes);
         const nextCount = (counts.get(record.table) ?? 0) + record.rowCount;
         if (!Number.isSafeInteger(nextCount)) {
             throw new BackupFormatError(
@@ -170,4 +203,14 @@ export async function validateBackupArchive(
         );
     }
     return { header, rows: totalRows };
+}
+
+function verifyArchiveMac(actual: Buffer, encoded: string): void {
+    const expected = Buffer.from(encoded, "base64");
+    if (
+        expected.length !== actual.length ||
+        !crypto.timingSafeEqual(actual, expected)
+    ) {
+        throw new BackupFormatError("Backup archive authentication failed");
+    }
 }

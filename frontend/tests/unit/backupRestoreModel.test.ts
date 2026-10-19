@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
     MAX_BACKUP_PASSPHRASE_LENGTH,
+    PROXY_BODY_TOO_LARGE,
+    chunkErrorCode,
     chunkRange,
+    chunkRetryWaitMs,
+    isFreshInstallIntact,
     isRestoreRunning,
     isRetryableChunkError,
     readApiErrorCode,
@@ -35,6 +39,7 @@ function status(overrides: Partial<RestoreStatus>): RestoreStatus {
         error: null,
         summary: null,
         restartRequired: false,
+        upload: null,
         ...overrides,
     };
 }
@@ -146,7 +151,7 @@ test("flowFromStatus maps server states to page steps", () => {
         status({
             state: "failed",
             error: {
-                code: "BACKUP_SCHEMA_MISMATCH",
+                code: "SOMETHING_NEW",
                 message: "Tables differ.",
             },
         }),
@@ -181,4 +186,68 @@ test("flowFromStartError keeps the upload only for a wrong passphrase", () => {
         newer.kind === "form" ? (newer.error ?? "") : "",
         /newer version/,
     );
+});
+
+test("coded 503 barriers are not retried, proxy 413s get their own code", () => {
+    assert.equal(
+        isRetryableChunkError(apiError(503, "RESTART_REQUIRED")),
+        false,
+    );
+    assert.equal(chunkErrorCode(apiError(413)), PROXY_BODY_TOO_LARGE);
+    assert.equal(
+        chunkErrorCode(apiError(413, "BACKUP_TOO_LARGE")),
+        "BACKUP_TOO_LARGE",
+    );
+});
+
+test("chunkRetryWaitMs honors Retry-After and caps exponential backoff", () => {
+    assert.equal(chunkRetryWaitMs(new Error("x"), 1), 1000);
+    assert.equal(chunkRetryWaitMs(new Error("x"), 3), 4000);
+    assert.equal(chunkRetryWaitMs(new Error("x"), 10), 60_000);
+    const limited = Object.assign(new Error("slow down"), {
+        retryAfterMs: 7000,
+    });
+    assert.equal(chunkRetryWaitMs(limited, 1), 7000);
+    const huge = Object.assign(new Error("slow down"), {
+        retryAfterMs: 600_000,
+    });
+    assert.equal(chunkRetryWaitMs(huge, 1), 60_000);
+});
+
+test("only cleanup and interruption failures leave a dirty database", () => {
+    assert.equal(isFreshInstallIntact("BACKUP_ROW_COUNT_MISMATCH"), true);
+    assert.equal(isFreshInstallIntact(undefined), true);
+    assert.equal(isFreshInstallIntact("RESTORE_CLEANUP_FAILED"), false);
+    assert.equal(isFreshInstallIntact("RESTORE_INTERRUPTED"), false);
+});
+
+test("flowFromStatus: wiped server shows the form; foreign upload its expiry", () => {
+    assert.equal(
+        flowFromStatus(status({ state: "complete", available: true })).kind,
+        "form",
+    );
+    assert.equal(
+        flowFromStatus(
+            status({
+                state: "complete",
+                available: false,
+                restartRequired: true,
+            }),
+        ).kind,
+        "complete",
+    );
+    assert.deepEqual(
+        flowFromStatus(
+            status({
+                state: "uploading",
+                upload: { expiresAt: "2030-01-01T00:00:00.000Z" },
+            }),
+        ),
+        { kind: "otherUpload", expiresAt: "2030-01-01T00:00:00.000Z" },
+    );
+});
+
+test("flowFromStartError keeps the upload for a code-less 400", () => {
+    assert.equal(flowFromStartError(apiError(400), true).kind, "passphrase");
+    assert.equal(flowFromStartError(apiError(500), true).kind, "form");
 });

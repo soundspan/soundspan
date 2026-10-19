@@ -22,6 +22,10 @@ function capped(values: string[]): string {
     return values.slice(0, 10).join(", ");
 }
 
+function quoteLiteral(value: string): string {
+    return `'${value.replaceAll("'", "''")}'`;
+}
+
 function validateSchema(header: BackupHeader, target: CatalogTable[]): void {
     const targetByName = new Map(target.map((table) => [table.name, table]));
     const archiveNames = new Set(header.tables.map((table) => table.name));
@@ -145,10 +149,18 @@ async function insertArchiveRows(
             throw new RestoreError("BACKUP_SCHEMA_MISMATCH", "Unknown table");
         const columns = table.columns.map((column) => quoteIdent(column.name));
         const tableIdent = quoteIdent(table.name);
+        const values = table.columns.map((column) => {
+            const columnIdent = quoteIdent(column.name);
+            if (column.type === "json" || column.type === "jsonb") {
+                const key = quoteLiteral(column.name);
+                return `CASE WHEN e->${key} = 'null'::jsonb THEN NULL ELSE ((e->${key})->0)::${column.type} END`;
+            }
+            return `(jsonb_populate_record(NULL::public.${tableIdent}, e)).${columnIdent}`;
+        });
         const result = await client.query(
             `INSERT INTO public.${tableIdent} (${columns.join(", ")}) OVERRIDING SYSTEM VALUE
-             SELECT ${columns.join(", ")}
-               FROM jsonb_populate_recordset(NULL::public.${tableIdent}, $1::jsonb)`,
+             SELECT ${values.join(", ")}
+               FROM jsonb_array_elements($1::jsonb) AS e`,
             [record.rows],
         );
         const rowCount = result.rowCount ?? 0;
@@ -193,6 +205,7 @@ export async function loadBackupData(
     filePath: string,
     header: BackupHeader,
     onProgress: (progress: RestoreProgress) => void | Promise<void>,
+    beforeCommit?: (client: Client) => void | Promise<void>,
 ): Promise<void> {
     await client.query("BEGIN");
     try {
@@ -228,6 +241,7 @@ export async function loadBackupData(
             );
         }
         verifyCounts(header, inserted);
+        if (beforeCommit) await beforeCommit(client);
         await client.query("COMMIT");
     } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);

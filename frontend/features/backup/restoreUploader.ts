@@ -2,6 +2,7 @@ import type { RestoreUploadSession } from "@/lib/api/backup";
 import {
     MAX_CHUNK_ATTEMPTS,
     chunkRange,
+    chunkRetryWaitMs,
     isRetryableChunkError,
 } from "./backupRestoreModel";
 
@@ -22,8 +23,6 @@ export interface UploadBackupFileOptions {
     signal: AbortSignal;
     wait?: (ms: number) => Promise<void>;
 }
-
-const RETRY_BACKOFF_MS = 1000;
 
 function defaultWait(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,7 +52,7 @@ async function uploadOneChunk(
             ) {
                 throw error;
             }
-            await wait(RETRY_BACKOFF_MS * attempt);
+            await wait(chunkRetryWaitMs(error, attempt));
         }
     }
 }

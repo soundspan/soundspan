@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import type { BackupMigration } from "./backupFormat";
 import { RestoreMigrationError } from "./backupErrors";
+import { buildChildProcessEnvironment } from "../../config";
 
 const OUTPUT_TAIL_BYTES = 64 * 1024;
 const MIGRATION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -31,7 +32,9 @@ async function runPrisma(
             {
                 cwd: BACKEND_ROOT,
                 shell: false,
-                env: { ...process.env, DATABASE_URL: databaseUrl },
+                env: buildChildProcessEnvironment({
+                    DATABASE_URL: databaseUrl,
+                }),
                 stdio: ["ignore", "pipe", "pipe"],
             },
         );

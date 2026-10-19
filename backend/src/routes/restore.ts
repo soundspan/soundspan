@@ -24,7 +24,6 @@ import {
 } from "../services/backup/restoreCompatibility";
 import {
     getRestoreStatus,
-    isRestoreJobActive,
     setRestoreStatus,
     startRestoreJob,
 } from "../services/backup/restoreJob";
@@ -33,11 +32,14 @@ import {
     claimCompletedRestoreUpload,
     completeRestoreUpload,
     createRestoreUpload,
-    hasActiveRestoreUpload,
+    getActiveRestoreUpload,
+    beginRestoreCompletion,
+    releaseRestoreCompletion,
     MAX_RESTORE_SIZE_BYTES,
     writeRestoreChunk,
 } from "../services/backup/restoreUploads";
 import { isRestartRequired } from "../services/backup/restartRequired";
+import { isRestoreLockHeld } from "../services/backup/restoreLock";
 
 const router = Router();
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
@@ -55,6 +57,8 @@ function statusForError(error: BackupError): number {
     if (error.code === "RESTORE_UPLOAD_NOT_FOUND") return 404;
     if (error.code === "BACKUP_TOO_LARGE") return 413;
     if (error.code === "INSUFFICIENT_STORAGE") return 507;
+    if (error.code === "RESTORE_STAGING_UNAVAILABLE") return 507;
+    if (error.code === "RESTORE_STATUS_UNAVAILABLE") return 503;
     if (
         error.code === "BACKUP_FORMAT_INVALID" ||
         error.code === "BACKUP_PASSPHRASE_INVALID" ||
@@ -86,26 +90,40 @@ router.get(
     "/status",
     apiLimiter,
     asyncHandler(async (_req, res) => {
-        const [status, uploadActive, userExists, restartRequired] =
-            await Promise.all([
-                getRestoreStatus(),
-                hasActiveRestoreUpload(),
-                usersExist(),
-                isRestartRequired(),
-            ]);
+        const jobActive = await isRestoreLockHeld();
+        let status;
+        try {
+            status = await getRestoreStatus(jobActive);
+        } catch (error) {
+            return sendBackupError(res, error);
+        }
+        const [upload, restartRequired] = await Promise.all([
+            getActiveRestoreUpload(),
+            isRestartRequired(),
+        ]);
+        const userExists = jobActive ? false : await usersExist();
         const { error: jobFailure } = status;
         const state =
-            status.state === "uploading" && !uploadActive
-                ? "idle"
-                : status.state;
+            status.state === "uploading" && !upload ? "idle" : status.state;
+        if (userExists && !restartRequired) {
+            return res.json({
+                available: false,
+                state,
+                restartRequired: false,
+                progress: null,
+                error: null,
+                summary: null,
+                upload: null,
+            });
+        }
         res.json({
-            available:
-                !userExists && !uploadActive && !isRestoreJobActive(status),
+            available: !userExists && !upload && !jobActive,
             state,
             progress: status.progress,
             ["error"]: jobFailure,
             summary: status.summary,
             restartRequired,
+            upload,
         });
     }),
 );
@@ -128,8 +146,8 @@ router.post(
     "/uploads",
     restoreMutationLimiter,
     asyncHandler(async (req, res) => {
-        if (!(await requireFreshInstall(res))) return;
         if (!(await requireNoRestoreJob(res))) return;
+        if (!(await requireFreshInstall(res))) return;
         const parsed = sizeSchema.safeParse(req.body);
         if (!parsed.success)
             return sendRouteError(res, 400, "Invalid backup size");
@@ -173,10 +191,13 @@ router.post(
 router.put(
     "/uploads/:uploadId/chunks/:index",
     restoreChunkLimiter,
+    asyncHandler(async (_req, res, next) => {
+        if (!(await requireNoRestoreJob(res))) return;
+        if (!(await requireFreshInstall(res))) return;
+        next();
+    }),
     parseRestoreChunk,
     asyncHandler(async (req, res) => {
-        if (!(await requireFreshInstall(res))) return;
-        if (!(await requireNoRestoreJob(res))) return;
         const uploadId = uploadIdSchema.safeParse(req.params.uploadId);
         const index = z.coerce
             .number()
@@ -217,17 +238,20 @@ router.post(
     "/uploads/:uploadId/complete",
     restoreMutationLimiter,
     asyncHandler(async (req, res) => {
-        if (!(await requireFreshInstall(res))) return;
         if (!(await requireNoRestoreJob(res))) return;
+        if (!(await requireFreshInstall(res))) return;
         const uploadId = uploadIdSchema.safeParse(req.params.uploadId);
         const body = passphraseSchema.safeParse(req.body);
         if (!uploadId.success || !body.success) {
             return sendRouteError(res, 400, "Invalid restore request");
         }
+        let completionReserved = false;
         try {
+            await beginRestoreCompletion(uploadId.data);
+            completionReserved = true;
             const filePath = await completeRestoreUpload(uploadId.data);
             const header = await readBackupHeader(filePath);
-            const backupKey = await unwrapEncryptionKey(
+            const secrets = await unwrapEncryptionKey(
                 header.wrappedKey,
                 body.data.passphrase,
             );
@@ -248,7 +272,9 @@ router.post(
             const restoreId = await startRestoreJob({
                 uploadId: uploadId.data,
                 filePath,
-                backupKey,
+                backupKey: secrets.key,
+                backupPepperFingerprint: secrets.pepperFingerprint,
+                macKey: secrets.macKey,
             });
             res.status(202).json({
                 restoreId,
@@ -257,6 +283,11 @@ router.post(
                 appVersion: resolveAppVersion(),
             });
         } catch (error) {
+            if (completionReserved) {
+                await releaseRestoreCompletion(uploadId.data).catch(
+                    () => undefined,
+                );
+            }
             sendBackupError(res, error);
         }
     }),

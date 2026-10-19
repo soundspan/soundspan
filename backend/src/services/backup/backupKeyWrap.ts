@@ -6,6 +6,7 @@ import {
     type WrappedEncryptionKey,
 } from "./backupFormat";
 import { BackupPassphraseError } from "./backupErrors";
+import { z } from "zod";
 export { BackupPassphraseError } from "./backupErrors";
 
 const KEY_BYTES = 32;
@@ -16,6 +17,14 @@ const MIN_PASSPHRASE_CHARACTERS = 12;
 const MAX_PASSPHRASE_CHARACTERS = 1024;
 const SCRYPT_OPTIONS = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
 const AAD = Buffer.from(`${BACKUP_FORMAT_MAGIC}:${BACKUP_FORMAT_VERSION}`);
+const WRAP_INFO = Buffer.from("soundspan-backup-v1 key-wrap");
+const MAC_INFO = Buffer.from("soundspan-backup-v1 mac");
+const wrappedPayloadSchema = z
+    .object({
+        key: z.string().min(1).max(10_000),
+        pepperFingerprint: z.string().max(256).nullable(),
+    })
+    .strict();
 
 async function deriveKey(passphrase: string, salt: Buffer): Promise<Buffer> {
     return new Promise((resolve, reject) => {
@@ -32,6 +41,23 @@ async function deriveKey(passphrase: string, salt: Buffer): Promise<Buffer> {
     });
 }
 
+function expandKey(key: Buffer, info: Buffer): Buffer {
+    return Buffer.from(
+        crypto.hkdfSync("sha256", key, Buffer.alloc(0), info, KEY_BYTES),
+    );
+}
+
+export interface WrappedBackupSecrets {
+    wrappedKey: WrappedEncryptionKey;
+    macKey: Buffer;
+}
+
+export interface UnwrappedBackupSecrets {
+    key: string;
+    pepperFingerprint: string | null;
+    macKey: Buffer;
+}
+
 function validatePassphrase(passphrase: string): void {
     if (
         passphrase.length < MIN_PASSPHRASE_CHARACTERS ||
@@ -45,22 +71,28 @@ function validatePassphrase(passphrase: string): void {
 export async function wrapEncryptionKey(
     key: string,
     passphrase: string,
-): Promise<WrappedEncryptionKey> {
+    pepperFingerprint: string | null,
+): Promise<WrappedBackupSecrets> {
     validatePassphrase(passphrase);
     const salt = crypto.randomBytes(SALT_BYTES);
     const iv = crypto.randomBytes(IV_BYTES);
-    const wrappingKey = await deriveKey(passphrase, salt);
+    const rootKey = await deriveKey(passphrase, salt);
+    const wrappingKey = expandKey(rootKey, WRAP_INFO);
+    const macKey = expandKey(rootKey, MAC_INFO);
     const cipher = crypto.createCipheriv("aes-256-gcm", wrappingKey, iv);
     cipher.setAAD(AAD);
     const ciphertext = Buffer.concat([
-        cipher.update(key, "utf8"),
+        cipher.update(JSON.stringify({ key, pepperFingerprint }), "utf8"),
         cipher.final(),
     ]);
     return {
-        salt: salt.toString("base64"),
-        iv: iv.toString("base64"),
-        tag: cipher.getAuthTag().toString("base64"),
-        ciphertext: ciphertext.toString("base64"),
+        wrappedKey: {
+            salt: salt.toString("base64"),
+            iv: iv.toString("base64"),
+            tag: cipher.getAuthTag().toString("base64"),
+            ciphertext: ciphertext.toString("base64"),
+        },
+        macKey,
     };
 }
 
@@ -96,11 +128,12 @@ function decodeWrapped(wrapped: WrappedEncryptionKey): {
 export async function unwrapEncryptionKey(
     wrapped: WrappedEncryptionKey,
     passphrase: string,
-): Promise<string> {
+): Promise<UnwrappedBackupSecrets> {
     try {
         validatePassphrase(passphrase);
         const decoded = decodeWrapped(wrapped);
-        const wrappingKey = await deriveKey(passphrase, decoded.salt);
+        const rootKey = await deriveKey(passphrase, decoded.salt);
+        const wrappingKey = expandKey(rootKey, WRAP_INFO);
         const decipher = crypto.createDecipheriv(
             "aes-256-gcm",
             wrappingKey,
@@ -108,10 +141,17 @@ export async function unwrapEncryptionKey(
         );
         decipher.setAAD(AAD);
         decipher.setAuthTag(decoded.tag);
-        return Buffer.concat([
+        const plaintext = Buffer.concat([
             decipher.update(decoded.ciphertext),
             decipher.final(),
         ]).toString("utf8");
+        const payload = wrappedPayloadSchema.parse(
+            JSON.parse(plaintext) as unknown,
+        );
+        return {
+            ...payload,
+            macKey: expandKey(rootKey, MAC_INFO),
+        };
     } catch (cause) {
         throw new BackupPassphraseError({ cause });
     }

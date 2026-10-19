@@ -48,21 +48,29 @@ export default function OnboardingPage() {
     useEffect(() => {
         let cancelled = false;
         async function checkOnboarding() {
-            const restore = await api.getRestoreStatus().catch(() => null);
+            // Both checks run at once so a slow restore check never delays
+            // the redirect of an installed server to sign-in. Failures are
+            // ignored (fail open) so first-time setup still works.
+            const [restoreResult, onboardingResult] = await Promise.allSettled([
+                api.getRestoreStatus(),
+                api.getOnboardingStatus(),
+            ]);
             if (cancelled) return;
+            const restore =
+                restoreResult.status === "fulfilled"
+                    ? restoreResult.value
+                    : null;
             if (restore && restoreHoldsFirstRun(restore)) {
                 setRestoreAvailable(true);
                 setAccountMode("restore");
                 return;
             }
             setRestoreAvailable(Boolean(restore?.available));
-            try {
-                const data = await api.getOnboardingStatus();
-                if (!cancelled && !data.needsOnboarding) {
-                    router.replace("/login");
-                }
-            } catch {
-                // Ignore — fail open so first-time setup still works
+            if (
+                onboardingResult.status === "fulfilled" &&
+                !onboardingResult.value.needsOnboarding
+            ) {
+                router.replace("/login");
             }
         }
         checkOnboarding();

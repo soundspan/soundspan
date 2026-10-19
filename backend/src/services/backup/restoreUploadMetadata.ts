@@ -15,6 +15,7 @@ const uploadSessionSchema = z
         totalChunks: z.number().int().safe().min(1),
         nextIndex: z.number().int().safe().nonnegative(),
         createdAt: z.number().int().safe().nonnegative(),
+        expiresAt: z.number().int().safe().nonnegative(),
     })
     .strict()
     .refine(
@@ -31,6 +32,7 @@ export interface RestoreUploadSession {
     totalChunks: number;
     nextIndex: number;
     createdAt: number;
+    expiresAt: number;
 }
 
 export function restoreUploadSessionKey(uploadId: string): string {

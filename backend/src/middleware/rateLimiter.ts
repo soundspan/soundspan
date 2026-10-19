@@ -271,11 +271,12 @@ export const restoreMutationLimiter = rateLimit({
 
 export const restoreChunkLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 600,
+    max: 1500,
     message: "Too many restore chunks. Please slow down.",
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req, res, _next, options) => {
+        res.setHeader("Retry-After", "60");
         sendRouteError(res, options.statusCode, String(options.message));
     },
     ...createRedisRateLimitOptions("restore-chunk", { fallback: "memory" }),

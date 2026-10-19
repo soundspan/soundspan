@@ -59,22 +59,15 @@ jest.mock("../../utils/systemSettings", () => ({
     encryptField: mockEncryptField,
 }));
 
-const mockGetRestoreStatus = jest.fn();
 const mockHasActiveRestoreUpload = jest.fn();
-jest.mock("../../services/backup/restoreJob", () => ({
-    getRestoreStatus: mockGetRestoreStatus,
-    isRestoreJobActive: (status: { state: string }) =>
-        [
-            "validating",
-            "resetting",
-            "replaying",
-            "loading",
-            "migrating",
-            "reencrypting",
-        ].includes(status.state),
+const mockRestoreLockHeld = jest.fn();
+const mockSweepRestoreStaging = jest.fn();
+jest.mock("../../services/backup/restoreLock", () => ({
+    isRestoreLockHeld: mockRestoreLockHeld,
 }));
 jest.mock("../../services/backup/restoreUploads", () => ({
-    hasActiveRestoreUpload: mockHasActiveRestoreUpload,
+    hasActiveRestoreUploadForRegistration: mockHasActiveRestoreUpload,
+    sweepRestoreStaging: mockSweepRestoreStaging,
 }));
 
 class MockEnvFileSyncSkippedError extends Error {}
@@ -146,8 +139,9 @@ describe("onboarding route runtime", () => {
         prisma.systemSettings.findFirst.mockResolvedValue({ id: "default" });
         prisma.systemSettings.update.mockResolvedValue({});
         prisma.systemSettings.upsert.mockResolvedValue({});
-        mockGetRestoreStatus.mockResolvedValue({ state: "idle" });
+        mockRestoreLockHeld.mockResolvedValue(false);
         mockHasActiveRestoreUpload.mockResolvedValue(false);
+        mockSweepRestoreStaging.mockResolvedValue(undefined);
 
         mockWriteEnvFile.mockResolvedValue(undefined);
         mockGenerateToken.mockReturnValue("jwt-token");
@@ -170,6 +164,18 @@ describe("onboarding route runtime", () => {
             error: "A restore is in progress",
             code: "RESTORE_IN_PROGRESS",
         });
+    });
+
+    it("checks the restore lock before any application table", async () => {
+        mockRestoreLockHeld.mockResolvedValue(true);
+        const res = createRes();
+        await register(
+            { body: { username: "alice", password: "password" } },
+            res,
+        );
+        expect(res.statusCode).toBe(409);
+        expect(prisma.user.count).not.toHaveBeenCalled();
+        expect(mockHasActiveRestoreUpload).not.toHaveBeenCalled();
     });
 
     afterAll(() => {
@@ -205,6 +211,7 @@ describe("onboarding route runtime", () => {
                 data: expect.objectContaining({ role: "admin" }),
             }),
         );
+        expect(mockSweepRestoreStaging).toHaveBeenCalledTimes(1);
 
         // Second registration attempt (count=1) — rejected (registration closed)
         prisma.user.count.mockResolvedValueOnce(1);

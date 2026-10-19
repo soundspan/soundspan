@@ -509,8 +509,11 @@
                     "backupFormat.test.ts",
                     "backupKeyWrap.test.ts",
                     "backupArchiveReader.test.ts",
+                    "backupExport.test.ts",
                     "restoreCompatibility.test.ts",
                     "restoreJob.test.ts",
+                    "restoreLock.test.ts",
+                    "restoreSchemaReset.test.ts",
                     "restoreReencrypt.test.ts",
                     "restoreStatus.test.ts",
                     "restoreUploads.test.ts",
@@ -835,7 +838,7 @@
                 ],
                 "backend_contract": [
                     "config.test.ts",
-                    "healthEndpointContract.test.ts"
+                    "apiEntrypointRuntime.test.ts"
                 ]
             }
         },

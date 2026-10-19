@@ -93,6 +93,8 @@ function backendEnvironment(
         AUTO_PLAYLISTS_ENABLED: "false",
         FEATURE_REQUESTS: "false",
         CATALOG_PERSISTENCE: "off",
+        ENABLE_ENV_FILE_SYNC: "false",
+        LOG_LEVEL: "info",
     };
 }
 

@@ -8,6 +8,7 @@ import {
 } from "../backupRestoreModel";
 import { useRestoreFlow } from "../hooks/useRestoreFlow";
 import {
+    OtherUploadView,
     RestoreCompleteView,
     RestoreFailedView,
     RestoreRunningView,
@@ -124,8 +125,15 @@ function PassphraseRetryForm({
     onStartOver: () => void;
 }) {
     const [passphrase, setPassphrase] = useState("");
+    const [formError, setFormError] = useState<string | null>(null);
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault();
+        const problem = validateBackupPassphrase(passphrase);
+        if (problem) {
+            setFormError(problem);
+            return;
+        }
+        setFormError(null);
         onRetry(passphrase);
     };
     return (
@@ -134,7 +142,7 @@ function PassphraseRetryForm({
                 The file is uploaded. Type the passphrase again to restore it.
             </p>
             <PassphraseField value={passphrase} onChange={setPassphrase} />
-            <ErrorBox message={error} />
+            <ErrorBox message={formError ?? error} />
             <button type="submit" className={PRIMARY_BUTTON_CLASS}>
                 Restore
             </button>
@@ -201,6 +209,8 @@ function RestoreFlowBody({ onBack }: { onBack?: () => void }) {
                     onCancel={cancel}
                 />
             );
+        case "otherUpload":
+            return <OtherUploadView expiresAt={flow.expiresAt} />;
         case "restoring":
             return <RestoreRunningView status={flow.status} />;
         case "complete":

@@ -99,6 +99,26 @@ async function storeHealedAlbumCover(
     return buildNativeCoverProxyRedirectPath(localCoverPath);
 }
 
+async function extractEmbeddedAlbumCover(
+    albumId: string,
+): Promise<string | null> {
+    const track = await prisma.track.findFirst({
+        where: { albumId, filePath: { not: null }, removedAt: null },
+        select: { filePath: true },
+        orderBy: { id: "asc" },
+    });
+    if (!track?.filePath) return null;
+    const audioPath = safeResolvePath(config.music.musicPath, track.filePath);
+    if (!audioPath) return null;
+    const { CoverArtExtractor } = await import("./coverArtExtractor");
+    const extractor = new CoverArtExtractor(coversBaseDir());
+    const coverPath = await extractor.extractCoverArt(audioPath, albumId);
+    if (!coverPath) return null;
+    const nativeCoverUrl = `native:${coverPath}`;
+    await persistHealedAlbumCover(albumId, nativeCoverUrl);
+    return buildNativeCoverProxyRedirectPath(nativeCoverUrl);
+}
+
 export const tryHealMissingNativeAlbumCover = async (
     nativePath: string,
 ): Promise<string | null> => {
@@ -234,7 +254,7 @@ export const tryHealMissingNativeAlbumCover = async (
             return fallbackExternalUrl;
         }
 
-        return null;
+        return extractEmbeddedAlbumCover(album.id);
     })().finally(() => {
         nativeCoverHealInFlight.delete(albumId);
     });

@@ -14,8 +14,11 @@ jest.mock("../../config/brand", () => ({ BRAND_SLUG: "test-brand" }));
 jest.mock("../../config/appVersion", () => ({
     resolveAppVersion: () => "2.6.1",
 }));
-jest.mock("../../config/secretsPolicy", () => ({
-    resolveSettingsEncryptionKey: () => ({ value: "k".repeat(32) }),
+jest.mock("../../utils/encryption", () => ({
+    getSettingsEncryptionKey: () => "k".repeat(32),
+}));
+jest.mock("../../utils/apiKeyHash", () => ({
+    getPepperFingerprint: () => "pepper",
 }));
 jest.mock("../../middleware/rateLimiter", () => ({
     backupLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
@@ -101,10 +104,13 @@ describe("backup routes", () => {
         mockIsBusy.mockResolvedValue(false);
         mockPutOnce.mockResolvedValue(true);
         mockWrapKey.mockResolvedValue({
-            salt: "salt",
-            iv: "iv",
-            tag: "tag",
-            ciphertext: "ciphertext",
+            wrappedKey: {
+                salt: "salt",
+                iv: "iv",
+                tag: "tag",
+                ciphertext: "ciphertext",
+            },
+            macKey: Buffer.alloc(32, 1),
         });
         mockGenerateToken.mockReturnValue("cookie-token");
         mockUserFind.mockResolvedValue({
@@ -153,6 +159,7 @@ describe("backup routes", () => {
                     tag: "dGFn",
                     ciphertext: "Y2lwaGVy",
                 },
+                macKey: Buffer.alloc(32, 1).toString("base64"),
             })
             .mockResolvedValueOnce(null);
         const exporter = {

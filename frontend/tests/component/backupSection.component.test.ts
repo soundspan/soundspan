@@ -23,7 +23,12 @@ const createBackupDownloadSession = mock.fn(async (_passphrase: string) => {
 const clickedLinks: Array<{ href: string; download: boolean }> = [];
 
 mock.module("@/lib/api", {
-    namedExports: { api: { createBackupDownloadSession } },
+    namedExports: {
+        api: {
+            createBackupDownloadSession,
+            getBackupDownloadUrl: () => "/api/backup/download",
+        },
+    },
 });
 mock.module("@/lib/logger", {
     namedExports: {
@@ -86,7 +91,11 @@ async function mountSection() {
 }
 
 function input(label: string): HTMLInputElement {
-    const element = document.querySelector(`input[aria-label="${label}"]`);
+    const owner = Array.from(document.querySelectorAll("label")).find(
+        (candidate) =>
+            candidate.querySelector("span")?.textContent?.trim() === label,
+    );
+    const element = owner?.querySelector("input");
     assert.ok(element instanceof HTMLInputElement, `Missing ${label} input`);
     return element;
 }

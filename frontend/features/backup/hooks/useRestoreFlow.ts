@@ -92,7 +92,9 @@ function useRestoreStatusPolling(setFlow: (flow: RestoreFlow) => void) {
             if (!mounted.current) return;
             const next = flowFromStatus(status);
             setFlow(next);
-            if (next.kind === "restoring") schedule(RESTORE_STATUS_POLL_MS);
+            if (next.kind === "restoring" || next.kind === "otherUpload") {
+                schedule(RESTORE_STATUS_POLL_MS);
+            }
         } catch (error) {
             handleFailure(error);
         }
@@ -118,8 +120,9 @@ function useRestoreStatusPolling(setFlow: (flow: RestoreFlow) => void) {
 /**
  * Drive a fresh-install restore: upload the backup in chunks, start the
  * restore, then follow its progress until it completes or fails. A page
- * reload during a restore picks the progress back up from the server, and a
- * wrong passphrase keeps the uploaded file so only the passphrase is retyped.
+ * reload during a restore picks the progress back up from the server, a
+ * wrong passphrase keeps the uploaded file so only the passphrase is
+ * retyped, and an upload this page didn't start is followed until it ends.
  */
 export function useRestoreFlow(): RestoreFlowControls {
     const [flow, setFlow] = useState<RestoreFlow>({ kind: "checking" });
@@ -127,7 +130,21 @@ export function useRestoreFlow(): RestoreFlowControls {
     const uploadAbort = useRef<AbortController | null>(null);
     const uploadId = useRef<string | null>(null);
 
-    useEffect(() => () => uploadAbort.current?.abort(), []);
+    // Leaving the page mid-upload (close, reload, navigate) cancels the
+    // upload on the server, so the fresh install's single upload slot is not
+    // held until it expires.
+    useEffect(() => {
+        const releaseOnExit = () => {
+            const id = uploadId.current;
+            if (id) api.cancelRestoreUploadOnExit(id);
+        };
+        window.addEventListener("pagehide", releaseOnExit);
+        return () => {
+            window.removeEventListener("pagehide", releaseOnExit);
+            uploadAbort.current?.abort();
+            discardUpload(uploadId);
+        };
+    }, []);
 
     const finishStart = useCallback(
         async (id: string, passphrase: string) => {

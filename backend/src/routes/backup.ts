@@ -2,7 +2,6 @@ import crypto from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { resolveAppVersion } from "../config/appVersion";
-import { resolveSettingsEncryptionKey } from "../config/secretsPolicy";
 import {
     BACKUP_DOWNLOAD_TOKEN_PURPOSE,
     BACKUP_DOWNLOAD_TTL_SECONDS,
@@ -17,6 +16,8 @@ import { backupLimiter } from "../middleware/rateLimiter";
 import { prisma } from "../utils/db";
 import { readCookie } from "../utils/cookies";
 import { logger as rootLogger } from "../utils/logger";
+import { getSettingsEncryptionKey } from "../utils/encryption";
+import { getPepperFingerprint } from "../utils/apiKeyHash";
 import { putOnce, takeOnce } from "../utils/redisKv";
 import { sendRouteError } from "../utils/routeErrorResponse";
 import { wrapEncryptionKey } from "../services/backup/backupKeyWrap";
@@ -39,11 +40,13 @@ const passphraseSchema = z.object({
 
 interface DownloadSession {
     wrapped: WrappedEncryptionKey;
+    macKey: string;
     userId: string;
 }
 const downloadSessionSchema = z
     .object({
         wrapped: wrappedEncryptionKeySchema,
+        macKey: z.string().min(1).max(100_000),
         userId: z.string().min(1).max(1_000),
     })
     .strict();
@@ -94,14 +97,21 @@ router.post(
                 code: "BACKUP_IN_PROGRESS",
             });
         }
-        const key = resolveSettingsEncryptionKey(process.env).value;
-        if (!key || !req.user)
-            throw new Error("Backup encryption key unavailable");
-        const wrapped = await wrapEncryptionKey(key, parsed.data.passphrase);
+        const key = getSettingsEncryptionKey();
+        if (!req.user) throw new Error("Backup encryption key unavailable");
+        const wrapped = await wrapEncryptionKey(
+            key,
+            parsed.data.passphrase,
+            getPepperFingerprint(),
+        );
         const downloadId = crypto.randomBytes(32).toString("base64url");
         const stored = await putOnce(
             downloadKey(downloadId),
-            { wrapped, userId: req.user.id } satisfies DownloadSession,
+            {
+                wrapped: wrapped.wrappedKey,
+                macKey: wrapped.macKey.toString("base64"),
+                userId: req.user.id,
+            } satisfies DownloadSession,
             BACKUP_DOWNLOAD_TTL_SECONDS,
         );
         if (!stored)
@@ -171,6 +181,7 @@ router.get(
         try {
             exporter = await openBackupExport({
                 wrappedKey: stored.data.wrapped,
+                macKey: Buffer.from(stored.data.macKey, "base64"),
                 appVersion: resolveAppVersion(),
             });
         } catch (error) {

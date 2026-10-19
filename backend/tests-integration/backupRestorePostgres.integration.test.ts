@@ -2,6 +2,7 @@ import fs from "fs";
 import fsp from "fs/promises";
 import os from "os";
 import path from "path";
+import crypto from "crypto";
 import { Client } from "pg";
 import { gunzipSync, gzipSync } from "zlib";
 
@@ -9,11 +10,16 @@ jest.mock("../src/utils/redis", () => {
     const values = new Map<string, string>();
     return {
         redisClient: {
+            isReady: true,
             set: jest.fn(async (key: string, value: string) => {
                 values.set(key, value);
                 return "OK";
             }),
             get: jest.fn(async (key: string) => values.get(key) ?? null),
+            sendCommand: jest.fn(async (args: readonly string[]) => {
+                if (args[0] !== "GET") return null;
+                return values.get(args[1]!) ?? null;
+            }),
             getDel: jest.fn(async (key: string) => {
                 const value = values.get(key) ?? null;
                 values.delete(key);
@@ -107,19 +113,18 @@ async function seedTypeFamilies(
         `INSERT INTO "User" (
              "id", "username", "role", "onboardingComplete",
              "enrichmentSettings", "profilePicture", "moodMixParams", "createdAt"
-         ) VALUES ($1, 'backup-user', 'admin', false, $2::jsonb, $3, $4::jsonb, $5)`,
+         ) VALUES ($1, 'backup-user', 'admin', false, $2::jsonb, $3, NULL, $4)`,
         [
             userId,
             JSON.stringify({ sources: ["library"], threshold: 0.75 }),
             Buffer.from([0, 1, 2, 255]),
-            JSON.stringify({ energy: 0.25, tags: ["calm"] }),
             timestamp,
         ],
     );
     await client.query(
-        `INSERT INTO "SystemSettings" ("id", "openaiApiKey", "fanartApiKey")
-         VALUES ('default', $1, 'v2:broken-value')`,
-        [encryptedSetting],
+        `INSERT INTO "SystemSettings" ("id", "openaiApiKey", "fanartApiKey", "updatedAt")
+         VALUES ('default', $1, 'v2:broken-value', $2)`,
+        [encryptedSetting, timestamp],
     );
     await client.query(
         `INSERT INTO "AppPassword" ("id", "userId", "displayName", "encryptedSecret")
@@ -171,8 +176,8 @@ async function seedTypeFamilies(
              "id", "family", "checkpoint_hash", "dim", "preprocessing",
              "status", "created_at", "last_seen_at"
          ) VALUES ('backup-space', 'integration', 'backup-checkpoint', 512,
-                   $1::jsonb, 'active', $2, $2)`,
-        [JSON.stringify({ normalize: true }), timestamp],
+                   $1::jsonb, 'migrating', $2, $2)`,
+        [JSON.stringify(null), timestamp],
     );
     const vector = `[${Array.from({ length: 512 }, () => "0.125").join(",")}]`;
     await client.query(
@@ -277,11 +282,14 @@ describeWithPostgres("data-only backup and restore", () => {
         const sourceState = await captureDatabaseState(source);
 
         const archivePath = path.join(directory, "roundtrip.soundspan-backup");
+        const wrapped = await wrapEncryptionKey(
+            backupKey,
+            "integration passphrase",
+            null,
+        );
         const exporter = await openBackupExport({
-            wrappedKey: await wrapEncryptionKey(
-                backupKey,
-                "integration passphrase",
-            ),
+            wrappedKey: wrapped.wrappedKey,
+            macKey: wrapped.macKey,
             appVersion: "integration",
         });
         try {
@@ -347,6 +355,22 @@ describeWithPostgres("data-only backup and restore", () => {
             "setting-secret",
         );
         expect(restored.rows[0]?.fanartApiKey).toBe("v2:broken-value");
+        const jsonNulls = await target.query<{
+            preprocessing_is_json_null: boolean;
+            mood_mix_is_sql_null: boolean;
+        }>(
+            `
+            SELECT e.preprocessing = 'null'::jsonb AS preprocessing_is_json_null,
+                   u."moodMixParams" IS NULL AS mood_mix_is_sql_null
+              FROM embedding_spaces e CROSS JOIN "User" u
+             WHERE e.id = 'backup-space' AND u.id = $1
+        `,
+            [userId],
+        );
+        expect(jsonNulls.rows[0]).toEqual({
+            preprocessing_is_json_null: true,
+            mood_mix_is_sql_null: true,
+        });
 
         const foreignKey = await target.query<{ count: string }>(
             `SELECT count(*)::text AS count FROM pg_constraint
@@ -384,21 +408,24 @@ describeWithPostgres("data-only backup and restore", () => {
             );
             await olderClient.connect();
             await olderClient.query(
-                `INSERT INTO "User" ("id", "username") VALUES ('older-user', 'older-user')`,
+                `INSERT INTO "User" ("id", "username", "role") VALUES ('older-user', 'older-user', 'admin')`,
             );
             await olderClient.query(
-                `INSERT INTO "SystemSettings" ("id") VALUES ('default')`,
+                `INSERT INTO "SystemSettings" ("id", "updatedAt") VALUES ('default', now())`,
             );
 
             const previousUrl = config.databaseUrl;
             config.databaseUrl = olderUrl;
             const olderArchive = path.join(directory, "older.soundspan-backup");
+            const olderWrapped = await wrapEncryptionKey(
+                backupKey,
+                "older integration passphrase",
+                null,
+            );
             try {
                 const exporter = await openBackupExport({
-                    wrappedKey: await wrapEncryptionKey(
-                        backupKey,
-                        "older integration passphrase",
-                    ),
+                    wrappedKey: olderWrapped.wrappedKey,
+                    macKey: olderWrapped.macKey,
                     appVersion: "older-integration",
                 });
                 try {
@@ -412,7 +439,7 @@ describeWithPostgres("data-only backup and restore", () => {
 
             const header = await readBackupHeader(olderArchive);
             expect(header.migrations).toEqual(olderMigrations);
-            await resetApplicationSchema(target);
+            await resetApplicationSchema(target, { allowExistingUsers: true });
             await replayBackupMigrations(
                 path.join(directory, "older-target"),
                 header.migrations,
@@ -432,7 +459,7 @@ describeWithPostgres("data-only backup and restore", () => {
                 imageMigrations.length,
             );
 
-            await resetApplicationSchema(target);
+            await resetApplicationSchema(target, { allowExistingUsers: true });
             await deployCurrentMigrations(targetUrl);
             const jobArchive = path.join(
                 directory,
@@ -447,6 +474,8 @@ describeWithPostgres("data-only backup and restore", () => {
                 uploadId: "integration-older",
                 filePath: jobArchive,
                 backupKey,
+                backupPepperFingerprint: null,
+                macKey: olderWrapped.macKey,
             });
             const status = await waitForRestore(restoreJob);
             expect(status.state).toBe("complete");
@@ -462,7 +491,41 @@ describeWithPostgres("data-only backup and restore", () => {
     });
 
     it("cleans up to a fresh install when a corrupted batch fails after reset", async () => {
-        const archivePath = path.join(directory, "older.soundspan-backup");
+        await resetApplicationSchema(target, { allowExistingUsers: true });
+        await deployCurrentMigrations(targetUrl);
+        await target.query(
+            `INSERT INTO "User" ("id", "username", "role")
+             VALUES ('corrupt-user', 'corrupt-user', 'admin')`,
+        );
+        await target.query(
+            `INSERT INTO "SystemSettings" ("id", "updatedAt")
+             VALUES ('default', now())`,
+        );
+        const wrapped = await wrapEncryptionKey(
+            backupKey,
+            "corruption integration passphrase",
+            null,
+        );
+        const archivePath = path.join(
+            directory,
+            "corrupt-source.soundspan-backup",
+        );
+        const previousUrl = config.databaseUrl;
+        config.databaseUrl = targetUrl;
+        try {
+            const exporter = await openBackupExport({
+                wrappedKey: wrapped.wrappedKey,
+                macKey: wrapped.macKey,
+                appVersion: "corruption-integration",
+            });
+            try {
+                await exporter.streamTo(fs.createWriteStream(archivePath));
+            } finally {
+                await exporter.close();
+            }
+        } finally {
+            config.databaseUrl = previousUrl;
+        }
         const records = gunzipSync(await fsp.readFile(archivePath))
             .toString("utf8")
             .trimEnd()
@@ -480,17 +543,29 @@ describeWithPostgres("data-only backup and restore", () => {
         };
         batch.rows = "[]";
         records[batchIndex] = JSON.stringify(batch);
+        const authenticatedBody = `${records.slice(0, -1).join("\n")}\n`;
+        records[records.length - 1] = JSON.stringify({
+            type: "end",
+            mac: crypto
+                .createHmac("sha256", wrapped.macKey)
+                .update(authenticatedBody, "utf8")
+                .digest("base64"),
+        });
         const corrupted = path.join(directory, "corrupted.soundspan-backup");
         await fsp.writeFile(corrupted, gzipSync(`${records.join("\n")}\n`));
 
-        await expect(validateBackupArchive(corrupted)).resolves.toBeDefined();
-        await resetApplicationSchema(target);
+        await expect(
+            validateBackupArchive(corrupted, wrapped.macKey),
+        ).resolves.toBeDefined();
+        await resetApplicationSchema(target, { allowExistingUsers: true });
         await deployCurrentMigrations(targetUrl);
         const restoreJob = await prepareRestoreRuntime(targetUrl, currentKey);
         await restoreJob.startRestoreJob({
             uploadId: "integration-corrupt",
             filePath: corrupted,
             backupKey,
+            backupPepperFingerprint: null,
+            macKey: wrapped.macKey,
         });
         const status = await waitForRestore(restoreJob);
         expect(status.state).toBe("failed");
@@ -508,8 +583,13 @@ describeWithPostgres("data-only backup and restore", () => {
     });
 
     it("detects the bigint advisory lock through pg_locks", async () => {
-        const { isRestoreLockHeld, RESTORE_ADVISORY_LOCK } =
-            await import("../src/services/backup/restoreLock");
+        config.databaseUrl = targetUrl;
+        const {
+            invalidateRestoreLockCache,
+            isRestoreLockHeld,
+            RESTORE_ADVISORY_LOCK,
+        } = await import("../src/services/backup/restoreLock");
+        invalidateRestoreLockCache();
         await target.query("SELECT pg_advisory_lock($1)", [
             RESTORE_ADVISORY_LOCK,
         ]);

@@ -24,6 +24,8 @@ export interface RestoreSummary {
     credentialsReencrypted: number;
     credentialsUndecryptable: number;
     apiKeysNeedReissue: boolean;
+    /** Backup migrations whose recorded checksum differs from this image's file. */
+    migrationChecksumWarnings: number;
 }
 
 /** Restore progress as reported by `GET /api/restore/status`. */
@@ -39,6 +41,8 @@ export interface RestoreStatus {
     error: { code: string; message: string } | null;
     summary: RestoreSummary | null;
     restartRequired: boolean;
+    /** The active upload session, when one is open on the server. */
+    upload: { expiresAt: string } | null;
 }
 
 /** A chunked upload session for a backup file. */
@@ -61,6 +65,16 @@ export interface RestoreStartResult {
 export interface RestoreChunkError extends Error {
     status: number;
     data: { error?: string; code?: string };
+    /** Server-requested wait before retrying, from `Retry-After`. */
+    retryAfterMs: number | null;
+}
+
+/** Longest a single chunk request may take before it is retried. */
+const CHUNK_REQUEST_TIMEOUT_MS = 120_000;
+
+function readRetryAfterMs(response: Response): number | null {
+    const seconds = Number(response.headers.get("Retry-After"));
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null;
 }
 
 async function toChunkError(response: Response): Promise<RestoreChunkError> {
@@ -73,7 +87,17 @@ async function toChunkError(response: Response): Promise<RestoreChunkError> {
     ) as RestoreChunkError;
     error.status = response.status;
     error.data = data;
+    error.retryAfterMs = readRetryAfterMs(response);
     return error;
+}
+
+/** Combine the caller's cancel signal with a per-request timeout. */
+function chunkRequestSignal(signal?: AbortSignal): AbortSignal | undefined {
+    if (typeof AbortSignal.timeout !== "function") return signal;
+    const timeout = AbortSignal.timeout(CHUNK_REQUEST_TIMEOUT_MS);
+    if (!signal) return timeout;
+    if (typeof AbortSignal.any !== "function") return signal;
+    return AbortSignal.any([signal, timeout]);
 }
 
 /** Add backup and restore operations to an API client base class. */
@@ -89,6 +113,14 @@ export function WithBackup<TBase extends ApiClientConstructor>(Base: TBase) {
                 method: "POST",
                 body: JSON.stringify({ passphrase }),
             });
+        }
+
+        /**
+         * Address of the cookie-authorized backup download, on the same
+         * origin the session request went to.
+         */
+        getBackupDownloadUrl(): string {
+            return `${this.getBaseUrl()}/api/backup/download`;
         }
 
         /** Read restore availability and progress (no sign-in needed). */
@@ -123,7 +155,7 @@ export function WithBackup<TBase extends ApiClientConstructor>(Base: TBase) {
                     headers: { "Content-Type": "application/octet-stream" },
                     body: chunk,
                     credentials: "include",
-                    signal,
+                    signal: chunkRequestSignal(signal),
                 },
             );
             if (!response.ok) {
@@ -151,6 +183,18 @@ export function WithBackup<TBase extends ApiClientConstructor>(Base: TBase) {
                 `/restore/uploads/${encodeURIComponent(uploadId)}`,
                 { method: "DELETE" },
             );
+        }
+
+        /**
+         * Cancel an upload while the page unloads. `keepalive` lets the
+         * request outlive the page, so a closed or reloaded tab doesn't hold
+         * the fresh install's only upload slot until it expires.
+         */
+        cancelRestoreUploadOnExit(uploadId: string): void {
+            void fetch(
+                `${this.getBaseUrl()}/api/restore/uploads/${encodeURIComponent(uploadId)}`,
+                { method: "DELETE", credentials: "include", keepalive: true },
+            ).catch(() => undefined);
         }
     }
     return BackupApi;

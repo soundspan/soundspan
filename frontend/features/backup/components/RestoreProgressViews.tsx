@@ -22,15 +22,23 @@ export const RESTART_COMMANDS: ReadonlyArray<{
     { label: "Docker Compose", command: "docker compose restart" },
     {
         label: "Kubernetes (Helm)",
-        command: `kubectl rollout restart deployment -l app.kubernetes.io/instance=${BRAND_SLUG}`,
+        command:
+            "kubectl -n <namespace> rollout restart deployment -l app.kubernetes.io/instance=<release>",
     },
 ];
 
-function ProgressBar({ percent }: { percent: number | null }) {
+function ProgressBar({
+    percent,
+    label,
+}: {
+    percent: number | null;
+    label: string;
+}) {
     return (
         <div
             className="h-2 w-full rounded-full bg-white/10 overflow-hidden"
             role="progressbar"
+            aria-label={label}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent ?? undefined}
@@ -56,13 +64,13 @@ export function UploadProgressView({
     const percent =
         totalBytes > 0 ? Math.floor((sentBytes / totalBytes) * 100) : 0;
     return (
-        <div className="space-y-4" role="status">
+        <div className="space-y-4">
             <p className="text-white/80 text-sm">
                 Uploading the backup: {formatBytes(sentBytes)} of{" "}
                 {formatBytes(totalBytes)}. Keep this page open until the upload
-                finishes.
+                finishes; leaving the page cancels it.
             </p>
-            <ProgressBar percent={percent} />
+            <ProgressBar percent={percent} label="Backup upload progress" />
             <button
                 type="button"
                 onClick={onCancel}
@@ -70,6 +78,22 @@ export function UploadProgressView({
             >
                 Cancel upload
             </button>
+        </div>
+    );
+}
+
+/** An upload that another page or tab started holds the server's upload slot. */
+export function OtherUploadView({ expiresAt }: { expiresAt: string | null }) {
+    return (
+        <div className="space-y-2" role="status">
+            <p className="text-white/80 text-sm">
+                Another upload of a backup is in progress on this server.
+            </p>
+            <p className="text-sm text-white/60">
+                {expiresAt
+                    ? `If it was yours and its page was closed, it expires by ${new Date(expiresAt).toLocaleTimeString()}. This page updates when it ends.`
+                    : "This page updates when it ends."}
+            </p>
         </div>
     );
 }
@@ -83,14 +107,17 @@ export function RestoreRunningView({
     const state = status?.state ?? "validating";
     const progress = status?.progress ?? null;
     return (
-        <div className="space-y-4" role="status">
+        <div className="space-y-4">
             <div className="flex items-center gap-3">
                 <GradientSpinner size="sm" />
-                <p className="text-white font-medium">
+                <p className="text-white font-medium" role="status">
                     {restorePhaseLabel(state)}
                 </p>
             </div>
-            <ProgressBar percent={restoreProgressPercent(progress)} />
+            <ProgressBar
+                percent={restoreProgressPercent(progress)}
+                label="Restore progress"
+            />
             {progress && progress.totalRows > 0 && (
                 <p className="text-xs text-white/50">
                     {progress.completedRows.toLocaleString()} of{" "}
@@ -128,6 +155,13 @@ function RestoreSummaryList({ status }: { status: RestoreStatus }) {
                     couldn&apos;t be read and need to be entered again.
                 </li>
             )}
+            {summary.migrationChecksumWarnings > 0 && (
+                <li>
+                    {summary.migrationChecksumWarnings} of the backup&apos;s
+                    database changes were recorded differently than this
+                    version&apos;s copies; the restore used this version&apos;s.
+                </li>
+            )}
             {summary.apiKeysNeedReissue && (
                 <li>
                     API keys, linked devices, and incoming federation peers need
@@ -143,8 +177,11 @@ function RestoreSummaryList({ status }: { status: RestoreStatus }) {
 export function RestoreCompleteView({ status }: { status: RestoreStatus }) {
     return (
         <div className="space-y-4">
-            <div className="flex items-center gap-3">
-                <CheckCircle2 className="w-6 h-6 text-green-400" />
+            <div className="flex items-center gap-3" role="status">
+                <CheckCircle2
+                    className="w-6 h-6 text-green-400"
+                    aria-hidden="true"
+                />
                 <h3 className="text-lg font-semibold text-white">
                     {status.restartRequired
                         ? `Restore complete. Restart ${BRAND_NAME} to finish.`
@@ -191,8 +228,14 @@ export function RestoreFailedView({
 }) {
     return (
         <div className="space-y-4">
-            <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <div
+                role="alert"
+                className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-lg p-4"
+            >
+                <AlertTriangle
+                    className="w-5 h-5 text-red-400 shrink-0 mt-0.5"
+                    aria-hidden="true"
+                />
                 <div className="text-sm text-red-300 space-y-1">
                     <p>{message}</p>
                     {freshInstallIntact && (

@@ -89,6 +89,11 @@ function requireRawEncryptionKey(): string {
     return rawEncryptionKey;
 }
 
+/** Return the validated deployment key for controlled encryption workflows. */
+export function getSettingsEncryptionKey(): string {
+    return requireRawEncryptionKey();
+}
+
 function requireLegacyEncryptionKey(): Buffer {
     validateEncryptionKey();
     if (legacyEncryptionKey === null) {

@@ -18,6 +18,7 @@ type RateLimitOptions = {
     handler?: (
         req: { ip: string; method: string; path: string },
         res: {
+            setHeader: (name: string, value: string) => unknown;
             status: (code: number) => {
                 send: (message: string) => unknown;
                 json: (body: unknown) => unknown;
@@ -32,6 +33,7 @@ type RateLimitHandlerResponse = {
     status: jest.MockedFunction<(code: number) => RateLimitHandlerResponse>;
     send: jest.MockedFunction<(message: string) => void>;
     json: jest.MockedFunction<(body: unknown) => void>;
+    setHeader: jest.MockedFunction<(name: string, value: string) => void>;
 };
 
 const mockRateLimit = jest.fn((options: RateLimitOptions) => options);
@@ -75,7 +77,7 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(18);
+        expect(mockRateLimit).toHaveBeenCalledTimes(21);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.adminSurfaceLimiter).toBeDefined();
         expect(mod.shareLinkLimiter).toBeDefined();
@@ -90,6 +92,9 @@ describe("rateLimiter middleware config", () => {
         expect(mod.downloadLimiter).toBeDefined();
         expect(mod.lyricsLimiter).toBeDefined();
         expect(mod.lyricsMutationLimiter).toBeDefined();
+        expect(mod.backupLimiter).toBeDefined();
+        expect(mod.restoreMutationLimiter).toBeDefined();
+        expect(mod.restoreChunkLimiter).toBeDefined();
         expect(mod.ytMusicSearchLimiter).toBeDefined();
         expect(mod.ytMusicStreamLimiter).toBeDefined();
         expect(mod.webhookLimiter).toBeDefined();
@@ -110,10 +115,13 @@ describe("rateLimiter middleware config", () => {
             { index: 11, windowMs: 60_000, max: 100 },
             { index: 12, windowMs: 60_000, max: 120 },
             { index: 13, windowMs: 900_000, max: 20 },
-            { index: 14, windowMs: 60_000, max: 30 },
-            { index: 15, windowMs: 60_000, max: 20 },
-            { index: 16, windowMs: 60_000, max: 60 },
-            { index: 17, windowMs: 60_000, max: 1000 },
+            { index: 14, windowMs: 900_000, max: 10 },
+            { index: 15, windowMs: 900_000, max: 20 },
+            { index: 16, windowMs: 60_000, max: 1500 },
+            { index: 17, windowMs: 60_000, max: 30 },
+            { index: 18, windowMs: 60_000, max: 20 },
+            { index: 19, windowMs: 60_000, max: 60 },
+            { index: 20, windowMs: 60_000, max: 1000 },
         ];
 
         for (const config of expectedConfigs) {
@@ -138,8 +146,11 @@ describe("rateLimiter middleware config", () => {
         ["oidc-flow", 6],
         ["cover-art-surface", 9],
         ["streaming-surface", 10],
-        ["webhook", 16],
-        ["federation-peer", 17],
+        ["backup", 14],
+        ["restore-mutation", 15],
+        ["restore-chunk", 16],
+        ["webhook", 19],
+        ["federation-peer", 20],
     ])("uses the namespaced shared store for %s", async (name, index) => {
         await loadRateLimiterModule();
 
@@ -153,6 +164,9 @@ describe("rateLimiter middleware config", () => {
         "oidc-flow",
         "cover-art-surface",
         "streaming-surface",
+        "backup",
+        "restore-mutation",
+        "restore-chunk",
         "webhook",
     ])("uses the memory fallback for the %s credential guard", async (name) => {
         await loadRateLimiterModule();
@@ -179,8 +193,8 @@ describe("rateLimiter middleware config", () => {
         ["download", 11],
         ["lyrics lookup", 12],
         ["lyrics mutation", 13],
-        ["YouTube Music search", 14],
-        ["YouTube Music stream", 15],
+        ["YouTube Music search", 17],
+        ["YouTube Music stream", 18],
     ])("keeps the %s limiter in memory", async (_name, index) => {
         await loadRateLimiterModule();
 
@@ -189,12 +203,31 @@ describe("rateLimiter middleware config", () => {
 
     it("keys authenticated federation limits by peer identity", async () => {
         await loadRateLimiterModule();
-        const keyGenerator = getOptions(17).keyGenerator!;
+        const keyGenerator = getOptions(20).keyGenerator!;
 
         expect(
             keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),
         ).toBe("peer-1");
         expect(keyGenerator({ ip: "10.0.0.1" })).toBe("unresolved-peer");
+    });
+
+    it("adds Retry-After to restore chunk limit responses", async () => {
+        await loadRateLimiterModule();
+        const handler = getOptions(16).handler as NonNullable<
+            RateLimitOptions["handler"]
+        >;
+        const res = {} as RateLimitHandlerResponse;
+        res.status = jest.fn((_: number) => res);
+        res.send = jest.fn();
+        res.json = jest.fn();
+        res.setHeader = jest.fn();
+        handler(
+            { ip: "127.0.0.1", method: "PUT", path: "/api/restore/chunk" },
+            res,
+            jest.fn(),
+            { statusCode: 429, message: "limited" },
+        );
+        expect(res.setHeader).toHaveBeenCalledWith("Retry-After", "60");
     });
 
     it("uses standard headers, disables legacy headers, and disables trustProxy validation for all limiters", async () => {

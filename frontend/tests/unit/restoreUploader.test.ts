@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { MAX_CHUNK_ATTEMPTS } from "../../features/backup/backupRestoreModel";
 import { uploadBackupFile } from "../../features/backup/restoreUploader";
 import type { RestoreUploadSession } from "../../lib/api/backup";
 
@@ -76,7 +77,8 @@ test("gives up after the bounded number of attempts", async () => {
         }),
         /bad gateway/,
     );
-    assert.equal(attempts, 3);
+    assert.equal(attempts, MAX_CHUNK_ATTEMPTS);
+    assert.equal(MAX_CHUNK_ATTEMPTS, 6);
 });
 
 test("does not retry contract errors", async () => {

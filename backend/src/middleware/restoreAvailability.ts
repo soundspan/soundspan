@@ -1,8 +1,5 @@
 import type { Response } from "express";
-import {
-    getRestoreStatus,
-    isRestoreJobActive,
-} from "../services/backup/restoreJob";
+import { isRestoreLockHeld } from "../services/backup/restoreLock";
 import { prisma } from "../utils/db";
 import { sendRouteError } from "../utils/routeErrorResponse";
 
@@ -17,7 +14,7 @@ export async function requireFreshInstall(res: Response): Promise<boolean> {
 
 /** Prevent a second upload from starting while a restore job owns the database. */
 export async function requireNoRestoreJob(res: Response): Promise<boolean> {
-    if (!isRestoreJobActive(await getRestoreStatus())) return true;
+    if (!(await isRestoreLockHeld())) return true;
     sendRouteError(res, 409, "A restore is already in progress", {
         code: "RESTORE_IN_PROGRESS",
     });

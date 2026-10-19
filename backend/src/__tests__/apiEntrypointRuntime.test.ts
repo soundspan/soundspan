@@ -153,6 +153,7 @@ describe("api entrypoint runtime behavior", () => {
             error: jest.fn(),
             child: jest.fn().mockReturnThis(),
         };
+        const sweepRestoreStaging = jest.fn(async () => undefined);
 
         const dependencyReadiness = {
             probe: jest.fn(
@@ -382,6 +383,9 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../services/coalescedLibraryScan", () => ({
             closeCoalescedLibraryScanRedis,
         }));
+        jest.doMock("../services/backup/restoreUploads", () => ({
+            sweepRestoreStaging,
+        }));
 
         for (const routeModule of routeModules) {
             jest.doMock(routeModule, () => ({
@@ -413,6 +417,8 @@ describe("api entrypoint runtime behavior", () => {
             requireAuth,
             requireAdmin,
             requireQueueDashboardAccess,
+            requireNoPendingRestart,
+            sweepRestoreStaging,
             shutdownWorkers,
             shutdownSchedulerClaimRedis,
             shutdownUmapProjection,
@@ -545,6 +551,7 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(mocks.prisma.$queryRaw).toHaveBeenCalled();
         expect(mocks.redisClient.ping).toHaveBeenCalled();
+        expect(mocks.sweepRestoreStaging).toHaveBeenCalledTimes(1);
         expect(mocks.createDependencyReadinessTracker).toHaveBeenCalledWith(
             "api",
         );
@@ -851,6 +858,36 @@ describe("api entrypoint runtime behavior", () => {
             ],
             "/rest": ["urlencoded-middleware", route("../routes/subsonic")],
         };
+
+        const healthPaths = [
+            "/health",
+            "/api/health",
+            "/health/live",
+            "/api/health/live",
+            "/health/ready",
+            "/api/health/ready",
+        ];
+        const healthOrders = healthPaths.map((healthPath) => {
+            const index = mocks.app.get.mock.calls.findIndex(
+                (args: unknown[]) => args[0] === healthPath,
+            );
+            expect(index).toBeGreaterThanOrEqual(0);
+            return mocks.app.get.mock.invocationCallOrder[index]!;
+        });
+        const barrierIndex = mocks.app.use.mock.calls.findIndex(
+            (args: unknown[]) => args[0] === mocks.requireNoPendingRestart,
+        );
+        const firstApiIndex = mocks.app.use.mock.calls.findIndex(
+            (args: unknown[]) => args[0] === "/api/restore",
+        );
+        expect(barrierIndex).toBeGreaterThanOrEqual(0);
+        expect(firstApiIndex).toBeGreaterThanOrEqual(0);
+        const barrierOrder =
+            mocks.app.use.mock.invocationCallOrder[barrierIndex]!;
+        const firstApiOrder =
+            mocks.app.use.mock.invocationCallOrder[firstApiIndex]!;
+        expect(Math.max(...healthOrders)).toBeLessThan(barrierOrder);
+        expect(barrierOrder).toBeLessThan(firstApiOrder);
 
         for (const [prefix, chain] of Object.entries(expectedMounts)) {
             const call = mocks.app.use.mock.calls.find(

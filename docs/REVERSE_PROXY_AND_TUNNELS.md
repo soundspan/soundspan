@@ -74,8 +74,8 @@ Set `SECURE_COOKIES=true` when the browser uses HTTPS, including when Cloudflare
 ## Request body size
 
 Two uploads send request bodies of several megabytes: profile pictures (up to
-5 MB) and backup restores, which upload the file in 4 MiB pieces. Your proxy
-must accept bodies of at least 5 MB. NGINX accepts 1 MB by default, so the
+5 MiB) and backup restores, which upload the file in 4 MiB pieces. Your proxy
+must accept bodies of at least 6 MB. NGINX accepts 1 MB by default, so the
 examples below set `client_max_body_size 8m;`.
 
 ## NGINX example (Docker/Kubernetes edge)

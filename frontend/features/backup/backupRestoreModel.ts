@@ -1,4 +1,5 @@
 import type { RestoreState, RestoreStatus } from "@/lib/api/backup";
+import { BRAND_NAME } from "@/lib/brand";
 
 /** Shortest passphrase the server accepts for a backup. */
 export const MIN_BACKUP_PASSPHRASE_LENGTH = 12;
@@ -6,8 +7,12 @@ export const MIN_BACKUP_PASSPHRASE_LENGTH = 12;
 export const MAX_BACKUP_PASSPHRASE_LENGTH = 1024;
 /** File extension of backups downloaded from the Admin page. */
 export const BACKUP_FILE_EXTENSION = ".soundspan-backup";
-/** How often one chunk is retried before the upload gives up. */
-export const MAX_CHUNK_ATTEMPTS = 3;
+/** How often one chunk is tried before the upload gives up. */
+export const MAX_CHUNK_ATTEMPTS = 6;
+/** Longest wait between two tries of one chunk. */
+export const MAX_CHUNK_RETRY_WAIT_MS = 60_000;
+/** Synthetic code for a proxy that rejects a chunk body as too large. */
+export const PROXY_BODY_TOO_LARGE = "PROXY_BODY_TOO_LARGE";
 /** How often the restore page asks the server for progress. */
 export const RESTORE_STATUS_POLL_MS = 2000;
 
@@ -57,9 +62,36 @@ const ERROR_MESSAGES: Record<string, string> = {
         "That passphrase doesn't match this backup. Check it and try again.",
     BACKUP_NEWER_THAN_APP:
         "This backup comes from a newer version. Update this server to that version or later, then restore.",
-    BACKUP_MIGRATION_CHECKSUM_MISMATCH:
-        "This backup comes from a build whose database changes differ from this version's. Restore it into the same release it came from.",
+    BACKUP_HAS_NO_ADMIN:
+        "This backup has no admin account, so restoring it would leave nobody able to manage the server.",
+    RESTORE_STATUS_UNAVAILABLE:
+        "The server can't report the restore's progress right now. Reload this page in a moment.",
+    BACKUP_SCHEMA_MISMATCH:
+        "The backup's tables don't match what this version expects for the backup's version. The backup may come from a modified database.",
+    BACKUP_ROW_COUNT_MISMATCH:
+        "The backup file is damaged: it holds a different number of rows than it lists. Use another backup.",
+    RESTORE_OBJECT_NOT_OWNED:
+        "The database holds objects owned by another database user, so the restore can't replace them. Start from an empty database.",
+    RESTORE_MIGRATION_FAILED:
+        "Upgrading the restored data to this version failed. Check the server logs for the database error.",
+    RESTORE_STAGING_UNAVAILABLE:
+        "The server can't write the upload next to its caches. Check that the cache volume is writable.",
+    RESTORE_FAILED:
+        "The restore failed. Check the server logs, then try again.",
+    RESTORE_INTERRUPTED:
+        "The restore stopped before it finished, for example because the server restarted. Reset the database, then restore again.",
+    RESTORE_CLEANUP_FAILED:
+        "The restore failed, and the server couldn't return to a fresh install. Reset the database, then restore again.",
+    RESTART_REQUIRED: `Restart ${BRAND_NAME} to finish the restore.`,
+    [PROXY_BODY_TOO_LARGE]:
+        "A reverse proxy in front of the server rejected the upload as too large. Let it accept request bodies of at least 6 MB.",
 };
+
+/** Failure codes that leave the database in a state other than a fresh install. */
+const DIRTY_FAILURE_CODES: ReadonlySet<string> = new Set([
+    "RESTORE_CLEANUP_FAILED",
+    "RESTORE_INTERRUPTED",
+]);
 
 /** Explain why a passphrase can't be used, or return null when it can. */
 export function validateBackupPassphrase(
@@ -102,6 +134,11 @@ export function restoreHoldsFirstRun(status: RestoreStatus): boolean {
         isRestoreRunning(status.state) ||
         (status.state === "complete" && status.restartRequired)
     );
+}
+
+/** True when a failed restore left this server a clean fresh install. */
+export function isFreshInstallIntact(code: string | undefined): boolean {
+    return !code || !DIRTY_FAILURE_CODES.has(code);
 }
 
 /** Plain-language label for a restore phase. */
@@ -154,14 +191,39 @@ export function readApiErrorStatus(error: unknown): number | undefined {
 }
 
 /**
- * A failed chunk is worth retrying only for network failures and transient
- * server answers; contract errors (wrong replica, out of order, expired)
- * never fix themselves.
+ * A failed chunk is worth retrying only for network failures, timeouts, and
+ * transient server answers; contract errors (wrong replica, out of order,
+ * expired) and restore barriers never fix themselves.
  */
 export function isRetryableChunkError(error: unknown): boolean {
     const status = readApiErrorStatus(error);
     if (status === undefined) {
         return !(error instanceof DOMException && error.name === "AbortError");
     }
+    if (status === 503 && readApiErrorCode(error) !== undefined) {
+        return false;
+    }
     return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+/** Map a chunk error to the code the page explains, including proxy limits. */
+export function chunkErrorCode(error: unknown): string | undefined {
+    const code = readApiErrorCode(error);
+    if (code) return code;
+    return readApiErrorStatus(error) === 413 ? PROXY_BODY_TOO_LARGE : undefined;
+}
+
+/**
+ * Wait before try `attempt + 1` of a chunk: the server's `Retry-After` when
+ * it sent one, otherwise exponential backoff from one second, both capped.
+ */
+export function chunkRetryWaitMs(error: unknown, attempt: number): number {
+    const requested =
+        error && typeof error === "object" && "retryAfterMs" in error
+            ? (error as { retryAfterMs?: unknown }).retryAfterMs
+            : null;
+    const backoff = 1000 * 2 ** Math.max(0, attempt - 1);
+    const wait =
+        typeof requested === "number" && requested >= 0 ? requested : backoff;
+    return Math.min(wait, MAX_CHUNK_RETRY_WAIT_MS);
 }

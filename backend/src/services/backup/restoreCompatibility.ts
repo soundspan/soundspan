@@ -8,13 +8,13 @@ export type CompatibilityResult =
           outcome: "ok";
           migrationsToReplay: BackupMigration[];
           pendingAfterLoad: number;
+          checksumWarnings: string[];
       }
     | {
-          outcome:
-              | "BACKUP_NEWER_THAN_APP"
-              | "BACKUP_MIGRATION_CHECKSUM_MISMATCH";
+          outcome: "BACKUP_NEWER_THAN_APP";
           migrationsToReplay: BackupMigration[];
           pendingAfterLoad: number;
+          checksumWarnings: string[];
       };
 
 /** Apply the same-or-newer restore rule to ordered Prisma migration inventories. */
@@ -24,28 +24,31 @@ export function evaluateRestoreCompatibility(
 ): CompatibilityResult {
     const imageByName = new Map(image.map((entry) => [entry.name, entry]));
     const migrationsToReplay: BackupMigration[] = [];
+    const checksumWarnings: string[] = [];
+    const seen = new Set<string>();
     for (const entry of backup) {
+        if (seen.has(entry.name)) continue;
+        seen.add(entry.name);
         const imageEntry = imageByName.get(entry.name);
         if (imageEntry === undefined) {
             return {
                 outcome: "BACKUP_NEWER_THAN_APP",
                 migrationsToReplay: [],
                 pendingAfterLoad: 0,
+                checksumWarnings: [],
             };
         }
         if (imageEntry.checksum !== entry.checksum) {
-            return {
-                outcome: "BACKUP_MIGRATION_CHECKSUM_MISMATCH",
-                migrationsToReplay: [],
-                pendingAfterLoad: 0,
-            };
+            checksumWarnings.push(entry.name);
         }
         migrationsToReplay.push(imageEntry);
     }
     return {
         outcome: "ok",
         migrationsToReplay,
-        pendingAfterLoad: image.length - backup.length,
+        pendingAfterLoad:
+            new Set(image.map((entry) => entry.name)).size - seen.size,
+        checksumWarnings,
     };
 }
 

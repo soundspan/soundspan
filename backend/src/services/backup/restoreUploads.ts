@@ -2,6 +2,7 @@ import crypto from "crypto";
 import fs from "fs/promises";
 import { redisClient } from "../../utils/redis";
 import { RestoreError } from "./backupErrors";
+import { logger as rootLogger } from "../../utils/logger";
 import {
     ensureRestoreStorage,
     restoreUploadPath,
@@ -24,7 +25,9 @@ export {
     type RestoreUploadSession,
 } from "./restoreUploadMetadata";
 
-const SESSION_TTL_SECONDS = 60 * 60;
+const SESSION_TTL_SECONDS = 15 * 60;
+const REGISTRATION_REDIS_TIMEOUT_MS = 250;
+const logger = rootLogger.child("BackupRestore");
 
 export interface RestoreUploadCreated {
     uploadId: string;
@@ -35,6 +38,31 @@ export interface RestoreUploadCreated {
 
 function uploadPath(uploadId: string): string {
     return restoreUploadPath(uploadId);
+}
+
+function completionKey(uploadId: string): string {
+    return `restore:complete:${uploadId}`;
+}
+
+/** Reserve expensive completion validation for one caller per upload. */
+export async function beginRestoreCompletion(uploadId: string): Promise<void> {
+    const reserved = await redisClient.set(completionKey(uploadId), "1", {
+        EX: SESSION_TTL_SECONDS,
+        NX: true,
+    });
+    if (reserved !== "OK") {
+        throw new RestoreError(
+            "RESTORE_IN_PROGRESS",
+            "A restore is already in progress",
+        );
+    }
+}
+
+/** Release completion validation after a non-destructive failure. */
+export async function releaseRestoreCompletion(
+    uploadId: string,
+): Promise<void> {
+    await redisClient.del(completionKey(uploadId));
 }
 
 async function readSession(uploadId: string): Promise<RestoreUploadSession> {
@@ -75,6 +103,7 @@ async function readSession(uploadId: string): Promise<RestoreUploadSession> {
 }
 
 async function saveSession(session: RestoreUploadSession): Promise<void> {
+    session.expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
     await redisClient.set(
         restoreUploadSessionKey(session.uploadId),
         JSON.stringify(session),
@@ -119,10 +148,21 @@ export async function createRestoreUpload(
         totalChunks: Math.ceil(sizeBytes / RESTORE_CHUNK_SIZE_BYTES),
         nextIndex: 0,
         createdAt,
+        expiresAt: createdAt + SESSION_TTL_SECONDS * 1000,
     };
     try {
         const handle = await fs.open(uploadPath(uploadId), "wx", 0o600);
         await handle.close();
+    } catch (error) {
+        await redisClient.del(RESTORE_UPLOAD_ACTIVE_KEY);
+        await fs.unlink(uploadPath(uploadId)).catch(() => undefined);
+        throw new RestoreError(
+            "RESTORE_STAGING_UNAVAILABLE",
+            "Restore staging storage is unavailable",
+            { cause: error },
+        );
+    }
+    try {
         await saveSession(session);
     } catch (error) {
         await redisClient.del(RESTORE_UPLOAD_ACTIVE_KEY);
@@ -133,9 +173,7 @@ export async function createRestoreUpload(
         uploadId,
         chunkSizeBytes: RESTORE_CHUNK_SIZE_BYTES,
         totalChunks: session.totalChunks,
-        expiresAt: new Date(
-            createdAt + SESSION_TTL_SECONDS * 1000,
-        ).toISOString(),
+        expiresAt: new Date(session.expiresAt).toISOString(),
     };
 }
 
@@ -269,11 +307,62 @@ export async function cancelRestoreUpload(uploadId: string): Promise<boolean> {
     return cancelled;
 }
 
+export async function getActiveRestoreUpload(): Promise<{
+    expiresAt: string;
+} | null> {
+    const uploadId = await redisClient.get(RESTORE_UPLOAD_ACTIVE_KEY);
+    if (!uploadId) return null;
+    const raw = await redisClient.get(restoreUploadSessionKey(uploadId));
+    if (!raw) return null;
+    const session = parseRestoreUploadSession(raw);
+    if (!session || session.expiresAt <= Date.now()) return null;
+    return { expiresAt: new Date(session.expiresAt).toISOString() };
+}
+
 export async function hasActiveRestoreUpload(): Promise<boolean> {
-    return (await redisClient.exists(RESTORE_UPLOAD_ACTIVE_KEY)) === 1;
+    return (await getActiveRestoreUpload()) !== null;
+}
+
+/** Check upload liveness without allowing Redis to block first registration. */
+export async function hasActiveRestoreUploadForRegistration(): Promise<boolean> {
+    if (!redisClient.isReady) return false;
+    let timeoutId: NodeJS.Timeout | undefined;
+    try {
+        const read = async (): Promise<boolean> => {
+            const uploadId = await redisClient.sendCommand(
+                ["GET", RESTORE_UPLOAD_ACTIVE_KEY],
+                { timeout: REGISTRATION_REDIS_TIMEOUT_MS },
+            );
+            if (typeof uploadId !== "string") return false;
+            const raw = await redisClient.sendCommand(
+                ["GET", restoreUploadSessionKey(uploadId)],
+                { timeout: REGISTRATION_REDIS_TIMEOUT_MS },
+            );
+            if (typeof raw !== "string") return false;
+            const session = parseRestoreUploadSession(raw);
+            return session !== null && session.expiresAt > Date.now();
+        };
+        const timeout = new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(
+                () => reject(new Error("Restore upload check timed out")),
+                REGISTRATION_REDIS_TIMEOUT_MS,
+            );
+            timeoutId.unref();
+        });
+        return await Promise.race([read(), timeout]);
+    } catch (error) {
+        logger.warn(
+            "Could not check active restore upload during registration",
+            error,
+        );
+        return false;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
 }
 
 export async function releaseRestoreUpload(uploadId: string): Promise<void> {
+    await releaseRestoreCompletion(uploadId);
     await redisClient.del(restoreUploadSessionKey(uploadId));
     const active = await redisClient.get(RESTORE_UPLOAD_ACTIVE_KEY);
     if (active && safeCapabilityEqual(active, uploadId))

@@ -17,13 +17,11 @@ import {
     BACKUP_FILE_EXTENSION,
     MIN_BACKUP_PASSPHRASE_LENGTH,
     readApiErrorCode,
+    readApiErrorStatus,
     validateBackupPassphrase,
 } from "@/features/backup/backupRestoreModel";
 
 const logger = createFrontendLogger("Settings.BackupSection");
-
-/** Where the backup download is served; the cookie is scoped to this path. */
-export const BACKUP_DOWNLOAD_PATH = "/api/backup/download";
 
 const INPUT_CLASS =
     "w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand/30";
@@ -34,10 +32,10 @@ type BackupStatus =
     | { kind: "started" }
     | { kind: "error"; message: string };
 
-/** Start a native browser download of the backup file. */
-export function startBackupDownload(doc: Document): void {
+/** Start a native browser download of the backup file from `url`. */
+export function startBackupDownload(doc: Document, url: string): void {
     const link = doc.createElement("a");
-    link.href = BACKUP_DOWNLOAD_PATH;
+    link.href = url;
     link.download = "";
     link.rel = "noopener";
     doc.body.appendChild(link);
@@ -48,6 +46,9 @@ export function startBackupDownload(doc: Document): void {
 function errorMessageFor(error: unknown): string {
     if (readApiErrorCode(error) === "BACKUP_IN_PROGRESS") {
         return "Another backup is running. Try again when it finishes.";
+    }
+    if (readApiErrorStatus(error) === 429) {
+        return "Too many backup requests. Wait a few minutes, then try again.";
     }
     return "Couldn't start the backup. Check the backend logs and try again.";
 }
@@ -62,7 +63,7 @@ function StatusLine({ status }: { status: BackupStatus }) {
     }
     const text =
         status.kind === "started"
-            ? "Your browser is downloading the backup. Large libraries take a while; the download link works once and expires after five minutes."
+            ? "Your browser is downloading the backup. Large libraries take a while. Check your browser's downloads list: if the download failed or stopped early, start a new backup here. The download link works once and expires after five minutes."
             : `The file is named ${BRAND_NAME}-backup-<date>${BACKUP_FILE_EXTENSION}.`;
     return (
         <p role="status" className="mt-3 text-xs text-gray-400">
@@ -88,7 +89,7 @@ export function BackupSection() {
         setStatus({ kind: "preparing" });
         try {
             await api.createBackupDownloadSession(passphrase);
-            startBackupDownload(document);
+            startBackupDownload(document, api.getBackupDownloadUrl());
             setPassphrase("");
             setConfirmation("");
             setStatus({ kind: "started" });
@@ -112,24 +113,32 @@ export function BackupSection() {
                     the backup can&apos;t be restored without it. The file also
                     holds personal data, so keep it somewhere private.
                 </p>
-                <input
-                    type="password"
-                    autoComplete="new-password"
-                    aria-label="Backup passphrase"
-                    placeholder="Backup passphrase"
-                    value={passphrase}
-                    onChange={(event) => setPassphrase(event.target.value)}
-                    className={INPUT_CLASS}
-                />
-                <input
-                    type="password"
-                    autoComplete="new-password"
-                    aria-label="Confirm backup passphrase"
-                    placeholder="Confirm passphrase"
-                    value={confirmation}
-                    onChange={(event) => setConfirmation(event.target.value)}
-                    className={INPUT_CLASS}
-                />
+                <label className="block space-y-1">
+                    <span className="text-xs text-gray-300">
+                        Backup passphrase
+                    </span>
+                    <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={passphrase}
+                        onChange={(event) => setPassphrase(event.target.value)}
+                        className={INPUT_CLASS}
+                    />
+                </label>
+                <label className="block space-y-1">
+                    <span className="text-xs text-gray-300">
+                        Confirm backup passphrase
+                    </span>
+                    <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={confirmation}
+                        onChange={(event) =>
+                            setConfirmation(event.target.value)
+                        }
+                        className={INPUT_CLASS}
+                    />
+                </label>
                 <button
                     type="submit"
                     disabled={busy}

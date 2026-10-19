@@ -27,7 +27,7 @@ export type WrappedEncryptionKey = z.infer<typeof wrappedEncryptionKeySchema>;
 export const migrationEntrySchema = z
     .object({
         name: z.string().regex(/^[A-Za-z0-9_-]{1,255}$/),
-        checksum: boundedString,
+        checksum: z.string().max(10_000),
     })
     .strict();
 
@@ -60,7 +60,6 @@ export const backupHeaderSchema = z
         formatVersion: z.literal(BACKUP_FORMAT_VERSION),
         createdAt: z.string().datetime(),
         appVersion: z.string().min(1).max(256),
-        pepperFingerprint: z.string().max(256).nullable(),
         wrappedKey: wrappedEncryptionKeySchema,
         migrations: z.array(migrationEntrySchema).max(10_000),
         tables: z.array(backupTableSchema).max(10_000),
@@ -108,7 +107,9 @@ export const backupRowsSchema = z
     })
     .strict();
 
-export const backupEndSchema = z.object({ type: z.literal("end") }).strict();
+export const backupEndSchema = z
+    .object({ type: z.literal("end"), mac: base64String })
+    .strict();
 export const backupRecordSchema = z.discriminatedUnion("type", [
     backupHeaderSchema,
     backupRowsSchema,

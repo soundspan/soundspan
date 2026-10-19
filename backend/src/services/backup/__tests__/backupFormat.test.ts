@@ -13,7 +13,6 @@ const header: BackupHeader = {
     formatVersion: BACKUP_FORMAT_VERSION,
     createdAt: "2026-10-19T12:00:00.000Z",
     appVersion: "2.6.1",
-    pepperFingerprint: "deadbeef",
     wrappedKey: {
         salt: "c2FsdA==",
         iv: "aXZpdml2aXZpdml2",
@@ -45,6 +44,15 @@ describe("backup format", () => {
         ).toThrow();
         expect(() =>
             backupHeaderSchema.parse({ ...header, formatVersion: 2 }),
+        ).toThrow();
+    });
+
+    it("does not accept a cleartext pepper fingerprint", () => {
+        expect(() =>
+            backupHeaderSchema.parse({
+                ...header,
+                pepperFingerprint: "deadbeef",
+            }),
         ).toThrow();
     });
 

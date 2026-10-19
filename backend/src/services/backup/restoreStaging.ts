@@ -3,7 +3,16 @@ import path from "path";
 import { config } from "../../config";
 import { RestoreError } from "./backupErrors";
 
-const SWEEP_AGE_MS = 24 * 60 * 60 * 1000;
+const SWEEP_AGE_MS = 15 * 60 * 1000;
+const MINIMUM_FREE_MARGIN_BYTES = 1024 * 1024 * 1024;
+
+function stagingUnavailable(cause: unknown): RestoreError {
+    return new RestoreError(
+        "RESTORE_STAGING_UNAVAILABLE",
+        "Restore staging storage is unavailable",
+        { cause },
+    );
+}
 
 /** Resolve the restore staging sibling of the configured transcode cache. */
 export function restoreStagingDirectory(): string {
@@ -21,7 +30,11 @@ export function restoreUploadPath(uploadId: string): string {
 /** Require free space for the declared archive plus a ten-percent margin. */
 export async function ensureRestoreStorage(sizeBytes: number): Promise<void> {
     const directory = restoreStagingDirectory();
-    await fs.mkdir(directory, { recursive: true });
+    try {
+        await fs.mkdir(directory, { recursive: true });
+    } catch (cause) {
+        throw stagingUnavailable(cause);
+    }
     let stats;
     try {
         stats = await fs.statfs(directory);
@@ -32,7 +45,9 @@ export async function ensureRestoreStorage(sizeBytes: number): Promise<void> {
             { cause },
         );
     }
-    const required = sizeBytes + Math.ceil(sizeBytes / 10);
+    const required =
+        sizeBytes +
+        Math.max(Math.ceil(sizeBytes / 10), MINIMUM_FREE_MARGIN_BYTES);
     if (stats.bavail * stats.bsize < required) {
         throw new RestoreError(
             "INSUFFICIENT_STORAGE",
@@ -41,10 +56,14 @@ export async function ensureRestoreStorage(sizeBytes: number): Promise<void> {
     }
 }
 
-/** Delete staged upload files older than one day during session creation. */
+/** Delete staged upload files older than the upload-session idle lifetime. */
 export async function sweepRestoreStaging(now = Date.now()): Promise<void> {
     const directory = restoreStagingDirectory();
-    await fs.mkdir(directory, { recursive: true });
+    try {
+        await fs.mkdir(directory, { recursive: true });
+    } catch (cause) {
+        throw stagingUnavailable(cause);
+    }
     const entries = (
         await fs.readdir(directory, { withFileTypes: true })
     ).slice(0, 10_000);

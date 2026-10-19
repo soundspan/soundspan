@@ -1,5 +1,10 @@
 jest.mock("../../config", () => ({
-    config: { music: { transcodeCachePath: "/tmp/soundspan-transcodes" } },
+    config: {
+        music: {
+            transcodeCachePath: "/tmp/soundspan-transcodes",
+            musicPath: "/music",
+        },
+    },
 }));
 
 jest.mock("../../utils/db", () => ({
@@ -9,6 +14,7 @@ jest.mock("../../utils/db", () => ({
             update: jest.fn(),
             updateMany: jest.fn(),
         },
+        track: { findFirst: jest.fn() },
     },
 }));
 
@@ -28,6 +34,13 @@ jest.mock("../imageStorage", () => ({
     downloadAndStoreImage: jest.fn(),
 }));
 
+const mockExtractCoverArt = jest.fn();
+jest.mock("../coverArtExtractor", () => ({
+    CoverArtExtractor: jest.fn(() => ({
+        extractCoverArt: mockExtractCoverArt,
+    })),
+}));
+
 import { prisma } from "../../utils/db";
 import { resolveAlbumCover } from "../metadata/albumCoverResolver";
 import { downloadAndStoreImage } from "../imageStorage";
@@ -41,11 +54,43 @@ const mockAlbumUpdate = prisma.album.update as jest.Mock;
 const mockAlbumUpdateMany = prisma.album.updateMany as jest.Mock;
 const mockResolveAlbumCover = resolveAlbumCover as jest.Mock;
 const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
+const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
 
 describe("native cover healing", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         nativeCoverHealInFlight.clear();
+        mockTrackFindFirst.mockResolvedValue(null);
+    });
+
+    it("falls back to one local track embedded-art extraction", async () => {
+        mockAlbumFindUnique.mockResolvedValue({
+            id: "embedded-album",
+            title: "Embedded album",
+            rgMbid: null,
+            coverUrl: "native:embedded-album.jpg",
+            location: "LIBRARY",
+            artist: { name: "Local artist" },
+        });
+        mockResolveAlbumCover.mockResolvedValue(null);
+        mockTrackFindFirst.mockResolvedValue({
+            filePath: "Artist/Album/track.flac",
+        });
+        mockExtractCoverArt.mockResolvedValue("embedded-album.jpg");
+
+        const result =
+            await tryHealMissingNativeAlbumCover("embedded-album.jpg");
+
+        expect(mockTrackFindFirst).toHaveBeenCalledTimes(1);
+        expect(mockExtractCoverArt).toHaveBeenCalledWith(
+            "/music/Artist/Album/track.flac",
+            "embedded-album",
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "embedded-album" },
+            data: { coverUrl: "native:embedded-album.jpg" },
+        });
+        expect(result).toContain("native%3Aembedded-album.jpg");
     });
 
     it("conditionally clears stale native cover state before routing a federated album through the proxy endpoint", async () => {

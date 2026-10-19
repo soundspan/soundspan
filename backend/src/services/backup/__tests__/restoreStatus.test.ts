@@ -1,17 +1,23 @@
+export {};
+
 const mockRedisGet = jest.fn();
-const mockQueryRaw = jest.fn();
+const mockRedis = {
+    isReady: true,
+    sendCommand: mockRedisGet,
+    set: jest.fn(),
+};
+const mockRestoreLockHeld = jest.fn();
 
 jest.mock("../../../utils/redis", () => ({
-    redisClient: { get: mockRedisGet, set: jest.fn() },
+    redisClient: mockRedis,
 }));
-jest.mock("../../../utils/db", () => ({
-    prisma: { $queryRaw: mockQueryRaw },
-}));
+jest.mock("../restoreLock", () => ({ isRestoreLockHeld: mockRestoreLockHeld }));
 
 describe("effective restore status", () => {
     beforeEach(() => {
         jest.resetModules();
         jest.clearAllMocks();
+        mockRedis.isReady = true;
     });
 
     it("preserves a running status while the database lock is held", async () => {
@@ -24,7 +30,7 @@ describe("effective restore status", () => {
                 summary: null,
             }),
         );
-        mockQueryRaw.mockResolvedValue([{ held: true }]);
+        mockRestoreLockHeld.mockResolvedValue(true);
         const { getRestoreStatus } = await import("../restoreStatus");
         await expect(getRestoreStatus()).resolves.toMatchObject({
             state: "loading",
@@ -33,7 +39,7 @@ describe("effective restore status", () => {
         await expect(getRestoreStatus()).resolves.toMatchObject({
             state: "loading",
         });
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+        expect(mockRestoreLockHeld).toHaveBeenCalledTimes(2);
     });
 
     it("maps a stale running status to an interrupted failure", async () => {
@@ -51,7 +57,7 @@ describe("effective restore status", () => {
                 summary: null,
             }),
         );
-        mockQueryRaw.mockResolvedValue([{ held: false }]);
+        mockRestoreLockHeld.mockResolvedValue(false);
         const { getRestoreStatus } = await import("../restoreStatus");
         await expect(getRestoreStatus()).resolves.toEqual({
             restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
@@ -79,17 +85,47 @@ describe("effective restore status", () => {
         await expect(getRestoreStatus()).resolves.toMatchObject({
             state: "complete",
         });
-        expect(mockQueryRaw).not.toHaveBeenCalled();
+        expect(mockRestoreLockHeld).not.toHaveBeenCalled();
     });
 
-    it("fails open to idle when Redis status cannot be read", async () => {
+    it("reports status storage failure instead of masking it as idle", async () => {
         mockRedisGet.mockRejectedValue(new Error("redis unavailable"));
         const { getRestoreStatus } = await import("../restoreStatus");
-        await expect(getRestoreStatus()).resolves.toEqual({
-            state: "idle",
+        await expect(getRestoreStatus()).rejects.toMatchObject({
+            code: "RESTORE_STATUS_UNAVAILABLE",
+        });
+    });
+
+    it("sanitizes status errors on write and accepts legacy oversized messages", async () => {
+        const mockSet = jest.fn().mockResolvedValue(undefined);
+        const redis = jest.requireMock("../../../utils/redis") as {
+            redisClient: { set: jest.Mock };
+        };
+        redis.redisClient.set = mockSet;
+        const { getRestoreStatus, setRestoreStatus } =
+            await import("../restoreStatus");
+        await setRestoreStatus({
+            state: "failed",
             progress: null,
-            error: null,
+            error: { code: "FAIL", message: `${"x".repeat(600)}\nsecret` },
             summary: null,
+        });
+        const stored = JSON.parse(mockSet.mock.calls[0][1] as string) as {
+            error: { message: string };
+        };
+        expect(stored.error.message).toHaveLength(500);
+        expect(stored.error.message).not.toMatch(/[\r\n]/);
+
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                state: "failed",
+                progress: null,
+                error: { code: "FAIL", message: "y".repeat(10_000) },
+                summary: null,
+            }),
+        );
+        await expect(getRestoreStatus()).resolves.toMatchObject({
+            error: { message: "y".repeat(500) },
         });
     });
 });

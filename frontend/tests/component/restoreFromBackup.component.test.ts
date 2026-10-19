@@ -25,6 +25,7 @@ const idle: RestoreStatus = {
     error: null,
     summary: null,
     restartRequired: false,
+    upload: null,
 };
 
 let statusQueue: RestoreStatus[] = [];
@@ -51,6 +52,7 @@ const completeRestoreUpload = mock.fn(async (_id: string, _pass: string) => {
     };
 });
 const cancelRestoreUpload = mock.fn(async (_id: string) => undefined);
+const cancelRestoreUploadOnExit = mock.fn((_id: string) => undefined);
 
 mock.module("@/lib/api", {
     namedExports: {
@@ -60,6 +62,7 @@ mock.module("@/lib/api", {
             uploadRestoreChunk,
             completeRestoreUpload,
             cancelRestoreUpload,
+            cancelRestoreUploadOnExit,
         },
     },
 });
@@ -91,6 +94,7 @@ beforeEach(() => {
         uploadRestoreChunk,
         completeRestoreUpload,
         cancelRestoreUpload,
+        cancelRestoreUploadOnExit,
     ]) {
         fn.mock.resetCalls();
     }
@@ -188,6 +192,7 @@ test("uploads the planned chunks, starts the restore, and asks for a restart", a
                 credentialsReencrypted: 5,
                 credentialsUndecryptable: 0,
                 apiKeysNeedReissue: true,
+                migrationChecksumWarnings: 0,
             },
         },
     ];
@@ -314,4 +319,47 @@ test("a failed restore says the fresh install is intact", async (t) => {
 
     await clickButton("Try again");
     assert.ok(document.getElementById("restore-file"));
+});
+
+test("an upload another page started is shown with its expiry, not the form", async (t) => {
+    statusQueue = [
+        {
+            ...idle,
+            available: false,
+            state: "uploading",
+            upload: { expiresAt: "2030-01-01T12:10:00.000Z" },
+        },
+    ];
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    assert.match(
+        harness.container.textContent ?? "",
+        /Another upload of a backup is in progress/,
+    );
+    assert.equal(document.getElementById("restore-file"), null);
+});
+
+test("leaving the page mid-upload cancels the upload on the server", async (t) => {
+    let releaseChunk: () => void = () => undefined;
+    uploadRestoreChunk.mock.mockImplementation(
+        () =>
+            new Promise<undefined>((resolve) => {
+                releaseChunk = () => resolve(undefined);
+            }),
+    );
+    t.after(() => uploadRestoreChunk.mock.restore());
+    const harness = await mountFlow();
+    t.after(harness.unmount);
+
+    await chooseFile("abcdefghij");
+    await typePassphrase("correct horse battery");
+    await clickButton("Restore");
+    window.dispatchEvent(new Event("pagehide"));
+
+    assert.deepEqual(
+        cancelRestoreUploadOnExit.mock.calls.map((call) => call.arguments),
+        [["upload-7"]],
+    );
+    releaseChunk();
 });

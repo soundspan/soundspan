@@ -101,24 +101,42 @@ function dropRoutineSql(routine: OwnedRoutine): string {
 }
 
 /** Drop only application-owned public objects while preserving extensions. */
-export async function resetApplicationSchema(client: Client): Promise<void> {
-    const [objects, routines, userResult] = await Promise.all([
-        readObjects(client),
-        readRoutines(client),
-        client.query<{ current_user: string }>("SELECT current_user"),
-    ]);
-    const currentUser = userResult.rows[0]?.current_user;
-    if (!currentUser)
-        throw new Error("Could not resolve current database user");
-    assertOwnedByCurrentUser([...objects, ...routines], currentUser);
-    const order: OwnedObject["kind"][] = [
-        "table",
-        "view",
-        "materialized view",
-        "sequence",
-    ];
+export async function resetApplicationSchema(
+    client: Client,
+    options: { allowExistingUsers?: boolean } = {},
+): Promise<void> {
     await client.query("BEGIN");
     try {
+        if (!options.allowExistingUsers) {
+            await client.query(
+                'LOCK TABLE public."User" IN ACCESS EXCLUSIVE MODE',
+            );
+            const users = await client.query<{ count: string }>(
+                'SELECT count(*)::text AS count FROM public."User"',
+            );
+            if (users.rows[0]?.count !== "0") {
+                throw new RestoreError(
+                    "RESTORE_UNAVAILABLE",
+                    "Restore is unavailable after a user has been created",
+                );
+            }
+        }
+        const objects = await readObjects(client);
+        const routines = await readRoutines(client);
+        const userResult = await client.query<{ current_user: string }>(
+            "SELECT current_user",
+        );
+        const currentUser = userResult.rows[0]?.current_user;
+        if (!currentUser) {
+            throw new Error("Could not resolve current database user");
+        }
+        assertOwnedByCurrentUser([...objects, ...routines], currentUser);
+        const order: OwnedObject["kind"][] = [
+            "table",
+            "view",
+            "materialized view",
+            "sequence",
+        ];
         for (const kind of order) {
             for (const object of objects.filter(
                 (entry) => entry.kind === kind,

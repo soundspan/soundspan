@@ -50,7 +50,7 @@ async function seedEmbedding(client: Client): Promise<void> {
         await client.query(`
             INSERT INTO embedding_spaces
                 (id, family, checkpoint_hash, dim, preprocessing, status)
-            VALUES ('smoke-space', 'smoke', 'smoke-checkpoint', 512, '{}'::jsonb, 'active')
+            VALUES ('smoke-space', 'smoke', 'smoke-checkpoint', 512, '{}'::jsonb, 'migrating')
         `);
         const vector = `[${Array.from({ length: 512 }, () => "0.125").join(",")}]`;
         await client.query(
@@ -79,19 +79,13 @@ export async function seedLibrary(sourceUrl: string): Promise<void> {
         `);
         await client.query(`
             INSERT INTO "Track"
-                (id, "albumId", title, "trackNo", duration, "filePath", "fileModified", "fileSize")
+                (id, "albumId", title, "trackNo", duration, "filePath", "fileModified", "fileSize", "updatedAt")
             VALUES
                 ('smoke-track', 'smoke-album', 'Smoke Track', 1, 180,
-                 '/music/smoke.flac', now(), 1234)
+                 '/music/smoke.flac', now(), 1234, now())
         `);
-        try {
-            await seedEmbedding(client);
-            process.stdout.write("Seeded one track embedding.\n");
-        } catch (error) {
-            process.stdout.write(
-                `Skipped track embedding seed: ${String(error)}\n`,
-            );
-        }
+        await seedEmbedding(client);
+        process.stdout.write("Seeded one track embedding.\n");
     } finally {
         await client.end();
     }
@@ -160,13 +154,10 @@ export async function compareDatabases(
     await source.connect();
     await target.connect();
     try {
-        const [sourceCounts, targetCounts, sourceMigrations, targetMigrations] =
-            await Promise.all([
-                tableCounts(source),
-                tableCounts(target),
-                migrationNames(source),
-                migrationNames(target),
-            ]);
+        const sourceCounts = await tableCounts(source);
+        const targetCounts = await tableCounts(target);
+        const sourceMigrations = await migrationNames(source);
+        const targetMigrations = await migrationNames(target);
         assertSmoke(
             JSON.stringify([...targetCounts]) ===
                 JSON.stringify([...sourceCounts]),
@@ -176,6 +167,18 @@ export async function compareDatabases(
             JSON.stringify(targetMigrations) ===
                 JSON.stringify(sourceMigrations),
             "Applied migration sets differ between source and target",
+        );
+        const sourceVector = await source.query<{ embedding: string }>(
+            `SELECT embedding::text AS embedding FROM track_embeddings
+              WHERE track_id = 'smoke-track' AND space_id = 'smoke-space'`,
+        );
+        const targetVector = await target.query<{ embedding: string }>(
+            `SELECT embedding::text AS embedding FROM track_embeddings
+              WHERE track_id = 'smoke-track' AND space_id = 'smoke-space'`,
+        );
+        assertSmoke(
+            sourceVector.rows[0]?.embedding === targetVector.rows[0]?.embedding,
+            "Restored track embedding differs from the source",
         );
     } finally {
         await Promise.all([source.end(), target.end()]);

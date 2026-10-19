@@ -9,6 +9,7 @@ describe("restore compatibility", () => {
             outcome: "ok",
             migrationsToReplay: [a, b],
             pendingAfterLoad: 0,
+            checksumWarnings: [],
         });
     });
 
@@ -19,6 +20,7 @@ describe("restore compatibility", () => {
             outcome: "ok",
             migrationsToReplay: [imageEntry],
             pendingAfterLoad: 1,
+            checksumWarnings: [],
         });
         if (result.outcome === "ok") {
             expect(result.migrationsToReplay[0]).toBe(imageEntry);
@@ -34,10 +36,25 @@ describe("restore compatibility", () => {
         ).toBe("BACKUP_NEWER_THAN_APP");
     });
 
-    it("rejects a checksum mismatch", () => {
+    it("accepts checksum drift by name and reports a warning", () => {
         expect(
-            evaluateRestoreCompatibility([{ ...a, checksum: "wrong" }], [a, b])
-                .outcome,
-        ).toBe("BACKUP_MIGRATION_CHECKSUM_MISMATCH");
+            evaluateRestoreCompatibility([{ ...a, checksum: "wrong" }], [a, b]),
+        ).toEqual({
+            outcome: "ok",
+            migrationsToReplay: [a],
+            pendingAfterLoad: 1,
+            checksumWarnings: [a.name],
+        });
+    });
+
+    it("accepts an empty legacy checksum and deduplicates names", () => {
+        expect(
+            evaluateRestoreCompatibility([{ ...a, checksum: "" }, a], [a, b]),
+        ).toEqual({
+            outcome: "ok",
+            migrationsToReplay: [a],
+            pendingAfterLoad: 1,
+            checksumWarnings: [a.name],
+        });
     });
 });

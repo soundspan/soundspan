@@ -18,6 +18,7 @@ import { LocalLoginForm } from "@/features/auth/components/LocalLoginForm";
 import { OidcInviteForm } from "@/features/auth/components/OidcInviteForm";
 import { OidcLinkForm } from "@/features/auth/components/OidcLinkForm";
 import { SsoButton } from "@/features/auth/components/SsoButton";
+import { useRestoreHoldRedirect } from "@/features/backup/hooks/useRestoreHoldRedirect";
 import {
     buildOidcLoginUrl,
     getSsoErrorMessage,
@@ -228,8 +229,12 @@ function LoginPageContent() {
             router.replace("/onboarding");
         }
     }, [onboarding.data, router]);
+    const restoreHold = useRestoreHoldRedirect(
+        authConfig.isError || onboarding.isError,
+    );
 
     if (authConfig.isPending || onboarding.isPending) return <LoadingPage />;
+    if (restoreHold) return <LoadingPage />;
     if (authConfig.isError || !authConfig.data) {
         return <AuthConfigFailure onRetry={() => void authConfig.refetch()} />;
     }

@@ -1,4 +1,6 @@
 import { RestoreError, RestoreMigrationError } from "../backupErrors";
+import { EventEmitter } from "events";
+import { Client } from "pg";
 
 const mockClientConnect = jest.fn();
 const mockClientEnd = jest.fn();
@@ -18,13 +20,14 @@ const mockUserCount = jest.fn();
 const mockRm = jest.fn();
 const mockUnlink = jest.fn();
 const mockLoggerError = jest.fn();
+const mockClient = Object.assign(new EventEmitter(), {
+    connect: mockClientConnect,
+    end: mockClientEnd,
+    query: mockClientQuery,
+});
 
 jest.mock("pg", () => ({
-    Client: jest.fn(() => ({
-        connect: mockClientConnect,
-        end: mockClientEnd,
-        query: mockClientQuery,
-    })),
+    Client: jest.fn(() => mockClient),
 }));
 jest.mock("fs/promises", () => ({
     __esModule: true,
@@ -39,8 +42,8 @@ jest.mock("../../../config", () => ({
 jest.mock("../../../config/appVersion", () => ({
     resolveAppVersion: () => "2.6.1",
 }));
-jest.mock("../../../config/secretsPolicy", () => ({
-    resolveSettingsEncryptionKey: () => ({ value: "current-key" }),
+jest.mock("../../../utils/encryption", () => ({
+    getSettingsEncryptionKey: () => "current-key",
 }));
 jest.mock("../../../utils/db", () => ({
     prisma: { user: { count: mockUserCount } },
@@ -99,6 +102,14 @@ const validation = {
     rows: 2,
 };
 
+const jobOptions = {
+    uploadId: "upload-id",
+    filePath: "/tmp/restore.upload",
+    backupKey: "backup-key",
+    backupPepperFingerprint: "pepper",
+    macKey: Buffer.alloc(32),
+};
+
 async function waitForTerminalStatus(): Promise<void> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
         if (
@@ -131,6 +142,7 @@ describe("restore job", () => {
             outcome: "ok",
             migrationsToReplay: [],
             pendingAfterLoad: 0,
+            checksumWarnings: [],
         });
         mockResetSchema.mockResolvedValue(undefined);
         mockReplayMigrations.mockResolvedValue(undefined);
@@ -139,6 +151,7 @@ describe("restore job", () => {
         mockReencrypt.mockResolvedValue({
             credentialsReencrypted: 1,
             credentialsUndecryptable: 0,
+            processedColumns: [],
         });
         mockReleaseUpload.mockResolvedValue(undefined);
         mockMarkRestart.mockResolvedValue(undefined);
@@ -149,13 +162,12 @@ describe("restore job", () => {
 
     it("fails immediately when the advisory lock is already held", async () => {
         mockClientQuery.mockResolvedValueOnce({ rows: [{ acquired: false }] });
-        await expect(
-            startRestoreJob({
-                uploadId: "upload-id",
-                filePath: "/tmp/restore.upload",
-                backupKey: "backup-key",
-            }),
-        ).rejects.toMatchObject({ code: "RESTORE_IN_PROGRESS" });
+        await expect(startRestoreJob(jobOptions)).rejects.toMatchObject({
+            code: "RESTORE_IN_PROGRESS",
+        });
+        expect(Client).toHaveBeenCalledWith(
+            expect.objectContaining({ query_timeout: 2 * 60 * 60 * 1000 }),
+        );
         expect(mockSetStatus).not.toHaveBeenCalled();
         expect(mockResetSchema).not.toHaveBeenCalled();
         expect(mockClientEnd).toHaveBeenCalledTimes(1);
@@ -166,11 +178,7 @@ describe("restore job", () => {
         mockLoadData.mockRejectedValue(
             new RestoreError("BACKUP_ROW_COUNT_MISMATCH", "row mismatch"),
         );
-        await startRestoreJob({
-            uploadId: "upload-id",
-            filePath: "/tmp/restore.upload",
-            backupKey: "backup-key",
-        });
+        await startRestoreJob(jobOptions);
         await waitForTerminalStatus();
         expect(mockSetStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({
@@ -183,16 +191,116 @@ describe("restore job", () => {
         );
     });
 
+    it("rejects a restored database with no admin before load commit", async () => {
+        mockLoadData.mockImplementation(
+            async (
+                _client: unknown,
+                _file: unknown,
+                _header: unknown,
+                _progress: unknown,
+                beforeCommit: (client: typeof mockClient) => Promise<void>,
+            ) => beforeCommit(mockClient),
+        );
+        mockClientQuery.mockImplementation(async (sql: string) => {
+            if (sql.includes("pg_try_advisory_lock")) {
+                return { rows: [{ acquired: true }] };
+            }
+            if (sql.includes("SELECT EXISTS")) {
+                return { rows: [{ present: false }] };
+            }
+            return { rows: [] };
+        });
+        await startRestoreJob(jobOptions);
+        await waitForTerminalStatus();
+        expect(mockSetStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                state: "failed",
+                error: {
+                    code: "BACKUP_HAS_NO_ADMIN",
+                    message: "This backup has no admin account.",
+                },
+            }),
+        );
+    });
+
+    it("turns a dedicated client error into a failed restore", async () => {
+        let resolveLoad: (() => void) | undefined;
+        mockLoadData.mockImplementation(
+            () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+        );
+        await startRestoreJob(jobOptions);
+        mockClient.emit("error", new Error("connection terminated"));
+        await waitForTerminalStatus();
+        resolveLoad?.();
+        expect(mockSetStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({ state: "failed" }),
+        );
+    });
+
+    it("re-encrypts existing columns before commit and only new columns after migrations", async () => {
+        mockClientQuery.mockImplementation(async (sql: string) => {
+            if (sql.includes("pg_try_advisory_lock")) {
+                return { rows: [{ acquired: true }] };
+            }
+            if (sql.includes("SELECT EXISTS")) {
+                return { rows: [{ present: true }] };
+            }
+            return { rows: [] };
+        });
+        mockLoadData.mockImplementation(
+            async (
+                _client: unknown,
+                _file: unknown,
+                _header: unknown,
+                _progress: unknown,
+                beforeCommit: (client: typeof mockClient) => Promise<void>,
+            ) => beforeCommit(mockClient),
+        );
+        mockReencrypt
+            .mockResolvedValueOnce({
+                credentialsReencrypted: 2,
+                credentialsUndecryptable: 1,
+                processedColumns: ["SystemSettings.openaiApiKey"],
+            })
+            .mockResolvedValueOnce({
+                credentialsReencrypted: 1,
+                credentialsUndecryptable: 0,
+                processedColumns: ["User.twoFactorSecret"],
+            });
+
+        await startRestoreJob(jobOptions);
+        await waitForTerminalStatus();
+
+        expect(mockReencrypt).toHaveBeenNthCalledWith(
+            1,
+            mockClient,
+            "backup-key",
+            "current-key",
+        );
+        expect(mockReencrypt).toHaveBeenNthCalledWith(
+            2,
+            mockClient,
+            "backup-key",
+            "current-key",
+            new Set(["SystemSettings.openaiApiKey"]),
+        );
+        expect(mockSetStatus).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                state: "complete",
+                summary: expect.objectContaining({
+                    credentialsReencrypted: 3,
+                    credentialsUndecryptable: 1,
+                }),
+            }),
+        );
+    });
+
     it("reports cleanup failure when the database cannot be reset", async () => {
         mockLoadData.mockRejectedValue(new Error("load failed"));
         mockResetSchema
             .mockResolvedValueOnce(undefined)
             .mockRejectedValueOnce(new Error("cleanup failed"));
-        await startRestoreJob({
-            uploadId: "upload-id",
-            filePath: "/tmp/restore.upload",
-            backupKey: "backup-key",
-        });
+        await startRestoreJob(jobOptions);
         await waitForTerminalStatus();
         expect(mockSetStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({
@@ -208,11 +316,7 @@ describe("restore job", () => {
 
     it("does not reject the detached job when replay-directory removal fails", async () => {
         mockRm.mockRejectedValue(new Error("rm failed"));
-        await startRestoreJob({
-            uploadId: "upload-id",
-            filePath: "/tmp/restore.upload",
-            backupKey: "backup-key",
-        });
+        await startRestoreJob(jobOptions);
         await waitForTerminalStatus();
         await new Promise<void>((resolve) => setImmediate(resolve));
         expect(mockLoggerError).not.toHaveBeenCalledWith(
@@ -247,11 +351,7 @@ describe("restore job", () => {
                 });
             },
         );
-        await startRestoreJob({
-            uploadId: "upload-id",
-            filePath: "/tmp/restore.upload",
-            backupKey: "backup-key",
-        });
+        await startRestoreJob(jobOptions);
         await waitForTerminalStatus();
         const loading = mockSetStatus.mock.calls
             .map(([status]) => status)
@@ -265,11 +365,7 @@ describe("restore job", () => {
         mockReplayMigrations.mockRejectedValue(
             new RestoreMigrationError("migration failed at statement 4"),
         );
-        await startRestoreJob({
-            uploadId: "upload-id",
-            filePath: "/tmp/restore.upload",
-            backupKey: "backup-key",
-        });
+        await startRestoreJob(jobOptions);
         await waitForTerminalStatus();
         expect(mockLoggerError).toHaveBeenCalledWith(
             "Restore migration output",

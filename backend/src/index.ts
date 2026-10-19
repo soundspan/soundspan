@@ -584,6 +584,13 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
         process.exit(1);
     });
     await checkRedisConnection();
+    if (runApiRole) {
+        const { sweepRestoreStaging } =
+            await import("./services/backup/restoreUploads");
+        await sweepRestoreStaging().catch((error) => {
+            logger.warn("Could not sweep restore staging at startup", error);
+        });
+    }
     if (isSecretsDbOnlyEnabled()) {
         // Lazy import keeps the entrypoint free of the settings/encryption
         // module chain unless the DB-only secrets flag is enabled.
