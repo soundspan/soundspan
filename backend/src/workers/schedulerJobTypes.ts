@@ -16,6 +16,7 @@ export const SCHEDULER_JOB_TYPES = {
     trackRemovalPurge: "track-removal-purge",
     trackMappingReconcile: "track-mapping-reconcile",
     remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
+    remoteAlbumMbidResolution: "remote-album-mbid-resolution",
 } as const;
 
 /** Persisted scheduler job name accepted by the canonical dispatcher. */

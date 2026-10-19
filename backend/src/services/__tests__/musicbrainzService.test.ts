@@ -200,6 +200,72 @@ describe("musicBrainzService", () => {
         );
     });
 
+    it("rethrows strict release-group search failures without caching a fallback", async () => {
+        const error = new Error("MusicBrainz unavailable");
+        mockRateLimiterExecute.mockRejectedValueOnce(error);
+
+        await expect(
+            musicBrainzService.searchReleaseGroups(
+                "OK Computer",
+                "Radiohead",
+                10,
+                { strict: true },
+            ),
+        ).rejects.toBe(error);
+
+        expect(mockRedisGet).toHaveBeenCalledWith(
+            "mb:search:release-group:OK Computer:Radiohead:10:strict",
+        );
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
+    });
+
+    it("reads and writes strict release-group searches under the strict cache key", async () => {
+        const releaseGroups = [{ id: "rg-strict", title: "OK Computer" }];
+        mockHttpGet.mockResolvedValueOnce({
+            data: { "release-groups": releaseGroups },
+        });
+
+        await expect(
+            musicBrainzService.searchReleaseGroups(
+                "OK Computer",
+                "Radiohead",
+                10,
+                { strict: true },
+            ),
+        ).resolves.toEqual(releaseGroups);
+
+        const strictKey =
+            "mb:search:release-group:OK Computer:Radiohead:10:strict";
+        expect(mockRedisGet).toHaveBeenCalledWith(strictKey);
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            strictKey,
+            6 * 24 * 60 * 60,
+            JSON.stringify(releaseGroups),
+        );
+    });
+
+    it("keeps non-strict release-group search fallback behavior and cache key", async () => {
+        mockRateLimiterExecute.mockRejectedValueOnce(
+            new Error("MusicBrainz unavailable"),
+        );
+
+        await expect(
+            musicBrainzService.searchReleaseGroups(
+                "OK Computer",
+                "Radiohead",
+                10,
+            ),
+        ).resolves.toEqual([]);
+
+        const cacheKey = "mb:search:release-group:OK Computer:Radiohead:10";
+        expect(mockRedisGet).toHaveBeenCalledWith(cacheKey);
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            cacheKey,
+            120,
+            JSON.stringify([]),
+        );
+    });
+
     it("caches successful null responses with 1-hour TTL", async () => {
         mockHttpGet.mockResolvedValueOnce({ data: null });
 

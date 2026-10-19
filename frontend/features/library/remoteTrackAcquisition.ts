@@ -27,8 +27,10 @@ function resolveAlbumAcquisition(
     track: Track,
     policy: RemoteTrackAcquisitionPolicy,
 ): RemoteTrackAcquisition | null {
+    // A streaming-only album keeps its placeholder id; the background
+    // MusicBrainz match is what the download and request flows can use.
     const rgMbid = resolveAcquisitionMbid({
-        rgMbid: track.album?.rgMbid ?? undefined,
+        rgMbid: track.album?.matchedRgMbid || track.album?.rgMbid || undefined,
     });
     const albumTitle = track.album?.title;
     if (!rgMbid || !albumTitle) return null;

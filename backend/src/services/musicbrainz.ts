@@ -199,6 +199,9 @@ function flattenAlbumTracks(value: unknown): MusicBrainzAlbumTrack[] {
     return tracks;
 }
 
+// Strict lookups back a weekly recheck, so their cache must expire sooner.
+const STRICT_ARRAY_CACHE_TTL_SECONDS = 6 * 24 * 60 * 60;
+
 class MusicBrainzService {
     private client: AxiosInstance;
 
@@ -272,6 +275,25 @@ class MusicBrainzService {
         return data;
     }
 
+    /**
+     * Strict array requests rethrow failures instead of returning an empty
+     * fallback, and cache for under a week so weekly rechecks see fresh data.
+     */
+    private cachedArrayRequest<T>(
+        cacheKey: string,
+        requestFn: () => Promise<T[]>,
+        options?: { strict?: boolean },
+    ): Promise<T[]> {
+        if (options?.strict) {
+            return this.cachedRequest(
+                `${cacheKey}:strict`,
+                requestFn,
+                STRICT_ARRAY_CACHE_TTL_SECONDS,
+            );
+        }
+        return this.cachedRequest(cacheKey, requestFn, 2592000, []);
+    }
+
     async searchArtist(query: string, limit = 10) {
         const cacheKey = `mb:search:artist:${query}:${limit}`;
 
@@ -292,12 +314,17 @@ class MusicBrainzService {
         );
     }
 
-    async searchReleaseGroups(query: string, artistName?: string, limit = 10) {
+    async searchReleaseGroups(
+        query: string,
+        artistName?: string,
+        limit = 10,
+        options?: { strict?: boolean },
+    ): Promise<MusicBrainzReleaseGroupSearchResult[]> {
         const normalizedQuery = query.trim();
         const normalizedArtist = artistName?.trim() || "";
         const cacheKey = `mb:search:release-group:${normalizedQuery}:${normalizedArtist}:${limit}`;
 
-        return this.cachedRequest(
+        return this.cachedArrayRequest<MusicBrainzReleaseGroupSearchResult>(
             cacheKey,
             async () => {
                 let searchQuery = `releasegroup:"${this.escapeLucene(normalizedQuery)}"`;
@@ -315,8 +342,7 @@ class MusicBrainzService {
 
                 return response.data["release-groups"] || [];
             },
-            2592000,
-            [],
+            options,
         );
     }
 

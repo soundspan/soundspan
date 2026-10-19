@@ -183,9 +183,8 @@ export const tracksDeletionRouter = Router();
  *                       album:
  *                         type: object
  *                         properties:
- *                           rgMbid:
- *                             type: string
- *                             nullable: true
+ *                           rgMbid: { type: string, nullable: true }
+ *                           matchedRgMbid: { type: string, nullable: true, description: "MusicBrainz release group matched for a streaming-only album; used for add-to-library" }
  *                 total:
  *                   type: integer
  *                 offset:

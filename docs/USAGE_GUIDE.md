@@ -62,6 +62,8 @@ Open the song's menu (the `⋮` button at the end of the row). What it offers de
 - When the album has no MusicBrainz match, admins see `Add song to library`. It downloads that one song. A TIDAL song needs TIDAL set up as a download source (see [TIDAL Downloads](INTEGRATIONS.md#tidal-downloads)).
 - Otherwise the menu has no add option. This is the case for users who are not admins when the album has no MusicBrainz match, and for admins on a TIDAL song when TIDAL is not set up as a download source.
 
+soundspan looks up MusicBrainz matches for the albums of your liked streaming songs in the background, about once an hour. A song whose album gets a sure match offers `Add album to library` or `Request album`, the same as a song on an album with a MusicBrainz match. An album without a sure match is checked again a week later, and a match is checked again after a month.
+
 After the files arrive and the next library scan matches the song to them, only your own copy shows, without the badge.
 
 ## Artist Playback Order

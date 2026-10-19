@@ -175,6 +175,7 @@ describe("remote library search", () => {
                 album: expect.objectContaining({
                     title: "Remote Album",
                     rgMbid: null,
+                    matchedRgMbid: null,
                 }),
             }),
         ]);

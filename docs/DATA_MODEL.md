@@ -128,13 +128,25 @@ TrackMapping is **advisory, not authoritative**:
 | Entity   | Purpose                                | Notes                                                                                                                                    |
 | -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `Artist` | Universal artist (MusicBrainz-backed)  | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, nullable `catalogSyncedAt`, optional peer identity                       |
-| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`, `CATALOG`), nullable `catalogTouchedAt`, optional peer identity |
+| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`, `CATALOG`), nullable `catalogTouchedAt`, nullable `matchedRgMbid` and `rgMbidCheckedAt`, optional peer identity |
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 
 - Artist pages showing both local and remote tracks
 - Album pages with mixed local/remote content
 - Unified play counts across providers
+
+A `REMOTE` album that `albumResolutionService` cannot match starts with a
+placeholder `rgMbid` of the form `remote:<hash>`. The
+`remote-album-mbid-resolution` worker job looks up placeholder albums that hold
+liked streaming songs in MusicBrainz and stores a confident release-group match
+in `matchedRgMbid`; `rgMbid` itself never changes. The add-to-library options on
+Library and Search song rows use `matchedRgMbid` when it is set; the album page
+still reads `rgMbid`. `rgMbidCheckedAt` records the last check (Various Artists
+albums are marked checked without a lookup). An album without a match is
+checked again after seven days, and a matched album after thirty days, when a
+new answer replaces or clears the match. Artist browse results come from the
+MusicBrainz cache, which can be up to 30 days old.
 
 Metadata-catalog persistence reuses `Artist` and `Album`; it does not introduce
 separate catalog models. Persisted catalog albums use `Album.location=CATALOG`

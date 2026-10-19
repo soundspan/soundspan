@@ -1,6 +1,8 @@
 import { toLibraryRemoteTrack } from "../responseRow";
 import type { HydratedRemoteLibraryTrack } from "../types";
 
+const RELEASE_GROUP_MBID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
 describe("remote library response adapter", () => {
     it("adapts a linked TIDAL row with release-group identity", () => {
         const row = {
@@ -27,6 +29,7 @@ describe("remote library response adapter", () => {
                     id: "album-1",
                     title: "Linked album",
                     rgMbid: "remote:synthetic-hash",
+                    matchedRgMbid: RELEASE_GROUP_MBID,
                     coverUrl: "cover.jpg",
                     artistId: "artist-1",
                     location: "REMOTE",
@@ -50,6 +53,7 @@ describe("remote library response adapter", () => {
                     id: "album-1",
                     title: "Linked album",
                     rgMbid: "remote:synthetic-hash",
+                    matchedRgMbid: RELEASE_GROUP_MBID,
                     coverArt: "cover.jpg",
                     coverUrl: "cover.jpg",
                     artistId: "artist-1",
@@ -98,6 +102,7 @@ describe("remote library response adapter", () => {
                     id: null,
                     title: "Raw album",
                     rgMbid: null,
+                    matchedRgMbid: null,
                     coverArt: "thumb.jpg",
                     artistId: null,
                     artist: { id: null, name: "Raw artist" },
@@ -131,6 +136,7 @@ describe("remote library response adapter", () => {
                     id: "album-1",
                     title: "Linked album",
                     rgMbid: "remote:album",
+                    matchedRgMbid: null,
                     coverUrl: null,
                     artistId: "album-artist",
                     location: "REMOTE",
@@ -172,6 +178,7 @@ describe("remote library response adapter", () => {
                     id: "album-1",
                     title: "Linked album",
                     rgMbid: "remote:album",
+                    matchedRgMbid: null,
                     coverUrl: null,
                     artistId: "album-artist",
                     location: "REMOTE",
