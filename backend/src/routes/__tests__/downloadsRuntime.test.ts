@@ -51,6 +51,17 @@ jest.mock("../../services/tidal", () => ({
     },
 }));
 
+jest.mock("../../services/tidalTrackDownloadQueue", () => {
+    class TidalTrackDownloadQueueFullError extends Error {}
+    return {
+        __esModule: true,
+        default: {
+            enqueue: jest.fn(),
+        },
+        TidalTrackDownloadQueueFullError,
+    };
+});
+
 jest.mock("../../services/youtubeDownload", () => ({
     youtubeDownloadService: {
         isAvailable: jest.fn(),
@@ -117,6 +128,9 @@ import { getSystemSettings } from "../../utils/systemSettings";
 import { lidarrService } from "../../services/lidarr";
 import { soulseekService } from "../../services/soulseek";
 import { tidalService } from "../../services/tidal";
+import tidalTrackDownloadQueue, {
+    TidalTrackDownloadQueueFullError,
+} from "../../services/tidalTrackDownloadQueue";
 import { youtubeDownloadService } from "../../services/youtubeDownload";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { lastFmService } from "../../services/lastfm";
@@ -132,6 +146,7 @@ const mockLidarrGrabRelease = lidarrService.grabRelease as jest.Mock;
 
 const mockSoulseekAvailable = soulseekService.isAvailable as jest.Mock;
 const mockTidalAvailable = tidalService.isAvailable as jest.Mock;
+const mockTidalTrackEnqueue = tidalTrackDownloadQueue.enqueue as jest.Mock;
 const mockYoutubeAvailable = youtubeDownloadService.isAvailable as jest.Mock;
 
 const mockGetArtist = musicBrainzService.getArtist as jest.Mock;
@@ -216,6 +231,8 @@ describe("downloads routes runtime", () => {
     const availabilityHandler = getRouteHandler("/availability", "get");
     const createJobAdmin = getRouteHandler("/", "post");
     const createJobHandler = getFinalRouteHandler("/", "post");
+    const tidalTrackAdmin = getRouteHandler("/tidal-track", "post");
+    const tidalTrackHandler = getFinalRouteHandler("/tidal-track", "post");
     const clearAllHandler = getRouteHandler("/clear-all", "delete");
     const clearLidarrQueueAdmin = getRouteHandler(
         "/clear-lidarr-queue",
@@ -255,6 +272,7 @@ describe("downloads routes runtime", () => {
 
         mockSoulseekAvailable.mockResolvedValue(true);
         mockTidalAvailable.mockResolvedValue(false);
+        mockTidalTrackEnqueue.mockReturnValue("queued");
         mockYoutubeAvailable.mockResolvedValue(false);
         mockEnqueueAlbumDownloadInBackground.mockReturnValue(undefined);
         mockEnqueueArtistDownloadExpansionInBackground.mockReturnValue(
@@ -330,6 +348,134 @@ describe("downloads routes runtime", () => {
         expect(res.body).toEqual({
             error: "Failed to check download availability",
         });
+    });
+
+    it.each(["queued", "already-queued"])(
+        "accepts an available TIDAL track with %s status",
+        async (status) => {
+            mockTidalAvailable.mockResolvedValueOnce(true);
+            mockTidalTrackEnqueue.mockReturnValueOnce(status);
+            const req = {
+                body: { tidalTrackId: 12345 },
+                user: { id: "admin-1", role: "admin" },
+            } as any;
+            const res = createRes();
+
+            await tidalTrackHandler(req, res);
+
+            expect(res.statusCode).toBe(202);
+            expect(res.body).toEqual({ tidalTrackId: 12345, status });
+            expect(mockTidalTrackEnqueue).toHaveBeenCalledWith({
+                tidalTrackId: 12345,
+                userId: "admin-1",
+            });
+            expect(mockTidalAvailable.mock.invocationCallOrder[0]).toBeLessThan(
+                mockTidalTrackEnqueue.mock.invocationCallOrder[0],
+            );
+        },
+    );
+
+    it.each([
+        ["missing", {}, "Invalid input: expected number, received undefined"],
+        [
+            "string",
+            { tidalTrackId: "123" },
+            "Invalid input: expected number, received string",
+        ],
+        ["negative", { tidalTrackId: -1 }, "tidalTrackId must be positive"],
+        [
+            "non-integer",
+            { tidalTrackId: 1.5 },
+            "tidalTrackId must be an integer",
+        ],
+        [
+            "too large",
+            { tidalTrackId: 2147483648 },
+            "tidalTrackId must be at most 2147483647",
+        ],
+    ])("returns 400 for a %s TIDAL track id", async (_case, body, error) => {
+        const req = {
+            body,
+            user: { id: "admin-1", role: "admin" },
+        } as any;
+        const res = createRes();
+
+        await tidalTrackHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error });
+        expect(mockTidalAvailable).not.toHaveBeenCalled();
+        expect(mockTidalTrackEnqueue).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-admin before queuing a TIDAL track", async () => {
+        const req = {
+            user: { id: "user-1", role: "user" },
+            body: { tidalTrackId: 12345 },
+        } as any;
+        const res = createRes();
+        const next = jest.fn();
+
+        await tidalTrackAdmin(req, res, next);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(next).not.toHaveBeenCalled();
+        expect(mockTidalAvailable).not.toHaveBeenCalled();
+        expect(mockTidalTrackEnqueue).not.toHaveBeenCalled();
+    });
+
+    it("returns 503 before enqueue when TIDAL is unavailable", async () => {
+        mockTidalAvailable.mockResolvedValueOnce(false);
+        const req = {
+            body: { tidalTrackId: 12345 },
+            user: { id: "admin-1", role: "admin" },
+        } as any;
+        const res = createRes();
+
+        await tidalTrackHandler(req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({
+            error: "TIDAL downloads are not available",
+        });
+        expect(mockTidalTrackEnqueue).not.toHaveBeenCalled();
+    });
+
+    it("returns 429 when the TIDAL track queue is full", async () => {
+        mockTidalAvailable.mockResolvedValueOnce(true);
+        mockTidalTrackEnqueue.mockImplementationOnce(() => {
+            throw new TidalTrackDownloadQueueFullError();
+        });
+        const req = {
+            body: { tidalTrackId: 12345 },
+            user: { id: "admin-1", role: "admin" },
+        } as any;
+        const res = createRes();
+
+        await tidalTrackHandler(req, res);
+
+        expect(res.statusCode).toBe(429);
+        expect(res.body).toEqual({
+            error: "Too many TIDAL song downloads are waiting. Try again later.",
+        });
+    });
+
+    it("uses the canonical 500 response for unexpected TIDAL queue errors", async () => {
+        mockTidalAvailable.mockRejectedValueOnce(new Error("probe failed"));
+        const req = {
+            body: { tidalTrackId: 12345 },
+            user: { id: "admin-1", role: "admin" },
+        } as any;
+        const res = createRes();
+
+        await tidalTrackHandler(req, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({
+            error: "Failed to queue TIDAL track download",
+        });
+        expect(mockTidalTrackEnqueue).not.toHaveBeenCalled();
     });
 
     it.each([

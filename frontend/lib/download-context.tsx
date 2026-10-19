@@ -31,6 +31,8 @@ interface DownloadContextType {
         failedDownloads: DownloadJob[];
     };
     downloadsEnabled: boolean;
+    /** True when TIDAL is a working download source for this admin. */
+    tidalDownloadsEnabled: boolean;
     addPendingDownload: (
         type: "artist" | "album",
         subject: string,
@@ -59,6 +61,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     const shouldPollDownloads = isAuthenticated && user?.role === "admin";
     const downloadStatus = useDownloadStatus(15000, shouldPollDownloads);
     const [downloadsEnabled, setDownloadsEnabled] = useState(false);
+    const [tidalDownloadsEnabled, setTidalDownloadsEnabled] = useState(false);
 
     useEffect(() => {
         pendingRef.current = pendingDownloads;
@@ -69,16 +72,21 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (!isAuthenticated || user?.role !== "admin") {
             setDownloadsEnabled(false);
+            setTidalDownloadsEnabled(false);
             return;
         }
 
         let mounted = true;
         api.getDownloadAvailability()
             .then((result) => {
-                if (mounted) setDownloadsEnabled(result.enabled);
+                if (!mounted) return;
+                setDownloadsEnabled(result.enabled);
+                setTidalDownloadsEnabled(result.tidal === true);
             })
             .catch(() => {
-                if (mounted) setDownloadsEnabled(false);
+                if (!mounted) return;
+                setDownloadsEnabled(false);
+                setTidalDownloadsEnabled(false);
             });
 
         return () => {
@@ -203,6 +211,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             pendingDownloads,
             downloadStatus,
             downloadsEnabled,
+            tidalDownloadsEnabled,
             addPendingDownload,
             removePendingDownload,
             removePendingByMbid,
@@ -214,6 +223,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             pendingDownloads,
             downloadStatus,
             downloadsEnabled,
+            tidalDownloadsEnabled,
             addPendingDownload,
             removePendingDownload,
             removePendingByMbid,

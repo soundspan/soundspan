@@ -634,6 +634,101 @@ describe("tidalService", () => {
             expect(mockClient.post).toHaveBeenCalledTimes(2);
         });
 
+        it("rethrows the original downloadTrack 401 when refresh fails", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(false);
+            const unauthorized = { response: { status: 401 } };
+            mockClient.post.mockRejectedValueOnce(unauthorized);
+
+            await expect(tidalService.downloadTrack(24)).rejects.toBe(
+                unauthorized,
+            );
+            expect(mockClient.post).toHaveBeenCalledTimes(1);
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("rethrows a downloadTrack 500 without refreshing", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest.spyOn(tidalService, "refreshAccessToken");
+            const serverError = { response: { status: 500 } };
+            mockClient.post.mockRejectedValueOnce(serverError);
+
+            await expect(tidalService.downloadTrack(25)).rejects.toBe(
+                serverError,
+            );
+            expect(mockClient.post).toHaveBeenCalledTimes(1);
+            expect(refreshSpy).not.toHaveBeenCalled();
+        });
+
+        it("reloads credentials before retrying downloadTrack after refresh", async () => {
+            const refreshedCreds = {
+                ...baseCreds,
+                accessToken: "new-access-token",
+            };
+            const getCredentialsSpy = jest
+                .spyOn(tidalService as any, "getCredentials")
+                .mockResolvedValueOnce(baseCreds)
+                .mockResolvedValueOnce(refreshedCreds);
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(true);
+            const retriedPayload = {
+                track_id: 26,
+                title: "Retried Track",
+                artist: "Artist",
+                album: "Album",
+                quality: "LOSSLESS",
+                file_path: "/music/retried-track.flac",
+                relative_path: "retried-track.flac",
+                file_size: 43,
+            };
+            mockClient.post
+                .mockRejectedValueOnce({ response: { status: 401 } })
+                .mockResolvedValueOnce({ data: retriedPayload });
+
+            await expect(tidalService.downloadTrack(26)).resolves.toEqual(
+                retriedPayload,
+            );
+            expect(getCredentialsSpy).toHaveBeenCalledTimes(2);
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
+            expect(mockClient.post).toHaveBeenCalledTimes(2);
+            expect(mockClient.post).toHaveBeenNthCalledWith(
+                2,
+                "/download/track",
+                expect.any(Object),
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: `Bearer ${refreshedCreds.accessToken}`,
+                    }),
+                }),
+            );
+        });
+
+        it("rejects after a refreshed downloadTrack receives a second 401", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(true);
+            const secondUnauthorized = { response: { status: 401 } };
+            mockClient.post
+                .mockRejectedValueOnce({ response: { status: 401 } })
+                .mockRejectedValueOnce(secondUnauthorized);
+
+            await expect(tidalService.downloadTrack(23)).rejects.toBe(
+                secondUnauthorized,
+            );
+            expect(mockClient.post).toHaveBeenCalledTimes(2);
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
+        });
+
         it("throws unauthenticated error when downloadTrack has no credentials", async () => {
             jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
                 null,
@@ -712,6 +807,101 @@ describe("tidalService", () => {
             );
             expect(refreshSpy).toHaveBeenCalledTimes(1);
             expect(mockClient.post).toHaveBeenCalledTimes(2);
+        });
+
+        it("rethrows the original downloadAlbum 401 when refresh fails", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(false);
+            const unauthorized = { response: { status: 401 } };
+            mockClient.post.mockRejectedValueOnce(unauthorized);
+
+            await expect(tidalService.downloadAlbum(90)).rejects.toBe(
+                unauthorized,
+            );
+            expect(mockClient.post).toHaveBeenCalledTimes(1);
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("rethrows a downloadAlbum 500 without refreshing", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest.spyOn(tidalService, "refreshAccessToken");
+            const serverError = { response: { status: 500 } };
+            mockClient.post.mockRejectedValueOnce(serverError);
+
+            await expect(tidalService.downloadAlbum(91)).rejects.toBe(
+                serverError,
+            );
+            expect(mockClient.post).toHaveBeenCalledTimes(1);
+            expect(refreshSpy).not.toHaveBeenCalled();
+        });
+
+        it("reloads credentials before retrying downloadAlbum after refresh", async () => {
+            const refreshedCreds = {
+                ...baseCreds,
+                accessToken: "new-access-token",
+            };
+            const getCredentialsSpy = jest
+                .spyOn(tidalService as any, "getCredentials")
+                .mockResolvedValueOnce(baseCreds)
+                .mockResolvedValueOnce(refreshedCreds);
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(true);
+            const retriedAlbumPayload = {
+                album_id: 92,
+                album_title: "Retried Album",
+                artist: "Artist",
+                total_tracks: 1,
+                downloaded: 1,
+                failed: 0,
+                tracks: [],
+                errors: [],
+            };
+            mockClient.post
+                .mockRejectedValueOnce({ response: { status: 401 } })
+                .mockResolvedValueOnce({ data: retriedAlbumPayload });
+
+            await expect(tidalService.downloadAlbum(92)).resolves.toEqual(
+                retriedAlbumPayload,
+            );
+            expect(getCredentialsSpy).toHaveBeenCalledTimes(2);
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
+            expect(mockClient.post).toHaveBeenCalledTimes(2);
+            expect(mockClient.post).toHaveBeenNthCalledWith(
+                2,
+                "/download/album",
+                expect.any(Object),
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: `Bearer ${refreshedCreds.accessToken}`,
+                    }),
+                }),
+            );
+        });
+
+        it("rejects after a refreshed downloadAlbum receives a second 401", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(true);
+            const secondUnauthorized = { response: { status: 401 } };
+            mockClient.post
+                .mockRejectedValueOnce({ response: { status: 401 } })
+                .mockRejectedValueOnce(secondUnauthorized);
+
+            await expect(tidalService.downloadAlbum(89)).rejects.toBe(
+                secondUnauthorized,
+            );
+            expect(mockClient.post).toHaveBeenCalledTimes(2);
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
         });
 
         it("throws unauthenticated error when downloadAlbum has no credentials", async () => {

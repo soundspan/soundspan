@@ -42,6 +42,7 @@ import { WithYtMusic } from "./api/ytmusic";
 import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 
 export { vibeErrorMessage } from "./api/vibe";
+export { hasApiErrorStatus } from "./api/core";
 
 // Mood Mix Types (Legacy - for old presets endpoint)
 export interface MoodPreset {

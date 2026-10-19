@@ -6,9 +6,22 @@ import {
 } from "../../features/library/remoteTrackAcquisition";
 import type { Track } from "../../features/library/types";
 
-const admin = { downloadsEnabled: true, requestsEnabled: false };
-const member = { downloadsEnabled: false, requestsEnabled: true };
-const nobody = { downloadsEnabled: false, requestsEnabled: false };
+const admin = {
+    downloadsEnabled: true,
+    tidalDownloadsEnabled: true,
+    requestsEnabled: false,
+};
+const adminWithoutTidal = { ...admin, tidalDownloadsEnabled: false };
+const member = {
+    downloadsEnabled: false,
+    tidalDownloadsEnabled: false,
+    requestsEnabled: true,
+};
+const nobody = {
+    downloadsEnabled: false,
+    tidalDownloadsEnabled: false,
+    requestsEnabled: false,
+};
 
 function remoteTrack(overrides: Partial<Track> = {}): Track {
     return {
@@ -65,8 +78,49 @@ test("synthetic remote album ids cannot be downloaded or requested", () => {
     const track = remoteTrack({
         album: { id: "a", title: "Album", rgMbid: "remote:abc" },
     });
-    assert.equal(resolveRemoteTrackAcquisition(track, admin), null);
+    assert.equal(resolveRemoteTrackAcquisition(track, adminWithoutTidal), null);
     assert.equal(resolveRemoteTrackAcquisition(track, member), null);
+});
+
+test("admins can add a single TIDAL song when the album is not acquirable", () => {
+    const track = remoteTrack({
+        album: { id: "a", title: "Album", rgMbid: "remote:abc" },
+    });
+    assert.deepEqual(resolveRemoteTrackAcquisition(track, admin), {
+        kind: "download-tidal",
+        tidalTrackId: 1,
+        title: "Song",
+    });
+});
+
+test("the TIDAL song action reads the provider id when the row has no top-level id", () => {
+    const track = remoteTrack({
+        tidalTrackId: undefined,
+        provider: { tidalTrackId: 42, youtubeVideoId: null },
+        album: { id: "a", title: "Album", rgMbid: "remote:abc" },
+    });
+    assert.deepEqual(resolveRemoteTrackAcquisition(track, admin), {
+        kind: "download-tidal",
+        tidalTrackId: 42,
+        title: "Song",
+    });
+});
+
+test("the TIDAL song action needs TIDAL downloads and a TIDAL id", () => {
+    const placeholder = {
+        album: { id: "a", title: "Album", rgMbid: "remote:abc" },
+    };
+    const withoutId = remoteTrack({ ...placeholder, tidalTrackId: undefined });
+    assert.equal(resolveRemoteTrackAcquisition(withoutId, admin), null);
+    assert.equal(
+        resolveRemoteTrackAcquisition(remoteTrack(placeholder), member),
+        null,
+    );
+});
+
+test("a real album MBID still wins over the single TIDAL song", () => {
+    const action = resolveRemoteTrackAcquisition(remoteTrack(), admin);
+    assert.equal(action?.kind, "download-album");
 });
 
 test("admins can add a single YouTube Music song when the album is not acquirable", () => {
@@ -109,6 +163,14 @@ test("labels describe each action in plain words", () => {
         getRemoteTrackAcquisitionLabel({
             kind: "download-youtube",
             videoId: "v",
+            title: "t",
+        }),
+        "Add song to library",
+    );
+    assert.equal(
+        getRemoteTrackAcquisitionLabel({
+            kind: "download-tidal",
+            tidalTrackId: 1,
             title: "t",
         }),
         "Add song to library",

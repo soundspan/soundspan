@@ -10,12 +10,15 @@ export type RemoteTrackAcquisition =
           artistName: string;
           albumTitle: string;
       }
-    | { kind: "download-youtube"; videoId: string; title: string };
+    | { kind: "download-youtube"; videoId: string; title: string }
+    | { kind: "download-tidal"; tidalTrackId: number; title: string };
 
 /** What the current viewer is allowed to do. */
 export interface RemoteTrackAcquisitionPolicy {
     /** Admin with at least one download source configured. */
     downloadsEnabled: boolean;
+    /** Admin with TIDAL set up as a download source. */
+    tidalDownloadsEnabled: boolean;
     /** Non-admin with music requests turned on. */
     requestsEnabled: boolean;
 }
@@ -53,11 +56,20 @@ function resolveYouTubeAcquisition(
     return { kind: "download-youtube", videoId, title: track.title };
 }
 
+function resolveTidalAcquisition(
+    track: Track,
+    policy: RemoteTrackAcquisitionPolicy,
+): RemoteTrackAcquisition | null {
+    if (!policy.tidalDownloadsEnabled) return null;
+    const tidalTrackId = track.tidalTrackId ?? track.provider?.tidalTrackId;
+    if (typeof tidalTrackId !== "number") return null;
+    return { kind: "download-tidal", tidalTrackId, title: track.title };
+}
+
 /**
  * Picks the "add to library" action for a liked streaming track. The whole
- * album is preferred when it has a real MusicBrainz id; a single YouTube
- * Music song is the admin fallback. TIDAL songs on albums without a real id
- * have no action yet.
+ * album is preferred when it has a real MusicBrainz id; a single song from
+ * the same provider is the admin fallback.
  */
 export function resolveRemoteTrackAcquisition(
     track: Track,
@@ -69,7 +81,7 @@ export function resolveRemoteTrackAcquisition(
     if (albumAction) return albumAction;
     return source === "youtube"
         ? resolveYouTubeAcquisition(track, policy)
-        : null;
+        : resolveTidalAcquisition(track, policy);
 }
 
 /** Menu label for an acquisition action. */

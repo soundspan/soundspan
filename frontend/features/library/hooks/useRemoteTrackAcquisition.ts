@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, hasApiErrorStatus } from "@/lib/api";
 import { useDownloadContext } from "@/lib/download-context";
 import {
     useCreateMusicRequest,
@@ -43,25 +43,60 @@ async function startYouTubeSongDownload(
     }
 }
 
+/** Server messages that explain a refused TIDAL download in plain words. */
+function describeTidalDownloadError(error: unknown, title: string): string {
+    const isExplained =
+        hasApiErrorStatus(error, 429) || hasApiErrorStatus(error, 503);
+    return isExplained && error instanceof Error ? error.message : title;
+}
+
+/** Queues a single TIDAL song download and reports it in a toast. */
+async function startTidalSongDownload(
+    tidalTrackId: number,
+    title: string,
+): Promise<void> {
+    const toastId = `tidal-download-${tidalTrackId}`;
+    try {
+        const result = await api.downloadTidalTrack(tidalTrackId);
+        const heading =
+            result.status === "already-queued"
+                ? `Already downloading "${title}"`
+                : `Downloading "${title}"`;
+        toast.success(heading, {
+            id: toastId,
+            description: "It joins your library when it finishes.",
+        });
+    } catch (error) {
+        toast.error("Failed to start the download", {
+            id: toastId,
+            description: describeTidalDownloadError(error, title),
+        });
+    }
+}
+
 /**
  * Provides the viewer's "add to library" permissions and an action runner for
  * liked streaming tracks.
  */
 export function useRemoteTrackAcquisition() {
-    const { downloadsEnabled } = useDownloadContext();
+    const { downloadsEnabled, tidalDownloadsEnabled } = useDownloadContext();
     const { requestsEnabled } = useRequestsGate();
     const startAlbumDownload = useStartAlbumDownload();
     const { mutateAsync: createRequest } = useCreateMusicRequest();
 
     const policy = useMemo<RemoteTrackAcquisitionPolicy>(
-        () => ({ downloadsEnabled, requestsEnabled }),
-        [downloadsEnabled, requestsEnabled],
+        () => ({ downloadsEnabled, tidalDownloadsEnabled, requestsEnabled }),
+        [downloadsEnabled, tidalDownloadsEnabled, requestsEnabled],
     );
 
     const acquire = useCallback(
         async (action: RemoteTrackAcquisition) => {
             if (action.kind === "download-youtube") {
                 await startYouTubeSongDownload(action.videoId, action.title);
+                return;
+            }
+            if (action.kind === "download-tidal") {
+                await startTidalSongDownload(action.tidalTrackId, action.title);
                 return;
             }
             const album = {

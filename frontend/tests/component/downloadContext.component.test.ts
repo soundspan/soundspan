@@ -30,10 +30,12 @@ mock.module("@/lib/auth-context", {
     },
 });
 
+let availability: Record<string, boolean> = { enabled: false };
+
 mock.module("@/lib/api", {
     namedExports: {
         api: {
-            getDownloadAvailability: async () => ({ enabled: false }),
+            getDownloadAvailability: async () => availability,
         },
     },
 });
@@ -125,4 +127,30 @@ test("pending additions remain singular and usable under StrictMode", async () =
     assert.equal(harness.latest().pendingDownloads.length, 2);
     assert.equal(harness.latest().isPendingByMbid("mbid-2"), true);
     await harness.unmount();
+});
+
+test("TIDAL downloads are enabled only when TIDAL is an available source", async () => {
+    try {
+        availability = {
+            enabled: true,
+            lidarr: false,
+            soulseek: false,
+            tidal: true,
+            youtube: false,
+        };
+        const withTidal = await mountDownloadProvider();
+        await withTidal.act(() => undefined);
+        assert.equal(withTidal.latest().downloadsEnabled, true);
+        assert.equal(withTidal.latest().tidalDownloadsEnabled, true);
+        await withTidal.unmount();
+
+        availability = { ...availability, tidal: false, lidarr: true };
+        const withoutTidal = await mountDownloadProvider();
+        await withoutTidal.act(() => undefined);
+        assert.equal(withoutTidal.latest().downloadsEnabled, true);
+        assert.equal(withoutTidal.latest().tidalDownloadsEnabled, false);
+        await withoutTidal.unmount();
+    } finally {
+        availability = { enabled: false };
+    }
 });

@@ -17,6 +17,13 @@ import { pickBestAlbumMatch } from "./albumMatchPolicy";
 
 const tidalLogger = logger.child("TidalService");
 
+function isUnauthorizedError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) return false;
+    const response = (error as { response?: unknown }).response;
+    if (typeof response !== "object" || response === null) return false;
+    return (response as { status?: unknown }).status === 401;
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface TidalDeviceAuth {
@@ -415,53 +422,66 @@ class TidalService {
      * using the user's configured file template.
      */
     async downloadTrack(trackId: number): Promise<TidalDownloadResult> {
+        return this.requestWithSingleRefresh(() =>
+            this.downloadTrackOnce(trackId),
+        );
+    }
+
+    private async downloadTrackOnce(
+        trackId: number,
+    ): Promise<TidalDownloadResult> {
         const creds = await this.getCredentials();
         if (!creds) throw new Error("TIDAL not authenticated");
 
-        try {
-            const res = await this.client.post(
-                "/download/track",
-                {
-                    track_id: trackId,
-                    quality: creds.quality,
-                    output_template: creds.fileTemplate,
-                },
-                { headers: this.buildCredentialHeaders(creds) },
-            );
-            return res.data;
-        } catch (err: any) {
-            if (err.response?.status === 401) {
-                const refreshed = await this.refreshAccessToken();
-                if (refreshed) return this.downloadTrack(trackId);
-            }
-            throw err;
-        }
+        const res = await this.client.post(
+            "/download/track",
+            {
+                track_id: trackId,
+                quality: creds.quality,
+                output_template: creds.fileTemplate,
+            },
+            { headers: this.buildCredentialHeaders(creds) },
+        );
+        return res.data;
     }
 
     /**
      * Download an entire album directly to /music.
      */
     async downloadAlbum(albumId: number): Promise<TidalAlbumDownloadResult> {
+        return this.requestWithSingleRefresh(() =>
+            this.downloadAlbumOnce(albumId),
+        );
+    }
+
+    private async downloadAlbumOnce(
+        albumId: number,
+    ): Promise<TidalAlbumDownloadResult> {
         const creds = await this.getCredentials();
         if (!creds) throw new Error("TIDAL not authenticated");
 
+        const res = await this.client.post(
+            "/download/album",
+            {
+                album_id: albumId,
+                quality: creds.quality,
+                output_template: creds.fileTemplate,
+            },
+            { headers: this.buildCredentialHeaders(creds) },
+        );
+        return res.data;
+    }
+
+    private async requestWithSingleRefresh<T>(
+        request: () => Promise<T>,
+    ): Promise<T> {
         try {
-            const res = await this.client.post(
-                "/download/album",
-                {
-                    album_id: albumId,
-                    quality: creds.quality,
-                    output_template: creds.fileTemplate,
-                },
-                { headers: this.buildCredentialHeaders(creds) },
-            );
-            return res.data;
-        } catch (err: any) {
-            if (err.response?.status === 401) {
-                const refreshed = await this.refreshAccessToken();
-                if (refreshed) return this.downloadAlbum(albumId);
-            }
-            throw err;
+            return await request();
+        } catch (error) {
+            if (!isUnauthorizedError(error)) throw error;
+            const refreshed = await this.refreshAccessToken();
+            if (!refreshed) throw error;
+            return request();
         }
     }
 }

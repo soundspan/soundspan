@@ -61,6 +61,20 @@ export function WithDownloads<TBase extends ApiClientConstructor>(Base: TBase) {
             }>("/downloads/availability");
         }
 
+        /**
+         * Queue one TIDAL song for download into the library. Admin only.
+         * The library scan that follows the download brings the file in.
+         */
+        async downloadTidalTrack(tidalTrackId: number) {
+            return this.request<{
+                tidalTrackId: number;
+                status: "queued" | "already-queued";
+            }>("/downloads/tidal-track", {
+                method: "POST",
+                body: JSON.stringify({ tidalTrackId }),
+            });
+        }
+
         async deleteDownload(id: string) {
             return this.request<{ success: boolean }>(`/downloads/${id}`, {
                 method: "DELETE",

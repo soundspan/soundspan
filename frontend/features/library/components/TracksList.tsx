@@ -52,6 +52,7 @@ const DEFAULT_EMPTY_COPY: TracksListEmptyCopy = {
 
 const NO_ACQUISITION: RemoteTrackAcquisitionPolicy = {
     downloadsEnabled: false,
+    tidalDownloadsEnabled: false,
     requestsEnabled: false,
 };
 
