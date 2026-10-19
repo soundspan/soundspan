@@ -26,12 +26,12 @@ function restoreHandle(
     client: FakeClient,
     connectionError: Error | null,
     backendPid: number | null = null,
-    backendStart: string | null = null,
+    backendStartEpoch: string | null = null,
 ): RestoreClientHandle {
     return {
         client: client as unknown as Client,
         backendPid,
-        backendStart,
+        backendStartEpoch,
         connectionFailure: new Promise<Error>(() => undefined),
         detachClientError: jest.fn(),
         getConnectionError: () => connectionError,
@@ -104,13 +104,13 @@ describe("restore client lifecycle", () => {
 
     it("returns the backend identity losslessly for an acquired restore lock", async () => {
         const client = fakeClient();
-        const backendStart = "2026-10-19 12:00:00.123456+00";
+        const backendStartEpoch = "1792411200.123456";
         client.query.mockResolvedValue({
             rows: [
                 {
                     acquired: true,
                     backend_pid: 55,
-                    backend_start: backendStart,
+                    backend_start_epoch: backendStartEpoch,
                 },
             ],
         });
@@ -121,16 +121,16 @@ describe("restore client lifecycle", () => {
         const handle = await acquireRestoreClient();
 
         expect(handle.backendPid).toBe(55);
-        expect(handle.backendStart).toBe(backendStart);
+        expect(handle.backendStartEpoch).toBe(backendStartEpoch);
         expect(client.query).toHaveBeenCalledWith(
-            expect.stringContaining("backend_start::text"),
+            expect.stringContaining("extract(epoch FROM backend_start)::text"),
             [5_331_001_002],
         );
         expect(mockRecordLock).toHaveBeenCalledWith(true);
         await releaseRestoreClient(handle);
     });
 
-    it("closes a healthy original before taking the recovery lock", async () => {
+    it("connects recovery before closing a healthy original and taking the lock", async () => {
         const original = fakeClient();
         original.getTransactionStatus.mockReturnValue("T");
         const recovery = fakeClient();
@@ -167,10 +167,10 @@ describe("restore client lifecycle", () => {
         ).resolves.toBe("done");
         await releaseRestoreClient(handle);
         expect(order).toEqual([
+            "recovery:connect",
             "original:ROLLBACK",
             "original:SELECT pg_advisory_unlock($1)",
             "original:end",
-            "recovery:connect",
             "recovery:SET lock_timeout = '30s'",
             "recovery:SELECT pg_advisory_lock($1)",
             "recovery:RESET lock_timeout",
@@ -185,17 +185,45 @@ describe("restore client lifecycle", () => {
         expect(original.end).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps the original lock ownership until recovery is connected", async () => {
+        const original = fakeClient();
+        const recovery = fakeClient();
+        let finishConnect: (() => void) | undefined;
+        recovery.connect.mockReturnValue(
+            new Promise<void>((resolve) => {
+                finishConnect = resolve;
+            }),
+        );
+        clients.push(recovery);
+        const { withRecoveryRestoreClient } = await import("../restoreClient");
+        const handle = restoreHandle(original, null, 77, "1792411200.123456");
+
+        const pending = withRecoveryRestoreClient(handle, async () => "done");
+        await Promise.resolve();
+
+        expect(recovery.connect).toHaveBeenCalledTimes(1);
+        expect(original.query).not.toHaveBeenCalled();
+        expect(original.end).not.toHaveBeenCalled();
+        expect(mockInvalidateLock).not.toHaveBeenCalled();
+
+        finishConnect?.();
+        await expect(pending).resolves.toBe("done");
+        expect(mockInvalidateLock).toHaveBeenCalledTimes(1);
+    });
+
     it("guards dead-backend termination by timestamp identity before locking", async () => {
         const original = fakeClient();
         const recovery = fakeClient();
-        const backendStart = "2026-10-19 12:00:00.123456+00";
+        const backendStartEpoch = "1792411200.123456";
         const order: string[] = [];
         recovery.query.mockImplementation(
             async (sql: string, params?: unknown[]) => {
                 order.push(sql);
                 if (sql.includes("pg_terminate_backend")) {
-                    expect(params).toEqual([77, backendStart]);
-                    expect(sql).toContain("backend_start = $2::timestamptz");
+                    expect(params).toEqual([77, backendStartEpoch]);
+                    expect(sql).toContain(
+                        "extract(epoch FROM backend_start) = $2::numeric",
+                    );
                     expect(sql).toContain("pid <> pg_backend_pid()");
                 }
                 return { rows: [] };
@@ -207,7 +235,7 @@ describe("restore client lifecycle", () => {
             original,
             new Error("connection lost"),
             77,
-            backendStart,
+            backendStartEpoch,
         );
 
         await expect(
@@ -239,12 +267,7 @@ describe("restore client lifecycle", () => {
         );
         clients.push(recovery);
         const { withRecoveryRestoreClient } = await import("../restoreClient");
-        const handle = restoreHandle(
-            original,
-            null,
-            77,
-            "2026-10-19 12:00:00.123456+00",
-        );
+        const handle = restoreHandle(original, null, 77, "1792411200.123456");
 
         const pending = withRecoveryRestoreClient(handle, async () => "done");
         await jest.advanceTimersByTimeAsync(5_000);
@@ -253,7 +276,7 @@ describe("restore client lifecycle", () => {
         expect(recovery.query).toHaveBeenNthCalledWith(
             1,
             expect.stringContaining("pg_terminate_backend"),
-            [77, "2026-10-19 12:00:00.123456+00"],
+            [77, "1792411200.123456"],
         );
         finishEnd?.();
     });
@@ -300,7 +323,7 @@ describe("restore client lifecycle", () => {
                 {
                     acquired: true,
                     backend_pid: 55,
-                    backend_start: "2026-10-19 12:00:00.123456+00",
+                    backend_start_epoch: "1792411200.123456",
                 },
             ],
         });
@@ -330,10 +353,9 @@ describe("restore client lifecycle", () => {
         clients.push(...failures);
         const { withRecoveryRestoreClient } = await import("../restoreClient");
 
-        const handle = restoreHandle(
-            fakeClient(),
-            new Error("connection lost"),
-        );
+        const original = fakeClient();
+        original.getTransactionStatus.mockReturnValue("T");
+        const handle = restoreHandle(original, null);
         const pending = withRecoveryRestoreClient(handle, async () => "unused");
         const rejection = expect(pending).rejects.toThrow("down 6");
         await jest.advanceTimersByTimeAsync(60_000);
@@ -343,5 +365,8 @@ describe("restore client lifecycle", () => {
         for (const client of failures) {
             expect(client.end).toHaveBeenCalledTimes(1);
         }
+        expect(original.query).not.toHaveBeenCalled();
+        expect(original.end).not.toHaveBeenCalled();
+        expect(mockInvalidateLock).not.toHaveBeenCalled();
     });
 });

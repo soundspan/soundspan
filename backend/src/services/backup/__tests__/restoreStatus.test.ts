@@ -7,7 +7,7 @@ const mockRedis = {
     set: jest.fn(),
 };
 const mockRestoreLockHeld = jest.fn();
-const mockReadRestartMarkerForRestore = jest.fn();
+const mockReadCompletionMarkerForRestore = jest.fn();
 const mockLoggerWarn = jest.fn();
 
 jest.mock("../../../utils/redis", () => ({
@@ -15,7 +15,7 @@ jest.mock("../../../utils/redis", () => ({
 }));
 jest.mock("../restoreLock", () => ({ isRestoreLockHeld: mockRestoreLockHeld }));
 jest.mock("../restartRequired", () => ({
-    readRestartMarkerForRestore: mockReadRestartMarkerForRestore,
+    readCompletionMarkerForRestore: mockReadCompletionMarkerForRestore,
 }));
 jest.mock("../../../utils/logger", () => ({
     logger: { child: () => ({ warn: mockLoggerWarn }) },
@@ -26,7 +26,7 @@ describe("effective restore status", () => {
         jest.resetModules();
         jest.clearAllMocks();
         mockRedis.isReady = true;
-        mockReadRestartMarkerForRestore.mockResolvedValue(0);
+        mockReadCompletionMarkerForRestore.mockResolvedValue(0);
     });
 
     it("preserves a running status while the database lock is held", async () => {
@@ -93,17 +93,56 @@ describe("effective restore status", () => {
             }),
         );
         mockRestoreLockHeld.mockResolvedValue(false);
-        mockReadRestartMarkerForRestore.mockResolvedValue(10_000);
         const { getRestoreStatus } = await import("../restoreStatus");
 
         await expect(getRestoreStatus()).resolves.toMatchObject({
             state: "failed",
             error: { code: "RESTORE_FINISH_INCOMPLETE" },
         });
-        expect(mockReadRestartMarkerForRestore).toHaveBeenCalledWith(
+        expect(mockReadCompletionMarkerForRestore).toHaveBeenCalledWith(
             "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
             true,
         );
+    });
+
+    it("maps a stale pre-commit status to interrupted when only its early marker exists", async () => {
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+                state: "loading",
+                progress: null,
+                error: null,
+                summary: null,
+                writtenAt: 10_000,
+            }),
+        );
+        mockRestoreLockHeld.mockResolvedValue(false);
+        const { getRestoreStatus } = await import("../restoreStatus");
+
+        await expect(getRestoreStatus()).resolves.toMatchObject({
+            state: "failed",
+            error: { code: "RESTORE_INTERRUPTED" },
+        });
+    });
+
+    it("does not complete a stale post-commit status from a failure-path marker", async () => {
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+                state: "reencrypting",
+                progress: null,
+                error: null,
+                summary: null,
+                writtenAt: 10_000,
+            }),
+        );
+        mockRestoreLockHeld.mockResolvedValue(false);
+        const { getRestoreStatus } = await import("../restoreStatus");
+
+        await expect(getRestoreStatus()).resolves.toMatchObject({
+            state: "failed",
+            error: { code: "RESTORE_FINISH_INCOMPLETE" },
+        });
     });
 
     it("maps a stale active status to complete after its completion marker", async () => {
@@ -118,7 +157,7 @@ describe("effective restore status", () => {
             }),
         );
         mockRestoreLockHeld.mockResolvedValue(false);
-        mockReadRestartMarkerForRestore.mockResolvedValue(10_001);
+        mockReadCompletionMarkerForRestore.mockResolvedValue(10_001);
         const { getRestoreStatus } = await import("../restoreStatus");
 
         await expect(getRestoreStatus()).resolves.toMatchObject({
@@ -139,7 +178,7 @@ describe("effective restore status", () => {
             }),
         );
         mockRestoreLockHeld.mockResolvedValue(false);
-        mockReadRestartMarkerForRestore.mockResolvedValue(0);
+        mockReadCompletionMarkerForRestore.mockResolvedValue(0);
         const { getRestoreStatus } = await import("../restoreStatus");
 
         await expect(getRestoreStatus()).resolves.toMatchObject({

@@ -81,10 +81,7 @@ function databaseUrl(name: string): string {
 
 function databaseUrlWithTimeZone(value: string, timeZone: string): string {
     const url = new URL(value);
-    url.searchParams.set(
-        "options",
-        `-c timezone=${timeZone} -c datestyle=ISO,YMD`,
-    );
+    url.searchParams.set("options", `-c timezone=${timeZone}`);
     return url.toString();
 }
 
@@ -94,23 +91,15 @@ async function assertRecoveryOwnsRestoreLock(
 ): Promise<void> {
     const identity = await recovery.query<{
         backend_pid: number;
-        backend_start: string;
-    }>(
-        `SELECT pg_backend_pid() AS backend_pid,
-                (SELECT backend_start::text
-                   FROM pg_stat_activity
-                  WHERE pid = pg_backend_pid()) AS backend_start`,
-    );
+    }>("SELECT pg_backend_pid() AS backend_pid");
     expect(identity.rows[0]?.backend_pid).not.toBe(originalPid);
-    const selfMatch = await recovery.query(
-        `SELECT pg_terminate_backend(pid) AS terminated
-           FROM pg_stat_activity
-          WHERE pid = $1
-            AND backend_start = $2::timestamptz
-            AND pid <> pg_backend_pid()`,
-        [identity.rows[0]?.backend_pid, identity.rows[0]?.backend_start],
+    const originalSession = await recovery.query<{ present: boolean }>(
+        `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity WHERE pid = $1
+         ) AS present`,
+        [originalPid],
     );
-    expect(selfMatch.rows).toHaveLength(0);
+    expect(originalSession.rows[0]?.present).toBe(false);
     const ownedLock = await recovery.query<{ held: boolean }>(
         `SELECT EXISTS (
              SELECT 1 FROM pg_locks
@@ -695,6 +684,19 @@ describeWithPostgres("data-only backup and restore", () => {
             "America/Los_Angeles",
         );
         const original = await acquireRestoreClient();
+        await original.client.query("SET datestyle = 'Postgres, MDY'");
+        const originalSettings = await original.client.query<{
+            date_style: string;
+            time_zone: string;
+            utc_offset_seconds: number;
+        }>(
+            `SELECT current_setting('DateStyle') AS date_style,
+                    current_setting('TimeZone') AS time_zone,
+                    extract(timezone FROM current_timestamp)::int AS utc_offset_seconds`,
+        );
+        expect(originalSettings.rows[0]?.date_style).toBe("Postgres, MDY");
+        expect(originalSettings.rows[0]?.time_zone).toBe("America/Los_Angeles");
+        expect(originalSettings.rows[0]?.utc_offset_seconds).not.toBe(0);
         const originalEnd = original.client.end.bind(original.client);
         const ignoredErrors = (): void => undefined;
         original.client.on("error", ignoredErrors);
@@ -720,6 +722,50 @@ describeWithPostgres("data-only backup and restore", () => {
             original.client.end = originalEnd;
             original.client.off("error", ignoredErrors);
             await originalEnd().catch(() => undefined);
+            await releaseRestoreClient(original);
+        }
+    });
+
+    it("closes a healthy restore backend before recovery takes the lock", async () => {
+        const {
+            acquireRestoreClient,
+            releaseRestoreClient,
+            withRecoveryRestoreClient,
+        } = await import("../src/services/backup/restoreClient");
+        const { RESTORE_ADVISORY_LOCK } =
+            await import("../src/services/backup/restoreLock");
+        config.databaseUrl = targetUrl;
+        const original = await acquireRestoreClient();
+        await original.client.query("BEGIN");
+        const originalQuery = jest.spyOn(original.client, "query");
+        const originalEnd = jest.spyOn(original.client, "end");
+
+        try {
+            await withRecoveryRestoreClient(original, async (recovery) => {
+                const recoveryQuery = jest.spyOn(recovery, "query");
+                await assertRecoveryOwnsRestoreLock(
+                    recovery,
+                    original.backendPid,
+                );
+                expect(
+                    recoveryQuery.mock.calls.some(([sql]) =>
+                        String(sql).includes("pg_terminate_backend"),
+                    ),
+                ).toBe(false);
+            });
+
+            expect(originalQuery).toHaveBeenCalledWith("ROLLBACK");
+            expect(originalQuery).toHaveBeenCalledWith(
+                "SELECT pg_advisory_unlock($1)",
+                [RESTORE_ADVISORY_LOCK],
+            );
+            expect(originalEnd).toHaveBeenCalledTimes(1);
+            await assertBackendEndedAndLockFreed(
+                target,
+                original.backendPid,
+                RESTORE_ADVISORY_LOCK,
+            );
+        } finally {
             await releaseRestoreClient(original);
         }
     });

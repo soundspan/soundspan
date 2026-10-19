@@ -4,7 +4,7 @@ import type { RestoreProgress } from "./restoreDataLoad";
 import { isRestoreLockHeld } from "./restoreLock";
 import { RestoreError } from "./backupErrors";
 import { logger as rootLogger } from "../../utils/logger";
-import { readRestartMarkerForRestore } from "./restartRequired";
+import { readCompletionMarkerForRestore } from "./restartRequired";
 
 const logger = rootLogger.child("BackupRestore");
 const STATUS_KEY = "restore:status";
@@ -247,7 +247,8 @@ async function effectiveStoredStatus(
     if (
         status.restoreId &&
         writtenAt !== undefined &&
-        (await readRestartMarkerForRestore(status.restoreId, true)) > writtenAt
+        (await readCompletionMarkerForRestore(status.restoreId, true)) >
+            writtenAt
     ) {
         return { ...status, state: "complete", error: null };
     }

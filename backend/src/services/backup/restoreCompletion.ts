@@ -2,18 +2,21 @@ import type { Client } from "pg";
 import { config } from "../../config";
 import { resolveAppVersion } from "../../config/appVersion";
 import { getPepperFingerprint } from "../../utils/apiKeyHash";
+import { logger as rootLogger } from "../../utils/logger";
 import { deployCurrentMigrations } from "./restoreMigrationReplay";
 import {
     reencryptRestoredCredentials,
     type ReencryptSummary,
 } from "./restoreReencrypt";
-import { markRestartRequired } from "./restartRequired";
+import { markRestartRequired, markRestoreComplete } from "./restartRequired";
 import { setRestoreStatus, setTerminalRestoreStatus } from "./restoreStatus";
 import type {
     RestoreExecutionState,
     StartRestoreJobOptions,
 } from "./restoreJobTypes";
 import type { RestoreSummary } from "./restoreStatus";
+
+const logger = rootLogger.child("BackupRestore");
 
 function combineCredentialResults(
     state: RestoreExecutionState,
@@ -101,6 +104,17 @@ async function publishCompleteStatus(
     });
 }
 
+async function publishCompletionMarker(
+    completedAt: number,
+    restoreId: string,
+): Promise<void> {
+    try {
+        await markRestoreComplete(completedAt, restoreId);
+    } catch (error) {
+        logger.warn("Could not publish restore completion marker", error);
+    }
+}
+
 /** Finish migrations, credential rotation, restart fencing, and status. */
 export async function finishCommittedRestore(
     client: Client,
@@ -115,7 +129,7 @@ export async function finishCommittedRestore(
         state,
     );
     const summary = buildSummary(options, state, completion.credentials);
-    await markRestartRequired(
+    await publishCompletionMarker(
         Math.max(Date.now(), completion.migratingWrittenAt + 1),
         restoreId,
     );

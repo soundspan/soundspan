@@ -16,7 +16,7 @@ const ORIGINAL_CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 export interface RestoreClientHandle {
     client: Client;
     backendPid: number | null;
-    backendStart: string | null;
+    backendStartEpoch: string | null;
     connectionFailure: Promise<Error>;
     detachClientError: () => void;
     getConnectionError: () => Error | null;
@@ -31,7 +31,7 @@ interface MonitoredClient {
 
 interface BackendIdentity {
     pid: number;
-    start: string;
+    startEpoch: string;
 }
 
 const clientCloses = new WeakMap<RestoreClientHandle, Promise<void>>();
@@ -72,8 +72,9 @@ function backendPid(value: unknown): number | null {
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function backendStart(value: unknown): string | null {
-    return typeof value === "string" && value.length > 0 ? value : null;
+function backendStartEpoch(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    return /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) ? value : null;
 }
 
 /** Connect and take the non-blocking restore lock for a new job. */
@@ -84,13 +85,13 @@ export async function acquireRestoreClient(): Promise<RestoreClientHandle> {
         const result = await monitored.client.query<{
             acquired: boolean;
             backend_pid: number;
-            backend_start: string;
+            backend_start_epoch: string;
         }>(
             `SELECT pg_try_advisory_lock($1) AS acquired,
                     pg_backend_pid() AS backend_pid,
-                    (SELECT backend_start::text
+                    (SELECT extract(epoch FROM backend_start)::text
                        FROM pg_stat_activity
-                      WHERE pid = pg_backend_pid()) AS backend_start`,
+                      WHERE pid = pg_backend_pid()) AS backend_start_epoch`,
             [RESTORE_ADVISORY_LOCK],
         );
         if (result.rows[0]?.acquired !== true) {
@@ -103,7 +104,9 @@ export async function acquireRestoreClient(): Promise<RestoreClientHandle> {
         return {
             client: monitored.client,
             backendPid: backendPid(result.rows[0]?.backend_pid),
-            backendStart: backendStart(result.rows[0]?.backend_start),
+            backendStartEpoch: backendStartEpoch(
+                result.rows[0]?.backend_start_epoch,
+            ),
             connectionFailure: monitored.failure,
             detachClientError: monitored.detach,
             getConnectionError: monitored.getError,
@@ -154,9 +157,9 @@ async function retakeRestoreLock(
             `SELECT pg_terminate_backend(pid) AS terminated
                FROM pg_stat_activity
               WHERE pid = $1
-                AND backend_start = $2::timestamptz
+                AND extract(epoch FROM backend_start) = $2::numeric
                 AND pid <> pg_backend_pid()`,
-            [original.pid, original.start],
+            [original.pid, original.startEpoch],
         );
     }
     await client.query("SET lock_timeout = '30s'");
@@ -240,10 +243,10 @@ async function prepareOriginalForRecovery(
     const connectionLost = handle.getConnectionError() !== null;
     const close = beginRestoreClientClose(handle, !connectionLost);
     const closed = await closeWithinRecoveryDeadline(close);
-    invalidateRestoreLockCache();
     if (!connectionLost && closed) return null;
-    if (handle.backendPid === null || handle.backendStart === null) return null;
-    return { pid: handle.backendPid, start: handle.backendStart };
+    if (handle.backendPid === null || handle.backendStartEpoch === null)
+        return null;
+    return { pid: handle.backendPid, startEpoch: handle.backendStartEpoch };
 }
 
 /** Run post-failure work on a retried fresh client that owns the restore lock. */
@@ -251,9 +254,9 @@ export async function withRecoveryRestoreClient<T>(
     original: RestoreClientHandle,
     work: (client: Client) => Promise<T>,
 ): Promise<T> {
-    const terminationTarget = await prepareOriginalForRecovery(original);
     const monitored = await connectRecoveryClient();
     try {
+        const terminationTarget = await prepareOriginalForRecovery(original);
         await retakeRestoreLock(monitored.client, terminationTarget);
         return await work(monitored.client);
     } finally {

@@ -246,10 +246,10 @@ describe("restart-required middleware", () => {
         expect(mockRedis.sendCommand).toHaveBeenCalledTimes(1);
     });
 
-    it("stores and matches a restore-specific marker", async () => {
+    it("stores an untagged restart marker without treating it as completion", async () => {
         mockRedis.set.mockResolvedValue("OK");
         const restoreId = "98e4582e-e030-4ae8-8aa9-63c8de4f707f";
-        const { markRestartRequired, readRestartMarkerForRestore } =
+        const { markRestartRequired, readCompletionMarkerForRestore } =
             await import("../restartRequired");
 
         await markRestartRequired(12_345, restoreId);
@@ -259,28 +259,56 @@ describe("restart-required middleware", () => {
             `12345:${restoreId}`,
         );
         await expect(
-            readRestartMarkerForRestore(restoreId, false, 12_346),
-        ).resolves.toBe(12_345);
+            readCompletionMarkerForRestore(restoreId, false, 12_346),
+        ).resolves.toBe(0);
+    });
+
+    it("stores and matches a tagged restore completion marker", async () => {
+        mockRedis.set.mockResolvedValue("OK");
+        const restoreId = "98e4582e-e030-4ae8-8aa9-63c8de4f707f";
+        const { markRestoreComplete, readCompletionMarkerForRestore } =
+            await import("../restartRequired");
+
+        await markRestoreComplete(12_345, restoreId);
+
+        expect(mockRedis.set).toHaveBeenCalledWith(
+            "restore:restart-required",
+            `12345:${restoreId}:complete`,
+        );
         await expect(
-            readRestartMarkerForRestore(
+            readCompletionMarkerForRestore(
                 "0e717451-202e-4bf2-bdff-07fa5a477c95",
                 false,
                 12_346,
             ),
         ).resolves.toBe(0);
+        await expect(
+            readCompletionMarkerForRestore(restoreId, false, 12_346),
+        ).resolves.toBe(12_345);
     });
 
-    it("parses a restore-specific marker read from Redis", async () => {
+    it("does not parse an untagged failure-path marker as completion", async () => {
         const restoreId = "98e4582e-e030-4ae8-8aa9-63c8de4f707f";
         mockRedis.sendCommand.mockResolvedValue(`12345:${restoreId}`);
-        const { readRestartMarkerForRestore } =
+        const { readCompletionMarkerForRestore } =
             await import("../restartRequired");
 
         await expect(
-            readRestartMarkerForRestore(restoreId, true, 50_000),
+            readCompletionMarkerForRestore(restoreId, true, 50_000),
+        ).resolves.toBe(0);
+    });
+
+    it("parses a tagged completion marker read from Redis", async () => {
+        const restoreId = "98e4582e-e030-4ae8-8aa9-63c8de4f707f";
+        mockRedis.sendCommand.mockResolvedValue(`12345:${restoreId}:complete`);
+        const { readCompletionMarkerForRestore } =
+            await import("../restartRequired");
+
+        await expect(
+            readCompletionMarkerForRestore(restoreId, true, 50_000),
         ).resolves.toBe(12_345);
         await expect(
-            readRestartMarkerForRestore(
+            readCompletionMarkerForRestore(
                 "0e717451-202e-4bf2-bdff-07fa5a477c95",
                 false,
                 50_001,

@@ -94,6 +94,7 @@ jest.mock("../restoreUploads", () => ({
 }));
 jest.mock("../restartRequired", () => ({
     markRestartRequired: mockMarkRestart,
+    markRestoreComplete: mockMarkRestart,
 }));
 jest.mock("../restoreStatus", () => ({
     setRestoreStatus: mockSetStatus,
