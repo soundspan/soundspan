@@ -81,7 +81,7 @@ describe("effective restore status", () => {
         });
     });
 
-    it("maps a stale active status to complete when its restart marker exists", async () => {
+    it("maps a stale post-commit status to incomplete when only its early marker exists", async () => {
         mockRedisGet.mockResolvedValue(
             JSON.stringify({
                 restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
@@ -93,17 +93,38 @@ describe("effective restore status", () => {
             }),
         );
         mockRestoreLockHeld.mockResolvedValue(false);
-        mockReadRestartMarkerForRestore.mockResolvedValue(9_999);
+        mockReadRestartMarkerForRestore.mockResolvedValue(10_000);
+        const { getRestoreStatus } = await import("../restoreStatus");
+
+        await expect(getRestoreStatus()).resolves.toMatchObject({
+            state: "failed",
+            error: { code: "RESTORE_FINISH_INCOMPLETE" },
+        });
+        expect(mockReadRestartMarkerForRestore).toHaveBeenCalledWith(
+            "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+            true,
+        );
+    });
+
+    it("maps a stale active status to complete after its completion marker", async () => {
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                restoreId: "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
+                state: "migrating",
+                progress: null,
+                error: null,
+                summary: null,
+                writtenAt: 10_000,
+            }),
+        );
+        mockRestoreLockHeld.mockResolvedValue(false);
+        mockReadRestartMarkerForRestore.mockResolvedValue(10_001);
         const { getRestoreStatus } = await import("../restoreStatus");
 
         await expect(getRestoreStatus()).resolves.toMatchObject({
             state: "complete",
             error: null,
         });
-        expect(mockReadRestartMarkerForRestore).toHaveBeenCalledWith(
-            "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
-            true,
-        );
     });
 
     it("does not complete a stale status from another restore's marker", async () => {
@@ -224,7 +245,7 @@ describe("effective restore status", () => {
 
         await jest.advanceTimersByTimeAsync(251);
 
-        await expect(pending).resolves.toBeUndefined();
+        await expect(pending).resolves.toEqual(expect.any(Number));
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "Could not persist restore status",
             expect.any(Error),

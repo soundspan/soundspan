@@ -126,11 +126,33 @@ describe("backup export streaming", () => {
         const output = new PassThrough();
         output.resume();
         const streaming = exporter.streamTo(output);
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        let settled = false;
+        const outcome = streaming.then(
+            () => {
+                settled = true;
+                return null;
+            },
+            (error: unknown) => {
+                settled = true;
+                return error;
+            },
+        );
+        for (let attempt = 0; attempt < 20 && !fetchStarted; attempt += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        expect(fetchStarted).toBeDefined();
         client.emit("error", new Error("connection terminated"));
-        await expect(streaming).rejects.toThrow("connection terminated");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
         fetchStarted?.();
+        await expect(outcome).resolves.toMatchObject({
+            message: "connection terminated",
+        });
         await exporter.close();
+        const sql = client.query.mock.calls.map(([value]) => String(value));
+        expect(sql.indexOf("ROLLBACK")).toBeLessThan(
+            sql.indexOf("SELECT pg_advisory_unlock($1)"),
+        );
     });
 
     it("rejects promptly when the destination is destroyed", async () => {
@@ -362,14 +384,20 @@ describe("backup export streaming", () => {
     it("closes the database client when an export reaches its deadline", async () => {
         jest.useFakeTimers();
         try {
+            let rejectSetup: ((error: Error) => void) | undefined;
             client.query.mockImplementation(async (sql: string) => {
                 if (sql.includes("pg_try_advisory_lock")) {
                     return { rows: [{ acquired: true }] };
                 }
                 if (sql.startsWith("SET statement_timeout")) {
-                    return new Promise(() => undefined);
+                    return new Promise((_resolve, reject) => {
+                        rejectSetup = reject;
+                    });
                 }
                 return { rows: [] };
+            });
+            client.end.mockImplementation(async () => {
+                rejectSetup?.(new Error("connection terminated"));
             });
             const { openBackupExport } = await import("../backupExport");
             const exporter = await openBackupExport({
@@ -385,8 +413,7 @@ describe("backup export streaming", () => {
             );
 
             await jest.advanceTimersByTimeAsync(6 * 60 * 60 * 1000);
-            expect(client.end).toHaveBeenCalledTimes(1);
-            client.emit("error", new Error("connection terminated"));
+            expect(client.end).toHaveBeenCalled();
 
             await rejected;
             await exporter.close();

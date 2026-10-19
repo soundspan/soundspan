@@ -79,6 +79,69 @@ function databaseUrl(name: string): string {
     return value.toString();
 }
 
+function databaseUrlWithTimeZone(value: string, timeZone: string): string {
+    const url = new URL(value);
+    url.searchParams.set(
+        "options",
+        `-c timezone=${timeZone} -c datestyle=ISO,YMD`,
+    );
+    return url.toString();
+}
+
+async function assertRecoveryOwnsRestoreLock(
+    recovery: Client,
+    originalPid: number | null,
+): Promise<void> {
+    const identity = await recovery.query<{
+        backend_pid: number;
+        backend_start: string;
+    }>(
+        `SELECT pg_backend_pid() AS backend_pid,
+                (SELECT backend_start::text
+                   FROM pg_stat_activity
+                  WHERE pid = pg_backend_pid()) AS backend_start`,
+    );
+    expect(identity.rows[0]?.backend_pid).not.toBe(originalPid);
+    const selfMatch = await recovery.query(
+        `SELECT pg_terminate_backend(pid) AS terminated
+           FROM pg_stat_activity
+          WHERE pid = $1
+            AND backend_start = $2::timestamptz
+            AND pid <> pg_backend_pid()`,
+        [identity.rows[0]?.backend_pid, identity.rows[0]?.backend_start],
+    );
+    expect(selfMatch.rows).toHaveLength(0);
+    const ownedLock = await recovery.query<{ held: boolean }>(
+        `SELECT EXISTS (
+             SELECT 1 FROM pg_locks
+              WHERE locktype = 'advisory'
+                AND granted
+                AND pid = pg_backend_pid()
+         ) AS held`,
+    );
+    expect(ownedLock.rows[0]?.held).toBe(true);
+}
+
+async function assertBackendEndedAndLockFreed(
+    observer: Client,
+    backendPid: number | null,
+    advisoryLock: number,
+): Promise<void> {
+    const session = await observer.query<{ present: boolean }>(
+        `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity WHERE pid = $1
+         ) AS present`,
+        [backendPid],
+    );
+    expect(session.rows[0]?.present).toBe(false);
+    const available = await observer.query<{ acquired: boolean }>(
+        "SELECT pg_try_advisory_lock($1) AS acquired",
+        [advisoryLock],
+    );
+    expect(available.rows[0]?.acquired).toBe(true);
+    await observer.query("SELECT pg_advisory_unlock($1)", [advisoryLock]);
+}
+
 interface DatabaseState {
     tables: Record<string, { count: string; digest: string }>;
     sequences: Awaited<ReturnType<typeof readOwnedSequences>>;
@@ -616,6 +679,48 @@ describeWithPostgres("data-only backup and restore", () => {
             await target.query("SELECT pg_advisory_unlock($1)", [
                 RESTORE_ADVISORY_LOCK,
             ]);
+        }
+    });
+
+    it("terminates only the recorded restore backend and frees its advisory lock", async () => {
+        const {
+            acquireRestoreClient,
+            releaseRestoreClient,
+            withRecoveryRestoreClient,
+        } = await import("../src/services/backup/restoreClient");
+        const { RESTORE_ADVISORY_LOCK } =
+            await import("../src/services/backup/restoreLock");
+        config.databaseUrl = databaseUrlWithTimeZone(
+            targetUrl,
+            "America/Los_Angeles",
+        );
+        const original = await acquireRestoreClient();
+        const originalEnd = original.client.end.bind(original.client);
+        const ignoredErrors = (): void => undefined;
+        original.client.on("error", ignoredErrors);
+        original.client.emit("error", new Error("force guarded takeover"));
+        original.client.end = jest
+            .fn()
+            .mockRejectedValue(
+                new Error("leave backend for guarded termination"),
+            ) as unknown as Client["end"];
+
+        try {
+            config.databaseUrl = databaseUrlWithTimeZone(targetUrl, "UTC");
+            await withRecoveryRestoreClient(original, async (recovery) =>
+                assertRecoveryOwnsRestoreLock(recovery, original.backendPid),
+            );
+            await assertBackendEndedAndLockFreed(
+                target,
+                original.backendPid,
+                RESTORE_ADVISORY_LOCK,
+            );
+        } finally {
+            config.databaseUrl = targetUrl;
+            original.client.end = originalEnd;
+            original.client.off("error", ignoredErrors);
+            await originalEnd().catch(() => undefined);
+            await releaseRestoreClient(original);
         }
     });
 });

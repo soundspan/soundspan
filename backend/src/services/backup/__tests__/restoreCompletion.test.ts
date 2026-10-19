@@ -4,6 +4,7 @@ import { createRestoreExecutionState } from "../restoreJobTypes";
 const mockDeployMigrations = jest.fn();
 const mockReencrypt = jest.fn();
 const mockSetStatus = jest.fn();
+const mockSetTerminalStatus = jest.fn();
 const mockMarkRestart = jest.fn();
 
 jest.mock("../restoreMigrationReplay", () => ({
@@ -14,7 +15,7 @@ jest.mock("../restoreReencrypt", () => ({
 }));
 jest.mock("../restoreStatus", () => ({
     setRestoreStatus: mockSetStatus,
-    setTerminalRestoreStatus: jest.fn(),
+    setTerminalRestoreStatus: mockSetTerminalStatus,
 }));
 jest.mock("../restartRequired", () => ({
     markRestartRequired: mockMarkRestart,
@@ -47,7 +48,8 @@ describe("committed restore completion guards", () => {
             credentialsUndecryptable: 0,
             processedColumns: [],
         });
-        mockSetStatus.mockResolvedValue(undefined);
+        mockSetStatus.mockResolvedValue(10_000);
+        mockSetTerminalStatus.mockResolvedValue(undefined);
         mockMarkRestart.mockResolvedValue(undefined);
     });
 
@@ -79,16 +81,32 @@ describe("committed restore completion guards", () => {
         expect(mockReencrypt).toHaveBeenCalledTimes(1);
     });
 
-    it("marks restart before publishing migrating and does not cancel deploy", async () => {
+    it("writes an early marker and a newer completion marker in phase order", async () => {
         const calls: string[] = [];
+        let migratingWrittenAt = 0;
+        let markerWrites = 0;
         mockMarkRestart.mockImplementation(async () => {
-            calls.push("marker");
+            calls.push(markerWrites === 0 ? "early-marker" : "finished-marker");
+            markerWrites += 1;
         });
-        mockSetStatus.mockImplementation(async (status) => {
+        mockSetStatus.mockImplementation(async (status, notBefore: number) => {
             calls.push(status.state);
+            migratingWrittenAt = Math.max(Date.now(), notBefore);
+            return migratingWrittenAt;
         });
         mockDeployMigrations.mockImplementation(async () => {
             calls.push("deploy");
+        });
+        mockReencrypt.mockImplementation(async () => {
+            calls.push("reencrypt");
+            return {
+                credentialsReencrypted: 0,
+                credentialsUndecryptable: 0,
+                processedColumns: [],
+            };
+        });
+        mockSetTerminalStatus.mockImplementation(async () => {
+            calls.push("complete");
         });
         const { finishCommittedRestore } = await import("../restoreCompletion");
         const state = createRestoreExecutionState();
@@ -116,11 +134,19 @@ describe("committed restore completion guards", () => {
             state,
         );
 
-        expect(calls.slice(0, 3)).toEqual(["marker", "migrating", "deploy"]);
-        expect(mockMarkRestart).toHaveBeenCalledWith(
-            expect.any(Number),
-            "98e4582e-e030-4ae8-8aa9-63c8de4f707f",
-        );
+        expect(calls).toEqual([
+            "early-marker",
+            "migrating",
+            "deploy",
+            "reencrypt",
+            "finished-marker",
+            "complete",
+        ]);
+        expect(mockMarkRestart).toHaveBeenCalledTimes(2);
+        const earlyTimestamp = mockMarkRestart.mock.calls[0]![0] as number;
+        const finishedTimestamp = mockMarkRestart.mock.calls[1]![0] as number;
+        expect(finishedTimestamp).toBeGreaterThan(migratingWrittenAt);
+        expect(finishedTimestamp).toBeGreaterThan(earlyTimestamp);
         expect(mockDeployMigrations).toHaveBeenCalledWith(
             "postgresql://target/database",
         );

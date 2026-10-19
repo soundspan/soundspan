@@ -10,12 +10,13 @@ import {
 
 const logger = rootLogger.child("BackupRestore");
 const RECOVERY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+const ORIGINAL_CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 
 /** Dedicated connection and liveness signals for one restore job. */
 export interface RestoreClientHandle {
     client: Client;
     backendPid: number | null;
-    backendStart: Date | null;
+    backendStart: string | null;
     connectionFailure: Promise<Error>;
     detachClientError: () => void;
     getConnectionError: () => Error | null;
@@ -27,6 +28,13 @@ interface MonitoredClient {
     getError: () => Error | null;
     failure: Promise<Error>;
 }
+
+interface BackendIdentity {
+    pid: number;
+    start: string;
+}
+
+const clientCloses = new WeakMap<RestoreClientHandle, Promise<void>>();
 
 function newRestoreClient(): Client {
     return new Client({
@@ -64,11 +72,8 @@ function backendPid(value: unknown): number | null {
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function backendStart(value: unknown): Date | null {
-    if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
-        return null;
-    }
-    return value;
+function backendStart(value: unknown): string | null {
+    return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 /** Connect and take the non-blocking restore lock for a new job. */
@@ -79,11 +84,11 @@ export async function acquireRestoreClient(): Promise<RestoreClientHandle> {
         const result = await monitored.client.query<{
             acquired: boolean;
             backend_pid: number;
-            backend_start: Date;
+            backend_start: string;
         }>(
             `SELECT pg_try_advisory_lock($1) AS acquired,
                     pg_backend_pid() AS backend_pid,
-                    (SELECT backend_start
+                    (SELECT backend_start::text
                        FROM pg_stat_activity
                       WHERE pid = pg_backend_pid()) AS backend_start`,
             [RESTORE_ADVISORY_LOCK],
@@ -142,42 +147,119 @@ async function connectRecoveryClient(): Promise<MonitoredClient> {
 
 async function retakeRestoreLock(
     client: Client,
-    originalBackendPid: number | null,
-    originalBackendStart: Date | null,
+    original: BackendIdentity | null,
 ): Promise<void> {
-    if (originalBackendPid !== null && originalBackendStart !== null) {
+    if (original) {
         await client.query(
             `SELECT pg_terminate_backend(pid) AS terminated
                FROM pg_stat_activity
               WHERE pid = $1
-                AND backend_start = $2
+                AND backend_start = $2::timestamptz
                 AND pid <> pg_backend_pid()`,
-            [originalBackendPid, originalBackendStart],
+            [original.pid, original.start],
         );
     }
     await client.query("SET lock_timeout = '30s'");
-    await client.query("SELECT pg_advisory_lock($1)", [RESTORE_ADVISORY_LOCK]);
-    await client.query("RESET lock_timeout");
+    try {
+        await client.query("SELECT pg_advisory_lock($1)", [
+            RESTORE_ADVISORY_LOCK,
+        ]);
+    } finally {
+        await client.query("RESET lock_timeout");
+    }
     recordRestoreLockState(true);
+}
+
+async function closeRestoreClient(
+    handle: RestoreClientHandle,
+    graceful: boolean,
+): Promise<void> {
+    let failure: unknown;
+    try {
+        const transaction = handle.client.getTransactionStatus();
+        if (graceful && (transaction === "T" || transaction === "E")) {
+            await handle.client.query("ROLLBACK");
+        }
+        if (graceful) {
+            await handle.client.query("SELECT pg_advisory_unlock($1)", [
+                RESTORE_ADVISORY_LOCK,
+            ]);
+        }
+    } catch (error) {
+        failure = error;
+    }
+    try {
+        await handle.client.end();
+    } catch (error) {
+        failure ??= error;
+    } finally {
+        handle.detachClientError();
+    }
+    if (failure) throw failure;
+}
+
+function beginRestoreClientClose(
+    handle: RestoreClientHandle,
+    graceful: boolean,
+): Promise<void> {
+    const active = clientCloses.get(handle);
+    if (active) return active;
+    const close = closeRestoreClient(handle, graceful);
+    clientCloses.set(handle, close);
+    return close;
+}
+
+async function closeWithinRecoveryDeadline(
+    close: Promise<void>,
+): Promise<boolean> {
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(
+            () => reject(new Error("Original restore client close timed out")),
+            ORIGINAL_CLIENT_CLOSE_TIMEOUT_MS,
+        );
+        timeoutId.unref();
+    });
+    try {
+        await Promise.race([close, timeout]);
+        return true;
+    } catch (error) {
+        logger.warn(
+            "Original restore database connection did not close",
+            error,
+        );
+        return false;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+}
+
+async function prepareOriginalForRecovery(
+    handle: RestoreClientHandle,
+): Promise<BackendIdentity | null> {
+    const connectionLost = handle.getConnectionError() !== null;
+    const close = beginRestoreClientClose(handle, !connectionLost);
+    const closed = await closeWithinRecoveryDeadline(close);
+    invalidateRestoreLockCache();
+    if (!connectionLost && closed) return null;
+    if (handle.backendPid === null || handle.backendStart === null) return null;
+    return { pid: handle.backendPid, start: handle.backendStart };
 }
 
 /** Run post-failure work on a retried fresh client that owns the restore lock. */
 export async function withRecoveryRestoreClient<T>(
-    originalBackendPid: number | null,
+    original: RestoreClientHandle,
     work: (client: Client) => Promise<T>,
-    originalBackendStart: Date | null = null,
 ): Promise<T> {
+    const terminationTarget = await prepareOriginalForRecovery(original);
     const monitored = await connectRecoveryClient();
     try {
-        await retakeRestoreLock(
-            monitored.client,
-            originalBackendPid,
-            originalBackendStart,
-        );
+        await retakeRestoreLock(monitored.client, terminationTarget);
         return await work(monitored.client);
     } finally {
         await monitored.client.end().catch(() => undefined);
         monitored.detach();
+        invalidateRestoreLockCache();
     }
 }
 
@@ -185,10 +267,7 @@ export async function withRecoveryRestoreClient<T>(
 export async function releaseRestoreClient(
     handle: RestoreClientHandle,
 ): Promise<void> {
-    await handle.client
-        .query("SELECT pg_advisory_unlock($1)", [RESTORE_ADVISORY_LOCK])
-        .catch(() => undefined);
-    await handle.client.end().catch(() => undefined);
-    handle.detachClientError();
+    const graceful = handle.getConnectionError() === null;
+    await beginRestoreClientClose(handle, graceful).catch(() => undefined);
     invalidateRestoreLockCache();
 }

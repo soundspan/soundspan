@@ -24,11 +24,13 @@ const mockLoggerWarn = jest.fn();
 const mockClient = Object.assign(new EventEmitter(), {
     connect: mockClientConnect,
     end: mockClientEnd,
+    getTransactionStatus: jest.fn(() => "I"),
     query: mockClientQuery,
 });
 const mockFreshClient = Object.assign(new EventEmitter(), {
     connect: jest.fn(),
     end: jest.fn(),
+    getTransactionStatus: jest.fn(() => "I"),
     query: jest.fn(),
 });
 const mockClientQueue: Array<typeof mockClient> = [];

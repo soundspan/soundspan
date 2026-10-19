@@ -1,4 +1,6 @@
 import { EventEmitter } from "events";
+import type { Client } from "pg";
+import type { RestoreClientHandle } from "../restoreClient";
 
 const mockRecordLock = jest.fn();
 const mockInvalidateLock = jest.fn();
@@ -7,6 +9,7 @@ const clients: FakeClient[] = [];
 interface FakeClient extends EventEmitter {
     connect: jest.Mock;
     end: jest.Mock;
+    getTransactionStatus: jest.Mock;
     query: jest.Mock;
 }
 
@@ -14,8 +17,25 @@ function fakeClient(): FakeClient {
     return Object.assign(new EventEmitter(), {
         connect: jest.fn().mockResolvedValue(undefined),
         end: jest.fn().mockResolvedValue(undefined),
+        getTransactionStatus: jest.fn().mockReturnValue("I"),
         query: jest.fn().mockResolvedValue({ rows: [] }),
     });
+}
+
+function restoreHandle(
+    client: FakeClient,
+    connectionError: Error | null,
+    backendPid: number | null = null,
+    backendStart: string | null = null,
+): RestoreClientHandle {
+    return {
+        client: client as unknown as Client,
+        backendPid,
+        backendStart,
+        connectionFailure: new Promise<Error>(() => undefined),
+        detachClientError: jest.fn(),
+        getConnectionError: () => connectionError,
+    };
 }
 
 jest.mock("pg", () => ({
@@ -61,9 +81,30 @@ describe("restore client lifecycle", () => {
         expect(mockInvalidateLock).not.toHaveBeenCalled();
     });
 
-    it("returns the backend pid for a successfully acquired restore lock", async () => {
+    it("keeps the acquisition error listener active through end", async () => {
         const client = fakeClient();
-        const backendStart = new Date("2026-10-19T12:00:00.000Z");
+        let listenerPresentDuringEnd = false;
+        client.query.mockResolvedValue({
+            rows: [{ acquired: false, backend_pid: 55 }],
+        });
+        client.end.mockImplementation(async () => {
+            listenerPresentDuringEnd = client.listenerCount("error") > 0;
+            client.emit("error", new Error("late acquisition close error"));
+        });
+        clients.push(client);
+        const { acquireRestoreClient } = await import("../restoreClient");
+
+        await expect(acquireRestoreClient()).rejects.toMatchObject({
+            code: "RESTORE_IN_PROGRESS",
+        });
+
+        expect(listenerPresentDuringEnd).toBe(true);
+        expect(client.listenerCount("error")).toBe(0);
+    });
+
+    it("returns the backend identity losslessly for an acquired restore lock", async () => {
+        const client = fakeClient();
+        const backendStart = "2026-10-19 12:00:00.123456+00";
         client.query.mockResolvedValue({
             rows: [
                 {
@@ -80,46 +121,103 @@ describe("restore client lifecycle", () => {
         const handle = await acquireRestoreClient();
 
         expect(handle.backendPid).toBe(55);
-        expect(handle.backendStart).toEqual(backendStart);
+        expect(handle.backendStart).toBe(backendStart);
+        expect(client.query).toHaveBeenCalledWith(
+            expect.stringContaining("backend_start::text"),
+            [5_331_001_002],
+        );
         expect(mockRecordLock).toHaveBeenCalledWith(true);
         await releaseRestoreClient(handle);
     });
 
-    it("guards old-backend termination by start time and recovery self pid", async () => {
-        jest.useFakeTimers();
-        const first = fakeClient();
-        const second = fakeClient();
-        const third = fakeClient();
-        first.connect.mockRejectedValue(new Error("first down"));
-        second.connect.mockRejectedValue(new Error("second down"));
+    it("closes a healthy original before taking the recovery lock", async () => {
+        const original = fakeClient();
+        original.getTransactionStatus.mockReturnValue("T");
+        const recovery = fakeClient();
         const order: string[] = [];
-        const backendStart = new Date("2026-10-19T12:00:00.000Z");
-        third.query.mockImplementation(
+        original.query.mockImplementation(async (sql: string) => {
+            order.push(`original:${sql}`);
+            return { rows: [] };
+        });
+        original.end.mockImplementation(async () => {
+            order.push("original:end");
+        });
+        recovery.connect.mockImplementation(async () => {
+            order.push("recovery:connect");
+        });
+        recovery.query.mockImplementation(async (sql: string) => {
+            order.push(`recovery:${sql}`);
+            return { rows: [] };
+        });
+        clients.push(recovery);
+        const { releaseRestoreClient, withRecoveryRestoreClient } =
+            await import("../restoreClient");
+        const handle = restoreHandle(
+            original,
+            null,
+            77,
+            "2026-10-19 12:00:00.123456+00",
+        );
+
+        await expect(
+            withRecoveryRestoreClient(handle, async () => {
+                order.push("work");
+                return "done";
+            }),
+        ).resolves.toBe("done");
+        await releaseRestoreClient(handle);
+        expect(order).toEqual([
+            "original:ROLLBACK",
+            "original:SELECT pg_advisory_unlock($1)",
+            "original:end",
+            "recovery:connect",
+            "recovery:SET lock_timeout = '30s'",
+            "recovery:SELECT pg_advisory_lock($1)",
+            "recovery:RESET lock_timeout",
+            "work",
+        ]);
+        expect(
+            recovery.query.mock.calls.some(([sql]) =>
+                String(sql).includes("pg_terminate_backend"),
+            ),
+        ).toBe(false);
+        expect(recovery.end).toHaveBeenCalledTimes(1);
+        expect(original.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("guards dead-backend termination by timestamp identity before locking", async () => {
+        const original = fakeClient();
+        const recovery = fakeClient();
+        const backendStart = "2026-10-19 12:00:00.123456+00";
+        const order: string[] = [];
+        recovery.query.mockImplementation(
             async (sql: string, params?: unknown[]) => {
                 order.push(sql);
                 if (sql.includes("pg_terminate_backend")) {
                     expect(params).toEqual([77, backendStart]);
-                    expect(sql).toContain("backend_start = $2");
+                    expect(sql).toContain("backend_start = $2::timestamptz");
                     expect(sql).toContain("pid <> pg_backend_pid()");
                 }
                 return { rows: [] };
             },
         );
-        clients.push(first, second, third);
+        clients.push(recovery);
         const { withRecoveryRestoreClient } = await import("../restoreClient");
-        const pending = withRecoveryRestoreClient(
+        const handle = restoreHandle(
+            original,
+            new Error("connection lost"),
             77,
-            async (client) => {
-                expect(client.listenerCount("error")).toBe(1);
-                order.push("work");
-                return "done";
-            },
             backendStart,
         );
 
-        await jest.advanceTimersByTimeAsync(3_000);
+        await expect(
+            withRecoveryRestoreClient(handle, async () => {
+                order.push("work");
+                return "done";
+            }),
+        ).resolves.toBe("done");
 
-        await expect(pending).resolves.toBe("done");
+        expect(original.query).not.toHaveBeenCalled();
         expect(order).toEqual([
             expect.stringContaining("pg_terminate_backend"),
             "SET lock_timeout = '30s'",
@@ -127,16 +225,37 @@ describe("restore client lifecycle", () => {
             "RESET lock_timeout",
             "work",
         ]);
-        expect(first.end).toHaveBeenCalledTimes(1);
-        expect(second.end).toHaveBeenCalledTimes(1);
-        expect(third.end).toHaveBeenCalledTimes(1);
-        const { Client } = await import("pg");
-        expect(Client).toHaveBeenCalledWith(
-            expect.objectContaining({
-                keepAlive: true,
-                keepAliveInitialDelayMillis: 30_000,
+    });
+
+    it("bounds a stalled healthy close before guarded takeover", async () => {
+        jest.useFakeTimers();
+        const original = fakeClient();
+        const recovery = fakeClient();
+        let finishEnd: (() => void) | undefined;
+        original.end.mockReturnValue(
+            new Promise<void>((resolve) => {
+                finishEnd = resolve;
             }),
         );
+        clients.push(recovery);
+        const { withRecoveryRestoreClient } = await import("../restoreClient");
+        const handle = restoreHandle(
+            original,
+            null,
+            77,
+            "2026-10-19 12:00:00.123456+00",
+        );
+
+        const pending = withRecoveryRestoreClient(handle, async () => "done");
+        await jest.advanceTimersByTimeAsync(5_000);
+
+        await expect(pending).resolves.toBe("done");
+        expect(recovery.query).toHaveBeenNthCalledWith(
+            1,
+            expect.stringContaining("pg_terminate_backend"),
+            [77, "2026-10-19 12:00:00.123456+00"],
+        );
+        finishEnd?.();
     });
 
     it("keeps a recovery client's error listener active while work runs", async () => {
@@ -144,13 +263,33 @@ describe("restore client lifecycle", () => {
         clients.push(client);
         const { withRecoveryRestoreClient } = await import("../restoreClient");
 
+        const handle = restoreHandle(fakeClient(), null);
         await expect(
-            withRecoveryRestoreClient(null, async (activeClient) => {
+            withRecoveryRestoreClient(handle, async (activeClient) => {
                 activeClient.emit("error", new Error("connection lost"));
                 return "done";
             }),
         ).resolves.toBe("done");
 
+        expect(client.listenerCount("error")).toBe(0);
+    });
+
+    it("keeps a recovery client's error listener active through end", async () => {
+        const client = fakeClient();
+        let listenerPresentDuringEnd = false;
+        client.end.mockImplementation(async () => {
+            listenerPresentDuringEnd = client.listenerCount("error") > 0;
+            client.emit("error", new Error("late recovery close error"));
+        });
+        clients.push(client);
+        const { withRecoveryRestoreClient } = await import("../restoreClient");
+
+        const handle = restoreHandle(fakeClient(), null);
+        await expect(
+            withRecoveryRestoreClient(handle, async () => "done"),
+        ).resolves.toBe("done");
+
+        expect(listenerPresentDuringEnd).toBe(true);
         expect(client.listenerCount("error")).toBe(0);
     });
 
@@ -161,7 +300,7 @@ describe("restore client lifecycle", () => {
                 {
                     acquired: true,
                     backend_pid: 55,
-                    backend_start: new Date("2026-10-19T12:00:00.000Z"),
+                    backend_start: "2026-10-19 12:00:00.123456+00",
                 },
             ],
         });
@@ -191,7 +330,11 @@ describe("restore client lifecycle", () => {
         clients.push(...failures);
         const { withRecoveryRestoreClient } = await import("../restoreClient");
 
-        const pending = withRecoveryRestoreClient(null, async () => "unused");
+        const handle = restoreHandle(
+            fakeClient(),
+            new Error("connection lost"),
+        );
+        const pending = withRecoveryRestoreClient(handle, async () => "unused");
         const rejection = expect(pending).rejects.toThrow("down 6");
         await jest.advanceTimersByTimeAsync(60_000);
         await rejection;

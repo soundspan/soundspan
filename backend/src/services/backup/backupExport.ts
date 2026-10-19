@@ -343,13 +343,17 @@ function createExportHandle(
                 }
             };
             output.once("close", abort);
+            const snapshot = streamSnapshot(client, output, options);
             try {
                 await Promise.race([
-                    streamSnapshot(client, output, options),
+                    snapshot,
                     clientFailure.then((error) => {
                         throw error;
                     }),
                 ]);
+            } catch (error) {
+                await snapshot.catch(() => undefined);
+                throw error;
             } finally {
                 setActiveOutput(null);
                 clearTimeout(timeout);

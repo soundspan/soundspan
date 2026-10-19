@@ -1,5 +1,6 @@
 import type { Client } from "pg";
 import { RestoreError } from "../backupErrors";
+import type { RestoreClientHandle } from "../restoreClient";
 import type { RestoreExecutionState } from "../restoreJobTypes";
 
 const mockWithRecoveryClient = jest.fn();
@@ -10,6 +11,7 @@ const mockMarkRestart = jest.fn();
 const mockSetTerminalStatus = jest.fn();
 const mockLoggerError = jest.fn();
 const client = { query: jest.fn() } as unknown as Client;
+const originalClient = {} as RestoreClientHandle;
 
 jest.mock("../restoreClient", () => ({
     withRecoveryRestoreClient: mockWithRecoveryClient,
@@ -106,7 +108,7 @@ describe("restore failure recovery", () => {
             options,
             state(),
             new RestoreError("BACKUP_INVALID", "invalid backup"),
-            44,
+            originalClient,
         );
 
         expect(mockResetSchema).toHaveBeenCalledWith(client, {
@@ -133,7 +135,7 @@ describe("restore failure recovery", () => {
             options,
             execution,
             new Error("commit acknowledgement lost"),
-            44,
+            originalClient,
         );
 
         expect(mockFinishCommitted).toHaveBeenCalledWith(
@@ -152,12 +154,12 @@ describe("restore failure recovery", () => {
             options,
             state({ loadCommitted: true }),
             new Error("commit acknowledgement lost"),
-            44,
+            originalClient,
         );
 
         expect(mockResetSchema).toHaveBeenCalledTimes(1);
         expect(mockFinishCommitted).not.toHaveBeenCalled();
-        expect(mockMarkRestart).toHaveBeenCalledTimes(1);
+        expect(mockMarkRestart).not.toHaveBeenCalled();
     });
 
     it("finishes a confirmed load after migrate-to-head fails", async () => {
@@ -172,7 +174,7 @@ describe("restore failure recovery", () => {
             options,
             execution,
             new Error("migration failed"),
-            44,
+            originalClient,
         );
 
         expect(mockFinishCommitted).toHaveBeenCalledTimes(1);
@@ -189,7 +191,7 @@ describe("restore failure recovery", () => {
             options,
             state({ loadCommitted: true, loadCommitConfirmed: true }),
             new Error("migration failed"),
-            44,
+            originalClient,
         );
 
         expect(mockResetSchema).not.toHaveBeenCalled();
@@ -215,7 +217,7 @@ describe("restore failure recovery", () => {
             options,
             state(),
             new Error("load failed"),
-            44,
+            originalClient,
         );
 
         expect(mockSetTerminalStatus).toHaveBeenLastCalledWith(
@@ -237,7 +239,7 @@ describe("restore failure recovery", () => {
             options,
             state({ loadCommitted: true }),
             new Error("commit acknowledgement lost"),
-            44,
+            originalClient,
         );
 
         expect(mockMarkRestart).toHaveBeenCalledTimes(1);
@@ -262,7 +264,7 @@ describe("restore failure recovery", () => {
             options,
             state({ loadCommitted: true, loadCommitConfirmed: true }),
             new Error("connection lost"),
-            44,
+            originalClient,
         );
 
         expect(mockSetTerminalStatus).toHaveBeenLastCalledWith(
@@ -285,7 +287,7 @@ describe("restore failure recovery", () => {
             options,
             state({ loadCommitted: true }),
             new Error("commit acknowledgement lost"),
-            44,
+            originalClient,
         );
 
         expect(mockMarkRestart).toHaveBeenCalledTimes(1);
@@ -308,7 +310,7 @@ describe("restore failure recovery", () => {
             options,
             state(),
             new Error("connection lost"),
-            44,
+            originalClient,
         );
 
         expect(mockSetTerminalStatus).toHaveBeenLastCalledWith(

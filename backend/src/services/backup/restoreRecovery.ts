@@ -3,7 +3,10 @@ import { config } from "../../config";
 import { logger as rootLogger } from "../../utils/logger";
 import { BackupError, RestoreMigrationError } from "./backupErrors";
 import { finishCommittedRestore } from "./restoreCompletion";
-import { withRecoveryRestoreClient } from "./restoreClient";
+import {
+    withRecoveryRestoreClient,
+    type RestoreClientHandle,
+} from "./restoreClient";
 import { deployCurrentMigrations } from "./restoreMigrationReplay";
 import { markRestartRequired } from "./restartRequired";
 import { resetApplicationSchema } from "./restoreSchemaReset";
@@ -75,7 +78,7 @@ async function reportCleanupResult(
     client: Client,
     restoreId: string,
     failure: unknown,
-    restartRequired: boolean,
+    markIfCleanupFails: boolean,
 ): Promise<void> {
     let reported = safeFailure(failure);
     try {
@@ -88,8 +91,10 @@ async function reportCleanupResult(
             message:
                 "The restore failed and the database could not be reset to a fresh install. Check the server logs.",
         };
+        if (markIfCleanupFails) {
+            await markRestartAfterIncompleteFinish(restoreId);
+        }
     }
-    if (restartRequired) await markRestartAfterIncompleteFinish(restoreId);
     await reportFailure(restoreId, reported);
 }
 
@@ -144,8 +149,7 @@ export async function handleRestoreFailure(
     options: StartRestoreJobOptions,
     state: RestoreExecutionState,
     failure: unknown,
-    originalBackendPid: number | null,
-    originalBackendStart: Date | null = null,
+    originalClient: RestoreClientHandle,
 ): Promise<void> {
     logFailure(failure);
     if (!state.resetStarted && !state.loadCommitted) {
@@ -153,11 +157,8 @@ export async function handleRestoreFailure(
         return;
     }
     try {
-        await withRecoveryRestoreClient(
-            originalBackendPid,
-            (client) =>
-                recoverWithLock(client, restoreId, options, state, failure),
-            originalBackendStart,
+        await withRecoveryRestoreClient(originalClient, (client) =>
+            recoverWithLock(client, restoreId, options, state, failure),
         );
     } catch (recoveryFailure) {
         logger.error("Restore failure recovery failed", recoveryFailure);

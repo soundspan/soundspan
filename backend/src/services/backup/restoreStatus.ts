@@ -109,7 +109,10 @@ const idleStatus: RestoreStatus = {
     summary: null,
 };
 
-async function persistRestoreStatus(status: RestoreStatus): Promise<void> {
+async function persistRestoreStatus(
+    status: RestoreStatus,
+    writtenAt: number,
+): Promise<void> {
     let timeoutId: NodeJS.Timeout | undefined;
     try {
         const timeout = new Promise<never>((_resolve, reject) => {
@@ -124,7 +127,7 @@ async function persistRestoreStatus(status: RestoreStatus): Promise<void> {
                 STATUS_KEY,
                 JSON.stringify({
                     ...sanitizeStatus(status),
-                    writtenAt: Date.now(),
+                    writtenAt,
                 }),
                 { EX: STATUS_TTL_SECONDS },
             ),
@@ -135,10 +138,16 @@ async function persistRestoreStatus(status: RestoreStatus): Promise<void> {
     }
 }
 
-export async function setRestoreStatus(status: RestoreStatus): Promise<void> {
-    await persistRestoreStatus(status).catch((error) => {
+/** Persist a best-effort active status and return its exact write timestamp. */
+export async function setRestoreStatus(
+    status: RestoreStatus,
+    notBefore = 0,
+): Promise<number> {
+    const writtenAt = Math.max(Date.now(), notBefore);
+    await persistRestoreStatus(status, writtenAt).catch((error) => {
         logger.warn("Could not persist restore status", error);
     });
+    return writtenAt;
 }
 
 function waitForTerminalRetry(): Promise<void> {
@@ -155,7 +164,7 @@ export async function setTerminalRestoreStatus(
     let lastError: unknown;
     for (let attempt = 0; attempt < TERMINAL_WRITE_ATTEMPTS; attempt += 1) {
         try {
-            await persistRestoreStatus(status);
+            await persistRestoreStatus(status, Date.now());
             return;
         } catch (error) {
             lastError = error;
@@ -229,7 +238,6 @@ async function effectiveStoredStatus(
     knownLockHeld: boolean | undefined,
 ): Promise<RestoreStatus> {
     const { writtenAt, ...rawStatus } = stored;
-    void writtenAt;
     const status = sanitizeStatus(rawStatus);
     if (!isRestoreJobActive(status)) return status;
     const lockHeld =
@@ -238,7 +246,8 @@ async function effectiveStoredStatus(
     if (lockHeld) return status;
     if (
         status.restoreId &&
-        (await readRestartMarkerForRestore(status.restoreId, true)) > 0
+        writtenAt !== undefined &&
+        (await readRestartMarkerForRestore(status.restoreId, true)) > writtenAt
     ) {
         return { ...status, state: "complete", error: null };
     }

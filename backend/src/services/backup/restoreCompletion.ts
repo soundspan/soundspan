@@ -56,16 +56,20 @@ async function migrateAndReencrypt(
     restoreId: string,
     options: StartRestoreJobOptions,
     state: RestoreExecutionState,
-): Promise<ReencryptSummary> {
+): Promise<{ credentials: ReencryptSummary; migratingWrittenAt: number }> {
     if (!state.currentKey) throw new Error("Restore key was not prepared");
-    await markRestartRequired(Date.now(), restoreId);
-    await setRestoreStatus({
-        restoreId,
-        state: "migrating",
-        progress: state.progress,
-        error: null,
-        summary: null,
-    });
+    const earlyMarkerAt = Date.now();
+    await markRestartRequired(earlyMarkerAt, restoreId);
+    const migratingWrittenAt = await setRestoreStatus(
+        {
+            restoreId,
+            state: "migrating",
+            progress: state.progress,
+            error: null,
+            summary: null,
+        },
+        earlyMarkerAt,
+    );
     await deployCurrentMigrations(config.databaseUrl);
     const secondPass = await reencryptRestoredCredentials(
         client,
@@ -73,7 +77,10 @@ async function migrateAndReencrypt(
         state.currentKey,
         new Set(state.firstPass.processedColumns),
     );
-    return combineCredentialResults(state, secondPass);
+    return {
+        credentials: combineCredentialResults(state, secondPass),
+        migratingWrittenAt,
+    };
 }
 
 async function publishCompleteStatus(
@@ -101,12 +108,16 @@ export async function finishCommittedRestore(
     options: StartRestoreJobOptions,
     state: RestoreExecutionState,
 ): Promise<void> {
-    const credentials = await migrateAndReencrypt(
+    const completion = await migrateAndReencrypt(
         client,
         restoreId,
         options,
         state,
     );
-    const summary = buildSummary(options, state, credentials);
+    const summary = buildSummary(options, state, completion.credentials);
+    await markRestartRequired(
+        Math.max(Date.now(), completion.migratingWrittenAt + 1),
+        restoreId,
+    );
     await publishCompleteStatus(restoreId, summary);
 }
