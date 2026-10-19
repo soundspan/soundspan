@@ -160,12 +160,13 @@ jest.mock("../../services/imageProxy", () => ({
     normalizeExternalImageUrl: jest.fn(() => null),
 }));
 
-const mockReadFreshCatalogReleaseGroups = jest.fn();
+const mockFindFreshArtistCatalogReleaseGroups = jest.fn();
 jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshArtistCatalogReleaseGroups:
+        mockFindFreshArtistCatalogReleaseGroups,
     logCatalogPersistenceError: jest.fn(),
     persistCatalogReleaseGroups: jest.fn(async () => undefined),
     persistCatalogTracklist: jest.fn(async () => undefined),
-    readFreshCatalogReleaseGroups: mockReadFreshCatalogReleaseGroups,
 }));
 
 import router from "../library";
@@ -240,7 +241,7 @@ describe("library artist lookup compatibility", () => {
         mockDataCacheGetArtistImage.mockResolvedValue(null);
         mockMusicBrainzGetReleaseGroups.mockResolvedValue([]);
         mockRedisGet.mockResolvedValue(null);
-        mockReadFreshCatalogReleaseGroups.mockReturnValue(null);
+        mockFindFreshArtistCatalogReleaseGroups.mockResolvedValue(null);
     });
 
     it.each([
@@ -634,21 +635,10 @@ describe("library artist lookup compatibility", () => {
         const artist = {
             ...createMockArtist(),
             catalogSyncedAt: new Date("2026-08-24T00:00:00.000Z"),
-            albums: [
-                {
-                    id: "catalog-album-1",
-                    title: "Catalog Album",
-                    rgMbid: "rg-catalog-1",
-                    year: 2012,
-                    primaryType: "Album",
-                    coverUrl: null,
-                    location: "CATALOG",
-                    tracks: [],
-                },
-            ],
+            albums: [],
         };
         mockArtistFindFirst.mockResolvedValueOnce(artist);
-        mockReadFreshCatalogReleaseGroups.mockReturnValueOnce([
+        mockFindFreshArtistCatalogReleaseGroups.mockResolvedValueOnce([
             {
                 id: "rg-catalog-1",
                 title: "Catalog Album",
@@ -671,10 +661,9 @@ describe("library artist lookup compatibility", () => {
 
         await artistHandler(req, res);
 
-        expect(mockReadFreshCatalogReleaseGroups).toHaveBeenCalledWith({
+        expect(mockFindFreshArtistCatalogReleaseGroups).toHaveBeenCalledWith({
             artistId: artist.id,
             catalogSyncedAt: artist.catalogSyncedAt,
-            albums: artist.albums,
         });
         expect(mockMusicBrainzGetReleaseGroups).not.toHaveBeenCalled();
         expect(res.body.albums).toEqual([
@@ -715,7 +704,7 @@ describe("library artist lookup compatibility", () => {
 
         await artistHandler(req, res);
 
-        expect(mockReadFreshCatalogReleaseGroups).not.toHaveBeenCalled();
+        expect(mockFindFreshArtistCatalogReleaseGroups).not.toHaveBeenCalled();
         expect(mockMusicBrainzGetReleaseGroups).not.toHaveBeenCalled();
         expect(res.body.albums).toEqual([
             expect.objectContaining({ id: "rg-redis", title: "Redis Album" }),

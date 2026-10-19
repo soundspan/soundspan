@@ -63,9 +63,9 @@ import { resolveArtistImage } from "../../services/metadata/artistImageResolver"
 import { isRealArtistMbid } from "../../utils/musicIds";
 import { filterLibraryArtistReleaseGroups } from "../../services/metadata/discographyFiltering";
 import {
+    findFreshArtistCatalogReleaseGroups,
     logCatalogPersistenceError,
     persistCatalogReleaseGroups,
-    readFreshCatalogReleaseGroups,
 } from "../../services/metadata/catalogPersistence";
 import {
     formatRemoteAwareArtist,
@@ -619,11 +619,11 @@ export async function handleGetArtist(
                         `[Artist] Using cached discography (${releaseGroups.length} albums)`,
                     );
                 } else {
-                    const catalogReleaseGroups = readFreshCatalogReleaseGroups({
-                        artistId: artist.id,
-                        catalogSyncedAt: artist.catalogSyncedAt,
-                        albums: artist.albums,
-                    });
+                    const catalogReleaseGroups =
+                        await findFreshArtistCatalogReleaseGroups({
+                            artistId: artist.id,
+                            catalogSyncedAt: artist.catalogSyncedAt,
+                        });
                     if (catalogReleaseGroups !== null) {
                         releaseGroups = catalogReleaseGroups;
                     } else {

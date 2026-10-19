@@ -193,11 +193,11 @@ jest.mock("../../services/imageProxy", () => ({
 
 jest.mock("../../services/metadata/catalogPersistence", () => ({
     findFreshCatalogAlbum: jest.fn(async () => null),
+    findFreshArtistCatalogReleaseGroups: jest.fn(async () => null),
     findFreshCatalogReleaseGroups: jest.fn(async () => null),
     logCatalogPersistenceError: jest.fn(),
     persistCatalogReleaseGroups: jest.fn(async () => undefined),
     persistCatalogTracklist: jest.fn(async () => undefined),
-    readFreshCatalogReleaseGroups: jest.fn(() => null),
 }));
 
 jest.mock("../../services/libraryRadioCache", () => ({
