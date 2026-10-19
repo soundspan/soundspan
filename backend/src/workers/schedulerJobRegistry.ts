@@ -40,6 +40,10 @@ export const SCHEDULER_JOB_IDS = {
         "scheduler:remote-track-metadata-refresh:startup",
     remoteTrackMetadataRefreshRepeat:
         "scheduler:remote-track-metadata-refresh:repeat",
+    remoteAlbumMbidResolutionStartup:
+        "scheduler:remote-album-mbid-resolution:startup",
+    remoteAlbumMbidResolutionRepeat:
+        "scheduler:remote-album-mbid-resolution:repeat",
 } as const;
 
 type SchedulerRegistration = {
@@ -321,6 +325,26 @@ export function buildSchedulerJobs(): SchedulerRegistration[] {
             opts: {
                 jobId: SCHEDULER_JOB_IDS.remoteTrackMetadataRefreshRepeat,
                 repeat: { every: 12 * ONE_HOUR_MS },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.remoteAlbumMbidResolution,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.remoteAlbumMbidResolutionStartup,
+                delay: 10 * ONE_MINUTE_MS,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.remoteAlbumMbidResolution,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.remoteAlbumMbidResolutionRepeat,
+                repeat: { every: ONE_HOUR_MS },
                 removeOnComplete: true,
                 removeOnFail: 10,
             },

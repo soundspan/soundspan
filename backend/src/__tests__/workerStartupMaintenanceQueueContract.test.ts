@@ -67,7 +67,20 @@ describe("worker startup maintenance queue contract", () => {
                     jobId: SCHEDULER_JOB_IDS.imageBackfillStartup,
                     queue: "worker-scheduler-maintenance",
                 },
+                {
+                    type: SCHEDULER_JOB_TYPES.remoteAlbumMbidResolution,
+                    mode: "startup",
+                    jobId: SCHEDULER_JOB_IDS.remoteAlbumMbidResolutionStartup,
+                    queue: "worker-scheduler-maintenance",
+                },
             ]),
         );
+
+        const startup = jobs.find(
+            (job) =>
+                job.opts.jobId ===
+                SCHEDULER_JOB_IDS.remoteAlbumMbidResolutionStartup,
+        );
+        expect(startup?.opts.delay).toBe(10 * 60_000);
     });
 });

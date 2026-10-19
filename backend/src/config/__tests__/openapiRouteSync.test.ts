@@ -92,11 +92,22 @@ describe("openapi route sync", () => {
                 tidalTrackId: { type: "integer" },
                 youtubeVideoId: { type: "string" },
                 album: expect.objectContaining({
-                    required: ["id", "title", "rgMbid", "coverArt", "artist"],
+                    required: [
+                        "id",
+                        "title",
+                        "rgMbid",
+                        "matchedRgMbid",
+                        "coverArt",
+                        "artist",
+                    ],
                     properties: expect.objectContaining({
                         id: { type: "string", nullable: true },
                         title: { type: "string" },
                         rgMbid: { type: "string", nullable: true },
+                        matchedRgMbid: expect.objectContaining({
+                            type: "string",
+                            nullable: true,
+                        }),
                         coverArt: { type: "string", nullable: true },
                         artist: {
                             type: "object",

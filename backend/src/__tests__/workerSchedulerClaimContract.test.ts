@@ -52,5 +52,15 @@ describe("worker scheduler registration contract", () => {
                 }),
             }),
         );
+        expect(
+            repeatById.get(SCHEDULER_JOB_IDS.remoteAlbumMbidResolutionRepeat),
+        ).toEqual(
+            expect.objectContaining({
+                type: SCHEDULER_JOB_TYPES.remoteAlbumMbidResolution,
+                opts: expect.objectContaining({
+                    repeat: { every: ONE_HOUR_MS },
+                }),
+            }),
+        );
     });
 });

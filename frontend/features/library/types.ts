@@ -54,6 +54,8 @@ export interface Track {
         coverArt?: string | null;
         /** Release-group MBID; remote albums may carry a synthetic `remote:` id. */
         rgMbid?: string | null;
+        /** MusicBrainz release group matched for a streaming-only album. */
+        matchedRgMbid?: string | null;
         artist?: {
             id: string;
             name: string;

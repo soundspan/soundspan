@@ -366,6 +366,8 @@ model Album {
   albumLoudnessLufs Float?
   albumTruePeakDb   Float?
   catalogTouchedAt  DateTime?
+  matchedRgMbid     String?
+  rgMbidCheckedAt   DateTime?
   artist            Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   federationPeer    FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
   tracks            Track[]

@@ -44,6 +44,7 @@ export function toLibraryRemoteTrack(row: HydratedRemoteLibraryTrack) {
         album: {
             ...normalized.album,
             rgMbid: linkedAlbum?.rgMbid ?? null,
+            matchedRgMbid: linkedAlbum?.matchedRgMbid ?? null,
             coverArt,
             coverUrl: coverArt,
             artistId: normalized.artist.id,

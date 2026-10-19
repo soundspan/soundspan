@@ -78,6 +78,7 @@ import type { ReconciliationCursor } from "../services/trackReconciliation";
 import { processAudioHashBackfill } from "./processors/audioHashBackfillProcessor";
 import { processLoudnessBackfill } from "./processors/loudnessBackfillProcessor";
 import { processTrackRemovalPurge } from "./processors/trackRemovalPurgeProcessor";
+import { processRemoteAlbumMbidResolution } from "./processors/remoteAlbumMbidResolutionProcessor";
 import { processRequestFulfillmentBatch } from "./processors/requestFulfillmentProcessor";
 import { processCatalogRetention } from "./processors/catalogRetentionProcessor";
 import {
@@ -971,6 +972,8 @@ async function processMaintenanceSchedulerJob(
         case SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh:
         case "remote-track-metadata-refresh":
             return processRemoteTrackMetadataRefreshJob();
+        case SCHEDULER_JOB_TYPES.remoteAlbumMbidResolution:
+            return processRemoteAlbumMbidResolution();
         case REQUEST_FULFILLMENT_JOB_NAME:
             if (config.features.requests) {
                 await processRequestFulfillmentBatch();

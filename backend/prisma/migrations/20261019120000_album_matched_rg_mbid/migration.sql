@@ -1,0 +1,2 @@
+ALTER TABLE "Album" ADD COLUMN "matchedRgMbid" TEXT;
+ALTER TABLE "Album" ADD COLUMN "rgMbidCheckedAt" TIMESTAMP(3);
