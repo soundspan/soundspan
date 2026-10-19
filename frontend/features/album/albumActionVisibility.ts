@@ -7,6 +7,10 @@ export interface AlbumActionVisibilityInput {
     albumId: string;
     rgMbid?: string;
     mbid?: string;
+    /** MusicBrainz release group matched for a streaming-only album. */
+    matchedRgMbid?: string | null;
+    /** True when a library album already holds `matchedRgMbid`. */
+    matchedInLibrary?: boolean;
     downloadsEnabled: boolean;
     requestsEnabled: boolean;
     hasAddAllToQueue: boolean;
@@ -36,9 +40,15 @@ export function isSyntheticRgMbid(value: string | null | undefined): boolean {
 
 /** Resolves a real release-group identifier suitable for acquisition routes. */
 export function resolveAcquisitionMbid(
-    input: Pick<AlbumActionVisibilityInput, "rgMbid" | "mbid">,
+    input: Pick<
+        AlbumActionVisibilityInput,
+        "rgMbid" | "mbid" | "matchedRgMbid" | "matchedInLibrary"
+    >,
 ): string | null {
-    const candidate = input.rgMbid || input.mbid;
+    // A streaming-only album keeps its placeholder id; its background
+    // MusicBrainz match is what can be acquired, until the library holds it.
+    const matched = input.matchedInLibrary ? null : input.matchedRgMbid;
+    const candidate = matched || input.rgMbid || input.mbid;
     // The acquisition flow must resolve synthetic remote IDs canonically before
     // these controls can send them to MusicBrainz or Lidarr.
     return candidate && !isSyntheticRgMbid(candidate) ? candidate : null;

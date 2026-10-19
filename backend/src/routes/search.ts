@@ -424,7 +424,7 @@ router.use(requireAuth);
  *                             type: string
  *                       album:
  *                         type: object
- *                         required: [id, title, rgMbid, matchedRgMbid, coverArt, artist]
+ *                         required: [id, title, rgMbid, matchedRgMbid, matchedInLibrary, coverArt, artist]
  *                         properties:
  *                           id:
  *                             type: string
@@ -438,6 +438,9 @@ router.use(requireAuth);
  *                             type: string
  *                             nullable: true
  *                             description: MusicBrainz release group matched for a streaming-only album; used for add-to-library
+ *                           matchedInLibrary:
+ *                             type: boolean
+ *                             description: The library already holds the matched release group
  *                           coverArt:
  *                             type: string
  *                             nullable: true

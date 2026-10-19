@@ -56,6 +56,8 @@ export interface Track {
         rgMbid?: string | null;
         /** MusicBrainz release group matched for a streaming-only album. */
         matchedRgMbid?: string | null;
+        /** True when a library album already holds `matchedRgMbid`. */
+        matchedInLibrary?: boolean;
         artist?: {
             id: string;
             name: string;

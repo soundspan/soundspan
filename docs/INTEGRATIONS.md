@@ -192,7 +192,7 @@ Use TIDAL as a download source for tracks/albums.
 
 ### Single songs
 
-When a liked TIDAL song's album has no MusicBrainz match, a download job cannot fetch the album. Admins can still download that one song with `Add song to library` in the song's menu in the Library or in Search. The song uses the same quality and naming template as album downloads.
+When a liked TIDAL song's album has no MusicBrainz match, a download job cannot fetch the album. Admins can still download that one song with `Add song to library` in the song's menu in the Library or in Search. The same option replaces `Add album to library` when the library already has the song's matched album but not the song, for example a streaming-only bonus track. The song uses the same quality and naming template as album downloads.
 
 - soundspan downloads these songs one at a time. Up to 25 more can wait in line; when the line is full, try again later. If you run more than one backend instance, each one has its own line.
 - The library scan after each download brings the song in.

@@ -140,13 +140,23 @@ A `REMOTE` album that `albumResolutionService` cannot match starts with a
 placeholder `rgMbid` of the form `remote:<hash>`. The
 `remote-album-mbid-resolution` worker job looks up placeholder albums that hold
 liked streaming songs in MusicBrainz and stores a confident release-group match
-in `matchedRgMbid`; `rgMbid` itself never changes. The add-to-library options on
-Library and Search song rows use `matchedRgMbid` when it is set; the album page
-still reads `rgMbid`. `rgMbidCheckedAt` records the last check (Various Artists
-albums are marked checked without a lookup). An album without a match is
-checked again after seven days, and a matched album after thirty days, when a
-new answer replaces or clears the match. Artist browse results come from the
-MusicBrainz cache, which can be up to 30 days old.
+in `matchedRgMbid`; `rgMbid` itself never changes. Library and Search song rows
+and the album detail response carry `matchedRgMbid`, and their add-to-library
+options use it when it is set. The library holds a match when a `LIBRARY` album
+with at least one visible local track has `rgMbid` equal to an album's
+`matchedRgMbid`. Song rows and the album detail response then report
+`matchedInLibrary: true`, the album is not offered for download or request, and
+a `REMOTE` placeholder leaves the per-user remote album lookups behind album
+lists and artist album counts. This is decided when each response is built:
+the placeholder's `TrackTidal` and `TrackYtMusic` rows keep their `albumId`, so
+a cleared or replaced match takes effect without moving rows back. A library
+scan can adopt a placeholder by title; it then becomes a `LIBRARY` album that
+keeps its `remote:` `rgMbid` and its `matchedRgMbid`, and the job, which only
+checks `REMOTE` albums, leaves that match as it is. `rgMbidCheckedAt` records
+the last check (Various Artists albums are marked checked without a lookup). An
+album without a match is checked again after seven days, and a matched album
+after thirty days, when a new answer replaces or clears the match. Artist browse
+results come from the MusicBrainz cache, which can be up to 30 days old.
 
 Metadata-catalog persistence reuses `Artist` and `Album`; it does not introduce
 separate catalog models. Persisted catalog albums use `Album.location=CATALOG`

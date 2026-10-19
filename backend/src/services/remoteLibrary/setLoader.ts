@@ -9,6 +9,7 @@ import {
 import { rankPlaybackSource } from "../playbackSourcePriority";
 import { RemoteLibraryCapWarningLimiter } from "./capWarningLimiter";
 import { deriveRemoteLibraryLookups } from "./derivations";
+import { findLibraryHeldReleaseGroups } from "./matchedLibraryAlbums";
 import { collapseProviderDuplicates } from "./providerDuplicateCollapse";
 import { loadRemoteLibraryAccess } from "./providers";
 import type {
@@ -25,6 +26,7 @@ const capWarningLimiter = new RemoteLibraryCapWarningLimiter();
 const albumMembershipSelect = {
     artistId: true,
     location: true,
+    matchedRgMbid: true,
 } satisfies PrismaTypes.AlbumSelect;
 const mappingSelect = {
     id: true,
@@ -122,6 +124,9 @@ function mapTidalLikedRow(entry: TidalLikedRow): RemoteLibraryTrack[] {
             albumId: entry.trackTidal.albumId,
             albumLocation: entry.trackTidal.albumEntity?.location ?? null,
             albumArtistId: entry.trackTidal.albumEntity?.artistId ?? null,
+            albumMatchedRgMbid:
+                entry.trackTidal.albumEntity?.matchedRgMbid ?? null,
+            albumMatchedInLibrary: false,
             likedAt: entry.likedAt,
             mappings: entry.trackTidal.mappings,
         },
@@ -139,6 +144,9 @@ function mapYoutubeLikedRow(entry: YtLikedRow): RemoteLibraryTrack[] {
             albumId: entry.trackYtMusic.albumId,
             albumLocation: entry.trackYtMusic.albumEntity?.location ?? null,
             albumArtistId: entry.trackYtMusic.albumEntity?.artistId ?? null,
+            albumMatchedRgMbid:
+                entry.trackYtMusic.albumEntity?.matchedRgMbid ?? null,
+            albumMatchedInLibrary: false,
             likedAt: entry.likedAt,
             mappings: entry.trackYtMusic.mappings,
         },
@@ -227,6 +235,22 @@ function preferredProvider(
     return tidal >= youtube ? "tidal" : "youtube";
 }
 
+async function annotateMatchedLibraryAlbums(
+    rows: RemoteLibraryTrack[],
+): Promise<RemoteLibraryTrack[]> {
+    const matchedRgMbids = rows.flatMap((row) =>
+        row.albumMatchedRgMbid ? [row.albumMatchedRgMbid] : [],
+    );
+    if (matchedRgMbids.length === 0) return rows;
+    const heldRgMbids = await findLibraryHeldReleaseGroups(matchedRgMbids);
+    return rows.map((row) => ({
+        ...row,
+        albumMatchedInLibrary:
+            row.albumMatchedRgMbid !== null &&
+            heldRgMbids.has(row.albumMatchedRgMbid),
+    }));
+}
+
 /** Loads and derives the bounded per-user remote library set. */
 export async function loadRemoteLibrarySet(
     userId: string | undefined,
@@ -246,10 +270,12 @@ export async function loadRemoteLibrarySet(
             ? loadYoutubeRows(userId, options?.artistId, shouldReportCap)
             : Promise.resolve([]),
     ]);
-    const tracks = collapseProviderDuplicates(
-        tidalRows,
-        youtubeRows,
-        preferredProvider(access.playbackSourceOrder),
+    const tracks = await annotateMatchedLibraryAlbums(
+        collapseProviderDuplicates(
+            tidalRows,
+            youtubeRows,
+            preferredProvider(access.playbackSourceOrder),
+        ),
     );
     return { tracks, ...deriveRemoteLibraryLookups(tracks) };
 }

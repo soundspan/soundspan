@@ -14,7 +14,6 @@ const remoteAlbumSelect = {
     id: true,
     title: true,
     rgMbid: true,
-    matchedRgMbid: true,
     coverUrl: true,
     artistId: true,
     location: true,

@@ -19,6 +19,16 @@ const ARTIST_ID = "remote-album-artist";
 const REMOTE_ALBUM_ID = "remote-only-album";
 const LOCAL_ALBUM_ID = "local-album-with-provider-copy";
 const LOCAL_PROVIDER_ONLY_ALBUM_ID = "local-album-with-only-provider-copy";
+const HELD_RELEASE_GROUP = "matched-held-release-group";
+const REMOVED_RELEASE_GROUP = "matched-removed-release-group";
+const FEDERATED_RELEASE_GROUP = "matched-federated-release-group";
+const ADOPTED_RELEASE_GROUP = "matched-adopted-release-group";
+const REMOTE_HELD_ALBUM_ID = "matched-remote-held";
+const REMOTE_REMOVED_ALBUM_ID = "matched-remote-removed";
+const REMOTE_FEDERATED_ALBUM_ID = "matched-remote-federated";
+const REMOTE_UNHELD_ALBUM_ID = "matched-remote-unheld";
+const ADOPTED_ALBUM_ID = "matched-adopted-placeholder";
+const FEDERATED_PEER_ID = "matched-federated-peer";
 
 type RouteResponse = {
     statusCode: number;
@@ -162,6 +172,94 @@ async function seedLocalAlbumWithOnlyProviderCopy(): Promise<void> {
     });
 }
 
+async function seedMatchedLocalTracks(): Promise<void> {
+    const common = {
+        trackNo: 1,
+        duration: 180,
+        fileModified: new Date("2026-10-19T00:00:00.000Z"),
+        fileSize: 1_000,
+    };
+    await prisma.track.createMany({
+        data: [
+            {
+                ...common,
+                id: "matched-held-local-track",
+                albumId: "matched-held-library-album",
+                title: "Held local track",
+            },
+            {
+                ...common,
+                id: "matched-removed-local-track",
+                albumId: "matched-removed-library-album",
+                title: "Removed local track",
+                removedAt: new Date("2026-10-19T01:00:00.000Z"),
+            },
+            {
+                ...common,
+                id: "matched-federated-track",
+                albumId: "matched-federated-library-album",
+                title: "Federated track",
+                origin: "FEDERATED",
+                peerId: FEDERATED_PEER_ID,
+                remoteId: "remote-matched-federated-track",
+            },
+            {
+                ...common,
+                id: "matched-adopted-local-track",
+                albumId: ADOPTED_ALBUM_ID,
+                title: "Adopted local track",
+            },
+            {
+                ...common,
+                id: "matched-adopted-holder-track",
+                albumId: "matched-adopted-library-album",
+                title: "Adopted holder track",
+            },
+        ],
+    });
+}
+
+async function seedMatchedLikedTracks(): Promise<void> {
+    const tracks = [
+        ["matched-held-tidal", 666101, REMOTE_HELD_ALBUM_ID],
+        ["matched-removed-tidal", 666102, REMOTE_REMOVED_ALBUM_ID],
+        ["matched-federated-tidal", 666105, REMOTE_FEDERATED_ALBUM_ID],
+        ["matched-unheld-tidal", 666103, REMOTE_UNHELD_ALBUM_ID],
+        ["matched-adopted-tidal", 666104, ADOPTED_ALBUM_ID],
+    ] as const;
+    await Promise.all(
+        tracks.map(async ([id, tidalId, albumId]) => {
+            await prisma.trackTidal.create({
+                data: {
+                    id,
+                    tidalId,
+                    title: id,
+                    artist: "Remote Artist",
+                    album: albumId,
+                    duration: 180,
+                    artistId: ARTIST_ID,
+                    albumId,
+                },
+            });
+            await prisma.likedRemoteTrack.create({
+                data: { userId: LIKER_ID, trackTidalId: id },
+            });
+        }),
+    );
+}
+
+async function expectMatchedInLibrary(
+    albumId: string,
+    expected: boolean,
+): Promise<void> {
+    const response = await getAlbum(albumId, LIKER_ID, false);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual(
+        expect.objectContaining({ matchedInLibrary: expected }),
+    );
+}
+
 describeWithPostgres("remote album route PostgreSQL behavior", () => {
     let admin: Client;
 
@@ -182,6 +280,14 @@ describeWithPostgres("remote album route PostgreSQL behavior", () => {
                 id: ARTIST_ID,
                 mbid: "remote-album-artist-mbid",
                 name: "Remote Artist",
+            },
+        });
+        await prisma.federationPeer.create({
+            data: {
+                id: FEDERATED_PEER_ID,
+                name: "Matched Federated Peer",
+                direction: "CONSUMER",
+                createdById: LIKER_ID,
             },
         });
         await prisma.album.createMany({
@@ -210,11 +316,90 @@ describeWithPostgres("remote album route PostgreSQL behavior", () => {
                     primaryType: "Album",
                     location: "LIBRARY",
                 },
+                {
+                    id: "matched-held-library-album",
+                    rgMbid: HELD_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Held Library Album",
+                    primaryType: "Album",
+                    location: "LIBRARY",
+                },
+                {
+                    id: "matched-removed-library-album",
+                    rgMbid: REMOVED_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Removed Library Album",
+                    primaryType: "Album",
+                    location: "LIBRARY",
+                },
+                {
+                    id: "matched-federated-library-album",
+                    rgMbid: FEDERATED_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Federated-track Library Album",
+                    primaryType: "Album",
+                    location: "LIBRARY",
+                },
+                {
+                    id: "matched-adopted-library-album",
+                    rgMbid: ADOPTED_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Adopted Holder Album",
+                    primaryType: "Album",
+                    location: "LIBRARY",
+                },
+                {
+                    id: REMOTE_HELD_ALBUM_ID,
+                    rgMbid: "remote:matched-held",
+                    matchedRgMbid: HELD_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Held Remote Placeholder",
+                    primaryType: "Album",
+                    location: "REMOTE",
+                },
+                {
+                    id: REMOTE_REMOVED_ALBUM_ID,
+                    rgMbid: "remote:matched-removed",
+                    matchedRgMbid: REMOVED_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Removed Remote Placeholder",
+                    primaryType: "Album",
+                    location: "REMOTE",
+                },
+                {
+                    id: REMOTE_FEDERATED_ALBUM_ID,
+                    rgMbid: "remote:matched-federated",
+                    matchedRgMbid: FEDERATED_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Federated-track Remote Placeholder",
+                    primaryType: "Album",
+                    location: "REMOTE",
+                },
+                {
+                    id: REMOTE_UNHELD_ALBUM_ID,
+                    rgMbid: "remote:matched-unheld",
+                    matchedRgMbid: "matched-unheld-release-group",
+                    artistId: ARTIST_ID,
+                    title: "Unheld Remote Placeholder",
+                    primaryType: "Album",
+                    location: "REMOTE",
+                },
+                {
+                    id: ADOPTED_ALBUM_ID,
+                    rgMbid: "remote:matched-adopted",
+                    matchedRgMbid: ADOPTED_RELEASE_GROUP,
+                    artistId: ARTIST_ID,
+                    title: "Adopted Placeholder",
+                    primaryType: "Album",
+                    location: "LIBRARY",
+                },
             ],
         });
         await seedRemoteOnlyAlbum();
         await seedLocalAlbumWithProviderCopy();
         await seedLocalAlbumWithOnlyProviderCopy();
+        await seedMatchedLocalTracks();
+        await seedMatchedLikedTracks();
     });
 
     afterAll(async () => {
@@ -297,5 +482,25 @@ describeWithPostgres("remote album route PostgreSQL behavior", () => {
 
         expect(response.statusCode).toBe(404);
         expect(response.body).toEqual({ error: "Album not found" });
+    });
+
+    it("reports a REMOTE placeholder as held by a visible local album", async () => {
+        await expectMatchedInLibrary(REMOTE_HELD_ALBUM_ID, true);
+    });
+
+    it("does not treat a soft-removed local track as holding a match", async () => {
+        await expectMatchedInLibrary(REMOTE_REMOVED_ALBUM_ID, false);
+    });
+
+    it("does not treat a visible federated track as holding a match", async () => {
+        await expectMatchedInLibrary(REMOTE_FEDERATED_ALBUM_ID, false);
+    });
+
+    it("reports a matched REMOTE placeholder as unheld without a holder", async () => {
+        await expectMatchedInLibrary(REMOTE_UNHELD_ALBUM_ID, false);
+    });
+
+    it("reports an adopted LIBRARY placeholder as held by another album", async () => {
+        await expectMatchedInLibrary(ADOPTED_ALBUM_ID, true);
     });
 });

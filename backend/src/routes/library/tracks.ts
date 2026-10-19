@@ -178,13 +178,13 @@ export const tracksDeletionRouter = Router();
  *                         type: integer
  *                       youtubeVideoId:
  *                         type: string
- *                       provider:
- *                         type: object
+ *                       provider: { type: object }
  *                       album:
  *                         type: object
  *                         properties:
  *                           rgMbid: { type: string, nullable: true }
  *                           matchedRgMbid: { type: string, nullable: true, description: "MusicBrainz release group matched for a streaming-only album; used for add-to-library" }
+ *                           matchedInLibrary: { type: boolean, description: "The library already holds the matched release group" }
  *                 total:
  *                   type: integer
  *                 offset:

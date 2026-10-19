@@ -34,6 +34,8 @@ function remoteRow(
         albumId: null,
         albumLocation: null,
         albumArtistId: null,
+        albumMatchedRgMbid: null,
+        albumMatchedInLibrary: false,
         likedAt: new Date(0),
         mappings: [],
     } as RemoteLibraryTrack;
@@ -176,6 +178,7 @@ describe("remote library search", () => {
                     title: "Remote Album",
                     rgMbid: null,
                     matchedRgMbid: null,
+                    matchedInLibrary: false,
                 }),
             }),
         ]);
