@@ -85,7 +85,7 @@ class GlobalRateLimiter {
                     concurrency: config.concurrency,
                     intervalCap: config.intervalCap,
                     interval: config.interval,
-                    carryoverConcurrencyCount: true,
+                    carryoverIntervalCount: true,
                 }),
             );
 

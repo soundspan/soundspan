@@ -8,7 +8,7 @@ jest.mock("p-queue", () => ({
         concurrency: number;
         intervalCap: number;
         interval: number;
-        carryoverConcurrencyCount: boolean;
+        carryoverIntervalCount: boolean;
         pending: number;
         size: number;
         add: jest.Mock;
@@ -19,7 +19,7 @@ jest.mock("p-queue", () => ({
             this.concurrency = options.concurrency;
             this.intervalCap = options.intervalCap;
             this.interval = options.interval;
-            this.carryoverConcurrencyCount = options.carryoverConcurrencyCount;
+            this.carryoverIntervalCount = options.carryoverIntervalCount;
             this.pending = 0;
             this.size = 0;
             this.add = jest.fn(async (task: () => Promise<any>) => task());
