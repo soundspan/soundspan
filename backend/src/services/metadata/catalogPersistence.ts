@@ -9,6 +9,18 @@ const MAX_RELEASE_GROUPS_PER_SYNC = 100;
 const MAX_TRACKS_PER_SYNC = 500;
 const CATALOG_READ_FRESHNESS_MS = 7 * 24 * 60 * 60 * 1000;
 const catalogPersistenceLogger = logger.child("CatalogPersistence");
+const CATALOG_RELEASE_GROUP_ORDER_BY = [
+    { year: "desc" },
+    { id: "asc" },
+] satisfies Prisma.AlbumOrderByWithRelationInput[];
+const CATALOG_RELEASE_GROUP_SELECT = {
+    id: true,
+    rgMbid: true,
+    title: true,
+    year: true,
+    primaryType: true,
+    location: true,
+} satisfies Prisma.AlbumSelect;
 
 /** Logs a rejected fire-and-forget catalog write without affecting its request. */
 export function logCatalogPersistenceError(error: unknown): void {
@@ -78,11 +90,17 @@ export interface CatalogReleaseGroupAlbum {
     location: AlbumLocation;
 }
 
-/** Local artist catalog snapshot already loaded by the library route. */
+/** Fresh catalog rows reconstructed into a release-group response. */
 export interface ReadFreshCatalogReleaseGroupsInput {
     artistId: string;
     catalogSyncedAt: Date | null;
     albums: readonly CatalogReleaseGroupAlbum[];
+}
+
+/** Artist identity and sync time already loaded by the library artist route. */
+export interface FindFreshArtistCatalogReleaseGroupsInput {
+    artistId: string;
+    catalogSyncedAt: Date | null;
 }
 
 /** Fresh persisted album and skeleton tracks used by discovery reads. */
@@ -133,7 +151,7 @@ function touchCatalogWhere(where: Prisma.AlbumWhereInput): void {
         .catch(logCatalogPersistenceError);
 }
 
-/** Reconstructs fresh release groups from catalog rows already loaded by a route. */
+/** Reconstructs release groups from fresh catalog rows loaded by a catalog finder. */
 export function readFreshCatalogReleaseGroups(
     input: ReadFreshCatalogReleaseGroupsInput,
 ): ReturnType<typeof releaseGroupFromCatalogAlbum>[] | null {
@@ -146,6 +164,29 @@ export function readFreshCatalogReleaseGroups(
     const albums = input.albums.filter((album) => album.location === "CATALOG");
     touchCatalogWhere({ artistId: input.artistId });
     return albums.map(releaseGroupFromCatalogAlbum);
+}
+
+/** Loads fresh release groups from one already-loaded artist's CATALOG albums. */
+export async function findFreshArtistCatalogReleaseGroups(
+    input: FindFreshArtistCatalogReleaseGroupsInput,
+): Promise<ReturnType<typeof releaseGroupFromCatalogAlbum>[] | null> {
+    if (
+        !isCatalogPersistenceEnabled() ||
+        !isFresh(input.catalogSyncedAt, new Date())
+    ) {
+        return null;
+    }
+    try {
+        const albums = await prisma.album.findMany({
+            where: { artistId: input.artistId, location: "CATALOG" },
+            orderBy: CATALOG_RELEASE_GROUP_ORDER_BY,
+            select: CATALOG_RELEASE_GROUP_SELECT,
+        });
+        return readFreshCatalogReleaseGroups({ ...input, albums });
+    } catch (error) {
+        catalogPersistenceLogger.warn("Catalog read failed", { error });
+        return null;
+    }
 }
 
 /** Loads a fresh local artist catalog by MusicBrainz artist ID. */
@@ -164,15 +205,8 @@ export async function findFreshCatalogReleaseGroups(artistMbid: string) {
             catalogSyncedAt: true,
             albums: {
                 where: { location: "CATALOG" },
-                orderBy: [{ year: "desc" }, { id: "asc" }],
-                select: {
-                    id: true,
-                    rgMbid: true,
-                    title: true,
-                    year: true,
-                    primaryType: true,
-                    location: true,
-                },
+                orderBy: CATALOG_RELEASE_GROUP_ORDER_BY,
+                select: CATALOG_RELEASE_GROUP_SELECT,
             },
         },
     });

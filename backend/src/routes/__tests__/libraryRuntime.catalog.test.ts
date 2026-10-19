@@ -996,6 +996,7 @@ describe("library catalog list runtime coverage", () => {
                         },
                     ],
                 },
+                // The real artist read never returns CATALOG albums; this guards the handler's defensive surface-location filter.
                 {
                     id: "album-catalog",
                     title: "Catalog Skeleton",
