@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import swaggerJsdoc from "swagger-jsdoc";
 import { config } from "../config";
 import {
@@ -8,7 +6,7 @@ import {
     BRAND_NAME,
     BRAND_SITE_URL,
 } from "./brand";
-import { safeResolvePath } from "../utils/safeResolvePath";
+import { resolveAppVersion } from "./appVersion";
 
 const ANONYMOUS_OPERATIONS = [
     ["/api/auth/login", "post"],
@@ -17,6 +15,11 @@ const ANONYMOUS_OPERATIONS = [
     ["/api/auth/register", "post"],
     ["/api/onboarding/register", "post"],
     ["/api/onboarding/status", "get"],
+    ["/api/restore/status", "get"],
+    ["/api/restore/uploads", "post"],
+    ["/api/restore/uploads/{uploadId}/chunks/{index}", "put"],
+    ["/api/restore/uploads/{uploadId}/complete", "post"],
+    ["/api/restore/uploads/{uploadId}", "delete"],
     ["/api/device-link/verify", "post"],
     ["/api/device-link/status/{code}", "get"],
     ["/api/share-links/access/{token}", "get"],
@@ -36,22 +39,7 @@ const ANONYMOUS_OPERATIONS = [
     ["/api/webhooks/lidarr/verify", "get"],
 ] as const;
 
-function resolveApiVersion(): string {
-    const backendRoot = path.resolve(__dirname, "..", "..");
-    const manifestPath = safeResolvePath(backendRoot, "package.json");
-    if (!manifestPath) {
-        throw new Error("backend package.json path escaped the backend root");
-    }
-    const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-        version?: unknown;
-    };
-    if (typeof parsed.version !== "string" || parsed.version.length === 0) {
-        throw new Error("backend package.json is missing a string version");
-    }
-    return parsed.version;
-}
-
-const API_VERSION = resolveApiVersion();
+const API_VERSION = resolveAppVersion();
 
 const options: swaggerJsdoc.Options = {
     definition: {

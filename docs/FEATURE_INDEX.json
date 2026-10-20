@@ -20,6 +20,7 @@
             "artist",
             "auth",
             "audiobook",
+            "backup",
             "discover",
             "explore",
             "home",
@@ -487,6 +488,47 @@
             }
         },
         {
+            "id": "backup-restore",
+            "name": "Backup and Restore",
+            "description": "Admin download of a passphrase-protected, data-only backup of the whole database, and restore of that backup into a fresh install from the first-run screen, with migration replay, credential re-encryption, and a restart prompt",
+            "frontend": {
+                "feature_dirs": ["backup", "settings"],
+                "routes": ["/onboarding", "/admin"]
+            },
+            "backend": {
+                "routes": ["backup.ts", "restore.ts", "onboarding.ts"],
+                "services": ["backup/"]
+            },
+            "tests": {
+                "backend_route": [
+                    "backupRuntime.test.ts",
+                    "restoreRuntime.test.ts",
+                    "onboardingRuntime.test.ts",
+                    "backupRestorePostgres.integration.test.ts"
+                ],
+                "backend_contract": [
+                    "backupFormat.test.ts",
+                    "backupKeyWrap.test.ts",
+                    "backupArchiveReader.test.ts",
+                    "backupExport.test.ts",
+                    "restoreCompatibility.test.ts",
+                    "restoreJob.test.ts",
+                    "restoreLock.test.ts",
+                    "restoreSchemaReset.test.ts",
+                    "restoreReencrypt.test.ts",
+                    "restoreStatus.test.ts",
+                    "restoreUploads.test.ts",
+                    "restartRequired.test.ts"
+                ],
+                "frontend": [
+                    "backupRestoreModel.test.ts",
+                    "restoreUploader.test.ts",
+                    "restoreFromBackup.component.test.ts",
+                    "backupSection.component.test.ts"
+                ]
+            }
+        },
+        {
             "id": "durable-track-identity",
             "name": "Durable Track Identity",
             "description": "Preserves local track identity across moves, retags, replacements, temporary removal, revival, and retention purge, with removed-track visibility in playlists and Library Health",
@@ -797,7 +839,7 @@
                 ],
                 "backend_contract": [
                     "config.test.ts",
-                    "healthEndpointContract.test.ts"
+                    "apiEntrypointRuntime.test.ts"
                 ]
             }
         },

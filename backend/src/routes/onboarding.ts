@@ -11,6 +11,12 @@ import {
     requireAdmin,
     verifyAccessToken,
 } from "../middleware/auth";
+import { isRestoreLockHeld } from "../services/backup/restoreLock";
+import {
+    hasActiveRestoreUploadForRegistration,
+    sweepRestoreStaging,
+} from "../services/backup/restoreUploads";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 const router = Router();
 
@@ -76,6 +82,16 @@ const enrichmentConfigSchema = z.object({
  */
 router.post("/register", async (req, res) => {
     try {
+        if (await isRestoreLockHeld()) {
+            return sendRouteError(res, 409, "A restore is in progress", {
+                code: "RESTORE_IN_PROGRESS",
+            });
+        }
+        if (await hasActiveRestoreUploadForRegistration()) {
+            return sendRouteError(res, 409, "A restore is in progress", {
+                code: "RESTORE_IN_PROGRESS",
+            });
+        }
         logger.debug(
             "[ONBOARDING] Register attempt for user:",
             req.body?.username,
@@ -122,6 +138,12 @@ router.post("/register", async (req, res) => {
                 offlineEnabled: false,
                 maxCacheSizeMb: 10240, // 10GB
             },
+        });
+        await sweepRestoreStaging().catch((error) => {
+            logger.warn(
+                "Could not sweep restore staging after registration",
+                error,
+            );
         });
 
         // Generate JWT token (same as login)

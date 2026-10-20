@@ -40,6 +40,29 @@ describe("resolveProxyTimeoutMs", () => {
         assert.equal(timeoutMs, 20_000);
     });
 
+    test("gives restore chunk uploads at least 120s", () => {
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploads/abc/chunks/0", {}),
+            120_000,
+        );
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploads/abc/chunks/0", {
+                PROXY_REQUEST_TIMEOUT_MS: "300000",
+            }),
+            300_000,
+        );
+        assert.equal(resolveProxyTimeoutMs("api/restore/uploads", {}), 120_000);
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploads/abc/complete", {}),
+            120_000,
+        );
+        assert.equal(resolveProxyTimeoutMs("api/restore/status", {}), 20_000);
+        assert.equal(
+            resolveProxyTimeoutMs("api/restore/uploadsx/abc", {}),
+            20_000,
+        );
+    });
+
     test("uses the long budget for bulk music-request actions", () => {
         assert.equal(
             resolveProxyTimeoutMs("api/requests/bulk/approve", {}),

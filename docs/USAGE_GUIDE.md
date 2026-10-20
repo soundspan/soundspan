@@ -11,6 +11,8 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 2. Optionally configure integrations (see [`INTEGRATIONS.md`](INTEGRATIONS.md))
 3. Wait for initial library scan and enrichment
 
+Moving from another server? Instead of creating an account, select `Restore from a backup` on the first-run screen and upload a backup from the old server's Admin page. Everything in its database comes back: accounts, settings, playlists, history, and the analyzed library. See [`BACKUP_AND_RESTORE.md`](BACKUP_AND_RESTORE.md).
+
 ## Home and Search
 
 - Home surfaces continue listening, recently added artists, Made For You mixes, recommendations, popular artists, community playlists, podcasts, and audiobooks
@@ -194,6 +196,10 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 - Queue dashboard (Bull Board): `Open queue dashboard` on the Admin page opens it in a new tab. Access lasts 15 minutes; reopen it from the Admin page when it expires, or end it early with `End dashboard access`. The dashboard cannot be opened by typing its address directly.
 - API keys: a key created under Settings is sent in an `X-API-Key` header (not as a Bearer token); the settings page shows an example
 
+### Backups
+
+`Admin → Backup` downloads a backup of everything in the database. Type a passphrase of at least 12 characters twice, then select `Download backup`. Keep the passphrase: the backup can't be restored without it. Music files are not in the backup. To restore, deploy a fresh soundspan and select `Restore from a backup` on its first-run screen. [`BACKUP_AND_RESTORE.md`](BACKUP_AND_RESTORE.md) lists what a backup restores and what you lose since the last one.
+
 ### Album downloads
 
 Album downloads run through a queue. One album downloads at a time across the whole server, and the queue survives restarts — queued albums resume where they left off.
@@ -272,3 +278,4 @@ When you opt in, the other server sees your username or display name — that is
 - [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — Environment variables and security hardening
 - [Integrations Guide](INTEGRATIONS.md) — Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL, podcasts, and OpenSubsonic
 - [Environment Variables](ENVIRONMENT_VARIABLES.md) — Complete env var reference by container
+- [Backup and Restore](BACKUP_AND_RESTORE.md) — What a backup holds, taking one, and restoring it on a new server

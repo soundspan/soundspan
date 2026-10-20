@@ -140,6 +140,23 @@ describe("encryption utils", () => {
         expect(decrypt("")).toBe("");
     });
 
+    it("round-trips v2 values with an explicit key", async () => {
+        const { decryptWithKey, encryptWithKey } = await loadEncryptionModule({
+            settingsKey: VALID_KEY,
+        });
+        const encrypted = encryptWithKey("explicit-value", KEY_A);
+        expect(decryptWithKey(encrypted, KEY_A)).toBe("explicit-value");
+        expect(() => decryptWithKey(encrypted, KEY_B)).toThrow();
+    });
+
+    it("decrypts legacy v1 values with an explicit key", async () => {
+        const { decryptWithKey } = await loadEncryptionModule({
+            settingsKey: VALID_KEY,
+        });
+        const encrypted = legacyEncrypt("legacy-explicit", KEY_A);
+        expect(decryptWithKey(encrypted, KEY_A)).toBe("legacy-explicit");
+    });
+
     describe("v2 authenticated envelope (AES-256-GCM)", () => {
         it("decrypts a valid v2 value when legacy fail-closed mode is enabled", async () => {
             const { encrypt, decrypt } = await loadEncryptionModule({

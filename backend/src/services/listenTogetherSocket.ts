@@ -83,6 +83,7 @@ import {
     hydrateSocketMutationAuthority,
 } from "./listenTogetherSocketMutationAuthority";
 import { assertSocketMutationUserEligible } from "./listenTogetherSocketMutationEligibility";
+import { configureListenTogetherRestoreBarrier } from "./listenTogetherRestoreBarrier";
 import {
     applySocketPlaybackAction,
     type SocketPlaybackRequest,
@@ -908,6 +909,7 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
     configureRedisSocketAdapter(io);
     configureClusterStateSync(ns);
     logSocketCoordinationMode();
+    configureListenTogetherRestoreBarrier(ns);
     configureSocketAuthentication(ns);
     configureSocketBroadcaster(ns);
     groupManager.setCallbacks(createManagerCallbacks(ns));

@@ -30,6 +30,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/audiobookCache.ts` | Core |
 | `backend/src/services/audiobookshelf.ts` | Core |
 | `backend/src/services/audioStreaming.ts` | Core |
+| `backend/src/services/backup/` | Whole-database backup export and fresh-install restore: archive format, key wrapping, catalog introspection, upload staging, schema reset, migration replay, data load, credential re-encryption, and restart/in-progress barriers |
 | `backend/src/services/browseImageCache.ts` | Core |
 | `backend/src/services/cacheHelpers.ts` | Core |
 | `backend/src/services/coalescedLibraryScan.ts` | Deployment-wide full-library scan coalescing and follow-up admission |
@@ -139,6 +140,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/listenTogetherSnapshot.ts` | Version-aware snapshot membership and playback adoption helpers |
 | `backend/src/services/listenTogetherShutdownDrain.ts` | Shared shutdown drain deadline and outcome |
 | `backend/src/services/listenTogetherSocket.ts` | Socket command admission, fenced mutation orchestration, and ordered fanout |
+| `backend/src/services/listenTogetherRestoreBarrier.ts` | Rejects new Listen Together socket connections while a restore runs or waits for its restart |
 | `backend/src/services/listenTogetherSocketMutationAuthority.ts` | Locked Redis-authority hydration and stale local socket-group eviction |
 | `backend/src/services/listenTogetherSocketMutationEligibility.ts` | In-lock pending-deletion check and local socket revocation for acting users |
 | `backend/src/services/listenTogetherSocketPlayback.ts` | Socket playback command validation and manager dispatch |

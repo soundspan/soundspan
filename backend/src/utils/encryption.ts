@@ -89,6 +89,11 @@ function requireRawEncryptionKey(): string {
     return rawEncryptionKey;
 }
 
+/** Return the validated deployment key for controlled encryption workflows. */
+export function getSettingsEncryptionKey(): string {
+    return requireRawEncryptionKey();
+}
+
 function requireLegacyEncryptionKey(): Buffer {
     validateEncryptionKey();
     if (legacyEncryptionKey === null) {
@@ -105,17 +110,17 @@ function requireLegacyEncryptionKey(): Buffer {
 const GCM_KEY_CACHE = new Map<string, Buffer>();
 const GCM_KEY_CACHE_MAX = 1000;
 
+function deriveGcmKeyForRawKey(rawKey: string, salt: Buffer): Buffer {
+    return crypto.scryptSync(rawKey, salt, SCRYPT_KEYLEN);
+}
+
 function deriveGcmKey(salt: Buffer): Buffer {
     const saltHex = salt.toString("hex");
     const cached = GCM_KEY_CACHE.get(saltHex);
     if (cached) {
         return cached;
     }
-    const key = crypto.scryptSync(
-        requireRawEncryptionKey(),
-        salt,
-        SCRYPT_KEYLEN,
-    );
+    const key = deriveGcmKeyForRawKey(requireRawEncryptionKey(), salt);
     if (GCM_KEY_CACHE.size >= GCM_KEY_CACHE_MAX) {
         // FIFO-evict the oldest entry to keep the cache bounded.
         const oldest = GCM_KEY_CACHE.keys().next().value;
@@ -152,11 +157,17 @@ function handleLegacyDecryptFailure(text: string, error?: unknown): string {
  * via scrypt over a random salt using the full key entropy. Returns empty string
  * for empty/null input.
  */
-export function encrypt(text: string): string {
+function encryptUsingKey(
+    text: string,
+    rawKey: string,
+    useProcessCache: boolean,
+): string {
     if (!text) return "";
     const salt = crypto.randomBytes(SALT_BYTES);
     const iv = crypto.randomBytes(GCM_IV_BYTES);
-    const key = deriveGcmKey(salt);
+    const key = useProcessCache
+        ? deriveGcmKey(salt)
+        : deriveGcmKeyForRawKey(rawKey, salt);
     const cipher = crypto.createCipheriv(GCM_ALGORITHM, key, iv);
     const ciphertext = Buffer.concat([
         cipher.update(text, "utf8"),
@@ -172,12 +183,26 @@ export function encrypt(text: string): string {
     ].join(":");
 }
 
+/** Encrypt a value with an explicitly supplied deployment key. */
+export function encryptWithKey(text: string, rawKey: string): string {
+    return encryptUsingKey(text, rawKey, false);
+}
+
+/** Encrypt a value with the process deployment key. */
+export function encrypt(text: string): string {
+    return encryptUsingKey(text, requireRawEncryptionKey(), true);
+}
+
 /**
  * Decrypt a v2 (AES-256-GCM) envelope. Fails CLOSED: a malformed envelope, a
  * tampered ciphertext/tag, or the wrong key all throw — a forged value is never
  * returned as cleartext.
  */
-function decryptV2(text: string): string {
+function decryptV2WithKey(
+    text: string,
+    rawKey: string,
+    useProcessCache = false,
+): string {
     const parts = text.split(":");
     // v2:salt:iv:tag:ct — any other shape is malformed.
     if (parts.length !== 5) {
@@ -198,7 +223,9 @@ function decryptV2(text: string): string {
     ) {
         throw new Error("Invalid v2 ciphertext envelope component length");
     }
-    const key = deriveGcmKey(salt);
+    const key = useProcessCache
+        ? deriveGcmKey(salt)
+        : deriveGcmKeyForRawKey(rawKey, salt);
     const decipher = crypto.createDecipheriv(GCM_ALGORITHM, key, iv);
     decipher.setAuthTag(tag);
     // .final() throws if the auth tag does not verify (tamper / wrong key).
@@ -215,7 +242,7 @@ function decryptV2(text: string): string {
  * disables that passthrough at call time. Operators should enable the flag only
  * after GET /api/admin/secrets-status reports zero legacy rows.
  */
-function decryptLegacy(text: string): string {
+function decryptLegacyWithDerivedKey(text: string, key: Buffer): string {
     const parts = text.split(":");
     if (parts.length < 2) {
         return handleLegacyDecryptFailure(text);
@@ -233,11 +260,7 @@ function decryptLegacy(text: string): string {
         ) {
             throw new Error("Invalid legacy ciphertext length");
         }
-        const decipher = crypto.createDecipheriv(
-            LEGACY_ALGORITHM,
-            requireLegacyEncryptionKey(),
-            iv,
-        );
+        const decipher = crypto.createDecipheriv(LEGACY_ALGORITHM, key, iv);
         let decrypted = decipher.update(encryptedText);
         decrypted = Buffer.concat([decrypted, decipher.final()]);
         return decrypted.toString();
@@ -259,9 +282,18 @@ function decryptLegacy(text: string): string {
 export function decrypt(text: string): string {
     if (!text) return "";
     if (text.startsWith(ENVELOPE_V2 + ":")) {
-        return decryptV2(text);
+        return decryptV2WithKey(text, requireRawEncryptionKey(), true);
     }
-    return decryptLegacy(text);
+    return decryptLegacyWithDerivedKey(text, requireLegacyEncryptionKey());
+}
+
+/** Decrypt a v2 or legacy value using an explicitly supplied deployment key. */
+export function decryptWithKey(text: string, rawKey: string): string {
+    if (!text) return "";
+    if (text.startsWith(ENVELOPE_V2 + ":")) {
+        return decryptV2WithKey(text, rawKey);
+    }
+    return decryptLegacyWithDerivedKey(text, deriveLegacyKey(rawKey));
 }
 
 /**

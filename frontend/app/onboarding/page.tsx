@@ -8,6 +8,8 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useFeatures } from "@/lib/features-context";
 import { useAuth } from "@/lib/auth-context";
 import { BRAND_MARKETING_TAGLINE, BRAND_NAME } from "@/lib/brand";
+import { RestoreFromBackup } from "@/features/backup/components/RestoreFromBackup";
+import { restoreHoldsFirstRun } from "@/features/backup/backupRestoreModel";
 
 /**
  * Renders the OnboardingPage component.
@@ -35,17 +37,42 @@ export default function OnboardingPage() {
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
 
-    // Guard: redirect away if onboarding is not needed (users already exist)
+    // Step 1 alternative: restore a backup instead of creating an account
+    const [accountMode, setAccountMode] = useState<"create" | "restore">(
+        "create",
+    );
+    const [restoreAvailable, setRestoreAvailable] = useState(false);
+
+    // Guard: redirect away if onboarding is not needed (users already exist),
+    // unless a restore holds this page (running, waiting for its restart, or
+    // failed between states).
     useEffect(() => {
         let cancelled = false;
         async function checkOnboarding() {
-            try {
-                const data = await api.getOnboardingStatus();
-                if (!cancelled && !data.needsOnboarding) {
-                    router.replace("/login");
-                }
-            } catch {
-                // Ignore — fail open so first-time setup still works
+            // Both checks run at once, so the slower one sets the wait; the
+            // restore answer decides first because a restore that holds this
+            // page keeps it. Failures are ignored (fail open) so first-time
+            // setup still works.
+            const [restoreResult, onboardingResult] = await Promise.allSettled([
+                api.getRestoreStatus(),
+                api.getOnboardingStatus(),
+            ]);
+            if (cancelled) return;
+            const restore =
+                restoreResult.status === "fulfilled"
+                    ? restoreResult.value
+                    : null;
+            if (restore && restoreHoldsFirstRun(restore)) {
+                setRestoreAvailable(true);
+                setAccountMode("restore");
+                return;
+            }
+            setRestoreAvailable(Boolean(restore?.available));
+            if (
+                onboardingResult.status === "fulfilled" &&
+                !onboardingResult.value.needsOnboarding
+            ) {
+                router.replace("/login");
             }
         }
         checkOnboarding();
@@ -244,8 +271,10 @@ export default function OnboardingPage() {
                             </p>
                         </div>
 
-                        {/* Progress Steps */}
-                        <div className="flex items-center justify-center gap-3 mb-8">
+                        {/* Progress Steps (account creation only) */}
+                        <div
+                            className={`flex items-center justify-center gap-3 mb-8 ${accountMode === "restore" ? "hidden" : ""}`}
+                        >
                             {[
                                 { num: 1, label: "Account" },
                                 { num: 2, label: "Integrations" },
@@ -290,7 +319,13 @@ export default function OnboardingPage() {
                         {/* Main Content Card */}
                         <div className="bg-[#111]/90 rounded-lg border border-white/10 shadow-xl  overflow-hidden">
                             <div className="p-6 md:p-8">
-                                {step === 1 && (
+                                {step === 1 && accountMode === "restore" && (
+                                    <RestoreFromBackup
+                                        onBack={() => setAccountMode("create")}
+                                    />
+                                )}
+
+                                {step === 1 && accountMode === "create" && (
                                     <div className="space-y-6">
                                         <div>
                                             <h2 className="text-2xl font-bold text-white mb-1">
@@ -393,6 +428,25 @@ export default function OnboardingPage() {
                                                 </span>
                                             </button>
                                         </form>
+
+                                        {restoreAvailable && (
+                                            <div className="pt-6 border-t border-white/10 text-center">
+                                                <p className="text-sm text-white/60 mb-2">
+                                                    Moving from another server?
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setAccountMode(
+                                                            "restore",
+                                                        )
+                                                    }
+                                                    className="text-sm font-medium text-brand hover:text-brand-hover transition-colors"
+                                                >
+                                                    Restore from a backup
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 

@@ -31,6 +31,13 @@ dotenv.config({ quiet: true });
 const databaseUrl = resolveDatabaseUrl(process.env);
 if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
 
+/** Build a child-process environment through the backend config boundary. */
+export function buildChildProcessEnvironment(
+    overrides: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+    return { ...process.env, ...overrides };
+}
+
 const secretsDbOnly = isSecretsDbOnlyEnabled();
 
 // Lenient positive-int env read with a numeric fallback (matches the historical

@@ -54,6 +54,17 @@ export class CoverArtExtractor {
                 ),
             );
         } catch (err) {
+            if (
+                typeof err === "object" &&
+                err !== null &&
+                "code" in err &&
+                err.code === "ENOENT"
+            ) {
+                logger.debug(
+                    `[COVER-ART] Audio file is unavailable for embedded cover extraction: ${audioFilePath}`,
+                );
+                return null;
+            }
             logger.error(
                 `[COVER-ART] Failed to extract from ${audioFilePath}:`,
                 err,

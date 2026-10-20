@@ -11,6 +11,9 @@ import { downloadAndStoreImage } from "./imageStorage";
 import { resolveAlbumCover } from "./metadata/albumCoverResolver";
 
 const ALBUM_COVER_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
+const EMBEDDED_COVER_FAILURE_TTL_MS = 10 * 60 * 1000;
+const EMBEDDED_COVER_FAILURE_CACHE_MAX = 1_000;
+const embeddedCoverFailures = new Map<string, number>();
 
 export const nativeCoverHealInFlight = new Map<
     string,
@@ -97,6 +100,40 @@ async function storeHealedAlbumCover(
     if (!localCoverPath) return null;
     await persistHealedAlbumCover(albumId, localCoverPath);
     return buildNativeCoverProxyRedirectPath(localCoverPath);
+}
+
+async function extractEmbeddedAlbumCover(
+    albumId: string,
+): Promise<string | null> {
+    const now = Date.now();
+    const failedUntil = embeddedCoverFailures.get(albumId) ?? 0;
+    if (failedUntil > now) return null;
+    embeddedCoverFailures.delete(albumId);
+    const track = await prisma.track.findFirst({
+        where: { albumId, filePath: { not: null }, removedAt: null },
+        select: { filePath: true },
+        orderBy: { id: "asc" },
+    });
+    if (!track?.filePath) return null;
+    const audioPath = safeResolvePath(config.music.musicPath, track.filePath);
+    if (!audioPath) return null;
+    const { CoverArtExtractor } = await import("./coverArtExtractor");
+    const extractor = new CoverArtExtractor(coversBaseDir());
+    const coverPath = await extractor.extractCoverArt(audioPath, albumId);
+    if (!coverPath) {
+        if (embeddedCoverFailures.size >= EMBEDDED_COVER_FAILURE_CACHE_MAX) {
+            const oldest = embeddedCoverFailures.keys().next().value;
+            if (oldest) embeddedCoverFailures.delete(oldest);
+        }
+        embeddedCoverFailures.set(albumId, now + EMBEDDED_COVER_FAILURE_TTL_MS);
+        logger.debug("Embedded cover fallback unavailable for album", {
+            albumId,
+        });
+        return null;
+    }
+    const nativeCoverUrl = `native:${coverPath}`;
+    await persistHealedAlbumCover(albumId, nativeCoverUrl);
+    return buildNativeCoverProxyRedirectPath(nativeCoverUrl);
 }
 
 export const tryHealMissingNativeAlbumCover = async (
@@ -234,7 +271,7 @@ export const tryHealMissingNativeAlbumCover = async (
             return fallbackExternalUrl;
         }
 
-        return null;
+        return extractEmbeddedAlbumCover(album.id);
     })().finally(() => {
         nativeCoverHealInFlight.delete(albumId);
     });

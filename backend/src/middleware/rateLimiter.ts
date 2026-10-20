@@ -2,6 +2,7 @@ import rateLimit from "express-rate-limit";
 import { logger } from "../utils/logger";
 import { isLibraryMediaPath } from "./libraryRateLimitPaths";
 import { createRedisRateLimitOptions } from "./rateLimitStore";
+import { sendRouteError } from "../utils/routeErrorResponse";
 
 // soundspan is self-hosted behind a reverse proxy, and app.set("trust proxy", ...)
 // makes X-Forwarded-For govern the client IP. Some auth, share-link, webhook,
@@ -239,6 +240,46 @@ export const lyricsMutationLimiter = rateLimit({
     message: "Too many lyrics cache actions. Please try again later.",
     standardHeaders: true,
     legacyHeaders: false,
+    ...trustProxyValidation,
+});
+
+export const backupLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: "Too many backup requests. Please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res, _next, options) => {
+        sendRouteError(res, options.statusCode, String(options.message));
+    },
+    ...createRedisRateLimitOptions("backup", { fallback: "memory" }),
+    ...trustProxyValidation,
+});
+
+export const restoreMutationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: "Too many restore requests. Please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res, _next, options) => {
+        sendRouteError(res, options.statusCode, String(options.message));
+    },
+    ...createRedisRateLimitOptions("restore-mutation", { fallback: "memory" }),
+    ...trustProxyValidation,
+});
+
+export const restoreChunkLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 1500,
+    message: "Too many restore chunks. Please slow down.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res, _next, options) => {
+        res.setHeader("Retry-After", "60");
+        sendRouteError(res, options.statusCode, String(options.message));
+    },
+    ...createRedisRateLimitOptions("restore-chunk", { fallback: "memory" }),
     ...trustProxyValidation,
 });
 

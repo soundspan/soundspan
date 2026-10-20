@@ -1,15 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
-// Time-to-first-byte budgets for backend requests, matching the retired
-// Next route-handler proxy (lib/apiProxy.ts): 20s for regular API calls,
-// 90s for the long-running import preview, both overridable via env.
+// Time-to-first-byte budgets for backend requests, matching the Next
+// route-handler proxy (lib/apiProxy.ts): 20s for regular API calls, 90s for
+// the long-running import preview, both overridable via env, and at least
+// 120s for every backup-restore upload request under /api/restore/uploads
+// (creating an upload, its multi-megabyte chunks, and starting the restore).
 // Bulk music-request actions process up to 25 approvals (each may look up an
-// artist name) per call, so they also get the 90s budget.
+// artist name) per call, so they also get at least the 90s budget.
 const DEFAULT_PROXY_TIMEOUT_MS = 20000;
 const DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS = 90000;
+const DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS = 120000;
 const DEFAULT_BULK_REQUEST_PROXY_TIMEOUT_MS = 90000;
 const IMPORT_PREVIEW_PATH_PREFIX = "/api/import/preview";
+const RESTORE_UPLOAD_PATH_PREFIX = "/api/restore/uploads";
 const BULK_REQUEST_PATH_PREFIX = "/api/requests/bulk";
 
 function parsePositiveTimeoutMs(value) {
@@ -28,14 +32,14 @@ function getRequestPathname(reqUrl) {
     }
 }
 
-function matchesPathPrefix(pathname, apiPrefix) {
+function matchesPathPrefix(pathname, pathPrefix) {
     const normalized = String(pathname || "")
         .replace(/\/+$/, "")
         .toLowerCase();
     // server.js dispatches from a raw createServer handler, so req.url keeps
     // the full /api prefix — but also accept the mount-stripped form in case
     // this proxy is ever Express-mounted under /api (which strips it).
-    const candidates = [apiPrefix, apiPrefix.replace(/^\/api/, "")];
+    const candidates = [pathPrefix, pathPrefix.replace(/^\/api/, "")];
     return candidates.some(
         (prefix) =>
             normalized === prefix || normalized.startsWith(`${prefix}/`),
@@ -46,6 +50,10 @@ function isImportPreviewPath(pathname) {
     return matchesPathPrefix(pathname, IMPORT_PREVIEW_PATH_PREFIX);
 }
 
+function isRestoreUploadPath(pathname) {
+    return matchesPathPrefix(pathname, RESTORE_UPLOAD_PATH_PREFIX);
+}
+
 function isBulkRequestPath(pathname) {
     return matchesPathPrefix(pathname, BULK_REQUEST_PATH_PREFIX);
 }
@@ -54,8 +62,9 @@ function isBulkRequestPath(pathname) {
  * Resolve the time-to-first-byte budget for a proxied backend request.
  * Honors PROXY_REQUEST_TIMEOUT_MS globally and
  * PROXY_IMPORT_PREVIEW_TIMEOUT_MS for the import-preview path prefix
- * (which otherwise never drops below its 90s default). Bulk music-request
- * actions never drop below 90s either.
+ * (which otherwise never drops below its 90s default); restore upload
+ * requests never drop below 120s, and bulk music-request actions never drop
+ * below 90s.
  *
  * @param {string} pathname
  * @param {Record<string, string | undefined>} [env]
@@ -66,9 +75,14 @@ function resolveProxyTimeoutMs(pathname, env = process.env) {
         parsePositiveTimeoutMs(env.PROXY_REQUEST_TIMEOUT_MS) ??
         DEFAULT_PROXY_TIMEOUT_MS;
 
+    if (isRestoreUploadPath(pathname)) {
+        return Math.max(globalTimeout, DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS);
+    }
+
     if (isBulkRequestPath(pathname)) {
         return Math.max(globalTimeout, DEFAULT_BULK_REQUEST_PROXY_TIMEOUT_MS);
     }
+
     if (!isImportPreviewPath(pathname)) {
         return globalTimeout;
     }
@@ -211,6 +225,7 @@ function buildBackendProxyOptions({
               120000,
               resolveProxyTimeoutMs("/api/", activeEnv),
               resolveProxyTimeoutMs(IMPORT_PREVIEW_PATH_PREFIX, activeEnv),
+              resolveProxyTimeoutMs(RESTORE_UPLOAD_PATH_PREFIX, activeEnv),
           )
         : 120000;
 

@@ -1,5 +1,6 @@
 import { ApiClientCore, type ApiData } from "./api/core";
 import { WithAuth } from "./api/auth";
+import { WithBackup } from "./api/backup";
 import { WithAudiobooks } from "./api/audiobooks";
 import { WithConnectors } from "./api/connectors";
 import { WithEnrichment } from "./api/enrichment";
@@ -484,7 +485,9 @@ class ApiClient extends WithRequests(
                                                                                                 WithMedia(
                                                                                                     WithPlaylists(
                                                                                                         WithLibrary(
-                                                                                                            ApiClientCore,
+                                                                                                            WithBackup(
+                                                                                                                ApiClientCore,
+                                                                                                            ),
                                                                                                         ),
                                                                                                     ),
                                                                                                 ),

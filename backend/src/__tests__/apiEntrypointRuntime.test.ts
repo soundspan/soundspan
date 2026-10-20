@@ -47,6 +47,8 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/federation",
         "../routes/federationAdmin",
         "../routes/libraryHealthDashboard",
+        "../routes/backup",
+        "../routes/restore",
     ];
 
     const flushPromises = async (): Promise<void> => {
@@ -114,6 +116,7 @@ describe("api entrypoint runtime behavior", () => {
         };
         const expressFn = jest.fn(() => app);
         (expressFn as any).json = jest.fn(() => "json-middleware");
+        (expressFn as any).raw = jest.fn(() => "raw-middleware");
         (expressFn as any).urlencoded = jest.fn(() => "urlencoded-middleware");
         (expressFn as any).Router = jest.fn(() => router);
 
@@ -150,6 +153,7 @@ describe("api entrypoint runtime behavior", () => {
             error: jest.fn(),
             child: jest.fn().mockReturnThis(),
         };
+        const sweepRestoreStaging = jest.fn(async () => undefined);
 
         const dependencyReadiness = {
             probe: jest.fn(
@@ -217,6 +221,7 @@ describe("api entrypoint runtime behavior", () => {
         const requireQueueDashboardAccess = jest.fn((_req, _res, next) =>
             next?.(),
         );
+        const requireNoPendingRestart = jest.fn((_req, _res, next) => next?.());
         const errorHandler = jest.fn((_err, _req, _res, _next) => undefined);
         const authLimiter = "auth-limiter";
         const refreshLimiter = "refresh-limiter";
@@ -323,6 +328,9 @@ describe("api entrypoint runtime behavior", () => {
             ensureFederationIdentity,
         }));
         jest.doMock("../middleware/errorHandler", () => ({ errorHandler }));
+        jest.doMock("../services/backup/restartRequired", () => ({
+            requireNoPendingRestart,
+        }));
         jest.doMock("../middleware/auth", () => ({
             requireAuth,
             requireAdmin,
@@ -375,6 +383,9 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../services/coalescedLibraryScan", () => ({
             closeCoalescedLibraryScanRedis,
         }));
+        jest.doMock("../services/backup/restoreUploads", () => ({
+            sweepRestoreStaging,
+        }));
 
         for (const routeModule of routeModules) {
             jest.doMock(routeModule, () => ({
@@ -406,6 +417,8 @@ describe("api entrypoint runtime behavior", () => {
             requireAuth,
             requireAdmin,
             requireQueueDashboardAccess,
+            requireNoPendingRestart,
+            sweepRestoreStaging,
             shutdownWorkers,
             shutdownSchedulerClaimRedis,
             shutdownUmapProjection,
@@ -538,6 +551,7 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(mocks.prisma.$queryRaw).toHaveBeenCalled();
         expect(mocks.redisClient.ping).toHaveBeenCalled();
+        expect(mocks.sweepRestoreStaging).toHaveBeenCalledTimes(1);
         expect(mocks.createDependencyReadinessTracker).toHaveBeenCalledWith(
             "api",
         );
@@ -756,6 +770,8 @@ describe("api entrypoint runtime behavior", () => {
         // its expected limiter fails this test. Router-level auth for the
         // routers themselves is asserted by their per-router authz tests.
         const expectedMounts: Record<string, unknown[]> = {
+            "/api/restore": [route("../routes/restore")],
+            "/api/backup": [route("../routes/backup")],
             "/api/auth/login": ["auth-limiter"],
             "/api/auth/register": ["auth-limiter"],
             "/api/auth/refresh": ["refresh-limiter"],
@@ -842,6 +858,36 @@ describe("api entrypoint runtime behavior", () => {
             ],
             "/rest": ["urlencoded-middleware", route("../routes/subsonic")],
         };
+
+        const healthPaths = [
+            "/health",
+            "/api/health",
+            "/health/live",
+            "/api/health/live",
+            "/health/ready",
+            "/api/health/ready",
+        ];
+        const healthOrders = healthPaths.map((healthPath) => {
+            const index = mocks.app.get.mock.calls.findIndex(
+                (args: unknown[]) => args[0] === healthPath,
+            );
+            expect(index).toBeGreaterThanOrEqual(0);
+            return mocks.app.get.mock.invocationCallOrder[index]!;
+        });
+        const barrierIndex = mocks.app.use.mock.calls.findIndex(
+            (args: unknown[]) => args[0] === mocks.requireNoPendingRestart,
+        );
+        const firstApiIndex = mocks.app.use.mock.calls.findIndex(
+            (args: unknown[]) => args[0] === "/api/restore",
+        );
+        expect(barrierIndex).toBeGreaterThanOrEqual(0);
+        expect(firstApiIndex).toBeGreaterThanOrEqual(0);
+        const barrierOrder =
+            mocks.app.use.mock.invocationCallOrder[barrierIndex]!;
+        const firstApiOrder =
+            mocks.app.use.mock.invocationCallOrder[firstApiIndex]!;
+        expect(Math.max(...healthOrders)).toBeLessThan(barrierOrder);
+        expect(barrierOrder).toBeLessThan(firstApiOrder);
 
         for (const [prefix, chain] of Object.entries(expectedMounts)) {
             const call = mocks.app.use.mock.calls.find(
