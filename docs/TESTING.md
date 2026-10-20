@@ -139,7 +139,7 @@ Notes:
 
 - `test:unit` and `test:coverage` use the `tsx` loader with Node's test runner.
 - `typecheck` disables incremental state so local verification matches a clean CI checkout and includes standalone `tests/**` files.
-- `lint` enforces the current ESLint warning budget with `--max-warnings=183`.
+- `lint` enforces the ESLint warning budget with `--max-warnings=181`.
 - `lint:hex` blocks increases above the 130-use baseline for arbitrary hardcoded
   hex utilities; use the centralized Tailwind theme tokens for new colors.
 
@@ -255,7 +255,7 @@ Quality visibility workflow:
 | CI job                                 | Blocking     | Checks                                                                                                                                                                                                                                                                                                                |
 | -------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend Tests + Coverage               | Configurable | Backend Jest tests plus coverage summary and artifacts.                                                                                                                                                                                                                                                               |
-| Frontend Quality Visibility            | Configurable | ESLint with the enforced 183-warning ceiling, Next build, targeted unit coverage, component tests, and E2E inventory visibility.                                                                                                                                                                                      |
+| Frontend Quality Visibility            | Configurable | ESLint with the enforced 181-warning ceiling, Next build, targeted unit coverage, component tests, and E2E inventory visibility.                                                                                                                                                                                      |
 | Python Sidecar Tests (matrix)          | Configurable | The four sidecar `pytest` suites. The root AIO image-hardening suite runs in Python Quality and is also included by local `npm run verify:python`.                                                                                                                                                                    |
 | Backend Typecheck / Frontend Typecheck | Configurable | Standalone TypeScript checks.                                                                                                                                                                                                                                                                                         |
 | Helm Chart Visibility                  | Configurable | Helm lint and render assertions.                                                                                                                                                                                                                                                                                      |
@@ -269,7 +269,7 @@ fail the workflow.
 
 ### Enforced ratchets
 
-- Frontend ESLint runs with `--max-warnings=183`; any warning count above that
+- Frontend ESLint runs with `--max-warnings=181`; any warning count above that
   budget fails lint.
 - `npm --prefix frontend run lint:hex` blocks increases above the baseline of
   130 arbitrary hardcoded-hex Tailwind utilities.
@@ -286,34 +286,15 @@ fail the workflow.
   mypy invocations enforce the configured
   Python lint and typing baseline.
 
+Known follow-ups are deliberately not gated here: an ES2020 `target` in
+`frontend/tsconfig.json` and enforced coverage for the frontend API boundary.
+
 Backend coverage artifacts include:
 
 - `backend/coverage/lcov.info`
 - `backend/coverage/coverage-summary.json`
 - `backend/coverage/jest-results.json`
 - generated markdown summary (`backend/coverage/coverage-summary.md`)
-
-### Recommended gating ratchet (owner-paced)
-
-These steps require owner sign-off and repository branch-protection or variable
-changes; they do not require workflow edits:
-
-1. Add `Frontend Typecheck` to the required status checks now. It is green, and
-   the historical 92-error budget has been paid down.
-2. After one clean week, add the four `Python Sidecar Tests (...)` checks to the
-   required status checks.
-3. Enable the backend coverage gate with the repository variable
-   `CI_ENFORCE_TEST_GATE=true`. Set the `COVERAGE_*_MIN` floors slightly below
-   the totals in the current coverage-summary artifact so coverage can only
-   ratchet upward.
-
-Known follow-ups are deliberately not gated here: the frontend strict-mode /
-ES2020 tsconfig ratchet and enforced coverage for the frontend API boundary.
-
-Module-scope eager ioredis clients in `backend/src/workers/index.ts` and
-`backend/src/workers/processors/discoverProcessor.ts` remain test-leak
-candidates. They stay outside this change and are covered by the
-backend-reliability slice's module-load side-effect work.
 
 AWM repo-contract checks:
 
