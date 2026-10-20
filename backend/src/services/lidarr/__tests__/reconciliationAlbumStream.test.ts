@@ -98,6 +98,26 @@ describe("Lidarr reconciliation album stream", () => {
         expect(albumsByMbid.has("rg-3")).toBe(true);
     });
 
+    it("passes artist query parameters to the album request", async () => {
+        const get = jest.fn(async () => ({ data: [] }));
+        const signal = new AbortController().signal;
+
+        await fetchReconciliationAlbumMaps(
+            { get } as unknown as AxiosInstance,
+            { albumsByMbid: new Map(), albumsByTitle: new Map() },
+            signal,
+            { artistId: 42 },
+        );
+
+        expect(get).toHaveBeenCalledWith("/api/v1/album", {
+            params: { artistId: 42 },
+            signal,
+            responseType: "stream",
+            maxContentLength: LIDARR_ALBUM_RESPONSE_MAX_BYTES,
+            maxBodyLength: LIDARR_ALBUM_RESPONSE_MAX_BYTES,
+        });
+    });
+
     it("rejects an aborted response before indexing entries", async () => {
         const controller = new AbortController();
         controller.abort(new Error("stop"));

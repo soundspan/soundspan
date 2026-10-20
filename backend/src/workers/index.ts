@@ -70,7 +70,6 @@ import {
 } from "./discoverCron";
 import { runDataIntegrityCheck } from "./dataIntegrity";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
-import { queueCleaner } from "../jobs/queueCleaner";
 import { enrichmentStateService } from "../services/enrichmentState";
 import { dataCacheService } from "../services/dataCache";
 import { genericImportJobRunner } from "../services/genericImportJobRunner";
@@ -121,6 +120,7 @@ import {
     type SchedulerMetricJob,
     type SchedulerTimeoutOperation,
 } from "../metrics/schedulerMetrics";
+import { runReconciliationCycle } from "./reconciliationCycle";
 
 const log = logger.child("WorkerScheduler");
 const queueProcessorLog = log.child("QueueProcessor");
@@ -341,7 +341,7 @@ async function processReconciliationJob(): Promise<boolean> {
                 return false;
             }
             try {
-                await runReconciliationCycle();
+                await runReconciliationCycle(requireSchedulerTimedOperation);
                 await reconciliationCircuitBreaker.recordSuccess();
                 return true;
             } catch (error) {
@@ -355,59 +355,6 @@ async function processReconciliationJob(): Promise<boolean> {
         },
     );
     return claim.acquired && claim.value;
-}
-
-async function runReconciliationCycle(): Promise<void> {
-    const { lidarrService } = await import("../services/lidarr");
-    const snapshot = await requireSchedulerTimedOperation(
-        "getReconciliationSnapshot",
-        30_000,
-        (signal) => lidarrService.getReconciliationSnapshot(signal),
-    );
-
-    const staleCount = await requireSchedulerTimedOperation(
-        "markStaleJobsAsFailed",
-        120_000,
-        () => simpleDownloadManager.markStaleJobsAsFailed(snapshot),
-    );
-    if (staleCount > 0) {
-        log.debug(
-            `Periodic cleanup: marked ${staleCount} stale download(s) as failed`,
-        );
-    }
-
-    const lidarrResult = await requireSchedulerTimedOperation(
-        "reconcileWithLidarr",
-        120_000,
-        () => simpleDownloadManager.reconcileWithLidarr(snapshot),
-    );
-    if (lidarrResult.reconciled > 0) {
-        log.debug(
-            `Periodic reconcile: ${lidarrResult.reconciled} job(s) matched in Lidarr`,
-        );
-    }
-
-    const localResult = await requireSchedulerTimedOperation(
-        "reconcileWithLocalLibrary",
-        120_000,
-        () => queueCleaner.reconcileWithLocalLibrary(),
-    );
-    if (localResult.reconciled > 0) {
-        log.debug(
-            `Periodic reconcile: ${localResult.reconciled} job(s) matched in local library`,
-        );
-    }
-
-    const syncResult = await requireSchedulerTimedOperation(
-        "syncWithLidarrQueue",
-        120_000,
-        () => simpleDownloadManager.syncWithLidarrQueue(snapshot),
-    );
-    if (syncResult.cancelled > 0) {
-        log.debug(
-            `Periodic sync: ${syncResult.cancelled} job(s) synced with Lidarr queue`,
-        );
-    }
 }
 
 async function processAlbumDownloadRecoveryJob(): Promise<boolean> {
