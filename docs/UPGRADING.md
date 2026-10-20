@@ -84,6 +84,20 @@ catalog sync time of every artist. It runs automatically at startup and needs
 no action. The next time an artist page is opened, soundspan rebuilds that
 artist's saved discography from MusicBrainz data.
 
+**All-in-one image, only if your database has no migration history:** the
+all-in-one container can start against an existing soundspan database that has
+its tables but no `_prisma_migrations` table, for example one copied in without
+that table. Before this fix, startup recorded the wrong name for the first
+migration, ignored the error, and then failed while it re-created tables that
+already existed. Startup now records `20251130000000_init` as already applied
+and runs only the later migrations. If that step fails, the container stops
+with a `FATAL` message before it changes the database. A database that the
+all-in-one image created itself always has migration history, so most installs
+are not affected. If an earlier start already failed this way, Prisma keeps a
+failed record for `20251130000000_init` and applies no new migrations until you
+resolve it. Follow Prisma's guide to resolving failed migrations:
+<https://pris.ly/d/migrate-resolve>.
+
 **Heads-up, music requests:** declining an album request now starts a 30-day
 wait before anyone can request that album again. Set
 `REQUESTS_DENIED_COOLDOWN_DAYS` to change the wait, or to `0` to turn it off;

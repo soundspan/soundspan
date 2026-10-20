@@ -101,6 +101,7 @@ describe("shared library artist read divergence guard", () => {
             expect.objectContaining({
                 albumLocations: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
                 requireVisibleAlbum: false,
+                likedRemoteAlbumsUserId: "user-1",
             }),
         );
         expect(mockReadLibraryArtist).toHaveBeenNthCalledWith(
@@ -109,6 +110,9 @@ describe("shared library artist read divergence guard", () => {
                 albumLocations: ["LIBRARY", "FEDERATED"],
                 requireVisibleAlbum: true,
             }),
+        );
+        expect(mockReadLibraryArtist.mock.calls[1][0]).not.toHaveProperty(
+            "likedRemoteAlbumsUserId",
         );
     });
 });

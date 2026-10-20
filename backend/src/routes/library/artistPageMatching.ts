@@ -60,16 +60,22 @@ function normalizeDiscographyAlbumTitle(title: string): string {
     return normalizeAlbumTitle(stripAlbumEdition(title));
 }
 
-/** Removes remote discography rows that match an owned album edition. */
+/**
+ * Removes discography rows an owned album stands for: by release group, or by
+ * edition-stripped title for albums that are not remote placeholders.
+ */
 export function filterDistinctDiscographyAlbums<
     TOwned extends Titled & {
+        source?: string;
         rgMbid?: string | null;
         matchedRgMbid?: string | null;
     },
     TRemote extends Titled & { rgMbid: string },
 >(ownedAlbums: readonly TOwned[], remoteAlbums: readonly TRemote[]): TRemote[] {
     const ownedTitles = new Set(
-        ownedAlbums.map((album) => normalizeDiscographyAlbumTitle(album.title)),
+        ownedAlbums
+            .filter((album) => album.source !== "remote")
+            .map((album) => normalizeDiscographyAlbumTitle(album.title)),
     );
     const ownedRgMbids = new Set(
         ownedAlbums.flatMap((album) =>
