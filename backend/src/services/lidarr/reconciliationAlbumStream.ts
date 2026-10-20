@@ -66,7 +66,11 @@ function snapshotAlbum(value: unknown): AlbumSnapshotInfo | null {
     };
 }
 
-function indexAlbum(target: ReconciliationAlbumMaps, value: unknown): void {
+/** Index one validated album when Lidarr reports downloaded tracks. */
+export function indexReconciliationAlbum(
+    target: ReconciliationAlbumMaps,
+    value: unknown,
+): void {
     const album = snapshotAlbum(value);
     if (!album) return;
     if (album.foreignAlbumId) {
@@ -85,7 +89,7 @@ function completeItem(
     if (state.items > LIDARR_ALBUM_MAX_ITEMS) {
         throw new Error("Lidarr album response exceeded the item bound");
     }
-    indexAlbum(target, JSON.parse(state.current) as unknown);
+    indexReconciliationAlbum(target, JSON.parse(state.current) as unknown);
     state.current = "";
     state.currentBytes = 0;
 }
@@ -212,14 +216,16 @@ function isReadable(value: unknown): value is Readable {
     );
 }
 
-/** Streams the unpaged Lidarr album array into the two derived snapshot maps. */
+/** Streams a bounded Lidarr album array into the two derived snapshot maps. */
 export async function fetchReconciliationAlbumMaps(
     client: ReconciliationAlbumClient,
     target: ReconciliationAlbumMaps,
     signal: AbortSignal,
+    params?: Record<string, unknown>,
 ): Promise<void> {
     signal.throwIfAborted();
     const response = await client.get("/api/v1/album", {
+        ...(params === undefined ? {} : { params }),
         signal,
         responseType: "stream",
         maxContentLength: LIDARR_ALBUM_RESPONSE_MAX_BYTES,
@@ -229,7 +235,9 @@ export async function fetchReconciliationAlbumMaps(
         if (response.data.length > LIDARR_ALBUM_MAX_ITEMS) {
             throw new Error("Lidarr album response exceeded the item bound");
         }
-        for (const album of response.data) indexAlbum(target, album);
+        for (const album of response.data) {
+            indexReconciliationAlbum(target, album);
+        }
         return;
     }
     if (!isReadable(response.data)) {

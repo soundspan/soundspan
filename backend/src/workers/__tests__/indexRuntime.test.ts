@@ -201,10 +201,14 @@ describe("workers runtime behavior", () => {
             })),
         };
 
+        const findActiveDownloadJobs = jest.fn(
+            async (): Promise<unknown[]> => [],
+        );
         const prisma = {
             discoveryAlbum: { findFirst: jest.fn(async () => null) },
             unavailableAlbum: { create: jest.fn(async () => undefined) },
             audiobook: { count: jest.fn(async () => 0) },
+            downloadJob: { findMany: findActiveDownloadJobs },
         };
 
         jest.doMock("../../utils/logger", () => ({ logger }));
@@ -433,6 +437,7 @@ describe("workers runtime behavior", () => {
             lidarrService,
             dataCacheService,
             trackReconciliationService,
+            prisma,
         };
     }
 
@@ -772,6 +777,18 @@ describe("workers runtime behavior", () => {
         expect(
             mocks.lidarrService.getReconciliationSnapshot,
         ).toHaveBeenCalledTimes(3);
+        expect(
+            mocks.queueCleaner.reconcileWithLocalLibrary,
+        ).toHaveBeenCalledTimes(3);
+        expect(
+            mocks.simpleDownloadManager.markStaleJobsAsFailed,
+        ).not.toHaveBeenCalled();
+        expect(
+            mocks.simpleDownloadManager.reconcileWithLidarr,
+        ).not.toHaveBeenCalled();
+        expect(
+            mocks.simpleDownloadManager.syncWithLidarrQueue,
+        ).not.toHaveBeenCalled();
         expect(mocks.logger.warn).toHaveBeenCalledWith(
             "Skipping reconciliation while circuit breaker is open",
             expect.objectContaining({
@@ -2314,6 +2331,26 @@ describe("workers runtime behavior", () => {
     it("runs reconciliation scheduler cycles and logs activity counts", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();
+        const activeJobs = [
+            {
+                status: "processing",
+                targetMbid: "target-mbid",
+                metadata: {
+                    lidarrMbid: "lidarr-mbid",
+                    artistName: "Scope Artist",
+                },
+                subject: "Subject Artist - Subject Album",
+                lidarrRef: "download-id",
+            },
+            {
+                status: "pending",
+                targetMbid: "pending-mbid",
+                metadata: null,
+                subject: "Pending Artist - Pending Album",
+                lidarrRef: null,
+            },
+        ];
+        mocks.prisma.downloadJob.findMany.mockResolvedValueOnce(activeJobs);
         mocks.simpleDownloadManager.markStaleJobsAsFailed.mockResolvedValueOnce(
             2,
         );
@@ -2343,7 +2380,28 @@ describe("workers runtime behavior", () => {
 
         expect(
             mocks.lidarrService.getReconciliationSnapshot,
-        ).toHaveBeenCalled();
+        ).toHaveBeenCalledWith(
+            {
+                needsQueue: true,
+                albumTargets: [
+                    {
+                        mbids: ["target-mbid", "lidarr-mbid"],
+                        artistName: "Scope Artist",
+                    },
+                ],
+            },
+            expect.any(AbortSignal),
+        );
+        expect(mocks.prisma.downloadJob.findMany).toHaveBeenCalledWith({
+            where: { status: { in: ["pending", "processing"] } },
+            select: {
+                status: true,
+                targetMbid: true,
+                metadata: true,
+                subject: true,
+                lidarrRef: true,
+            },
+        });
         expect(
             mocks.simpleDownloadManager.markStaleJobsAsFailed,
         ).toHaveBeenCalled();

@@ -466,7 +466,10 @@ describe("lidarr service behavior", () => {
             success: false,
             message: "Lidarr not enabled",
         });
-        const snapshot = await lidarrService.getReconciliationSnapshot();
+        const snapshot = await lidarrService.getReconciliationSnapshot({
+            needsQueue: false,
+            albumTargets: [],
+        });
         expect(snapshot.queue.size).toBe(0);
         expect(snapshot.albumsByMbid.size).toBe(0);
     });
@@ -891,9 +894,12 @@ describe("lidarr service behavior", () => {
                 ],
             });
 
-        await expect(lidarrService.getReconciliationSnapshot()).rejects.toThrow(
-            "queue fail",
-        );
+        await expect(
+            lidarrService.getReconciliationSnapshot({
+                needsQueue: true,
+                albumTargets: [],
+            }),
+        ).rejects.toThrow("queue fail");
     });
 
     it("searchArtist returns direct results when Lidarr lookup is populated", async () => {
@@ -2004,14 +2010,26 @@ describe("lidarr service behavior", () => {
                 },
             })
             .mockResolvedValueOnce({
+                data: [
+                    {
+                        id: 10,
+                        artistName: "Malformed Artist",
+                        statistics: { albumCount: 1 },
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
                 data: {
                     records: 5 as any,
                 },
             });
 
-        await expect(lidarrService.getReconciliationSnapshot()).rejects.toThrow(
-            "not readable",
-        );
+        await expect(
+            lidarrService.getReconciliationSnapshot({
+                needsQueue: true,
+                albumTargets: [{ mbids: [], artistName: "Malformed Artist" }],
+            }),
+        ).rejects.toThrow("not readable");
         expect(logger.error).toHaveBeenCalledWith(
             "[LIDARR] Failed to create reconciliation snapshot:",
             expect.objectContaining({

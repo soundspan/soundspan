@@ -22,11 +22,12 @@ import {
 import { selectAlbumInCatalogMatch } from "./lidarr/lidarrAlbumSelection";
 import { grabRelease as grabCatalogRelease } from "./lidarr/lidarrReleaseGrab";
 import {
-    getReconciliationSnapshot as fetchReconciliationSnapshot,
+    getReconciliationSnapshot as fetchSnapshot,
     isAlbumAvailableInSnapshot as snapshotHasAlbum,
     isDownloadActiveInSnapshot as snapshotHasActiveDownload,
     type ReconciliationSnapshot,
 } from "./lidarr/lidarrReconciliation";
+import type { ReconciliationScope } from "./download/reconciliationScope";
 import { LidarrTagService } from "./lidarr/lidarrTagService";
 import type {
     LidarrAlbum,
@@ -1606,18 +1607,13 @@ class LidarrService {
         }
     }
 
-    /**
-     * Fetch all data needed for reconciliation in minimal API calls.
-     * Returns indexed Maps for O(1) lookups against job data.
-     *
-     * This replaces multiple per-job API calls with a single snapshot fetch.
-     */
     /** Fetch all data needed for reconciliation in minimal API calls. */
     async getReconciliationSnapshot(
+        scope: ReconciliationScope,
         signal?: AbortSignal,
     ): Promise<ReconciliationSnapshot> {
         await this.ensureInitialized();
-        return fetchReconciliationSnapshot(this.client, this.enabled, signal);
+        return fetchSnapshot(this.client, this.enabled, scope, signal);
     }
 
     /** Check album availability against a pre-fetched snapshot. */
