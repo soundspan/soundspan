@@ -40,6 +40,19 @@ describe("resolveProxyTimeoutMs", () => {
         assert.equal(timeoutMs, 20_000);
     });
 
+    test("uses the long budget for bulk music-request actions", () => {
+        assert.equal(
+            resolveProxyTimeoutMs("api/requests/bulk/approve", {}),
+            90_000,
+        );
+        assert.equal(
+            resolveProxyTimeoutMs("/api/requests/bulk/deny-stale/", {}),
+            90_000,
+        );
+        assert.equal(resolveProxyTimeoutMs("api/requests", {}), 20_000);
+        assert.equal(resolveProxyTimeoutMs("api/requests/bulkx", {}), 20_000);
+    });
+
     test("falls back to max(global, import default) when import override is invalid", () => {
         const timeoutMs = resolveProxyTimeoutMs("api/import/preview", {
             PROXY_REQUEST_TIMEOUT_MS: "120000",

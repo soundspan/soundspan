@@ -22,7 +22,10 @@ export interface CreateAlbumDownloadJobParams {
     albumTitle?: string;
     downloadType: "library" | "discovery";
     rootFolderPath: string;
-    metadata: Readonly<{ queuedVia: typeof ALBUM_DOWNLOAD_QUEUE_OWNER }>;
+    metadata: Readonly<{
+        queuedVia: typeof ALBUM_DOWNLOAD_QUEUE_OWNER;
+        noFallback?: boolean;
+    }>;
 }
 
 /** A newly created job or the active job that already owns the album. */

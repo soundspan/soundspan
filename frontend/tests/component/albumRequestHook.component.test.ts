@@ -24,9 +24,15 @@ for (const kind of ["loading", "success", "error"] as const) {
 mock.module("@/hooks/useMusicRequests", {
     namedExports: {
         useRequestsGate: () => ({ requestsEnabled: true }),
-        useMyMusicRequests: () => ({ data: openRequestIds }),
-        openRequestRgMbids: (ids: string[] | undefined) =>
-            new Set((ids ?? []).map((id) => id.toLowerCase())),
+        useMyOpenMusicRequests: () => ({
+            data: openRequestIds.map((rgMbid) => ({
+                rgMbid,
+                status: "pending",
+                downloadStatus: null,
+            })),
+        }),
+        openRequestRgMbids: (rows: Array<{ rgMbid: string }> | undefined) =>
+            new Set((rows ?? []).map((row) => row.rgMbid.toLowerCase())),
         useCreateMusicRequest: () => ({
             isPending: false,
             mutateAsync: async (input: CreateMusicRequestInput) => {
@@ -105,6 +111,7 @@ test("an open request for the match marks the album as requested", async () => {
     openRequestIds = [MATCHED.toUpperCase()];
     const harness = await mountHook(matchedPlaceholder);
     assert.equal(harness.latest().isRequestedAlbum, true);
+    assert.equal(harness.latest().requestState, "requested");
     await harness.unmount();
 });
 

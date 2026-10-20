@@ -20,6 +20,9 @@ const getBackendUrl = (): string => {
 const DEFAULT_PROXY_TIMEOUT_MS = 20_000;
 const DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS = 90_000;
 const IMPORT_PREVIEW_PROXY_PATH = "api/import/preview";
+// Bulk music-request actions run up to 25 approvals per call.
+const DEFAULT_BULK_REQUEST_PROXY_TIMEOUT_MS = 90_000;
+const BULK_REQUEST_PROXY_PATH = "api/requests/bulk";
 
 const parsePositiveTimeoutMs = (value: string | undefined): number | null => {
     const parsed = Number(value);
@@ -40,7 +43,14 @@ export const resolveProxyTimeoutMs = (
         parsePositiveTimeoutMs(env.PROXY_REQUEST_TIMEOUT_MS) ??
         DEFAULT_PROXY_TIMEOUT_MS;
 
-    if (normalizeTargetPath(targetPath) !== IMPORT_PREVIEW_PROXY_PATH) {
+    const normalized = normalizeTargetPath(targetPath);
+    if (
+        normalized === BULK_REQUEST_PROXY_PATH ||
+        normalized.startsWith(`${BULK_REQUEST_PROXY_PATH}/`)
+    ) {
+        return Math.max(globalTimeout, DEFAULT_BULK_REQUEST_PROXY_TIMEOUT_MS);
+    }
+    if (normalized !== IMPORT_PREVIEW_PROXY_PATH) {
         return globalTimeout;
     }
 

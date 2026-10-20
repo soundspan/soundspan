@@ -226,8 +226,9 @@ tmp_frontend_uid="$(mktemp)"
 tmp_metrics="$(mktemp)"
 tmp_acoustid_value="$(mktemp)"
 tmp_acoustid_existing="$(mktemp)"
+tmp_requests_cooldown="$(mktemp)"
 tmp_requests_daily_cap="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_dclap_scaled" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics" "$tmp_acoustid_value" "$tmp_acoustid_existing" "$tmp_requests_daily_cap"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_dclap_scaled" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics" "$tmp_acoustid_value" "$tmp_acoustid_existing" "$tmp_requests_cooldown" "$tmp_requests_daily_cap"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -272,11 +273,30 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
 fi
 assert_service_selectors_isolated "default AIO" "$tmp_aio"
 assert_deployment_env_absent "$RELEASE_NAME" "CLAP_REDIS_SOCKET_TIMEOUT" "$tmp_aio"
+assert_deployment_env_absent "$RELEASE_NAME" "REQUESTS_DENIED_COOLDOWN_DAYS" "$tmp_aio"
 assert_deployment_env_absent "$RELEASE_NAME" "REQUESTS_PER_USER_PER_DAY" "$tmp_aio"
 if line_match '^kind: ServiceMonitor$' "$tmp_aio"; then
   echo "[ERROR] ServiceMonitor must be disabled by default" >&2
   exit 1
 fi
+
+echo "[CHECK] render request denial cooldown config and env overrides"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set config.requestsDeniedCooldownDays=0 \
+  >"$tmp_requests_cooldown"
+assert_deployment_env_value "$RELEASE_NAME" "REQUESTS_DENIED_COOLDOWN_DAYS" "0" "$tmp_requests_cooldown"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set config.requestsDeniedCooldownDays=0 \
+  >"$tmp_requests_cooldown"
+assert_deployment_env_value "${RELEASE_NAME}-backend" "REQUESTS_DENIED_COOLDOWN_DAYS" "0" "$tmp_requests_cooldown"
+assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "REQUESTS_DENIED_COOLDOWN_DAYS" "0" "$tmp_requests_cooldown"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set config.requestsDeniedCooldownDays=12 \
+  --set-string aio.env.REQUESTS_DENIED_COOLDOWN_DAYS=45 \
+  >"$tmp_requests_cooldown"
+assert_deployment_env_value "$RELEASE_NAME" "REQUESTS_DENIED_COOLDOWN_DAYS" "45" "$tmp_requests_cooldown"
 
 echo "[CHECK] render per-user music request daily cap config and env overrides"
 helm template "$RELEASE_NAME" "$CHART_PATH" \

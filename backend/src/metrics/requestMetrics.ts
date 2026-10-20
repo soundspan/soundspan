@@ -9,6 +9,7 @@ export const MUSIC_REQUEST_ACTIONS = [
     "fulfilled",
     "failed",
     "rejected_duplicate",
+    "rejected_cooldown",
     "rejected_cap",
 ] as const;
 

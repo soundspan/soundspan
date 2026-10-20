@@ -194,6 +194,37 @@ test("AlbumActionBar renders a disabled Requested state for open requests", asyn
     assert.doesNotMatch(html, />Request</);
 });
 
+test("AlbumActionBar shows approved and downloading request progress", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+    const render = (requestState: "approved" | "downloading") =>
+        renderToStaticMarkup(
+            React.createElement(AlbumActionBar, {
+                ...baseProps,
+                album: {
+                    ...baseProps.album,
+                    owned: false,
+                    rgMbid: "real-release-group",
+                },
+                source: "discovery" as const,
+                downloadsEnabled: false,
+                requestsEnabled: true,
+                isRequestedAlbum: true,
+                requestState,
+                onRequestAlbum: noop,
+            }),
+        );
+
+    const approved = render("approved");
+    assert.match(approved, />Approved</);
+    assert.match(approved, /approved your request/);
+    assert.doesNotMatch(approved, />Requested</);
+
+    const downloading = render("downloading");
+    assert.match(downloading, />Downloading</);
+    assert.match(downloading, /album is downloading/);
+});
+
 test("AlbumActionBar never shows Request to viewers with direct downloads", async () => {
     const { AlbumActionBar } =
         await import("../../features/album/components/AlbumActionBar");

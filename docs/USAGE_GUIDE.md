@@ -47,7 +47,7 @@ When you like a song that plays from TIDAL or YouTube Music, it appears in your 
 
 - Only your own likes appear. Other people's likes stay in their own Library.
 - Search finds them too, in their own **From your streaming services** group below your library songs.
-- Artists you only know from streaming appear in `Artists` with the number of streaming albums or songs you liked. Their artist page lists those albums together with your own, each with its badge.
+- Artists you only know from streaming appear in `Artists` with the number of streaming albums or songs you liked. Their artist page lists those albums under `Discography` together with your own, each with its badge. If MusicBrainz lists an album with the same title, that album still appears under `Albums Available` or `Singles and EPs`, so admins can download it, and other users can request it when requests are on. The exception is the MusicBrainz album that soundspan matched your streaming album to: it appears only once, as your streaming album, whose page offers `Download` or `Request`.
 - If you sign out of TIDAL, or an admin turns a service off, its songs leave your Library until it is back. Your likes are kept, and `My Liked` still lists them.
 - To take a streaming song out of your Library, unlike it. Streaming songs have no `Delete` option, because there is no file to delete.
 - Sorting artists by `Most Tracks` counts only your own files.
@@ -68,7 +68,7 @@ When your library already has the matched album, for example after you add it, s
 
 - A liked song that the album did not bring in, such as a streaming-only bonus track, offers neither `Add album to library` nor `Request album`. Admins see `Add song to library` instead, under the same rules as a song whose album has no MusicBrainz match: a TIDAL song needs TIDAL set up as a download source.
 - The streaming album's page shows no `Download` or `Request`.
-- The streaming album does not appear in the `Albums` list, so with `All` the album shows once, as your own copy. Its leftover liked songs stay in `Songs` and still open the streaming album's page.
+- The streaming album does not appear in the `Albums` list or on the artist page, so with `All` the album shows once, as your own copy. Its leftover liked songs stay in `Songs` and still open the streaming album's page.
 
 After the files arrive and the next library scan matches the song to them, only your own copy shows, without the badge.
 
@@ -114,15 +114,50 @@ What gets sent: finished tracks (scrobbles) and now-playing updates, for music y
 
 ## Requesting Music
 
-Non-admin users cannot download music directly. Instead, they can ask for it:
+Non-admin users cannot download music directly. Instead, they can ask for it.
 
-- Open an album that is not in the library. A `Request` button appears where admins see `Download`.
-- Click `Request`. The button changes to `Requested` and an admin is notified.
-- Admins review requests on the `Requests` page (avatar menu -> `Requests`): approve to send the album into the download queue, or decline.
-- You get a notification when your request is approved, declined, or when the album lands in the library.
-- Visit `/requests` to see your own requests and cancel pending ones.
+### Asking for an album
 
-Limits: you cannot request an album that is already in the library, already requested, or already downloading, and there is a daily per-user cap (default 10, operators can change `REQUESTS_PER_USER_PER_DAY`). Operators can turn the whole feature off with `FEATURE_REQUESTS=false`.
+- Open an album that is not in the library. A `Request` button appears where admins see `Download`. Artist pages and Release Radar offer the same request.
+- Click `Request`. The button changes to `Requested`, and the admins are notified.
+
+### Following your request
+
+Open `My Requests` from the avatar menu, or from the side menu on a phone. Each request shows where it stands:
+
+| Status                   | What it means                                                       |
+| ------------------------ | ------------------------------------------------------------------- |
+| `Pending`                | No admin has reviewed it yet. You can cancel it.                    |
+| `Approved`               | An admin approved it. The status updates within a few minutes.      |
+| `Approved — queued`      | An admin approved it. The download waits for its turn.              |
+| `Approved — downloading` | The album is downloading now.                                       |
+| `In your library`        | The album arrived. `Open album` takes you to it.                    |
+| `Declined`               | An admin said no. Their reason shows on the row when they gave one. |
+| `Failed`                 | The download did not finish. An admin can retry it or decline it.   |
+| `Cancelled`              | You cancelled it.                                                   |
+
+The button on the album page follows along too: `Requested`, then `Approved`, then `Downloading`.
+
+You get a notification when your request is approved, declined, or failed, and when the album is in your library. The library notification opens the album page. A failure notification says whether the download failed or was stopped before it finished.
+
+### Reviewing requests (admins)
+
+The `Requests` entry in the avatar menu shows how many requests are waiting. On the `Requests` page:
+
+- `Approve` sends the album into the download queue. `Decline` asks for an optional reason, which the requester sees.
+- `Approve all from <user>` approves that user's pending requests, up to 25 at a time. Run it again to approve the rest.
+- `Decline stale` declines every pending request older than the age you pick (7, 14, 30, or 90 days), up to 200 at a time, with an optional reason.
+- A failed request shows `Retry` and `Decline`. `Retry` starts a new download. Admins also get a notification when an approved request fails.
+- Use the status filter and the page buttons to move through long lists.
+
+A download that starts when an admin approves a request gets only the album that was asked for. It never falls back to a different album by the same artist; when no source has the album, the request fails. If the album is already downloading for another reason when the request is approved, the request follows that download instead.
+
+### Limits
+
+- You cannot request an album that is already in the library, already requested, or already downloading.
+- Each user has a daily request cap (default 10). Operators can change it with `REQUESTS_PER_USER_PER_DAY`.
+- After an admin declines an album, nobody can request it again for 30 days. If you try too early, the message says when you can ask again. Operators can change the wait with `REQUESTS_DENIED_COOLDOWN_DAYS`, and `0` turns it off. Declining stale requests does not start this wait.
+- Operators can turn the whole feature off with `FEATURE_REQUESTS=false`.
 
 On the default recommendation mode, Discover Weekly playlists generate for everyone from music the server already has and never download albums. The legacy download-based mode is admin-only.
 

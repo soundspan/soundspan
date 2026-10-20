@@ -89,6 +89,7 @@ spec:
             "SCAN_FILE_CONCURRENCY" true
             "CATALOG_PERSISTENCE" true
             "CATALOG_RETENTION_DAYS" true
+            "REQUESTS_DENIED_COOLDOWN_DAYS" true
             "REQUESTS_PER_USER_PER_DAY" true
             "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
             "PROVIDER_TRACK_RETENTION_DAYS" true
@@ -224,6 +225,13 @@ spec:
             {{- else if not (kindIs "invalid" .Values.config.catalogRetentionDays) }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ .Values.config.catalogRetentionDays | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "REQUESTS_DENIED_COOLDOWN_DAYS" }}
+            - name: REQUESTS_DENIED_COOLDOWN_DAYS
+              value: {{ index $aioEnv "REQUESTS_DENIED_COOLDOWN_DAYS" | quote }}
+            {{- else if not (kindIs "invalid" .Values.config.requestsDeniedCooldownDays) }}
+            - name: REQUESTS_DENIED_COOLDOWN_DAYS
+              value: {{ .Values.config.requestsDeniedCooldownDays | quote }}
             {{- end }}
             {{- if hasKey $aioEnv "REQUESTS_PER_USER_PER_DAY" }}
             - name: REQUESTS_PER_USER_PER_DAY

@@ -772,6 +772,9 @@ config:
   #    The application default is 180 days. When unset, the application default applies
   #    and any global.env/envFrom value passes through untouched.
   catalogRetentionDays: null
+  # -- Days before a declined album may be requested again. Set to 0 to disable.
+  #    When unset, the application default of 30 days applies.
+  requestsDeniedCooldownDays: null
   # -- Rolling 24-hour music-request cap per user; the application default is 10.
   #    When unset, the application default applies and any global.env/envFrom value passes through untouched.
   requestsPerUserPerDay: null

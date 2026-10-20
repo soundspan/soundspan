@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (68 models, 1553 lines)
+Schema source: `backend/prisma/schema.prisma` (69 models, 1569 lines)
 
 ## Entity Relationship Overview
 
@@ -132,9 +132,18 @@ TrackMapping is **advisory, not authoritative**:
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 
-- Artist pages showing both local and remote tracks
-- Album pages with mixed local/remote content
+- Artist pages that list a user's liked `REMOTE` albums next to the library albums
+- Album pages for those `REMOTE` albums, which list the user's liked songs
 - Unified play counts across providers
+
+An artist page lists a `REMOTE` album only to a user who liked one of its
+`TrackTidal` or `TrackYtMusic` rows. The provider must be connected for that
+user, at least one liked row must not be linked to a visible library track,
+and the library must not hold the album's match (see below). A `REMOTE` album
+hides a MusicBrainz discography entry only when the entry's release group equals
+its `matchedRgMbid`, because its album page then offers that download. A
+matching title alone never hides an entry: the placeholder `rgMbid` is not a
+release group that can be downloaded.
 
 A `REMOTE` album that `albumResolutionService` cannot match starts with a
 placeholder `rgMbid` of the form `remote:<hash>`. The
@@ -147,9 +156,9 @@ with at least one visible local track has `rgMbid` equal to an album's
 `matchedRgMbid`. Song rows and the album detail response then report
 `matchedInLibrary: true`, the album is not offered for download or request, and
 a `REMOTE` placeholder leaves the per-user remote album lookups behind album
-lists and artist album counts. This is decided when each response is built:
-the placeholder's `TrackTidal` and `TrackYtMusic` rows keep their `albumId`, so
-a cleared or replaced match takes effect without moving rows back. A library
+lists, artist pages, and artist album counts. This is decided when each response
+is built: the placeholder's `TrackTidal` and `TrackYtMusic` rows keep their
+`albumId`, so a cleared or replaced match takes effect without moving rows back. A library
 scan can adopt a placeholder by title; it then becomes a `LIBRARY` album that
 keeps its `remote:` `rgMbid` and its `matchedRgMbid`, and the job, which only
 checks `REMOTE` albums, leaves that match as it is. `rgMbidCheckedAt` records
@@ -158,10 +167,16 @@ album without a match is checked again after seven days, and a matched album
 after thirty days, when a new answer replaces or clears the match. Artist browse
 results come from the MusicBrainz cache, which can be up to 30 days old.
 
-Metadata-catalog persistence reuses `Artist` and `Album`; it does not introduce
-separate catalog models. Persisted catalog albums use `Album.location=CATALOG`
-and `catalogTouchedAt` for retention paging. `Artist.catalogSyncedAt` records the
-last catalog synchronization.
+Metadata-catalog persistence stores each artist's last MusicBrainz
+release-group list in `ArtistCatalogReleaseGroup`: one row per artist and
+release group (composite key `artistId` + `rgMbid`) with `position`, `title`,
+nullable `firstReleaseDate`, `primaryType`, and a `secondaryTypes` array. Each
+sync replaces the artist's rows, and the rows are deleted with their artist.
+They do not reference `Album`, so a collaboration owned by another artist, or a
+release group held by an album in another location, stays in the artist's list.
+Persisted catalog album skeletons use `Album.location=CATALOG` and
+`catalogTouchedAt` for retention paging. `Artist.catalogSyncedAt` records the
+last sync that stored at least one release group.
 
 ### Federation
 
@@ -222,7 +237,7 @@ is an unused legacy column retained in the schema; nothing reads or writes it.
 | `ApiKey`                         | Subsonic/API key auth                                                                                                                |
 | `DeviceLinkCode`                 | Device pairing codes                                                                                                                 |
 | `InviteCode` / `InviteCodeUsage` | Invite system                                                                                                                        |
-| `MusicRequest`                   | Non-admin album request queue backing `/api/requests`: requester, `artistName`/`albumTitle`/`rgMbid`, `status` lifecycle (pending through fulfilled/denied), reviewer fields, optional `downloadJobId` |
+| `MusicRequest`                   | Non-admin album request queue backing `/api/requests`: requester, `artistName`/`albumTitle`/`rgMbid`, `status` lifecycle (`pending`, `approved`, `fulfilled`, `denied`, `failed`, `cancelled`), reviewer fields, optional `downloadJobId` (not a foreign key; several requests can share one job, and an admin retry relinks a failed request to a new job), and `cooldownUntil` (set by a single admin decline while `REQUESTS_DENIED_COOLDOWN_DAYS` is above 0, null for stale bulk declines; while it is in the future and the setting is above 0, nobody can request the same `rgMbid`) |
 
 `User.passwordHash` is nullable for OIDC-only accounts. The credential-stranding
 guard blocks unlinking an external identity when the account has no local

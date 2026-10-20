@@ -418,6 +418,7 @@ config:
   scanFileConcurrency: 3
   catalogPersistence: true
   catalogRetentionDays: 180
+  requestsDeniedCooldownDays: 30
   requestsPerUserPerDay: 10
 ```
 
@@ -653,6 +654,7 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `DISCOVERY_ENABLED` | `config.features.discovery` | No | `true` |
 | `AUTO_PLAYLISTS_ENABLED` | `config.features.autoPlaylists` | No | `true` |
 | `FEATURE_REQUESTS` | `config.features.requests` | No | `true` |
+| `REQUESTS_DENIED_COOLDOWN_DAYS` | `config.requestsDeniedCooldownDays` | No | App default: `30` (chart leaves unset unless configured) |
 | `REQUESTS_PER_USER_PER_DAY` | `config.requestsPerUserPerDay` | No | App default: `10` requests per rolling 24 hours (chart leaves unset unless configured) |
 | `FEDERATION_ENABLED` | `config.features.federation` | No | `false` |
 | `SCAN_FILE_CONCURRENCY` | `config.scanFileConcurrency` | No | App default: `3` (chart leaves unset unless configured) |

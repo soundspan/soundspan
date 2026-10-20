@@ -183,7 +183,10 @@ describe("config module", () => {
         ]);
         expect(config.features.federation).toBe(false);
         expect(config.features.requests).toBe(true);
-        expect(config.requests).toEqual({ dailyCapPerUser: 10 });
+        expect(config.requests).toEqual({
+            dailyCapPerUser: 10,
+            deniedCooldownDays: 30,
+        });
         expect(config.federation.allowPrivatePeers).toBe(false);
         expect(config.federation.allowProxy).toBe(false);
         expect(config.workers.federationTombstoneRetentionDays).toBe(90);
@@ -709,17 +712,41 @@ describe("config module", () => {
         const enabled = await loadConfigModule({
             FEATURE_REQUESTS: "false",
             REQUESTS_PER_USER_PER_DAY: "25",
+            REQUESTS_DENIED_COOLDOWN_DAYS: "0",
         });
         expect(enabled.config.features.requests).toBe(false);
-        expect(enabled.config.requests).toEqual({ dailyCapPerUser: 25 });
+        expect(enabled.config.requests).toEqual({
+            dailyCapPerUser: 25,
+            deniedCooldownDays: 0,
+        });
 
         const fallback = await loadConfigModule({
             FEATURE_REQUESTS: undefined,
             REQUESTS_PER_USER_PER_DAY: "0",
+            REQUESTS_DENIED_COOLDOWN_DAYS: undefined,
         });
         expect(fallback.config.features.requests).toBe(true);
-        expect(fallback.config.requests).toEqual({ dailyCapPerUser: 10 });
+        expect(fallback.config.requests).toEqual({
+            dailyCapPerUser: 10,
+            deniedCooldownDays: 30,
+        });
     });
+
+    it.each([
+        ["abc", 30],
+        ["-1", 30],
+        ["3651", 30],
+        ["999999999999999999999", 30],
+    ])(
+        "falls back for invalid REQUESTS_DENIED_COOLDOWN_DAYS %p",
+        async (raw, expected) => {
+            const { config } = await loadConfigModule({
+                REQUESTS_DENIED_COOLDOWN_DAYS: raw,
+            });
+
+            expect(config.requests.deniedCooldownDays).toBe(expected);
+        },
+    );
 
     it.each(["off", "false", "0", "OFF", " FALSE "])(
         "disables catalog persistence for %p",

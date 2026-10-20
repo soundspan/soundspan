@@ -62,10 +62,11 @@ import {
 import { resolveArtistImage } from "../../services/metadata/artistImageResolver";
 import { isRealArtistMbid } from "../../utils/musicIds";
 import { filterLibraryArtistReleaseGroups } from "../../services/metadata/discographyFiltering";
+import { discographyCacheTtlSeconds } from "../../services/metadata/discographyCachePolicy";
 import {
+    findFreshArtistCatalogReleaseGroups,
     logCatalogPersistenceError,
     persistCatalogReleaseGroups,
-    readFreshCatalogReleaseGroups,
 } from "../../services/metadata/catalogPersistence";
 import {
     formatRemoteAwareArtist,
@@ -478,6 +479,7 @@ export async function handleGetArtist(
         readLibraryArtist({
             lookup: { id: idParam, name, mbid: idParam },
             albumLocations: LIBRARY_SURFACE_ALBUM_LOCATIONS,
+            likedRemoteAlbumsUserId: req.user?.id,
             requireVisibleAlbum: false,
             albumOrder: "year",
             maxTracksPerAlbum: 10,
@@ -494,8 +496,7 @@ export async function handleGetArtist(
         ? await loadRemoteLibrarySet(req.user?.id, { artistId: artist.id })
         : null;
 
-    // For enriched artists with ownedAlbums, skip expensive MusicBrainz calls.
-    // Only fetch from MusicBrainz if the artist hasn't been enriched yet.
+    // Fetch MusicBrainz only when the artist needs external discography data.
     let albumsWithOwnership = [];
     const ownedRgMbids = new Set(artist.ownedAlbums.map((o) => o.rgMbid));
 
@@ -619,11 +620,11 @@ export async function handleGetArtist(
                         `[Artist] Using cached discography (${releaseGroups.length} albums)`,
                     );
                 } else {
-                    const catalogReleaseGroups = readFreshCatalogReleaseGroups({
-                        artistId: artist.id,
-                        catalogSyncedAt: artist.catalogSyncedAt,
-                        albums: artist.albums,
-                    });
+                    const catalogReleaseGroups =
+                        await findFreshArtistCatalogReleaseGroups({
+                            artistId: artist.id,
+                            catalogSyncedAt: artist.catalogSyncedAt,
+                        });
                     if (catalogReleaseGroups !== null) {
                         releaseGroups = catalogReleaseGroups;
                     } else {
@@ -640,7 +641,7 @@ export async function handleGetArtist(
                     }
                     await redisClient.setEx(
                         discoCacheKey,
-                        24 * 60 * 60,
+                        discographyCacheTtlSeconds(releaseGroups.length),
                         JSON.stringify(releaseGroups),
                     );
                 }
@@ -659,7 +660,7 @@ export async function handleGetArtist(
                 if (fetchedFromProvider) {
                     void persistCatalogReleaseGroups({
                         artistId: artist.id,
-                        releaseGroups: filteredReleaseGroups,
+                        releaseGroups,
                     }).catch(logCatalogPersistenceError);
                 }
 

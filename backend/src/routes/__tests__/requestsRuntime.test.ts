@@ -5,12 +5,16 @@ const mockListAllRequests = jest.fn();
 const mockApproveRequest = jest.fn();
 const mockDenyRequest = jest.fn();
 const mockGetRequestAvailability = jest.fn();
+const mockGetRequestCounts = jest.fn();
+const mockApprovePendingRequestsForUser = jest.fn();
+const mockDenyStaleRequests = jest.fn();
 const mockEnqueueAlbumDownloadInBackground = jest.fn();
 
 class MockMusicRequestServiceError extends Error {
     constructor(
         public readonly code: string,
         message: string,
+        public readonly retryAfter?: Date,
     ) {
         super(message);
         this.name = "MusicRequestServiceError";
@@ -49,6 +53,13 @@ jest.mock("../../services/musicRequestService", () => ({
     denyRequest: (...args: unknown[]) => mockDenyRequest(...args),
     getRequestAvailability: (...args: unknown[]) =>
         mockGetRequestAvailability(...args),
+    getRequestCounts: (...args: unknown[]) => mockGetRequestCounts(...args),
+}));
+jest.mock("../../services/musicRequestBulkActions", () => ({
+    MAX_BULK_APPROVALS: 25,
+    approvePendingRequestsForUser: (...args: unknown[]) =>
+        mockApprovePendingRequestsForUser(...args),
+    denyStaleRequests: (...args: unknown[]) => mockDenyStaleRequests(...args),
 }));
 jest.mock("../../services/albumDownloadQueueService", () => ({
     enqueueAlbumDownloadInBackground: (...args: unknown[]) =>
@@ -147,7 +158,25 @@ describe("requests route runtime", () => {
             enabled: true,
             remainingToday: 9,
             dailyCap: 10,
+            deniedCooldownDays: 30,
         });
+        mockGetRequestCounts.mockResolvedValue({
+            pending: 1,
+            approved: 2,
+            denied: 3,
+            fulfilled: 4,
+            failed: 5,
+            cancelled: 6,
+        });
+        mockApprovePendingRequestsForUser.mockResolvedValue({
+            approved: 1,
+            fulfilled: 0,
+            skipped: 0,
+            failed: 0,
+            remaining: 0,
+            dispatches: [],
+        });
+        mockDenyStaleRequests.mockResolvedValue({ denied: 2, remaining: 0 });
         mockEnqueueAlbumDownloadInBackground.mockReturnValue(undefined);
     });
 
@@ -167,6 +196,9 @@ describe("requests route runtime", () => {
 
     it.each([
         ["/", "get"],
+        ["/counts", "get"],
+        ["/bulk/approve", "post"],
+        ["/bulk/deny-stale", "post"],
         ["/:id/approve", "post"],
         ["/:id/deny", "post"],
     ] as const)("rejects non-admin access to %s", async (path, method) => {
@@ -197,7 +229,11 @@ describe("requests route runtime", () => {
         );
 
         expect(res.statusCode).toBe(200);
-        expect(mockListAllRequests).toHaveBeenCalledWith(undefined);
+        expect(mockListAllRequests).toHaveBeenCalledWith({
+            status: undefined,
+            limit: 50,
+            offset: 0,
+        });
     });
 
     it.each([
@@ -274,7 +310,10 @@ describe("requests route runtime", () => {
         );
 
         expect(res.statusCode).toBe(409);
-        expect(res.body).toEqual({ error: "Album has already been requested" });
+        expect(res.body).toEqual({
+            error: "Album has already been requested",
+            code: "already_requested",
+        });
         expect(mockCreateRequest).toHaveBeenCalledWith("user-1", validBody);
     });
 
@@ -296,7 +335,32 @@ describe("requests route runtime", () => {
         );
 
         expect(res.statusCode).toBe(status);
-        expect(res.body).toEqual({ error: message });
+        expect(res.body).toEqual({ error: message, code });
+    });
+
+    it("maps an active cooldown with retry guidance", async () => {
+        const retryAfter = new Date("2026-11-01T00:00:00.000Z");
+        mockCreateRequest.mockRejectedValueOnce(
+            new MockMusicRequestServiceError(
+                "recently_denied",
+                "This album was declined recently and can be requested again later",
+                retryAfter,
+            ),
+        );
+        const res = createRes();
+
+        await finalHandler("/", "post")(
+            { user: { id: "user-1" }, body: validBody },
+            res,
+            jest.fn(),
+        );
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body).toEqual({
+            error: "This album was declined recently and can be requested again later",
+            code: "recently_denied",
+            retryAfter: "2026-11-01T00:00:00.000Z",
+        });
     });
 
     it("returns a static canonical 500 for unexpected create failures", async () => {
@@ -318,7 +382,11 @@ describe("requests route runtime", () => {
 
     it.each([
         [{ kind: "not_found" }, 404, "Music request not found"],
-        [{ kind: "conflict" }, 409, "Only pending requests can be cancelled"],
+        [
+            { kind: "conflict", reason: "not_reviewable" },
+            409,
+            "Only pending requests can be cancelled",
+        ],
     ])("maps cancellation outcomes", async (outcome, status, error) => {
         mockCancelOwnRequest.mockResolvedValueOnce(outcome);
         const res = createRes();
@@ -387,6 +455,235 @@ describe("requests route runtime", () => {
         );
 
         expect(res.statusCode).toBe(400);
-        expect(res.body).toEqual({ error: "Invalid request status" });
+        expect(res.body).toEqual({ error: "Invalid request query" });
+    });
+
+    it.each([
+        [
+            "/:id/approve",
+            mockApproveRequest,
+            "not_reviewable",
+            "Only pending or failed requests can be approved",
+        ],
+        [
+            "/:id/deny",
+            mockDenyRequest,
+            "not_reviewable",
+            "Only pending or failed requests can be denied",
+        ],
+        [
+            "/:id/approve",
+            mockApproveRequest,
+            "open_request_exists",
+            "This user already has an open request for this album",
+        ],
+    ] as const)(
+        "maps review conflicts on %s",
+        async (path, service, reason, message) => {
+            service.mockResolvedValueOnce({ kind: "conflict", reason });
+            const res = createRes();
+
+            await finalHandler(path, "post")(
+                {
+                    user: { id: "admin-1" },
+                    params: { id: "request-1" },
+                    body: {},
+                },
+                res,
+                jest.fn(),
+            );
+
+            expect(res.statusCode).toBe(409);
+            expect(res.body).toEqual({ error: message, code: reason });
+        },
+    );
+
+    it("returns the configured denial cooldown in availability", async () => {
+        const res = createRes();
+
+        await finalHandler("/availability", "get")(
+            { user: { id: "user-1" } },
+            res,
+            jest.fn(),
+        );
+
+        expect(mockGetRequestAvailability).toHaveBeenCalledWith("user-1");
+        expect(res.body).toEqual({
+            enabled: true,
+            remainingToday: 9,
+            dailyCap: 10,
+            deniedCooldownDays: 30,
+        });
+    });
+
+    it.each([
+        ["/", "get", { limit: "0" }],
+        ["/", "get", { limit: "101" }],
+        ["/mine", "get", { offset: "-1" }],
+    ] as const)("rejects invalid paging on %s", async (path, method, query) => {
+        const res = createRes();
+
+        await finalHandler(path, method)(
+            { user: { id: "admin-1" }, query },
+            res,
+            jest.fn(),
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Invalid request query" });
+    });
+
+    it("passes status and paging to the caller's list", async () => {
+        const page = { requests: [], total: 0, limit: 25, offset: 5 };
+        mockListRequestsForUser.mockResolvedValueOnce(page);
+        const res = createRes();
+
+        await finalHandler("/mine", "get")(
+            {
+                user: { id: "user-1" },
+                query: { status: "failed", limit: "25", offset: "5" },
+            },
+            res,
+            jest.fn(),
+        );
+
+        expect(mockListRequestsForUser).toHaveBeenCalledWith("user-1", {
+            status: "failed",
+            limit: 25,
+            offset: 5,
+        });
+        expect(res.body).toEqual(page);
+    });
+
+    it("returns zero-filled request counts", async () => {
+        const res = createRes();
+
+        await invokeRoute(
+            "/counts",
+            "get",
+            { user: { id: "admin-1", role: "admin" } },
+            res,
+        );
+
+        expect(res.body).toEqual({
+            pending: 1,
+            approved: 2,
+            denied: 3,
+            fulfilled: 4,
+            failed: 5,
+            cancelled: 6,
+        });
+    });
+
+    it("dispatches bulk approvals and omits internal dispatches from the response", async () => {
+        const dispatch = {
+            jobId: "job-1",
+            type: "album",
+            mbid: validBody.rgMbid,
+            subject: "Massive Attack - Mezzanine",
+        };
+        mockApprovePendingRequestsForUser.mockResolvedValueOnce({
+            approved: 1,
+            fulfilled: 1,
+            skipped: 1,
+            failed: 1,
+            remaining: 2,
+            dispatches: [dispatch],
+        });
+        const res = createRes();
+
+        await invokeRoute(
+            "/bulk/approve",
+            "post",
+            {
+                user: { id: "admin-1", role: "admin" },
+                body: { userId: "user-1" },
+            },
+            res,
+        );
+
+        expect(mockApprovePendingRequestsForUser).toHaveBeenCalledWith(
+            "admin-1",
+            "user-1",
+        );
+        expect(mockEnqueueAlbumDownloadInBackground).toHaveBeenCalledWith(
+            dispatch,
+        );
+        expect(res.body).toEqual({
+            approved: 1,
+            fulfilled: 1,
+            skipped: 1,
+            failed: 1,
+            remaining: 2,
+        });
+    });
+
+    it("denies stale requests through the bounded bulk service", async () => {
+        const res = createRes();
+
+        await invokeRoute(
+            "/bulk/deny-stale",
+            "post",
+            {
+                user: { id: "admin-1", role: "admin" },
+                body: { olderThanDays: 30, reason: " Not available " },
+            },
+            res,
+        );
+
+        expect(mockDenyStaleRequests).toHaveBeenCalledWith(
+            "admin-1",
+            30,
+            "Not available",
+        );
+        expect(res.body).toEqual({ denied: 2, remaining: 0 });
+    });
+
+    it.each([
+        ["/bulk/approve", { userId: "user-1", unexpected: true }],
+        ["/bulk/deny-stale", { olderThanDays: 0 }],
+        ["/bulk/deny-stale", { olderThanDays: 366 }],
+        ["/bulk/deny-stale", { olderThanDays: 30, unexpected: true }],
+    ])("rejects invalid strict bulk body on %s", async (path, body) => {
+        const res = createRes();
+
+        await finalHandler(path, "post")(
+            { user: { id: "admin-1" }, body },
+            res,
+            jest.fn(),
+        );
+
+        expect(res.statusCode).toBe(400);
+    });
+
+    it("registers bulk routes before parameterized review routes", () => {
+        const stack = (router as any).stack;
+        const counts = stack.findIndex(
+            (entry: any) => entry.route?.path === "/counts",
+        );
+        const cancel = stack.findIndex(
+            (entry: any) => entry.route?.path === "/:id",
+        );
+        const bulkApprove = stack.findIndex(
+            (entry: any) => entry.route?.path === "/bulk/approve",
+        );
+        const approve = stack.findIndex(
+            (entry: any) => entry.route?.path === "/:id/approve",
+        );
+        const bulkDeny = stack.findIndex(
+            (entry: any) => entry.route?.path === "/bulk/deny-stale",
+        );
+        const deny = stack.findIndex(
+            (entry: any) => entry.route?.path === "/:id/deny",
+        );
+
+        expect(cancel).toBeGreaterThan(-1);
+        expect(cancel).toBeLessThan(counts);
+        expect(counts).toBeGreaterThan(-1);
+        expect(counts).toBeLessThan(approve);
+        expect(bulkApprove).toBeGreaterThan(-1);
+        expect(bulkApprove).toBeLessThan(approve);
+        expect(bulkDeny).toBeGreaterThan(-1);
+        expect(bulkDeny).toBeLessThan(deny);
     });
 });

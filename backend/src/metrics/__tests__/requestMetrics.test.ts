@@ -3,6 +3,7 @@ import { createRequestMetrics, MUSIC_REQUEST_ACTIONS } from "../requestMetrics";
 
 describe("request metrics", () => {
     it("registers the closed action counter in the supplied registry", async () => {
+        expect(MUSIC_REQUEST_ACTIONS).toContain("rejected_cooldown");
         const registry = new Registry();
         const metrics = createRequestMetrics(registry);
 
