@@ -157,6 +157,7 @@ spec:
             "SCAN_FILE_CONCURRENCY" true
             "CATALOG_PERSISTENCE" true
             "CATALOG_RETENTION_DAYS" true
+            "REQUESTS_DENIED_COOLDOWN_DAYS" true
             "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
             "PROVIDER_TRACK_RETENTION_DAYS" true
             "FEDERATION_SYNC_INTERVAL_MINUTES" true
@@ -487,6 +488,13 @@ spec:
             {{- else if not (kindIs "invalid" .Values.config.catalogRetentionDays) }}
             - name: CATALOG_RETENTION_DAYS
               value: {{ .Values.config.catalogRetentionDays | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "REQUESTS_DENIED_COOLDOWN_DAYS" }}
+            - name: REQUESTS_DENIED_COOLDOWN_DAYS
+              value: {{ index $backendEnv "REQUESTS_DENIED_COOLDOWN_DAYS" | quote }}
+            {{- else if not (kindIs "invalid" .Values.config.requestsDeniedCooldownDays) }}
+            - name: REQUESTS_DENIED_COOLDOWN_DAYS
+              value: {{ .Values.config.requestsDeniedCooldownDays | quote }}
             {{- end }}
             {{- if hasKey $backendEnv "FEDERATION_TOMBSTONE_RETENTION_DAYS" }}
             - name: FEDERATION_TOMBSTONE_RETENTION_DAYS

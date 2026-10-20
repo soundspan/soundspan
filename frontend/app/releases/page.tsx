@@ -20,7 +20,7 @@ import { useDownloadContext } from "@/lib/download-context";
 import {
     openRequestRgMbids,
     useCreateMusicRequest,
-    useMyMusicRequests,
+    useMyOpenMusicRequests,
     useRequestsGate,
 } from "@/hooks/useMusicRequests";
 import { api } from "@/lib/api";
@@ -29,6 +29,10 @@ import Image from "next/image";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { formatRelativeDate } from "@/utils/formatTime";
 import { SectionHeader } from "@/components/layout/SectionHeader";
+import {
+    describeRequestSubmitError,
+    formatRequestDate,
+} from "@/lib/musicRequests";
 
 interface ReleaseItem {
     id: number | string;
@@ -51,6 +55,16 @@ interface ReleaseRadarData {
     similarArtistCount: number;
 }
 
+function releaseAcquireErrorMessage(
+    error: unknown,
+    downloadsEnabled: boolean,
+): string {
+    if (!downloadsEnabled) {
+        return describeRequestSubmitError(error, formatRequestDate);
+    }
+    return error instanceof Error ? error.message : "Something went wrong";
+}
+
 /**
  * Renders the ReleasesPage component.
  */
@@ -63,7 +77,7 @@ export default function ReleasesPage() {
     const [error, setError] = useState<string | null>(null);
     const { downloadsEnabled } = useDownloadContext();
     const { requestsEnabled } = useRequestsGate();
-    const myRequests = useMyMusicRequests(requestsEnabled);
+    const myRequests = useMyOpenMusicRequests(requestsEnabled);
     const createRequest = useCreateMusicRequest();
     const requestedRgMbids = openRequestRgMbids(myRequests.data);
 
@@ -122,10 +136,9 @@ export default function ReleasesPage() {
             );
         } catch (err) {
             sharedFrontendLogger.error("Release acquisition failed:", err);
-            toast.error(
-                err instanceof Error ? err.message : "Something went wrong",
-                { id: toastId },
-            );
+            toast.error(releaseAcquireErrorMessage(err, downloadsEnabled), {
+                id: toastId,
+            });
         } finally {
             setDownloadingId(null);
         }

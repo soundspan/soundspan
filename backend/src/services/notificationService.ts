@@ -20,7 +20,43 @@ export interface RequestNotificationMetadata {
     rgMbid: string;
     artistName: string;
     albumTitle: string;
+    albumId?: string;
 }
+
+/** Maximum administrator recipients loaded for one notification fan-out. */
+export const MAX_ADMIN_NOTIFICATIONS = 200;
+
+/** Build stable notification metadata from a persisted request projection. */
+export function buildRequestNotificationMetadata(
+    request: {
+        id: string;
+        rgMbid: string;
+        artistName: string;
+        albumTitle: string;
+    },
+    albumId?: string,
+): RequestNotificationMetadata {
+    return {
+        requestId: request.id,
+        rgMbid: request.rgMbid,
+        artistName: request.artistName,
+        albumTitle: request.albumTitle,
+        ...(albumId ? { albumId } : {}),
+    };
+}
+
+/** List the bounded administrator recipients for request notifications. */
+export async function listAdminRecipientIds(): Promise<string[]> {
+    const admins = await prisma.user.findMany({
+        where: { role: "admin" },
+        select: { id: true },
+        take: MAX_ADMIN_NOTIFICATIONS,
+    });
+    return admins.map((admin) => admin.id);
+}
+
+/** Terminal download cause used in request failure messaging. */
+export type RequestFailureCause = "download_failed" | "download_stopped";
 
 export interface CreateNotificationParams {
     userId: string;
@@ -283,12 +319,38 @@ class NotificationService {
     async notifyRequestFailed(
         userId: string,
         metadata: RequestNotificationMetadata,
+        cause: RequestFailureCause,
     ) {
+        const subject = `${metadata.artistName} — ${metadata.albumTitle}`;
+        const message =
+            cause === "download_failed"
+                ? `${subject} could not be downloaded. An admin can retry the download or decline the request.`
+                : `The download of ${subject} was stopped before it finished. An admin can retry it or decline the request.`;
         return this.create({
             userId,
             type: "request_failed",
             title: "Music Request Failed",
-            message: "The download failed.",
+            message,
+            metadata,
+        });
+    }
+
+    /** Notify an administrator that a request needs retry or denial. */
+    async notifyAdminRequestFailed(
+        adminUserId: string,
+        requesterUsername: string,
+        metadata: RequestNotificationMetadata,
+        cause: RequestFailureCause,
+    ) {
+        const outcome =
+            cause === "download_failed"
+                ? "could not be downloaded"
+                : "was stopped before it finished";
+        return this.create({
+            userId: adminUserId,
+            type: "request_failed",
+            title: `Request failed: ${metadata.artistName} — ${metadata.albumTitle}`,
+            message: `${requesterUsername}'s request ${outcome}. Retry or decline it on the Requests page.`,
             metadata,
         });
     }

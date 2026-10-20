@@ -98,6 +98,20 @@ failed record for `20251130000000_init` and applies no new migrations until you
 resolve it. Follow Prisma's guide to resolving failed migrations:
 <https://pris.ly/d/migrate-resolve>.
 
+**Heads-up, music requests:** declining an album request now starts a 30-day
+wait before anyone can request that album again. Set
+`REQUESTS_DENIED_COOLDOWN_DAYS` to change the wait, or to `0` to turn it off;
+the variable is available on Docker Compose, the all-in-one image, and Helm
+(`config.requestsDeniedCooldownDays`). Declines made before the upgrade do not
+start a wait. A small database migration adds the column that records it and
+runs automatically at startup.
+
+**Breaking for API-key clients of the request API:** `GET /api/requests` and
+`GET /api/requests/mine` now return one page as
+`{ requests, total, offset, limit }` (50 rows by default, `limit` up to 100,
+`offset` to move through pages) instead of a plain list. The soundspan web app
+is already updated.
+
 ---
 
 ## 2.6.0: scrobbling, AcoustID, and database changes

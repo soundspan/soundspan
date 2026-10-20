@@ -6,17 +6,23 @@ const mockNotifyRequestSubmitted = jest.fn();
 const mockNotifyRequestApproved = jest.fn();
 const mockNotifyRequestDenied = jest.fn();
 const mockNotifyRequestFulfilled = jest.fn();
+const mockListAdminRecipientIds = jest.fn();
+const mockConfig = {
+    music: { musicPath: "/music" },
+    requests: { dailyCapPerUser: 10, deniedCooldownDays: 30 },
+};
 
 const prisma = {
     album: { findFirst: jest.fn(), findMany: jest.fn() },
     artist: { findMany: jest.fn() },
-    downloadJob: { findFirst: jest.fn() },
+    downloadJob: { findFirst: jest.fn(), findMany: jest.fn() },
     musicRequest: {
         count: jest.fn(),
         create: jest.fn(),
         findFirst: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        groupBy: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
     },
@@ -25,12 +31,7 @@ const prisma = {
 };
 
 jest.mock("../../utils/db", () => ({ prisma }));
-jest.mock("../../config", () => ({
-    config: {
-        music: { musicPath: "/music" },
-        requests: { dailyCapPerUser: 10 },
-    },
-}));
+jest.mock("../../config", () => ({ config: mockConfig }));
 jest.mock("../albumDownloadJobs", () => ({
     createAlbumDownloadJob: (...args: unknown[]) =>
         mockCreateAlbumDownloadJob(...args),
@@ -45,6 +46,23 @@ jest.mock("../../metrics", () => ({
         mockRecordMusicRequestAction(...args),
 }));
 jest.mock("../notificationService", () => ({
+    buildRequestNotificationMetadata: (
+        request: {
+            id: string;
+            rgMbid: string;
+            artistName: string;
+            albumTitle: string;
+        },
+        albumId?: string,
+    ) => ({
+        requestId: request.id,
+        rgMbid: request.rgMbid,
+        artistName: request.artistName,
+        albumTitle: request.albumTitle,
+        ...(albumId ? { albumId } : {}),
+    }),
+    listAdminRecipientIds: (...args: unknown[]) =>
+        mockListAdminRecipientIds(...args),
     notificationService: {
         notifyRequestSubmitted: (...args: unknown[]) =>
             mockNotifyRequestSubmitted(...args),
@@ -72,6 +90,8 @@ import {
     cancelOwnRequest,
     createRequest,
     denyRequest,
+    getRequestAvailability,
+    getRequestCounts,
     listAllRequests,
     listRequestsForUser,
     MusicRequestServiceError,
@@ -106,12 +126,17 @@ async function expectCreateError(code: string): Promise<void> {
 describe("musicRequestService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockCreateAlbumDownloadJob.mockReset();
+        prisma.downloadJob.findFirst.mockReset();
+        prisma.musicRequest.updateMany.mockReset();
         prisma.album.findFirst.mockResolvedValue(null);
         prisma.album.findMany.mockResolvedValue([]);
         prisma.artist.findMany.mockResolvedValue([]);
         prisma.musicRequest.findFirst.mockResolvedValue(null);
         prisma.downloadJob.findFirst.mockResolvedValue(null);
+        prisma.downloadJob.findMany.mockResolvedValue([]);
         prisma.musicRequest.count.mockResolvedValue(0);
+        prisma.musicRequest.groupBy.mockResolvedValue([]);
         prisma.musicRequest.create.mockResolvedValue(pendingRequest);
         prisma.musicRequest.findMany.mockResolvedValue([]);
         prisma.musicRequest.findUnique.mockResolvedValue(pendingRequest);
@@ -133,6 +158,15 @@ describe("musicRequestService", () => {
         mockNotifyRequestApproved.mockResolvedValue(undefined);
         mockNotifyRequestDenied.mockResolvedValue(undefined);
         mockNotifyRequestFulfilled.mockResolvedValue(undefined);
+        mockListAdminRecipientIds.mockImplementation(async () => {
+            const admins = await prisma.user.findMany({
+                where: { role: "admin" },
+                select: { id: true },
+                take: 200,
+            });
+            return admins.map(({ id }: { id: string }) => id);
+        });
+        mockConfig.requests.deniedCooldownDays = 30;
         prisma.$transaction.mockImplementation(async (callback: any) =>
             callback(prisma),
         );
@@ -178,6 +212,73 @@ describe("musicRequestService", () => {
             },
             select: { id: true },
         });
+    });
+
+    it("rejects an album during a global denial cooldown", async () => {
+        const cooldownUntil = new Date("2026-11-01T00:00:00.000Z");
+        prisma.musicRequest.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ cooldownUntil });
+
+        await expect(createRequest("user-1", input)).rejects.toMatchObject({
+            code: "recently_denied",
+            retryAfter: cooldownUntil,
+        });
+
+        expect(prisma.musicRequest.findFirst).toHaveBeenNthCalledWith(2, {
+            where: {
+                rgMbid: input.rgMbid,
+                status: "denied",
+                cooldownUntil: { gt: expect.any(Date) },
+            },
+            select: { cooldownUntil: true },
+            orderBy: { cooldownUntil: "desc" },
+        });
+        expect(mockRecordMusicRequestAction).toHaveBeenCalledWith(
+            "rejected_cooldown",
+        );
+        expect(prisma.musicRequest.count).not.toHaveBeenCalled();
+    });
+
+    it("allows an expired denial cooldown", async () => {
+        prisma.musicRequest.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+
+        await expect(createRequest("user-1", input)).resolves.toEqual(
+            pendingRequest,
+        );
+    });
+
+    it("skips all denial cooldown rows when cooldowns are disabled", async () => {
+        mockConfig.requests.deniedCooldownDays = 0;
+
+        await createRequest("user-1", input);
+
+        expect(prisma.musicRequest.findFirst).toHaveBeenCalledTimes(1);
+        expect(prisma.musicRequest.findFirst).toHaveBeenCalledWith({
+            where: {
+                rgMbid: input.rgMbid,
+                status: { in: ["pending", "approved"] },
+            },
+            select: { id: true },
+        });
+    });
+
+    it("checks cooldowns only for the requested album", async () => {
+        await createRequest("user-1", {
+            ...input,
+            rgMbid: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        });
+
+        expect(prisma.musicRequest.findFirst).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    rgMbid: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                }),
+            }),
+        );
     });
 
     it("creates at cap minus one and trims the note", async () => {
@@ -239,20 +340,48 @@ describe("musicRequestService", () => {
             },
         ]);
 
-        const result = await listRequestsForUser("user-1");
-
-        expect(result).toEqual([
-            {
-                ...pendingRequest,
-                albumId: "album-library",
-                artistId: "artist-library",
-            },
-            {
-                ...secondRequest,
-                albumId: "album-library",
-                artistId: "artist-library",
-            },
+        prisma.musicRequest.count.mockResolvedValueOnce(2);
+        prisma.downloadJob.findMany.mockResolvedValueOnce([
+            { id: "job-1", status: "processing" },
         ]);
+        const rows = [
+            { ...pendingRequest, downloadJobId: "job-1" },
+            { ...secondRequest, downloadJobId: "deleted-job" },
+        ];
+        prisma.musicRequest.findMany.mockReset();
+        prisma.musicRequest.findMany.mockResolvedValueOnce(rows);
+
+        const result = await listRequestsForUser("user-1", {
+            status: "pending",
+            limit: 20,
+            offset: 10,
+        });
+
+        expect(result).toEqual({
+            requests: [
+                {
+                    ...rows[0],
+                    albumId: "album-library",
+                    artistId: "artist-library",
+                    downloadStatus: "processing",
+                },
+                {
+                    ...rows[1],
+                    albumId: "album-library",
+                    artistId: "artist-library",
+                    downloadStatus: null,
+                },
+            ],
+            total: 2,
+            offset: 10,
+            limit: 20,
+        });
+        expect(prisma.musicRequest.findMany).toHaveBeenCalledWith({
+            where: { userId: "user-1", status: "pending" },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: 10,
+            take: 20,
+        });
         expect(prisma.album.findMany).toHaveBeenCalledTimes(1);
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: { rgMbid: { in: [input.rgMbid] } },
@@ -264,6 +393,7 @@ describe("musicRequestService", () => {
             },
         });
         expect(prisma.artist.findMany).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.findMany).toHaveBeenCalledTimes(1);
     });
 
     it("falls back to the artist MBID for administrator request rows", async () => {
@@ -276,27 +406,51 @@ describe("musicRequestService", () => {
             { id: "artist-local", mbid: input.artistMbid },
         ]);
 
-        const result = await listAllRequests("pending");
+        prisma.musicRequest.count.mockResolvedValueOnce(1);
+        const result = await listAllRequests({
+            status: "pending",
+            limit: 50,
+            offset: 0,
+        });
 
-        expect(result).toEqual([
+        expect(result.requests).toEqual([
             {
                 ...adminRequest,
                 albumId: null,
                 artistId: "artist-local",
+                downloadStatus: null,
             },
         ]);
         expect(prisma.artist.findMany).toHaveBeenCalledWith({
             where: { mbid: { in: [input.artistMbid] } },
             select: { id: true, mbid: true },
         });
+        expect(prisma.musicRequest.findMany).toHaveBeenCalledWith({
+            where: { status: "pending" },
+            include: { user: { select: { id: true, username: true } } },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: 0,
+            take: 50,
+        });
     });
 
     it("returns null links when neither album nor artist resolves", async () => {
         prisma.musicRequest.findMany.mockResolvedValueOnce([pendingRequest]);
 
-        await expect(listRequestsForUser("user-1")).resolves.toEqual([
-            { ...pendingRequest, albumId: null, artistId: null },
-        ]);
+        prisma.musicRequest.count.mockResolvedValueOnce(1);
+        await expect(listRequestsForUser("user-1")).resolves.toEqual({
+            requests: [
+                {
+                    ...pendingRequest,
+                    albumId: null,
+                    artistId: null,
+                    downloadStatus: null,
+                },
+            ],
+            total: 1,
+            offset: 0,
+            limit: 50,
+        });
     });
 
     it("does not reveal another user's request during cancellation", async () => {
@@ -317,6 +471,7 @@ describe("musicRequestService", () => {
 
         await expect(cancelOwnRequest("user-1", "request-1")).resolves.toEqual({
             kind: "conflict",
+            reason: "not_reviewable",
         });
     });
 
@@ -343,6 +498,7 @@ describe("musicRequestService", () => {
 
         await expect(approveRequest("admin-1", "request-1")).resolves.toEqual({
             kind: "conflict",
+            reason: "not_reviewable",
         });
         expect(mockCreateAlbumDownloadJob).not.toHaveBeenCalled();
     });
@@ -360,7 +516,10 @@ describe("musicRequestService", () => {
                 albumTitle: input.albumTitle,
                 downloadType: "library",
                 rootFolderPath: "/library",
-                metadata: { queuedVia: "album-download-queue" },
+                metadata: {
+                    queuedVia: "album-download-queue",
+                    noFallback: true,
+                },
             },
             prisma,
             input.artistName,
@@ -368,6 +527,19 @@ describe("musicRequestService", () => {
         expect(mockNotifyRequestApproved).toHaveBeenCalledWith(
             "user-1",
             expect.objectContaining({ requestId: "request-1" }),
+        );
+    });
+
+    it("uses a supplied artist name without resolving it again", async () => {
+        await approveRequest("admin-1", "request-1", {
+            verifiedArtistName: "Canonical Artist",
+        });
+
+        expect(mockResolveAlbumDownloadArtistName).not.toHaveBeenCalled();
+        expect(mockCreateAlbumDownloadJob).toHaveBeenCalledWith(
+            expect.any(Object),
+            prisma,
+            "Canonical Artist",
         );
     });
 
@@ -396,6 +568,37 @@ describe("musicRequestService", () => {
                 status: "approved",
                 reviewedById: "admin-1",
             }),
+        });
+    });
+
+    it("reuses an active job after a download-job P2002 race", async () => {
+        mockCreateAlbumDownloadJob.mockRejectedValueOnce({ code: "P2002" });
+        prisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "job-existing",
+            targetMbid: input.rgMbid,
+            status: "processing",
+        });
+        prisma.musicRequest.update.mockResolvedValueOnce({
+            ...pendingRequest,
+            status: "approved",
+            downloadJobId: "job-existing",
+        });
+
+        await expect(
+            approveRequest("admin-1", "request-1"),
+        ).resolves.toMatchObject({
+            kind: "updated",
+            duplicate: true,
+            dispatch: null,
+            request: { downloadJobId: "job-existing" },
+        });
+
+        expect(prisma.downloadJob.findFirst).toHaveBeenCalledWith({
+            where: {
+                targetMbid: input.rgMbid,
+                status: { in: ["pending", "processing"] },
+            },
+            orderBy: { createdAt: "asc" },
         });
     });
 
@@ -479,10 +682,230 @@ describe("musicRequestService", () => {
         expect(mockRecordMusicRequestAction).toHaveBeenCalledWith("fulfilled");
         expect(mockNotifyRequestFulfilled).toHaveBeenCalledWith(
             "user-1",
-            expect.objectContaining({ requestId: "request-1" }),
+            expect.objectContaining({
+                requestId: "request-1",
+                albumId: "album-1",
+            }),
         );
         expect(mockGetSystemSettings).not.toHaveBeenCalled();
         expect(mockCreateAlbumDownloadJob).not.toHaveBeenCalled();
+    });
+
+    it("re-approves a failed request with a new linked job", async () => {
+        const failedRequest = { ...pendingRequest, status: "failed" };
+        prisma.musicRequest.findUnique.mockResolvedValueOnce(failedRequest);
+
+        await expect(
+            approveRequest("admin-1", "request-1"),
+        ).resolves.toMatchObject({ kind: "updated" });
+
+        expect(prisma.musicRequest.findFirst).toHaveBeenCalledWith({
+            where: {
+                id: { not: "request-1" },
+                userId: "user-1",
+                rgMbid: input.rgMbid,
+                status: { in: ["pending", "approved"] },
+            },
+            select: { id: true },
+        });
+        expect(prisma.musicRequest.updateMany).toHaveBeenCalledWith({
+            where: { id: "request-1", status: "failed" },
+            data: expect.objectContaining({ status: "approved" }),
+        });
+        expect(prisma.musicRequest.update).toHaveBeenCalledWith({
+            where: { id: "request-1" },
+            data: { downloadJobId: "job-1" },
+        });
+        expect(mockNotifyRequestApproved).toHaveBeenCalled();
+    });
+
+    it("fulfills a failed request during re-approval when already owned", async () => {
+        const failedRequest = { ...pendingRequest, status: "failed" };
+        const fulfilledRequest = { ...failedRequest, status: "fulfilled" };
+        prisma.musicRequest.findUnique
+            .mockResolvedValueOnce(failedRequest)
+            .mockResolvedValueOnce(fulfilledRequest);
+        prisma.album.findFirst.mockResolvedValueOnce({ id: "album-1" });
+
+        await approveRequest("admin-1", "request-1");
+
+        expect(prisma.musicRequest.updateMany).toHaveBeenCalledWith({
+            where: { id: "request-1", status: "failed" },
+            data: expect.objectContaining({ status: "fulfilled" }),
+        });
+        expect(mockNotifyRequestFulfilled).toHaveBeenCalledWith(
+            "user-1",
+            expect.objectContaining({ albumId: "album-1" }),
+        );
+    });
+
+    it("fulfills an owned failed request despite another open request", async () => {
+        const failedRequest = { ...pendingRequest, status: "failed" };
+        const fulfilledRequest = { ...failedRequest, status: "fulfilled" };
+        prisma.musicRequest.findUnique
+            .mockResolvedValueOnce(failedRequest)
+            .mockResolvedValueOnce(fulfilledRequest);
+        prisma.album.findFirst.mockResolvedValueOnce({ id: "album-1" });
+        prisma.musicRequest.findFirst.mockResolvedValueOnce({
+            id: "request-2",
+        });
+
+        await expect(
+            approveRequest("admin-1", "request-1"),
+        ).resolves.toMatchObject({
+            kind: "updated",
+            request: { status: "fulfilled" },
+        });
+
+        expect(prisma.musicRequest.findFirst).not.toHaveBeenCalled();
+        expect(prisma.musicRequest.updateMany).toHaveBeenCalledWith({
+            where: { id: "request-1", status: "failed" },
+            data: expect.objectContaining({ status: "fulfilled" }),
+        });
+    });
+
+    it("rejects failed re-approval when the user has another open request", async () => {
+        prisma.musicRequest.findUnique.mockResolvedValueOnce({
+            ...pendingRequest,
+            status: "failed",
+        });
+        prisma.musicRequest.findFirst.mockResolvedValueOnce({
+            id: "request-2",
+        });
+
+        await expect(approveRequest("admin-1", "request-1")).resolves.toEqual({
+            kind: "conflict",
+            reason: "open_request_exists",
+        });
+
+        expect(prisma.album.findFirst).toHaveBeenCalledWith({
+            where: { rgMbid: input.rgMbid, location: "LIBRARY" },
+            select: { id: true },
+        });
+        expect(mockCreateAlbumDownloadJob).not.toHaveBeenCalled();
+    });
+
+    it("maps a failed re-approval status-index P2002 race to conflict", async () => {
+        prisma.musicRequest.findUnique.mockResolvedValueOnce({
+            ...pendingRequest,
+            status: "failed",
+        });
+        prisma.musicRequest.updateMany.mockRejectedValueOnce({ code: "P2002" });
+
+        await expect(approveRequest("admin-1", "request-1")).resolves.toEqual({
+            kind: "conflict",
+            reason: "open_request_exists",
+        });
+
+        expect(prisma.downloadJob.findFirst).not.toHaveBeenCalled();
+        expect(mockCreateAlbumDownloadJob).not.toHaveBeenCalled();
+    });
+
+    it("maps a second-transaction status-index P2002 race to an open-request conflict", async () => {
+        prisma.musicRequest.findUnique.mockResolvedValueOnce({
+            ...pendingRequest,
+            status: "failed",
+        });
+        prisma.musicRequest.updateMany
+            .mockResolvedValueOnce({ count: 1 })
+            .mockRejectedValueOnce({ code: "P2002" });
+        mockCreateAlbumDownloadJob.mockRejectedValueOnce({ code: "P2002" });
+        prisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "job-existing",
+            targetMbid: input.rgMbid,
+            status: "processing",
+        });
+
+        await expect(approveRequest("admin-1", "request-1")).resolves.toEqual({
+            kind: "conflict",
+            reason: "open_request_exists",
+        });
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(prisma.musicRequest.updateMany).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["pending", "failed"])(
+        "denies a %s request and applies the configured cooldown",
+        async (status) => {
+            jest.useFakeTimers({
+                now: new Date("2026-10-19T12:00:00.000Z"),
+            });
+            const existing = { ...pendingRequest, status };
+            const denied = { ...existing, status: "denied" };
+            prisma.musicRequest.findUnique
+                .mockResolvedValueOnce(existing)
+                .mockResolvedValueOnce(denied);
+
+            try {
+                await denyRequest("admin-1", "request-1", " No space ");
+
+                expect(prisma.musicRequest.updateMany).toHaveBeenCalledWith({
+                    where: { id: "request-1", status },
+                    data: {
+                        status: "denied",
+                        deniedReason: "No space",
+                        reviewedById: "admin-1",
+                        reviewedAt: new Date("2026-10-19T12:00:00.000Z"),
+                        cooldownUntil: new Date("2026-11-18T12:00:00.000Z"),
+                    },
+                });
+                expect(mockNotifyRequestDenied).toHaveBeenCalledWith(
+                    "user-1",
+                    expect.objectContaining({ requestId: "request-1" }),
+                    "No space",
+                );
+            } finally {
+                jest.useRealTimers();
+            }
+        },
+    );
+
+    it("stores no denial cooldown when cooldowns are disabled", async () => {
+        mockConfig.requests.deniedCooldownDays = 0;
+        prisma.musicRequest.findUnique
+            .mockResolvedValueOnce(pendingRequest)
+            .mockResolvedValueOnce({ ...pendingRequest, status: "denied" });
+
+        await denyRequest("admin-1", "request-1");
+
+        expect(prisma.musicRequest.updateMany).toHaveBeenCalledWith({
+            where: { id: "request-1", status: "pending" },
+            data: expect.objectContaining({ cooldownUntil: null }),
+        });
+    });
+
+    it("zero-fills request counts from one grouped query", async () => {
+        prisma.musicRequest.groupBy.mockResolvedValueOnce([
+            { status: "pending", _count: { _all: 2 } },
+            { status: "failed", _count: { _all: 1 } },
+        ]);
+
+        await expect(getRequestCounts()).resolves.toEqual({
+            pending: 2,
+            approved: 0,
+            denied: 0,
+            fulfilled: 0,
+            failed: 1,
+            cancelled: 0,
+        });
+        expect(prisma.musicRequest.groupBy).toHaveBeenCalledTimes(1);
+        expect(prisma.musicRequest.groupBy).toHaveBeenCalledWith({
+            by: ["status"],
+            where: {
+                status: {
+                    in: [
+                        "pending",
+                        "approved",
+                        "denied",
+                        "fulfilled",
+                        "failed",
+                        "cancelled",
+                    ],
+                },
+            },
+            _count: { _all: true },
+        });
     });
 
     it("rejects denial after the pending state", async () => {
@@ -493,8 +916,22 @@ describe("musicRequestService", () => {
 
         await expect(
             denyRequest("admin-1", "request-1", "No space"),
-        ).resolves.toEqual({ kind: "conflict" });
+        ).resolves.toEqual({
+            kind: "conflict",
+            reason: "not_reviewable",
+        });
         expect(prisma.musicRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("includes the configured denial cooldown in availability", async () => {
+        prisma.musicRequest.count.mockResolvedValueOnce(3);
+
+        await expect(getRequestAvailability("user-1")).resolves.toEqual({
+            enabled: true,
+            remainingToday: 7,
+            dailyCap: 10,
+            deniedCooldownDays: 30,
+        });
     });
 
     it("exposes stable typed create errors", () => {

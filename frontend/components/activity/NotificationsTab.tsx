@@ -15,6 +15,7 @@ import { cn } from "@/utils/cn";
 import Link from "next/link";
 import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { createFrontendLogger } from "@/lib/logger";
+import { notificationLink } from "@/lib/notificationLinks";
 import { formatRelativeTime } from "@/utils/formatTime";
 
 const logger = createFrontendLogger("Activity.NotificationsTab");
@@ -105,24 +106,8 @@ export function NotificationsTab({
         }
     };
 
-    const getLink = (notification: Notification): string | null => {
-        const metadata = notification.metadata as
-            | Record<string, unknown>
-            | undefined;
-        if (typeof metadata?.requestId === "string") {
-            return "/requests";
-        }
-        if (typeof metadata?.playlistId === "string") {
-            return `/playlist/${metadata.playlistId}`;
-        }
-        if (typeof metadata?.albumId === "string") {
-            return `/album/${metadata.albumId}`;
-        }
-        if (typeof metadata?.artistId === "string") {
-            return `/artist/${metadata.artistId}`;
-        }
-        return null;
-    };
+    const getLink = (notification: Notification): string | null =>
+        notificationLink(notification.type, notification.metadata);
 
     if (loading) {
         return (

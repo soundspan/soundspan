@@ -1,83 +1,68 @@
 import type { MusicRequest } from "@prisma/client";
 import { recordMusicRequestAction } from "../../metrics";
-import {
-    notificationService,
-    type RequestNotificationMetadata,
-} from "../../services/notificationService";
+import type { RequestFailureCause } from "../../services/notificationService";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { TERMINAL_DOWNLOAD_JOB_STATUSES } from "../../services/downloadJobStatus";
+import {
+    createAdminRecipientIdsLoader,
+    type AdminRecipientIdsLoader,
+    notifyRequestTransition,
+} from "./requestFulfillmentNotifications";
 
 const log = logger.child("RequestFulfillmentProcessor");
 
 /** Maximum approved requests reconciled during one five-minute tick. */
 export const MAX_REQUEST_FULFILLMENTS_PER_TICK = 200;
+/** Maximum approved-request pages scanned during one reconciliation tick. */
+export const MAX_REQUEST_FULFILLMENT_PAGES = 5;
 
 type RequestCandidate = Pick<
     MusicRequest,
     "id" | "userId" | "rgMbid" | "artistName" | "albumTitle" | "downloadJobId"
 >;
 
-function metadata(request: RequestCandidate): RequestNotificationMetadata {
-    return {
-        requestId: request.id,
-        rgMbid: request.rgMbid,
-        artistName: request.artistName,
-        albumTitle: request.albumTitle,
-    };
+interface TerminalCandidate {
+    request: RequestCandidate;
+    downloadStatus: string;
+    cause?: RequestFailureCause;
 }
 
-async function notifyTransition(
+function terminalCandidate(
     request: RequestCandidate,
-    nextStatus: "fulfilled" | "failed",
-): Promise<void> {
-    try {
-        if (nextStatus === "fulfilled") {
-            await notificationService.notifyRequestFulfilled(
-                request.userId,
-                metadata(request),
-            );
-        } else {
-            await notificationService.notifyRequestFailed(
-                request.userId,
-                metadata(request),
-            );
-        }
-    } catch (error) {
-        log.warn("Request fulfillment notification failed", {
-            requestId: request.id,
-            nextStatus,
-            error,
-        });
+    statusByJobId: ReadonlyMap<string, string>,
+): TerminalCandidate | null {
+    const jobId = request.downloadJobId;
+    if (!jobId) return null;
+    const downloadStatus = statusByJobId.get(jobId) ?? "deleted";
+    if (downloadStatus === "completed") return { request, downloadStatus };
+    if (downloadStatus === "failed" || downloadStatus === "exhausted") {
+        return { request, downloadStatus, cause: "download_failed" };
+    }
+    if (downloadStatus === "cancelled" || downloadStatus === "deleted") {
+        return { request, downloadStatus, cause: "download_stopped" };
+    }
+    return null;
+}
+
+function appendTerminalCandidates(
+    candidates: TerminalCandidate[],
+    requests: RequestCandidate[],
+    statusByJobId: ReadonlyMap<string, string>,
+): void {
+    for (
+        let index = 0;
+        index < requests.length &&
+        index < MAX_REQUEST_FULFILLMENTS_PER_TICK &&
+        candidates.length < MAX_REQUEST_FULFILLMENTS_PER_TICK;
+        index += 1
+    ) {
+        const candidate = terminalCandidate(requests[index], statusByJobId);
+        if (candidate) candidates.push(candidate);
     }
 }
 
-async function transitionCandidate(
-    request: RequestCandidate,
-    downloadStatus: string,
-): Promise<"fulfilled" | "failed" | null> {
-    const nextStatus = downloadStatus === "completed" ? "fulfilled" : "failed";
-    const changed = await prisma.musicRequest.updateMany({
-        where: { id: request.id, status: "approved" },
-        data: { status: nextStatus },
-    });
-    if (changed.count === 0) return null;
-    recordMusicRequestAction(nextStatus);
-    log.info("Music request reached a terminal download state", {
-        requestId: request.id,
-        downloadJobId: request.downloadJobId,
-        nextStatus,
-    });
-    await notifyTransition(request, nextStatus);
-    return nextStatus;
-}
-
-async function loadCandidates(): Promise<{
-    requests: RequestCandidate[];
-    existingJobIds: Set<string>;
-    statusByJobId: Map<string, string>;
-}> {
-    const requests = await prisma.musicRequest.findMany({
+async function loadRequestPage(cursor?: string): Promise<RequestCandidate[]> {
+    return prisma.musicRequest.findMany({
         where: { status: "approved", downloadJobId: { not: null } },
         select: {
             id: true,
@@ -87,39 +72,97 @@ async function loadCandidates(): Promise<{
             albumTitle: true,
             downloadJobId: true,
         },
-        orderBy: { updatedAt: "asc" },
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take: MAX_REQUEST_FULFILLMENTS_PER_TICK,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
+}
+
+async function loadJobStatuses(
+    requests: RequestCandidate[],
+): Promise<Map<string, string>> {
     const jobIds = requests.flatMap((request) =>
         request.downloadJobId ? [request.downloadJobId] : [],
     );
-    if (jobIds.length === 0) {
-        return {
+    if (jobIds.length === 0) return new Map();
+    const jobs = await prisma.downloadJob.findMany({
+        where: { id: { in: jobIds } },
+        select: { id: true, status: true },
+        take: MAX_REQUEST_FULFILLMENTS_PER_TICK,
+    });
+    return new Map(jobs.map((job) => [job.id, job.status]));
+}
+
+async function loadCandidates(): Promise<{
+    candidates: TerminalCandidate[];
+    selected: number;
+}> {
+    const candidates: TerminalCandidate[] = [];
+    let selected = 0;
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_REQUEST_FULFILLMENT_PAGES; page += 1) {
+        const requests = await loadRequestPage(cursor);
+        selected += requests.length;
+        appendTerminalCandidates(
+            candidates,
             requests,
-            existingJobIds: new Set(),
-            statusByJobId: new Map(),
-        };
+            await loadJobStatuses(requests),
+        );
+        if (
+            candidates.length >= MAX_REQUEST_FULFILLMENTS_PER_TICK ||
+            requests.length < MAX_REQUEST_FULFILLMENTS_PER_TICK
+        )
+            break;
+        cursor = requests.at(-1)?.id;
+        if (!cursor) break;
     }
-    const [existingJobs, terminalJobs] = await Promise.all([
-        prisma.downloadJob.findMany({
-            where: { id: { in: jobIds } },
-            select: { id: true },
-            take: MAX_REQUEST_FULFILLMENTS_PER_TICK,
-        }),
-        prisma.downloadJob.findMany({
-            where: {
-                id: { in: jobIds },
-                status: { in: TERMINAL_DOWNLOAD_JOB_STATUSES },
-            },
-            select: { id: true, status: true },
-            take: MAX_REQUEST_FULFILLMENTS_PER_TICK,
-        }),
-    ]);
-    return {
-        requests,
-        existingJobIds: new Set(existingJobs.map((job) => job.id)),
-        statusByJobId: new Map(terminalJobs.map((job) => [job.id, job.status])),
-    };
+    return { candidates, selected };
+}
+
+async function ownedAlbumsByMbid(
+    candidates: TerminalCandidate[],
+): Promise<Map<string, string>> {
+    if (candidates.length === 0) return new Map();
+    const rgMbids = [
+        ...new Set(candidates.map(({ request }) => request.rgMbid)),
+    ];
+    const albums = await prisma.album.findMany({
+        where: { rgMbid: { in: rgMbids }, location: "LIBRARY" },
+        select: { id: true, rgMbid: true },
+    });
+    return new Map(albums.map((album) => [album.rgMbid, album.id]));
+}
+
+async function transitionCandidate(
+    candidate: TerminalCandidate,
+    loadAdminRecipientIds: AdminRecipientIdsLoader,
+    albumId?: string,
+): Promise<"fulfilled" | "failed" | null> {
+    const nextStatus =
+        albumId || candidate.downloadStatus === "completed"
+            ? "fulfilled"
+            : "failed";
+    const changed = await prisma.musicRequest.updateMany({
+        where: {
+            id: candidate.request.id,
+            status: "approved",
+            downloadJobId: candidate.request.downloadJobId,
+        },
+        data: { status: nextStatus },
+    });
+    if (changed.count === 0) return null;
+    recordMusicRequestAction(nextStatus);
+    log.info("Music request reached a terminal download state", {
+        requestId: candidate.request.id,
+        downloadJobId: candidate.request.downloadJobId,
+        nextStatus,
+    });
+    await notifyRequestTransition(candidate.request, nextStatus, {
+        albumId,
+        cause: candidate.cause,
+        loadAdminRecipientIds,
+    });
+    return nextStatus;
 }
 
 /** Reconcile one bounded batch of approved requests against terminal jobs. */
@@ -128,24 +171,25 @@ export async function processRequestFulfillmentBatch(): Promise<{
     fulfilled: number;
     failed: number;
 }> {
-    const { requests, existingJobIds, statusByJobId } = await loadCandidates();
+    const { candidates, selected } = await loadCandidates();
+    const ownedAlbums = await ownedAlbumsByMbid(candidates);
+    const loadAdminRecipientIds = createAdminRecipientIdsLoader();
     let fulfilled = 0;
     let failed = 0;
     for (
         let index = 0;
-        index < requests.length && index < MAX_REQUEST_FULFILLMENTS_PER_TICK;
+        index < candidates.length && index < MAX_REQUEST_FULFILLMENTS_PER_TICK;
         index += 1
     ) {
-        const request = requests[index];
-        const jobId = request.downloadJobId;
-        if (!jobId) continue;
-        const downloadStatus =
-            statusByJobId.get(jobId) ??
-            (existingJobIds.has(jobId) ? undefined : "deleted");
-        if (!downloadStatus) continue;
-        const outcome = await transitionCandidate(request, downloadStatus);
+        const candidate = candidates[index];
+        const albumId = ownedAlbums.get(candidate.request.rgMbid);
+        const outcome = await transitionCandidate(
+            candidate,
+            loadAdminRecipientIds,
+            albumId,
+        );
         if (outcome === "fulfilled") fulfilled += 1;
         if (outcome === "failed") failed += 1;
     }
-    return { selected: requests.length, fulfilled, failed };
+    return { selected, fulfilled, failed };
 }
