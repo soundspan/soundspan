@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (68 models, 1553 lines)
+Schema source: `backend/prisma/schema.prisma` (69 models, 1569 lines)
 
 ## Entity Relationship Overview
 
@@ -167,10 +167,16 @@ album without a match is checked again after seven days, and a matched album
 after thirty days, when a new answer replaces or clears the match. Artist browse
 results come from the MusicBrainz cache, which can be up to 30 days old.
 
-Metadata-catalog persistence reuses `Artist` and `Album`; it does not introduce
-separate catalog models. Persisted catalog albums use `Album.location=CATALOG`
-and `catalogTouchedAt` for retention paging. `Artist.catalogSyncedAt` records the
-last catalog synchronization.
+Metadata-catalog persistence stores each artist's last MusicBrainz
+release-group list in `ArtistCatalogReleaseGroup`: one row per artist and
+release group (composite key `artistId` + `rgMbid`) with `position`, `title`,
+nullable `firstReleaseDate`, `primaryType`, and a `secondaryTypes` array. Each
+sync replaces the artist's rows, and the rows are deleted with their artist.
+They do not reference `Album`, so a collaboration owned by another artist, or a
+release group held by an album in another location, stays in the artist's list.
+Persisted catalog album skeletons use `Album.location=CATALOG` and
+`catalogTouchedAt` for retention paging. `Artist.catalogSyncedAt` records the
+last sync that stored at least one release group.
 
 ### Federation
 

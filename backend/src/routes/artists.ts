@@ -511,7 +511,7 @@ router.get<{ nameOrMbid: string }>(
                     if (fetchedFromProvider) {
                         void persistCatalogReleaseGroups({
                             artistMbid: mbid,
-                            releaseGroups: filteredReleaseGroups,
+                            releaseGroups,
                         }).catch(logCatalogPersistenceError);
                     }
 
