@@ -4,10 +4,14 @@ import { toast } from "sonner";
 import {
     openRequestRgMbids,
     useCreateMusicRequest,
-    useMyMusicRequests,
+    useMyOpenMusicRequests,
     useRequestsGate,
 } from "@/hooks/useMusicRequests";
-import { isRequestableMbid } from "@/lib/musicRequests";
+import {
+    describeRequestSubmitError,
+    formatRequestDate,
+    isRequestableMbid,
+} from "@/lib/musicRequests";
 import type { Album } from "../types";
 
 /**
@@ -17,7 +21,7 @@ import type { Album } from "../types";
  */
 export function useArtistAlbumRequests(artistName: string) {
     const { requestsEnabled } = useRequestsGate();
-    const myRequests = useMyMusicRequests(requestsEnabled);
+    const myRequests = useMyOpenMusicRequests(requestsEnabled);
     const create = useCreateMusicRequest();
     const openRgMbids = openRequestRgMbids(myRequests.data);
 
@@ -47,12 +51,9 @@ export function useArtistAlbumRequests(artistName: string) {
                 { id: toastId },
             );
         } catch (error) {
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : "Failed to submit the request",
-                { id: toastId },
-            );
+            toast.error(describeRequestSubmitError(error, formatRequestDate), {
+                id: toastId,
+            });
         }
     };
 

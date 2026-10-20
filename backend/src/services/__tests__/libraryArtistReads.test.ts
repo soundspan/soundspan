@@ -4,7 +4,10 @@ const prisma = {
 
 jest.mock("../../utils/db", () => ({ prisma }));
 
-import { readLibraryArtist } from "../libraryArtistReads";
+import {
+    buildLibraryAlbumWhere,
+    readLibraryArtist,
+} from "../libraryArtistReads";
 
 describe("library artist reads", () => {
     beforeEach(() => {
@@ -68,7 +71,93 @@ describe("library artist reads", () => {
                 { mbid: "route-value" },
             ],
         });
+        expect(args.include.albums.where).toEqual(
+            buildLibraryAlbumWhere([
+                "LIBRARY",
+                "DISCOVER",
+                "REMOTE",
+                "FEDERATED",
+            ]),
+        );
         expect(args.include.albums.include.tracks.take).toBe(10);
         expect(args.include.albums.orderBy).toEqual([{ year: "desc" }]);
+    });
+
+    it("adds the requesting user's liked remote albums to both album predicates", async () => {
+        const albumLocations = ["LIBRARY", "REMOTE"] as const;
+        await readLibraryArtist({
+            lookup: { id: "artist-remote" },
+            albumLocations,
+            requireVisibleAlbum: true,
+            albumOrder: "year",
+            likedRemoteAlbumsUserId: "user-1",
+        });
+
+        const args = prisma.artist.findFirst.mock.calls[0][0];
+        const expectedAlbumWhere = {
+            OR: [
+                buildLibraryAlbumWhere(albumLocations),
+                {
+                    location: "REMOTE",
+                    OR: [
+                        {
+                            tracksTidal: {
+                                some: {
+                                    likedBy: { some: { userId: "user-1" } },
+                                },
+                            },
+                        },
+                        {
+                            tracksYtMusic: {
+                                some: {
+                                    likedBy: { some: { userId: "user-1" } },
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
+
+        expect(args.include.albums.where).toEqual(expectedAlbumWhere);
+        expect(args.where.albums.some).toEqual(expectedAlbumWhere);
+    });
+
+    it("ignores the remote user option when REMOTE albums are excluded", async () => {
+        const options = {
+            lookup: { id: "artist-local" },
+            albumLocations: ["LIBRARY", "FEDERATED"] as const,
+            requireVisibleAlbum: true,
+            albumOrder: "year-title" as const,
+        };
+
+        await readLibraryArtist(options);
+        await readLibraryArtist({
+            ...options,
+            likedRemoteAlbumsUserId: "user-1",
+        });
+
+        expect(prisma.artist.findFirst.mock.calls[1][0]).toEqual(
+            prisma.artist.findFirst.mock.calls[0][0],
+        );
+    });
+
+    it("ignores an empty remote album user id", async () => {
+        const options = {
+            lookup: { id: "artist-empty-user" },
+            albumLocations: ["LIBRARY", "REMOTE"] as const,
+            requireVisibleAlbum: false,
+            albumOrder: "year" as const,
+        };
+
+        await readLibraryArtist(options);
+        await readLibraryArtist({
+            ...options,
+            likedRemoteAlbumsUserId: "",
+        });
+
+        expect(prisma.artist.findFirst.mock.calls[1][0]).toEqual(
+            prisma.artist.findFirst.mock.calls[0][0],
+        );
     });
 });

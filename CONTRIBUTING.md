@@ -126,24 +126,43 @@ For features or fixes involving APIs, auth, routing/proxying, or external client
 
 If behavior differs between AIO and split deployments, call it out explicitly in the PR description and docs.
 
-## CI Quality Visibility (Non-Blocking by Default)
+## CI Quality Workflow
 
-This repo now includes a dedicated **Quality Visibility** workflow:
+The **Quality Visibility** workflow (`.github/workflows/quality-visibility.yml`) runs on pull requests to `main`, on pushes to `main`, `develop`, and `feature/**`, and on manual dispatch. Its jobs fall into two groups.
 
-- Workflow: `.github/workflows/quality-visibility.yml`
-- Purpose: give ongoing visibility into tests and coverage without blocking day-to-day development
-- Signals:
-    - Backend Jest test run + coverage summary + coverage artifact upload
-    - Frontend lint/build checks, targeted unit coverage, and component tests; frontend typecheck runs as a separate visibility job
+Enforcement jobs do not set `continue-on-error`. A failure in any of these jobs always fails the workflow run:
+
+- Backend Tests + Coverage: backend Jest tests, the coverage summary and coverage gate, and the coverage artifact upload
+- Backend Typecheck
+- Frontend Typecheck
+- Python Quality
+- Enforcement Gates
+- Enforcement Gates Build
+
+Visibility jobs set `continue-on-error` unless the repository variable `CI_NON_BLOCKING_TEST_VISIBILITY` is `false`. With the variable unset or set to any other value, their failures do not fail the workflow run:
+
+- Backend PostgreSQL Integration
+- Frontend Quality Visibility: frontend lint, build, targeted unit coverage, and component tests
+- Python Sidecar Tests: one job for each of the four sidecars
+- Helm Chart Visibility
+
+Branch protection, not this workflow, decides which checks must pass before a merge. `AGENTS.md` lists the local command for each job. `docs/TESTING.md` describes what each job checks.
+
+### Backend coverage gate
+
+When the gate is on, the Backend Tests + Coverage job fails if any coverage total is below its floor. These repository variables control the gate:
+
+- `CI_ENFORCE_TEST_GATE`: the gate is on when the variable is unset or `true`. Any other value turns the gate off, and the job only reports coverage.
+- `COVERAGE_LINE_MIN`, `COVERAGE_BRANCH_MIN`, `COVERAGE_FUNCTION_MIN`, `COVERAGE_STATEMENT_MIN`: these override the floors that the workflow sets.
 
 ### Backend coverage artifacts
 
-Each run uploads a `backend-coverage-*` artifact containing:
+Each run uploads `backend/coverage/` as the `backend-coverage-*` artifact. It contains:
 
-- `coverage/lcov.info`
-- `coverage/coverage-summary.json`
-- `coverage/jest-results.json`
-- generated markdown summary (`coverage/coverage-summary.md`)
+- `lcov.info`
+- `coverage-summary.json`
+- `jest-results.json`
+- generated markdown summary (`coverage-summary.md`)
 
 The workflow summary includes:
 
@@ -151,27 +170,7 @@ The workflow summary includes:
 - test suite and test counts
 - lowest-coverage files
 - zero-percent coverage file list
-
-### Current mode vs future gate mode
-
-By default this workflow is **non-blocking**.
-
-You can switch to stricter behavior with repository variables:
-
-- `CI_NON_BLOCKING_TEST_VISIBILITY=false` to make job failures blocking
-- `CI_ENFORCE_TEST_GATE=true` to enforce numeric coverage thresholds
-- Optional threshold vars:
-    - `COVERAGE_LINE_MIN`
-    - `COVERAGE_BRANCH_MIN`
-    - `COVERAGE_FUNCTION_MIN`
-    - `COVERAGE_STATEMENT_MIN`
-
-Recommended rollout:
-
-1. Keep visibility-only mode while stabilizing coverage.
-2. Set thresholds gradually.
-3. Make visibility workflow blocking.
-4. Add required status checks in branch protection for release branches/tags.
+- the coverage gate result when the gate is on
 
 ## AWM Repo Contract
 

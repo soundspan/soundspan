@@ -22,6 +22,9 @@ const DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS = 90_000;
 const DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS = 120_000;
 const IMPORT_PREVIEW_PROXY_PATH = "api/import/preview";
 const RESTORE_UPLOAD_PROXY_PATH = "api/restore/uploads";
+// Bulk music-request actions run up to 25 approvals per call.
+const DEFAULT_BULK_REQUEST_PROXY_TIMEOUT_MS = 90_000;
+const BULK_REQUEST_PROXY_PATH = "api/requests/bulk";
 
 const parsePositiveTimeoutMs = (value: string | undefined): number | null => {
     const parsed = Number(value);
@@ -50,6 +53,13 @@ export const resolveProxyTimeoutMs = (
         // Restore uploads (creating one, its chunks, starting the restore)
         // spend part of the budget sending a body or checking the file.
         return Math.max(globalTimeout, DEFAULT_RESTORE_UPLOAD_PROXY_TIMEOUT_MS);
+    }
+
+    if (
+        normalizedPath === BULK_REQUEST_PROXY_PATH ||
+        normalizedPath.startsWith(`${BULK_REQUEST_PROXY_PATH}/`)
+    ) {
+        return Math.max(globalTimeout, DEFAULT_BULK_REQUEST_PROXY_TIMEOUT_MS);
     }
 
     if (normalizedPath !== IMPORT_PREVIEW_PROXY_PATH) {

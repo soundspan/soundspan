@@ -616,8 +616,12 @@ elif [ "$USER_TABLE_EXIST" = "t" ]; then
     # Database has data but no migrations table - needs baseline
     echo "Existing database detected without migration history."
     echo "Creating baseline from current schema..."
-    # Mark the init migration as already applied (baseline)
-    ./node_modules/.bin/prisma migrate resolve --applied 20241130000000_init 2>&1 || true
+    # Mark the init migration as already applied (baseline). Fail closed:
+    # without this record, deploy would re-run init against existing tables.
+    if ! ./node_modules/.bin/prisma migrate resolve --applied 20251130000000_init 2>&1; then
+        echo "FATAL: Could not record the baseline migration. Check logs above."
+        exit 1
+    fi
     # Now run any subsequent migrations
     if ! ./node_modules/.bin/prisma migrate deploy 2>&1; then
         echo "FATAL: Migration after baseline failed!"

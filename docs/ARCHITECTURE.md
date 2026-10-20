@@ -79,7 +79,7 @@ graph TD
 Browser → frontend:3030 → custom-server streaming proxy /api/* → backend:3006 → Prisma → PostgreSQL
 ```
 
-The frontend's custom server (`frontend/server.js` + `frontend/server-proxy.js`) streams all `/api/*` requests to the backend via http-proxy-middleware — no body buffering, backend gzip and streaming preserved — enforcing a configurable time-to-first-byte budget (`PROXY_REQUEST_TIMEOUT_MS`, default 20s; `PROXY_IMPORT_PREVIEW_TIMEOUT_MS`, default 90s → `504 UPSTREAM_TIMEOUT`). The upstream proxy request retains a bounded timeout, while reused browser sockets do not receive per-request timeout listeners. The Next route handler at `app/api/[...path]` remains as a fallback. The browser never talks to the backend directly. `frontend/lib/api.ts` is the canonical API boundary — no direct `fetch` calls from components.
+The frontend's custom server (`frontend/server.js` + `frontend/server-proxy.js`) streams all `/api/*` requests to the backend via http-proxy-middleware — no body buffering, backend gzip and streaming preserved — enforcing a configurable time-to-first-byte budget (`PROXY_REQUEST_TIMEOUT_MS`, default 20s; `PROXY_IMPORT_PREVIEW_TIMEOUT_MS`, default 90s; bulk music-request actions under `/api/requests/bulk/` never below 90s → `504 UPSTREAM_TIMEOUT`). The upstream proxy request retains a bounded timeout, while reused browser sockets do not receive per-request timeout listeners. The Next route handler at `app/api/[...path]` remains as a fallback. The browser never talks to the backend directly. `frontend/lib/api.ts` is the canonical API boundary — no direct `fetch` calls from components.
 
 ### Music Playback (Local Library)
 

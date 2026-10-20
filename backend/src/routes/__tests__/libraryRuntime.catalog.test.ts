@@ -996,6 +996,7 @@ describe("library catalog list runtime coverage", () => {
                         },
                     ],
                 },
+                // The real artist read never returns CATALOG albums; this guards the handler's defensive surface-location filter.
                 {
                     id: "album-catalog",
                     title: "Catalog Skeleton",
@@ -1114,6 +1115,7 @@ describe("library catalog list runtime coverage", () => {
             releaseGroups: [
                 expect.objectContaining({ id: "rg-db-same" }),
                 expect.objectContaining({ id: "rg-new-1" }),
+                expect.objectContaining({ id: "rg-live-1" }),
             ],
         });
         expect(mockRedisSetEx).toHaveBeenCalledWith(
@@ -1181,6 +1183,43 @@ describe("library catalog list runtime coverage", () => {
         );
         expect(res.body.albums).not.toContainEqual(
             expect.objectContaining({ id: "album-catalog" }),
+        );
+    });
+
+    it("short-caches an empty MusicBrainz discography", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce({
+            id: "artist-empty-discography",
+            name: "Empty Discography Artist",
+            mbid: "empty-discography-mbid",
+            heroUrl: null,
+            userHeroUrl: null,
+            similarArtistsJson: null,
+            catalogSyncedAt: null,
+            ownedAlbums: [],
+            albums: [],
+        });
+        mockMusicBrainzGetReleaseGroups.mockResolvedValueOnce([]);
+        mockRedisGet.mockResolvedValue(null);
+        mockGetArtistImage.mockResolvedValueOnce(null);
+
+        const req = {
+            params: { id: "artist-empty-discography" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-empty-discography" },
+        } as any;
+        const res = createRes();
+
+        await artistByIdHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "discography:empty-discography-mbid",
+            120,
+            "[]",
         );
     });
 
@@ -1545,6 +1584,130 @@ describe("library catalog list runtime coverage", () => {
                     location: "LIBRARY",
                     rgMbid: { in: ["rg-held", "rg-unheld"] },
                 }),
+            }),
+        );
+    });
+
+    it("keeps matching MusicBrainz cards for remote albums but hides library albums", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            ytMusicEnabled: false,
+        });
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "token",
+            ytMusicOAuthJson: null,
+        });
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                likedAt: new Date(),
+                trackTidal: {
+                    id: "tidal-shared-title",
+                    tidalId: 78,
+                    title: "Remote shared song",
+                    artist: "Discography artist",
+                    album: "Shared Title",
+                    duration: 180,
+                    artistId: "artist-discography",
+                    albumId: "remote-shared-title",
+                    artistEntity: null,
+                    albumEntity: {
+                        id: "remote-shared-title",
+                        title: "Shared Title",
+                        rgMbid: "remote:shared-title",
+                        coverUrl: "shared-cover.jpg",
+                        artistId: "artist-discography",
+                        location: "REMOTE",
+                        artist: {
+                            id: "artist-discography",
+                            name: "Discography artist",
+                        },
+                    },
+                    mappings: [],
+                },
+            },
+        ]);
+        mockArtistFindFirst.mockResolvedValueOnce({
+            id: "artist-discography",
+            name: "Discography artist",
+            mbid: "11111111-1111-4111-8111-111111111111",
+            heroUrl: null,
+            userHeroUrl: null,
+            similarArtistsJson: null,
+            catalogSyncedAt: null,
+            peerId: null,
+            federationPeer: null,
+            ownedAlbums: [],
+            albums: [
+                {
+                    id: "remote-shared-title",
+                    title: "Shared Title",
+                    rgMbid: "remote:shared-title",
+                    location: "REMOTE",
+                    coverUrl: "shared-cover.jpg",
+                    tracks: [],
+                    federationPeer: null,
+                },
+                {
+                    id: "library-title",
+                    title: "Library Title",
+                    rgMbid: "22222222-2222-4222-8222-222222222222",
+                    location: "LIBRARY",
+                    coverUrl: "library-cover.jpg",
+                    tracks: [],
+                    federationPeer: null,
+                },
+            ],
+        });
+        mockRedisGet.mockResolvedValue(null);
+        mockMusicBrainzGetReleaseGroups.mockResolvedValueOnce([
+            {
+                id: "33333333-3333-4333-8333-333333333333",
+                title: "Shared Title",
+                "first-release-date": "2020-01-01",
+                "primary-type": "Album",
+                "secondary-types": [],
+            },
+            {
+                id: "44444444-4444-4444-8444-444444444444",
+                title: "Library Title",
+                "first-release-date": "2021-01-01",
+                "primary-type": "Album",
+                "secondary-types": [],
+            },
+        ]);
+        const res = createRes();
+
+        await artistByIdHandler(
+            {
+                params: { id: "artist-discography" },
+                query: {
+                    includeDiscography: "true",
+                    includeTopTracks: "false",
+                    includeSimilarArtists: "false",
+                },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.albums).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "remote-shared-title",
+                    source: "remote",
+                }),
+                expect.objectContaining({
+                    id: "33333333-3333-4333-8333-333333333333",
+                    title: "Shared Title",
+                    source: "musicbrainz",
+                }),
+            ]),
+        );
+        expect(res.body.albums).not.toContainEqual(
+            expect.objectContaining({
+                id: "44444444-4444-4444-8444-444444444444",
+                source: "musicbrainz",
             }),
         );
     });

@@ -1,6 +1,11 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { notificationService } from "../notificationService";
+import {
+    buildRequestNotificationMetadata,
+    listAdminRecipientIds,
+    MAX_ADMIN_NOTIFICATIONS,
+    notificationService,
+} from "../notificationService";
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -10,6 +15,9 @@ jest.mock("../../utils/db", () => ({
             count: jest.fn(),
             updateMany: jest.fn(),
             deleteMany: jest.fn(),
+        },
+        user: {
+            findMany: jest.fn(),
         },
     },
 }));
@@ -206,7 +214,17 @@ describe("notificationService", () => {
             "Not available",
         );
         await notificationService.notifyRequestFulfilled("user-1", details);
-        await notificationService.notifyRequestFailed("user-1", details);
+        await notificationService.notifyRequestFailed(
+            "user-1",
+            details,
+            "download_failed",
+        );
+        await notificationService.notifyAdminRequestFailed(
+            "admin-1",
+            "listener",
+            details,
+            "download_stopped",
+        );
 
         expect(mockPrisma.notification.create).toHaveBeenNthCalledWith(1, {
             data: {
@@ -228,9 +246,92 @@ describe("notificationService", () => {
         expect(mockPrisma.notification.create).toHaveBeenNthCalledWith(5, {
             data: expect.objectContaining({
                 type: "request_failed",
-                message: "The download failed.",
+                title: "Music Request Failed",
+                message:
+                    "Massive Attack — Mezzanine could not be downloaded. An admin can retry the download or decline the request.",
                 metadata: details,
             }),
+        });
+        expect(mockPrisma.notification.create).toHaveBeenNthCalledWith(6, {
+            data: {
+                userId: "admin-1",
+                type: "request_failed",
+                title: "Request failed: Massive Attack — Mezzanine",
+                message:
+                    "listener's request was stopped before it finished. Retry or decline it on the Requests page.",
+                metadata: details,
+            },
+        });
+    });
+
+    it("builds stable request metadata with an optional album link", () => {
+        const request = {
+            id: "request-1",
+            rgMbid: "4f9d25d1-32c2-4093-83a5-34fcbaaf6f25",
+            artistName: "Massive Attack",
+            albumTitle: "Mezzanine",
+        };
+
+        expect(buildRequestNotificationMetadata(request)).toEqual({
+            requestId: "request-1",
+            rgMbid: request.rgMbid,
+            artistName: "Massive Attack",
+            albumTitle: "Mezzanine",
+        });
+        expect(buildRequestNotificationMetadata(request, "album-1")).toEqual({
+            requestId: "request-1",
+            rgMbid: request.rgMbid,
+            artistName: "Massive Attack",
+            albumTitle: "Mezzanine",
+            albumId: "album-1",
+        });
+    });
+
+    it("lists a bounded set of administrator notification recipients", async () => {
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+            { id: "admin-1" },
+            { id: "admin-2" },
+        ]);
+
+        await expect(listAdminRecipientIds()).resolves.toEqual([
+            "admin-1",
+            "admin-2",
+        ]);
+
+        expect(MAX_ADMIN_NOTIFICATIONS).toBe(200);
+        expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+            where: { role: "admin" },
+            select: { id: true },
+            take: 200,
+        });
+    });
+
+    it("explains when a request download was stopped", async () => {
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue({
+            id: "stopped-notification",
+        });
+        const details = {
+            requestId: "request-1",
+            rgMbid: "4f9d25d1-32c2-4093-83a5-34fcbaaf6f25",
+            artistName: "Massive Attack",
+            albumTitle: "Mezzanine",
+        };
+
+        await notificationService.notifyRequestFailed(
+            "user-1",
+            details,
+            "download_stopped",
+        );
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+            data: {
+                userId: "user-1",
+                type: "request_failed",
+                title: "Music Request Failed",
+                message:
+                    "The download of Massive Attack — Mezzanine was stopped before it finished. An admin can retry it or decline the request.",
+                metadata: details,
+            },
         });
     });
 });

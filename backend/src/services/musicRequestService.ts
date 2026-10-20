@@ -1,4 +1,4 @@
-import type { Album, DownloadJob, MusicRequest } from "@prisma/client";
+import type { Album, DownloadJob, MusicRequest, Prisma } from "@prisma/client";
 import { config } from "../config";
 import { recordMusicRequestAction } from "../metrics";
 import { prisma } from "../utils/db";
@@ -11,23 +11,28 @@ import {
     type CreateAlbumDownloadJobParams,
 } from "./albumDownloadJobs";
 import { ALBUM_DOWNLOAD_QUEUE_OWNER } from "./albumDownloadQueueOwnership";
+import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "./downloadJobStatus";
 import {
+    buildRequestNotificationMetadata,
+    listAdminRecipientIds,
     notificationService,
-    type RequestNotificationMetadata,
 } from "./notificationService";
 
 const log = logger.child("MusicRequestService");
-const MAX_ADMIN_NOTIFICATIONS = 200;
-const MAX_REQUEST_LIST_SIZE = 200;
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_REQUEST_LIST_LIMIT = 50;
 const OPEN_REQUEST_STATUSES = ["pending", "approved"] as const;
 
 type RequestLibraryLinks = {
     albumId: string | null;
     artistId: string | null;
 };
-type LinkableRequest = Pick<MusicRequest, "rgMbid" | "artistMbid">;
+type RequestDownloadLink = { downloadStatus: string | null };
+type LinkableRequest = Pick<
+    MusicRequest,
+    "rgMbid" | "artistMbid" | "downloadJobId"
+>;
 type AlbumLink = Pick<Album, "id" | "rgMbid" | "location" | "artistId">;
+type ReviewableRequestStatus = "pending" | "failed";
 
 /** Stable persisted status vocabulary for the request queue. */
 export const MUSIC_REQUEST_STATUSES = [
@@ -41,11 +46,14 @@ export const MUSIC_REQUEST_STATUSES = [
 
 /** Persisted request status accepted by administrator list filtering. */
 export type MusicRequestStatus = (typeof MUSIC_REQUEST_STATUSES)[number];
+/** Stable reason returned when a request transition conflicts. */
+export type RequestConflictReason = "not_reviewable" | "open_request_exists";
 /** Create-time conflict and quota decisions exposed to the route boundary. */
 export type MusicRequestErrorCode =
     | "already_in_library"
     | "already_requested"
     | "already_downloading"
+    | "recently_denied"
     | "daily_cap";
 
 /** Stable service failure used by the route's HTTP conflict mapping. */
@@ -53,10 +61,26 @@ export class MusicRequestServiceError extends Error {
     constructor(
         public readonly code: MusicRequestErrorCode,
         message: string,
+        public readonly retryAfter?: Date,
     ) {
         super(message);
         this.name = "MusicRequestServiceError";
     }
+}
+
+/** Bounded filters accepted by music request list services. */
+export interface MusicRequestListOptions {
+    status?: MusicRequestStatus;
+    limit: number;
+    offset: number;
+}
+
+/** Paged music request result returned by list services. */
+export interface MusicRequestPage<T> {
+    requests: T[];
+    total: number;
+    offset: number;
+    limit: number;
 }
 
 /** Validated album request input from the HTTP boundary. */
@@ -71,7 +95,7 @@ export interface CreateMusicRequestInput {
 /** Result of an ownership-safe or administrator request transition. */
 export type RequestTransitionResult =
     | { kind: "not_found" }
-    | { kind: "conflict" }
+    | { kind: "conflict"; reason: RequestConflictReason }
     | { kind: "updated"; request: MusicRequest };
 
 /** Dispatcher input returned only for a fresh approval job. */
@@ -88,13 +112,18 @@ export interface DownloadDispatch {
 /** Approval result including optional background dispatch ownership. */
 export type ApprovalResult =
     | { kind: "not_found" }
-    | { kind: "conflict" }
+    | { kind: "conflict"; reason: RequestConflictReason }
     | {
           kind: "updated";
           request: MusicRequest;
           duplicate: boolean;
           dispatch: DownloadDispatch | null;
       };
+
+/** Optional values resolved by a bounded bulk-approval caller. */
+export interface ApproveRequestOptions {
+    verifiedArtistName?: string;
+}
 
 function isP2002(error: unknown): boolean {
     return (
@@ -105,20 +134,22 @@ function isP2002(error: unknown): boolean {
     );
 }
 
-function normalizeOptionalText(value?: string): string | undefined {
+/** Milliseconds in one 24-hour request policy window. */
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Trim optional text and collapse blank input to undefined. */
+export function normalizeOptionalText(value?: string): string | undefined {
     const normalized = value?.trim();
     return normalized ? normalized : undefined;
 }
 
-function requestNotificationMetadata(
-    request: Pick<MusicRequest, "id" | "rgMbid" | "artistName" | "albumTitle">,
-): RequestNotificationMetadata {
-    return {
-        requestId: request.id,
-        rgMbid: request.rgMbid,
-        artistName: request.artistName,
-        albumTitle: request.albumTitle,
-    };
+function cooldownError(cooldownUntil: Date): never {
+    recordMusicRequestAction("rejected_cooldown");
+    throw new MusicRequestServiceError(
+        "recently_denied",
+        "This album was declined recently and can be requested again later",
+        cooldownUntil,
+    );
 }
 
 function duplicateError(code: MusicRequestErrorCode, message: string): never {
@@ -158,6 +189,20 @@ async function rejectIfDownloading(rgMbid: string): Promise<void> {
         duplicateError("already_downloading", "Album is already downloading");
 }
 
+async function rejectIfCoolingDown(rgMbid: string): Promise<void> {
+    if (config.requests.deniedCooldownDays === 0) return;
+    const denied = await prisma.musicRequest.findFirst({
+        where: {
+            rgMbid,
+            status: "denied",
+            cooldownUntil: { gt: new Date() },
+        },
+        select: { cooldownUntil: true },
+        orderBy: { cooldownUntil: "desc" },
+    });
+    if (denied?.cooldownUntil) cooldownError(denied.cooldownUntil);
+}
+
 function dailyCutoff(now = new Date()): Date {
     return new Date(now.getTime() - ONE_DAY_MS);
 }
@@ -180,22 +225,18 @@ async function rejectIfAtDailyCap(userId: string): Promise<void> {
 
 async function notifyAdminsOfSubmission(request: MusicRequest): Promise<void> {
     try {
-        const [requester, admins] = await Promise.all([
+        const [requester, adminIds] = await Promise.all([
             prisma.user.findUnique({
                 where: { id: request.userId },
                 select: { username: true },
             }),
-            prisma.user.findMany({
-                where: { role: "admin" },
-                select: { id: true },
-                take: MAX_ADMIN_NOTIFICATIONS,
-            }),
+            listAdminRecipientIds(),
         ]);
-        const metadata = requestNotificationMetadata(request);
+        const metadata = buildRequestNotificationMetadata(request);
         const outcomes = await Promise.allSettled(
-            admins.map((admin) =>
+            adminIds.map((adminId) =>
                 notificationService.notifyRequestSubmitted(
-                    admin.id,
+                    adminId,
                     requester?.username || "A user",
                     metadata,
                 ),
@@ -225,6 +266,7 @@ export async function createRequest(
     await rejectIfOwned(input.rgMbid);
     await rejectIfOpenRequest(input.rgMbid);
     await rejectIfDownloading(input.rgMbid);
+    await rejectIfCoolingDown(input.rgMbid);
     await rejectIfAtDailyCap(userId);
     let request: MusicRequest;
     try {
@@ -322,16 +364,76 @@ function addLibraryLinks<T extends LinkableRequest>(
     });
 }
 
-/** List the caller's request history newest first. */
+async function attachDownloadStatuses<T extends LinkableRequest>(
+    rows: T[],
+): Promise<Array<T & RequestDownloadLink>> {
+    const jobIds = [
+        ...new Set(
+            rows.flatMap((row) =>
+                row.downloadJobId ? [row.downloadJobId] : [],
+            ),
+        ),
+    ];
+    const jobs = jobIds.length
+        ? await prisma.downloadJob.findMany({
+              where: { id: { in: jobIds } },
+              select: { id: true, status: true },
+          })
+        : [];
+    const statuses = new Map(jobs.map((job) => [job.id, job.status]));
+    return rows.map((row) => ({
+        ...row,
+        downloadStatus: row.downloadJobId
+            ? (statuses.get(row.downloadJobId) ?? null)
+            : null,
+    }));
+}
+
+async function enrichRequestRows<T extends LinkableRequest>(
+    rows: T[],
+): Promise<Array<T & RequestLibraryLinks & RequestDownloadLink>> {
+    const linked = await attachLibraryLinks(rows);
+    return attachDownloadStatuses(linked);
+}
+
+function listOptions(
+    options?: MusicRequestListOptions,
+): MusicRequestListOptions {
+    return (
+        options ?? {
+            limit: DEFAULT_REQUEST_LIST_LIMIT,
+            offset: 0,
+        }
+    );
+}
+
+/** List the caller's filtered request history newest first. */
 export async function listRequestsForUser(
     userId: string,
-): Promise<Array<MusicRequest & RequestLibraryLinks>> {
-    const rows = await prisma.musicRequest.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: MAX_REQUEST_LIST_SIZE,
-    });
-    return attachLibraryLinks(rows);
+    requestedOptions?: MusicRequestListOptions,
+): Promise<
+    MusicRequestPage<MusicRequest & RequestLibraryLinks & RequestDownloadLink>
+> {
+    const options = listOptions(requestedOptions);
+    const where = {
+        userId,
+        ...(options.status ? { status: options.status } : {}),
+    };
+    const [rows, total] = await Promise.all([
+        prisma.musicRequest.findMany({
+            where,
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: options.offset,
+            take: options.limit,
+        }),
+        prisma.musicRequest.count({ where }),
+    ]);
+    return {
+        requests: await enrichRequestRows(rows),
+        total,
+        offset: options.offset,
+        limit: options.limit,
+    };
 }
 
 /** Return current feature availability and the rolling 24-hour allowance. */
@@ -339,6 +441,7 @@ export async function getRequestAvailability(userId: string): Promise<{
     enabled: true;
     remainingToday: number;
     dailyCap: number;
+    deniedCooldownDays: number;
 }> {
     const dailyCap = config.requests.dailyCapPerUser;
     const used = await requestsInLastDay(userId);
@@ -346,6 +449,7 @@ export async function getRequestAvailability(userId: string): Promise<{
         enabled: true,
         remainingToday: Math.max(0, dailyCap - used),
         dailyCap,
+        deniedCooldownDays: config.requests.deniedCooldownDays,
     };
 }
 
@@ -363,7 +467,9 @@ export async function cancelOwnRequest(
             where: { id, userId },
             select: { id: true, status: true },
         });
-        return own ? { kind: "conflict" } : { kind: "not_found" };
+        return own
+            ? { kind: "conflict", reason: "not_reviewable" }
+            : { kind: "not_found" };
     }
     const request = await prisma.musicRequest.findUnique({ where: { id } });
     if (!request) return { kind: "not_found" };
@@ -372,22 +478,62 @@ export async function cancelOwnRequest(
     return { kind: "updated", request };
 }
 
-/** List the bounded administrator queue with requester identity. */
+/** List one bounded administrator queue page with requester identity. */
 export async function listAllRequests(
-    status?: MusicRequestStatus,
+    requestedOptions?: MusicRequestListOptions,
 ): Promise<
-    Array<
+    MusicRequestPage<
         MusicRequest &
-            RequestLibraryLinks & { user: { id: string; username: string } }
+            RequestLibraryLinks &
+            RequestDownloadLink & { user: { id: string; username: string } }
     >
 > {
-    const rows = await prisma.musicRequest.findMany({
-        where: status ? { status } : undefined,
-        include: { user: { select: { id: true, username: true } } },
-        orderBy: { createdAt: "desc" },
-        take: MAX_REQUEST_LIST_SIZE,
+    const options = listOptions(requestedOptions);
+    const where = options.status ? { status: options.status } : undefined;
+    const [rows, total] = await Promise.all([
+        prisma.musicRequest.findMany({
+            where,
+            include: { user: { select: { id: true, username: true } } },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: options.offset,
+            take: options.limit,
+        }),
+        prisma.musicRequest.count({ where }),
+    ]);
+    return {
+        requests: await enrichRequestRows(rows),
+        total,
+        offset: options.offset,
+        limit: options.limit,
+    };
+}
+
+/** Return every request status count with absent groups zero-filled. */
+export async function getRequestCounts(): Promise<
+    Record<MusicRequestStatus, number>
+> {
+    const counts: Record<MusicRequestStatus, number> = {
+        pending: 0,
+        approved: 0,
+        denied: 0,
+        fulfilled: 0,
+        failed: 0,
+        cancelled: 0,
+    };
+    const grouped = await prisma.musicRequest.groupBy({
+        by: ["status"],
+        where: { status: { in: [...MUSIC_REQUEST_STATUSES] } },
+        _count: { _all: true },
     });
-    return attachLibraryLinks(rows);
+    for (const row of grouped) {
+        if (isMusicRequestStatus(row.status))
+            counts[row.status] = row._count._all;
+    }
+    return counts;
+}
+
+function isMusicRequestStatus(status: string): status is MusicRequestStatus {
+    return (MUSIC_REQUEST_STATUSES as readonly string[]).includes(status);
 }
 
 function approvalJobParams(
@@ -404,7 +550,10 @@ function approvalJobParams(
         albumTitle: request.albumTitle,
         downloadType: "library",
         rootFolderPath,
-        metadata: { queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER },
+        metadata: {
+            queuedVia: ALBUM_DOWNLOAD_QUEUE_OWNER,
+            noFallback: true,
+        },
     };
 }
 
@@ -424,19 +573,46 @@ function approvalDispatch(
     };
 }
 
+class ApprovalStatusConflict extends Error {}
+
+async function transitionToApproved(
+    transaction: Prisma.TransactionClient,
+    adminId: string,
+    requestId: string,
+    observedStatus: ReviewableRequestStatus,
+): Promise<boolean> {
+    try {
+        const changed = await transaction.musicRequest.updateMany({
+            where: { id: requestId, status: observedStatus },
+            data: {
+                status: "approved",
+                reviewedById: adminId,
+                reviewedAt: new Date(),
+            },
+        });
+        return changed.count > 0;
+    } catch (error) {
+        if (isP2002(error)) throw new ApprovalStatusConflict();
+        throw error;
+    }
+}
+
 async function approveWithJob(
     adminId: string,
     request: MusicRequest,
     rootFolderPath: string,
+    observedStatus: ReviewableRequestStatus,
     verifiedArtistName?: string,
 ): Promise<ApprovalResult> {
     return prisma.$transaction(async (transaction) => {
-        const reviewedAt = new Date();
-        const changed = await transaction.musicRequest.updateMany({
-            where: { id: request.id, status: "pending" },
-            data: { status: "approved", reviewedById: adminId, reviewedAt },
-        });
-        if (changed.count === 0) return { kind: "conflict" } as const;
+        const changed = await transitionToApproved(
+            transaction,
+            adminId,
+            request.id,
+            observedStatus,
+        );
+        if (!changed)
+            return { kind: "conflict", reason: "not_reviewable" } as const;
         const jobResult = await createAlbumDownloadJob(
             approvalJobParams(request, adminId, rootFolderPath),
             transaction,
@@ -459,17 +635,17 @@ async function approveWithExistingJob(
     adminId: string,
     request: MusicRequest,
     job: DownloadJob,
+    observedStatus: ReviewableRequestStatus,
 ): Promise<ApprovalResult> {
     return prisma.$transaction(async (transaction) => {
-        const changed = await transaction.musicRequest.updateMany({
-            where: { id: request.id, status: "pending" },
-            data: {
-                status: "approved",
-                reviewedById: adminId,
-                reviewedAt: new Date(),
-            },
-        });
-        if (changed.count === 0) return { kind: "conflict" } as const;
+        const changed = await transitionToApproved(
+            transaction,
+            adminId,
+            request.id,
+            observedStatus,
+        );
+        if (!changed)
+            return { kind: "conflict", reason: "not_reviewable" } as const;
         const updated = await transaction.musicRequest.update({
             where: { id: request.id },
             data: { downloadJobId: job.id },
@@ -489,7 +665,7 @@ async function bestEffortApprovalNotification(
     try {
         await notificationService.notifyRequestApproved(
             request.userId,
-            requestNotificationMetadata(request),
+            buildRequestNotificationMetadata(request),
         );
     } catch (error) {
         log.warn("Request approval notification failed", {
@@ -501,11 +677,12 @@ async function bestEffortApprovalNotification(
 
 async function bestEffortFulfillmentNotification(
     request: MusicRequest,
+    albumId: string,
 ): Promise<void> {
     try {
         await notificationService.notifyRequestFulfilled(
             request.userId,
-            requestNotificationMetadata(request),
+            buildRequestNotificationMetadata(request, albumId),
         );
     } catch (error) {
         log.warn("Request fulfillment notification failed", {
@@ -518,16 +695,20 @@ async function bestEffortFulfillmentNotification(
 async function fulfillOwnedRequest(
     adminId: string,
     request: MusicRequest,
+    observedStatus: ReviewableRequestStatus,
+    albumId: string,
 ): Promise<ApprovalResult> {
     const changed = await prisma.musicRequest.updateMany({
-        where: { id: request.id, status: "pending" },
+        where: { id: request.id, status: observedStatus },
         data: {
             status: "fulfilled",
             reviewedById: adminId,
             reviewedAt: new Date(),
         },
     });
-    if (changed.count === 0) return { kind: "conflict" };
+    if (changed.count === 0) {
+        return { kind: "conflict", reason: "not_reviewable" };
+    }
     const updated = await prisma.musicRequest.findUnique({
         where: { id: request.id },
     });
@@ -537,7 +718,7 @@ async function fulfillOwnedRequest(
         requestId: request.id,
         adminId,
     });
-    await bestEffortFulfillmentNotification(updated);
+    await bestEffortFulfillmentNotification(updated, albumId);
     return {
         kind: "updated",
         request: updated,
@@ -546,44 +727,109 @@ async function fulfillOwnedRequest(
     };
 }
 
-/** Approve a pending request and atomically link its shared download job. */
+function isReviewableStatus(status: string): status is ReviewableRequestStatus {
+    return status === "pending" || status === "failed";
+}
+
+async function hasOtherOpenRequest(request: MusicRequest): Promise<boolean> {
+    if (request.status !== "failed") return false;
+    const open = await prisma.musicRequest.findFirst({
+        where: {
+            id: { not: request.id },
+            userId: request.userId,
+            rgMbid: request.rgMbid,
+            status: { in: [...OPEN_REQUEST_STATUSES] },
+        },
+        select: { id: true },
+    });
+    return open !== null;
+}
+
+async function approveWithActiveJobFallback(
+    adminId: string,
+    request: MusicRequest,
+    observedStatus: ReviewableRequestStatus,
+    rootFolderPath: string,
+    verifiedArtistName?: string,
+): Promise<ApprovalResult> {
+    try {
+        return await approveWithJob(
+            adminId,
+            request,
+            rootFolderPath,
+            observedStatus,
+            verifiedArtistName,
+        );
+    } catch (error) {
+        if (error instanceof ApprovalStatusConflict)
+            return { kind: "conflict", reason: "open_request_exists" };
+        if (!isP2002(error)) throw error;
+        return approveUsingExistingJob(adminId, request, observedStatus, error);
+    }
+}
+
+async function approveUsingExistingJob(
+    adminId: string,
+    request: MusicRequest,
+    observedStatus: ReviewableRequestStatus,
+    originalError: unknown,
+): Promise<ApprovalResult> {
+    const job = await prisma.downloadJob.findFirst({
+        where: {
+            targetMbid: request.rgMbid,
+            status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
+        },
+        orderBy: { createdAt: "asc" },
+    });
+    if (!job) throw originalError;
+    try {
+        return await approveWithExistingJob(
+            adminId,
+            request,
+            job,
+            observedStatus,
+        );
+    } catch (error) {
+        if (error instanceof ApprovalStatusConflict)
+            return { kind: "conflict", reason: "open_request_exists" };
+        throw error;
+    }
+}
+
+/** Approve a pending or failed request and atomically link its shared job. */
 export async function approveRequest(
     adminId: string,
     id: string,
+    options?: ApproveRequestOptions,
 ): Promise<ApprovalResult> {
     const request = await prisma.musicRequest.findUnique({ where: { id } });
     if (!request) return { kind: "not_found" };
-    if (request.status !== "pending") return { kind: "conflict" };
+    if (!isReviewableStatus(request.status)) {
+        return { kind: "conflict", reason: "not_reviewable" };
+    }
+    const observedStatus = request.status;
     const owned = await prisma.album.findFirst({
         where: { rgMbid: request.rgMbid, location: "LIBRARY" },
         select: { id: true },
     });
-    if (owned) return fulfillOwnedRequest(adminId, request);
+    if (owned) {
+        return fulfillOwnedRequest(adminId, request, observedStatus, owned.id);
+    }
+    if (await hasOtherOpenRequest(request)) {
+        return { kind: "conflict", reason: "open_request_exists" };
+    }
     const settings = await getSystemSettings();
     const rootFolderPath = settings?.musicPath || config.music.musicPath;
-    const verifiedArtistName = await resolveAlbumDownloadArtistName(
-        request.artistName,
+    const verifiedArtistName =
+        options?.verifiedArtistName ??
+        (await resolveAlbumDownloadArtistName(request.artistName));
+    const result = await approveWithActiveJobFallback(
+        adminId,
+        request,
+        observedStatus,
+        rootFolderPath,
+        verifiedArtistName,
     );
-    let result: ApprovalResult;
-    try {
-        result = await approveWithJob(
-            adminId,
-            request,
-            rootFolderPath,
-            verifiedArtistName,
-        );
-    } catch (error) {
-        if (!isP2002(error)) throw error;
-        const job = await prisma.downloadJob.findFirst({
-            where: {
-                targetMbid: request.rgMbid,
-                status: { in: ACTIVE_DOWNLOAD_JOB_STATUSES },
-            },
-            orderBy: { createdAt: "asc" },
-        });
-        if (!job) throw error;
-        result = await approveWithExistingJob(adminId, request, job);
-    }
     if (result.kind !== "updated") return result;
     recordMusicRequestAction("approved");
     log.info("Music request approved", { requestId: id, adminId });
@@ -598,7 +844,7 @@ async function bestEffortDenialNotification(
     try {
         await notificationService.notifyRequestDenied(
             request.userId,
-            requestNotificationMetadata(request),
+            buildRequestNotificationMetadata(request),
             reason,
         );
     } catch (error) {
@@ -609,7 +855,12 @@ async function bestEffortDenialNotification(
     }
 }
 
-/** Deny a pending request through an atomic conditional transition. */
+function denialCooldownUntil(reviewedAt: Date): Date | null {
+    const days = config.requests.deniedCooldownDays;
+    return days > 0 ? new Date(reviewedAt.getTime() + days * ONE_DAY_MS) : null;
+}
+
+/** Deny a pending or failed request through a conditional transition. */
 export async function denyRequest(
     adminId: string,
     id: string,
@@ -617,18 +868,25 @@ export async function denyRequest(
 ): Promise<RequestTransitionResult> {
     const existing = await prisma.musicRequest.findUnique({ where: { id } });
     if (!existing) return { kind: "not_found" };
-    if (existing.status !== "pending") return { kind: "conflict" };
+    if (!isReviewableStatus(existing.status)) {
+        return { kind: "conflict", reason: "not_reviewable" };
+    }
+    const observedStatus = existing.status;
     const deniedReason = normalizeOptionalText(reason);
+    const reviewedAt = new Date();
     const changed = await prisma.musicRequest.updateMany({
-        where: { id, status: "pending" },
+        where: { id, status: observedStatus },
         data: {
             status: "denied",
             deniedReason,
             reviewedById: adminId,
-            reviewedAt: new Date(),
+            reviewedAt,
+            cooldownUntil: denialCooldownUntil(reviewedAt),
         },
     });
-    if (changed.count === 0) return { kind: "conflict" };
+    if (changed.count === 0) {
+        return { kind: "conflict", reason: "not_reviewable" };
+    }
     const request = await prisma.musicRequest.findUnique({ where: { id } });
     if (!request) return { kind: "not_found" };
     recordMusicRequestAction("denied");
@@ -636,4 +894,3 @@ export async function denyRequest(
     await bestEffortDenialNotification(request, deniedReason);
     return { kind: "updated", request };
 }
-import { ACTIVE_DOWNLOAD_JOB_STATUSES } from "./downloadJobStatus";

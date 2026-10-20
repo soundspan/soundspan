@@ -34,9 +34,9 @@ jest.mock("../../services/metadata/artistImageResolver", () => ({
     resolveArtistImage: jest.fn(),
 }));
 jest.mock("../../services/metadata/catalogPersistence", () => ({
+    findFreshArtistCatalogReleaseGroups: jest.fn(async () => null),
     logCatalogPersistenceError: jest.fn(),
     persistCatalogReleaseGroups: jest.fn(),
-    readFreshCatalogReleaseGroups: jest.fn(),
 }));
 
 jest.mock("../../services/libraryArtistReads", () => ({
@@ -101,6 +101,7 @@ describe("shared library artist read divergence guard", () => {
             expect.objectContaining({
                 albumLocations: ["LIBRARY", "DISCOVER", "REMOTE", "FEDERATED"],
                 requireVisibleAlbum: false,
+                likedRemoteAlbumsUserId: "user-1",
             }),
         );
         expect(mockReadLibraryArtist).toHaveBeenNthCalledWith(
@@ -109,6 +110,9 @@ describe("shared library artist read divergence guard", () => {
                 albumLocations: ["LIBRARY", "FEDERATED"],
                 requireVisibleAlbum: true,
             }),
+        );
+        expect(mockReadLibraryArtist.mock.calls[1][0]).not.toHaveProperty(
+            "likedRemoteAlbumsUserId",
         );
     });
 });

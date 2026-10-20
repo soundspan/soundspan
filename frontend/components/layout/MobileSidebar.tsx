@@ -25,6 +25,8 @@ import { useToast } from "@/lib/toast-context";
 import { EqBars } from "@/components/ui/EqBars";
 import Image from "next/image";
 import { MOBILE_QUICK_LINKS } from "./socialNavigation";
+import { NavCountBadge } from "./NavCountBadge";
+import { useRequestsNavEntry } from "@/hooks/useMusicRequests";
 import { BRAND_NAME } from "@/lib/brand";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
@@ -45,6 +47,7 @@ export function MobileSidebar({
     const pathname = usePathname();
     const { user, logout } = useAuth();
     const { toast } = useToast();
+    const requestsNav = useRequestsNavEntry();
     const [isSyncing, setIsSyncing] = useState(false);
 
     // Close on route change
@@ -225,7 +228,7 @@ export function MobileSidebar({
                             </span>
                         </Link>
 
-                        {user?.role === "admin" && (
+                        {requestsNav && (
                             <Link
                                 href="/requests"
                                 aria-current={
@@ -242,8 +245,15 @@ export function MobileSidebar({
                             >
                                 <Inbox className="w-5 h-5" />
                                 <span className="text-[15px] font-medium">
-                                    Requests
+                                    {requestsNav.label}
                                 </span>
+                                {requestsNav.badge && (
+                                    <NavCountBadge
+                                        value={requestsNav.badge}
+                                        label={requestsNav.badgeLabel}
+                                        className="ml-auto"
+                                    />
+                                )}
                             </Link>
                         )}
 

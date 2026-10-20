@@ -7,10 +7,16 @@ const state: {
     pathname: string;
     hasActiveSessions: boolean;
     user: { id: string; role: string } | undefined;
+    requestsNav: {
+        label: string;
+        badge: string | null;
+        badgeLabel: string;
+    } | null;
 } = {
     pathname: "/discover",
     hasActiveSessions: false,
     user: undefined,
+    requestsNav: null,
 };
 
 const Icon = () => React.createElement("i");
@@ -87,6 +93,12 @@ mock.module("@/lib/toast-context", {
     },
 });
 
+mock.module("@/hooks/useMusicRequests", {
+    namedExports: {
+        useRequestsNavEntry: () => state.requestsNav,
+    },
+});
+
 mock.module("@/components/ui/EqBars", {
     namedExports: {
         EqBars: () => React.createElement("span", null, "eq-bars"),
@@ -97,6 +109,7 @@ beforeEach(() => {
     state.pathname = "/discover";
     state.hasActiveSessions = false;
     state.user = undefined;
+    state.requestsNav = null;
 });
 
 test("returns null when closed", async () => {
@@ -151,7 +164,7 @@ test("shows listen-together marker when sessions are active", async () => {
     assert.match(html, /eq-bars/);
 });
 
-test("admins see Requests and Admin links; users see neither", async () => {
+test("admins see Requests and Admin links; users without requests see neither", async () => {
     const { MobileSidebar } =
         await import("../../components/layout/MobileSidebar");
 
@@ -167,6 +180,11 @@ test("admins see Requests and Admin links; users see neither", async () => {
     assert.doesNotMatch(userHtml, /href="\/admin"/);
 
     state.user = { id: "a1", role: "admin" };
+    state.requestsNav = {
+        label: "Requests",
+        badge: null,
+        badgeLabel: "pending requests",
+    };
     const adminHtml = renderToStaticMarkup(
         React.createElement(MobileSidebar, {
             isOpen: true,
@@ -177,6 +195,52 @@ test("admins see Requests and Admin links; users see neither", async () => {
     assert.match(adminHtml, /href="\/requests"/);
     assert.match(adminHtml, />Requests</);
     assert.match(adminHtml, /href="\/admin"/);
+});
+
+test("users with requests enabled see My Requests", async () => {
+    const { MobileSidebar } =
+        await import("../../components/layout/MobileSidebar");
+
+    state.user = { id: "u1", role: "user" };
+    state.requestsNav = {
+        label: "My Requests",
+        badge: null,
+        badgeLabel: "pending requests",
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(MobileSidebar, {
+            isOpen: true,
+            onClose: () => undefined,
+            hasActiveSessions: false,
+        }),
+    );
+
+    assert.match(html, /href="\/requests"/);
+    assert.match(html, />My Requests</);
+    assert.doesNotMatch(html, /pending requests/);
+    assert.doesNotMatch(html, /href="\/admin"/);
+});
+
+test("the admin Requests entry shows the pending count", async () => {
+    const { MobileSidebar } =
+        await import("../../components/layout/MobileSidebar");
+
+    state.user = { id: "a1", role: "admin" };
+    state.requestsNav = {
+        label: "Requests",
+        badge: "7",
+        badgeLabel: "pending requests",
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(MobileSidebar, {
+            isOpen: true,
+            onClose: () => undefined,
+            hasActiveSessions: false,
+        }),
+    );
+
+    assert.match(html, />Requests</);
+    assert.match(html, />7<span class="sr-only"> pending requests<\/span>/);
 });
 
 test("marks settings as the current route when viewing settings", async () => {

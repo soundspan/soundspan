@@ -61,6 +61,19 @@ const boundedPositiveIntEnvOr = (
         : fallback;
 };
 
+const boundedNonNegativeIntEnvOr = (
+    value: string | undefined,
+    fallback: number,
+    maximum: number,
+): number => {
+    const normalized = (value ?? "").trim();
+    if (!/^(0|[1-9]\d*)$/.test(normalized)) return fallback;
+    const parsed = Number(normalized);
+    return Number.isSafeInteger(parsed) && parsed <= maximum
+        ? parsed
+        : fallback;
+};
+
 const listenTogetherMutationLockTtlMs = positiveIntEnvOr(
     process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS,
     3000,
@@ -887,6 +900,11 @@ export const config = {
         dailyCapPerUser: positiveIntEnvOr(
             process.env.REQUESTS_PER_USER_PER_DAY,
             10,
+        ),
+        deniedCooldownDays: boundedNonNegativeIntEnvOr(
+            process.env.REQUESTS_DENIED_COOLDOWN_DAYS,
+            30,
+            3650,
         ),
     },
 

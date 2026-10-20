@@ -27,6 +27,7 @@
             "library",
             "library-health",
             "podcast",
+            "requests",
             "search",
             "settings",
             "social"
@@ -1038,26 +1039,43 @@
         {
             "id": "music-requests",
             "name": "Music Requests",
-            "description": "Non-admin album request queue: request buttons on album and release surfaces, an admin approval page, request notifications, and a fulfillment reconciler feeding the existing download path",
+            "description": "Non-admin album request queue: request buttons on album, artist, and release surfaces, a paged role-aware requests page with admin retry, decline reasons, and bulk actions, a pending-count badge, request notifications with album deep links, a re-request cooldown for declined albums, and a fulfillment reconciler feeding the existing download path",
             "frontend": {
-                "feature_dirs": ["album"],
+                "feature_dirs": ["album", "artist", "requests"],
                 "routes": ["/requests"]
             },
             "backend": {
                 "routes": ["requests.ts"],
-                "services": ["musicRequestService.ts", "albumDownloadJobs.ts"],
+                "services": [
+                    "musicRequestService.ts",
+                    "musicRequestBulkActions.ts",
+                    "albumDownloadJobs.ts",
+                    "notificationService.ts"
+                ],
                 "workers": [
                     "processors/requestFulfillmentProcessor.ts",
+                    "processors/requestFulfillmentNotifications.ts",
                     "requestFulfillmentSchedule.ts"
                 ]
             },
             "tests": {
                 "backend_route": ["requestsRuntime.test.ts"],
-                "backend_contract": ["musicRequestService.test.ts"],
+                "backend_contract": [
+                    "musicRequestService.test.ts",
+                    "musicRequestBulkActions.test.ts",
+                    "requestFulfillmentProcessor.test.ts",
+                    "notificationService.test.ts"
+                ],
                 "frontend": [
                     "musicRequests.test.ts",
+                    "requestViewModel.test.ts",
+                    "notificationLinks.test.ts",
                     "requestsPage.component.test.ts",
-                    "albumActionBar.component.test.ts"
+                    "requestDialogs.component.test.ts",
+                    "musicRequestHooks.component.test.ts",
+                    "albumActionBar.component.test.ts",
+                    "availableAlbums.component.test.ts",
+                    "mobileSidebar.component.test.ts"
                 ]
             }
         }

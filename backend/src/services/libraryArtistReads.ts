@@ -16,6 +16,8 @@ export interface LibraryArtistLookup {
 export interface LibraryArtistReadOptions {
     lookup: LibraryArtistLookup;
     albumLocations: readonly AlbumLocation[];
+    /** Includes REMOTE albums liked by this user when REMOTE is requested. */
+    likedRemoteAlbumsUserId?: string;
     requireVisibleAlbum: boolean;
     albumOrder: "year" | "year-title";
     maxTracksPerAlbum?: number;
@@ -41,6 +43,27 @@ export function buildLibraryAlbumWhere(
         location: { in: [...albumLocations] },
         tracks: { some: trackWhere },
     };
+}
+
+function buildLikedRemoteAlbumWhere(userId: string): Prisma.AlbumWhereInput {
+    return {
+        location: "REMOTE",
+        OR: [
+            { tracksTidal: { some: { likedBy: { some: { userId } } } } },
+            { tracksYtMusic: { some: { likedBy: { some: { userId } } } } },
+        ],
+    };
+}
+
+function buildArtistAlbumWhere(
+    options: LibraryArtistReadOptions,
+): Prisma.AlbumWhereInput {
+    const albumWhere = buildLibraryAlbumWhere(options.albumLocations);
+    const userId = options.likedRemoteAlbumsUserId;
+    if (!userId || !options.albumLocations.includes("REMOTE")) {
+        return albumWhere;
+    }
+    return { OR: [albumWhere, buildLikedRemoteAlbumWhere(userId)] };
 }
 
 function buildArtistWhere(
@@ -131,7 +154,7 @@ function buildAlbumRead(
  */
 export async function readLibraryArtist(options: LibraryArtistReadOptions) {
     const trackWhere = buildLibraryTrackWhere(options.albumLocations);
-    const albumWhere = buildLibraryAlbumWhere(options.albumLocations);
+    const albumWhere = buildArtistAlbumWhere(options);
     return prisma.artist.findFirst({
         where: buildArtistWhere(options, albumWhere),
         include: {

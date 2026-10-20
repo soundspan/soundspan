@@ -163,6 +163,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/musicScanner.ts` | Core |
 | `backend/src/services/musicScannerIdentity.ts` | Scanner artist and album identity resolution |
 | `backend/src/services/musicRequestService.ts` | Album request deduplication, quota, review, and notification lifecycle |
+| `backend/src/services/musicRequestBulkActions.ts` | Admin bulk request actions: approve one user's pending requests and decline stale ones in bounded batches |
 | `backend/src/services/nativeCoverHealing.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
