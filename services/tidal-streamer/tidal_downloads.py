@@ -15,6 +15,7 @@ from xml.etree.ElementTree import fromstring as xml_fromstring
 
 from mutagen.easymp4 import EasyMP4
 from mutagen.flac import FLAC
+from tidal_album_artist import _album_primary_artist_name
 from tiddl.core.metadata import Cover, add_track_metadata
 from tiddl.core.utils import parse_track_stream
 from tiddl.core.utils.format import format_template
@@ -407,12 +408,8 @@ def _fetch_download_cover(album: Any, track_id: int) -> tuple[bool, bytes | None
 
 def _resolve_album_artist(album: Any, track: Any) -> str:
     """Album-level artist for the ALBUMARTIST tag; every track in one album must get the same value."""
-    artist_name = getattr(getattr(album, "artist", None), "name", "")
-    if isinstance(artist_name, str) and artist_name:
-        return artist_name
-    album_artists = getattr(album, "artists", None) or []
-    artist_name = getattr(album_artists[0], "name", "") if album_artists else ""
-    if isinstance(artist_name, str) and artist_name:
+    artist_name = _album_primary_artist_name(album)
+    if artist_name:
         return artist_name
     track_artists = getattr(track, "artists", None) or []
     artist_name = getattr(track_artists[0], "name", "") if track_artists else ""

@@ -447,6 +447,62 @@ describe("tidalService", () => {
     });
 
     describe("findAlbum", () => {
+        it("tries later symbol-title queries and stops after a match", async () => {
+            const searchSpy = jest
+                .spyOn(tidalService, "search")
+                .mockResolvedValueOnce({
+                    tracks: [],
+                    artists: [],
+                    albums: [],
+                })
+                .mockResolvedValueOnce({
+                    tracks: [],
+                    artists: [],
+                    albums: [
+                        {
+                            id: 11,
+                            title: "+",
+                            artist: "Ed Sheeran",
+                            numberOfTracks: 12,
+                            releaseDate: null,
+                            type: "ALBUM",
+                            quality: "LOSSLESS",
+                            cover: null,
+                        },
+                    ],
+                })
+                .mockResolvedValueOnce({
+                    tracks: [],
+                    artists: [],
+                    albums: [
+                        {
+                            id: 22,
+                            title: "- (Deluxe)",
+                            artist: "Ed Sheeran",
+                            numberOfTracks: 21,
+                            releaseDate: null,
+                            type: "ALBUM",
+                            quality: "LOSSLESS",
+                            cover: null,
+                        },
+                    ],
+                });
+
+            await expect(
+                tidalService.findAlbum("Ed Sheeran", "−"),
+            ).resolves.toEqual({
+                albumId: 22,
+                title: "- (Deluxe)",
+                artist: "Ed Sheeran",
+                numberOfTracks: 21,
+            });
+            expect(searchSpy.mock.calls.map(([query]) => query)).toEqual([
+                "Ed Sheeran −",
+                "Ed Sheeran -",
+                "Ed Sheeran minus",
+            ]);
+        });
+
         it("prefers exact normalized album+artist match over weaker candidates", async () => {
             jest.spyOn(tidalService, "search").mockResolvedValue({
                 tracks: [],
@@ -525,6 +581,7 @@ describe("tidalService", () => {
                     artistName: "Different Artist",
                     albumTitle: "Nonexistent Title",
                     candidateCount: 2,
+                    queryCount: 1,
                 },
             );
             expect(mockLogger.debug).toHaveBeenCalledTimes(1);
@@ -559,6 +616,7 @@ describe("tidalService", () => {
             );
 
             await expect(tidalService.findAlbum("A", "B")).resolves.toBeNull();
+            expect(tidalService.search).toHaveBeenCalledTimes(1);
             expect(mockLogger.error).toHaveBeenCalledWith(
                 "[TIDAL] Album search failed:",
                 "search down",

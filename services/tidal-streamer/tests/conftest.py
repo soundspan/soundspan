@@ -86,6 +86,7 @@ INTERNAL_API_SECRET = "test-internal-secret-value"
 APP_MODULES = (
     "app",
     "tidal_auth",
+    "tidal_album_artist",
     "tidal_browse",
     "tidal_cache",
     "tidal_download_routes",

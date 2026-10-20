@@ -3,6 +3,7 @@
 import asyncio
 
 from fastapi import Depends
+from tidal_album_artist import _album_primary_artist_name
 from tidal_auth import require_admin_credentials
 from tidal_downloads import (
     _download_album_tracks,
@@ -66,7 +67,7 @@ async def download_album(
         return {
             "album_id": req.album_id,
             "album_title": album.title,
-            "artist": album.artist.name if album.artist else "Unknown",
+            "artist": _album_primary_artist_name(album) or "Unknown",
             "total_tracks": len(tracks),
             "downloaded": len(results),
             "failed": len(errors),

@@ -36,6 +36,60 @@ const fixtures: MatchFixture[] = [
         accepted: true,
     },
     {
+        name: "accepts a multiplication-sign title as a folded x edition",
+        request: { artistName: "Ed Sheeran", albumTitle: "×" },
+        candidate: {
+            artistName: "Ed Sheeran",
+            albumTitle: "x (Deluxe Edition)",
+        },
+        accepted: true,
+    },
+    {
+        name: "accepts a minus-sign title as a folded hyphen edition",
+        request: { artistName: "Ed Sheeran", albumTitle: "−" },
+        candidate: {
+            artistName: "Ed Sheeran",
+            albumTitle: "- (Deluxe)",
+        },
+        accepted: true,
+    },
+    {
+        name: "accepts a minus-sign title as a folded hyphen",
+        request: { artistName: "Ed Sheeran", albumTitle: "−" },
+        candidate: { artistName: "Ed Sheeran", albumTitle: "-" },
+        accepted: true,
+    },
+    {
+        name: "accepts an exact punctuation-only parenthesized title",
+        request: { artistName: "Sigur Rós", albumTitle: "( )" },
+        candidate: { artistName: "Sigur Rós", albumTitle: "( )" },
+        accepted: true,
+    },
+    {
+        name: "accepts an edition of a punctuation-only parenthesized title",
+        request: { artistName: "Sigur Rós", albumTitle: "( )" },
+        candidate: {
+            artistName: "Sigur Rós",
+            albumTitle: "( ) [2022 Remaster]",
+        },
+        accepted: true,
+    },
+    {
+        name: "accepts an edition of a question-mark title",
+        request: { artistName: "XXXTENTACION", albumTitle: "?" },
+        candidate: {
+            artistName: "XXXTENTACION",
+            albumTitle: "? (Deluxe)",
+        },
+        accepted: true,
+    },
+    {
+        name: "accepts an exact punctuation-only artist",
+        request: { artistName: "!!!", albumTitle: "Myth Takes" },
+        candidate: { artistName: "!!!", albumTitle: "Myth Takes" },
+        accepted: true,
+    },
+    {
         name: "accepts a collaboration containing the requested artist",
         request: { artistName: "Drake", albumTitle: "Her Loss" },
         candidate: {
@@ -183,6 +237,42 @@ const fixtures: MatchFixture[] = [
         accepted: false,
     },
     {
+        name: "rejects a plus title for a minus-sign request",
+        request: { artistName: "Ed Sheeran", albumTitle: "−" },
+        candidate: { artistName: "Ed Sheeran", albumTitle: "+" },
+        accepted: false,
+    },
+    {
+        name: "rejects a tour collection for a minus-sign request",
+        request: { artistName: "Ed Sheeran", albumTitle: "−" },
+        candidate: {
+            artistName: "Ed Sheeran",
+            albumTitle: "+-=÷× (Tour Collection)",
+        },
+        accepted: false,
+    },
+    {
+        name: "rejects a divide title for a multiplication-sign request",
+        request: { artistName: "Ed Sheeran", albumTitle: "×" },
+        candidate: {
+            artistName: "Ed Sheeran",
+            albumTitle: "÷ (Deluxe)",
+        },
+        accepted: false,
+    },
+    {
+        name: "rejects a folded title from another artist",
+        request: { artistName: "Ed Sheeran", albumTitle: "×" },
+        candidate: { artistName: "Different Artist", albumTitle: "x" },
+        accepted: false,
+    },
+    {
+        name: "rejects different punctuation-only title keys",
+        request: { artistName: "Artist", albumTitle: "---" },
+        candidate: { artistName: "Artist", albumTitle: "-" },
+        accepted: false,
+    },
+    {
         name: "rejects an empty requested artist",
         request: { artistName: " ", albumTitle: "Take Care" },
         candidate: { artistName: "Drake", albumTitle: "Take Care" },
@@ -191,6 +281,12 @@ const fixtures: MatchFixture[] = [
     {
         name: "rejects an empty requested title",
         request: { artistName: "Drake", albumTitle: "" },
+        candidate: { artistName: "Drake", albumTitle: "Take Care" },
+        accepted: false,
+    },
+    {
+        name: "rejects a whitespace-only requested title",
+        request: { artistName: "Drake", albumTitle: " \t " },
         candidate: { artistName: "Drake", albumTitle: "Take Care" },
         accepted: false,
     },
@@ -232,6 +328,52 @@ describe("pickBestAlbumMatch", () => {
         expect(
             pickBestAlbumMatch(
                 { artistName: "Drake", albumTitle: "Take Care" },
+                candidates,
+                (candidate) => candidate,
+            ),
+        ).toBe(candidates[1]);
+    });
+
+    it("prefers an exact title over an earlier folded title", () => {
+        const candidates = [
+            {
+                id: "FOLDED",
+                artistName: "Ed Sheeran",
+                albumTitle: "x (Deluxe Edition)",
+            },
+            {
+                id: "EXACT",
+                artistName: "Ed Sheeran",
+                albumTitle: "×",
+            },
+        ];
+
+        expect(
+            pickBestAlbumMatch(
+                { artistName: "Ed Sheeran", albumTitle: "×" },
+                candidates,
+                (candidate) => candidate,
+            ),
+        ).toBe(candidates[1]);
+    });
+
+    it("prefers an edition title over an earlier folded title", () => {
+        const candidates = [
+            {
+                id: "FOLDED",
+                artistName: "Ed Sheeran",
+                albumTitle: "x (Deluxe Edition)",
+            },
+            {
+                id: "EDITION",
+                artistName: "Ed Sheeran",
+                albumTitle: "× (Deluxe Edition)",
+            },
+        ];
+
+        expect(
+            pickBestAlbumMatch(
+                { artistName: "Ed Sheeran", albumTitle: "×" },
                 candidates,
                 (candidate) => candidate,
             ),

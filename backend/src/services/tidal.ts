@@ -13,7 +13,9 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
+import { toErrorMessage } from "../utils/errors";
 import { pickBestAlbumMatch } from "./albumMatchPolicy";
+import { buildAlbumSearchQueries } from "./albumSearchQueries";
 
 const tidalLogger = logger.child("TidalService");
 
@@ -93,6 +95,11 @@ export interface TidalAlbumDownloadResult {
     failed: number;
     tracks: TidalDownloadResult[];
     errors: Array<{ track_id: number; title: string; error: string }>;
+}
+
+interface TidalAlbumSearchAttempt {
+    match: TidalAlbumResult | null;
+    candidateCount: number;
 }
 
 // ── Service ────────────────────────────────────────────────────────
@@ -385,36 +392,53 @@ class TidalService {
         numberOfTracks: number;
     } | null> {
         try {
-            const results = await this.search(`${artistName} ${albumTitle}`);
-            if (!results.albums || results.albums.length === 0) return null;
-
-            const match = pickBestAlbumMatch(
-                { artistName, albumTitle },
-                results.albums,
-                (album) => ({
-                    artistName: album.artist,
-                    albumTitle: album.title,
-                }),
-            );
-            if (!match) {
-                tidalLogger.debug("No acceptable album match found", {
+            const queries = buildAlbumSearchQueries(artistName, albumTitle);
+            let candidateCount = 0;
+            for (const query of queries) {
+                const attempt = await this.findAlbumForQuery(
+                    query,
                     artistName,
                     albumTitle,
-                    candidateCount: results.albums.length,
-                });
-                return null;
+                );
+                candidateCount += attempt.candidateCount;
+                if (attempt.match) {
+                    return {
+                        albumId: attempt.match.id,
+                        title: attempt.match.title,
+                        artist: attempt.match.artist,
+                        numberOfTracks: attempt.match.numberOfTracks,
+                    };
+                }
             }
-
-            return {
-                albumId: match.id,
-                title: match.title,
-                artist: match.artist,
-                numberOfTracks: match.numberOfTracks,
-            };
-        } catch (err: any) {
-            logger.error("[TIDAL] Album search failed:", err.message);
+            tidalLogger.debug("No acceptable album match found", {
+                artistName,
+                albumTitle,
+                candidateCount,
+                queryCount: queries.length,
+            });
+            return null;
+        } catch (error: unknown) {
+            logger.error("[TIDAL] Album search failed:", toErrorMessage(error));
             return null;
         }
+    }
+
+    private async findAlbumForQuery(
+        query: string,
+        artistName: string,
+        albumTitle: string,
+    ): Promise<TidalAlbumSearchAttempt> {
+        const results = await this.search(query);
+        const albums = results.albums ?? [];
+        const match = pickBestAlbumMatch(
+            { artistName, albumTitle },
+            albums,
+            (album) => ({
+                artistName: album.artist,
+                albumTitle: album.title,
+            }),
+        );
+        return { match, candidateCount: albums.length };
     }
 
     /**

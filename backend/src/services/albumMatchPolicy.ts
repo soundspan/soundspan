@@ -16,11 +16,56 @@ export interface AlbumMatchCandidate {
     albumTitle: string;
 }
 
-type TitleMatchTier = "exact" | "edition";
+type TitleMatchTier = "exact" | "edition" | "folded";
 
-function normalizedExact(value: string): string | null {
+const TITLE_MATCH_TIERS = [
+    "exact",
+    "edition",
+    "folded",
+] as const satisfies readonly TitleMatchTier[];
+
+const SYMBOL_FOLDS = new Map<string, string>([
+    ["×", "x"],
+    ["✕", "x"],
+    ["✖", "x"],
+    ["⨯", "x"],
+    ["‐", "-"],
+    ["‑", "-"],
+    ["‒", "-"],
+    ["–", "-"],
+    ["—", "-"],
+    ["―", "-"],
+    ["−", "-"],
+    ["﹣", "-"],
+    ["⁄", "/"],
+    ["∕", "/"],
+    ["∗", "*"],
+    ["‘", "'"],
+    ["’", "'"],
+    ["“", '"'],
+    ["”", '"'],
+]);
+
+/** Fold common typographic and mathematical look-alikes to keyboard symbols. */
+export function foldAlbumSymbols(value: string): string {
+    return Array.from(
+        value.normalize("NFKC"),
+        (character) => SYMBOL_FOLDS.get(character) ?? character,
+    ).join("");
+}
+
+function normalizedSymbolKey(value: string): string {
+    return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, "");
+}
+
+function normalizedFoldedSymbolKey(value: string): string | null {
     if (!value.trim()) return null;
-    return normalizeForExactKey(value) || null;
+    return normalizedSymbolKey(foldAlbumSymbols(value)) || null;
+}
+
+function normalizedComparisonKey(value: string): string | null {
+    if (!value.trim()) return null;
+    return normalizeForExactKey(value) || normalizedSymbolKey(value) || null;
 }
 
 function normalizedArtistTokens(value: string): string {
@@ -42,28 +87,52 @@ function containsRequestedArtist(
     );
 }
 
+function comparisonKeysMatch(
+    requestedValue: string,
+    candidateValue: string,
+): boolean {
+    const requestedKey = normalizedComparisonKey(requestedValue);
+    const candidateKey = normalizedComparisonKey(candidateValue);
+    return requestedKey !== null && requestedKey === candidateKey;
+}
+
 function titleMatchTier(
     requestedTitle: string,
     candidateTitle: string,
 ): TitleMatchTier | null {
-    const requestedExact = normalizedExact(requestedTitle);
-    const candidateExact = normalizedExact(candidateTitle);
-    if (!requestedExact || !candidateExact) return null;
-    if (candidateExact === requestedExact) return "exact";
+    if (comparisonKeysMatch(requestedTitle, candidateTitle)) return "exact";
+    if (
+        comparisonKeysMatch(
+            stripAlbumEdition(requestedTitle),
+            stripAlbumEdition(candidateTitle),
+        )
+    ) {
+        return "edition";
+    }
 
-    const requestedBase = normalizedExact(stripAlbumEdition(requestedTitle));
-    const candidateBase = normalizedExact(stripAlbumEdition(candidateTitle));
-    if (!requestedBase || !candidateBase) return null;
-    return candidateBase === requestedBase ? "edition" : null;
+    const foldedRequest = foldAlbumSymbols(requestedTitle);
+    const foldedCandidate = foldAlbumSymbols(candidateTitle);
+    if (comparisonKeysMatch(foldedRequest, foldedCandidate)) return "folded";
+    return comparisonKeysMatch(
+        stripAlbumEdition(foldedRequest),
+        stripAlbumEdition(foldedCandidate),
+    )
+        ? "folded"
+        : null;
 }
 
 function artistMatches(
     requestedArtist: string,
     candidateArtist: string,
 ): boolean {
-    const requestedExact = normalizedExact(requestedArtist);
-    const candidateExact = normalizedExact(candidateArtist);
-    if (!requestedExact || !candidateExact) return false;
+    if (!requestedArtist.trim() || !candidateArtist.trim()) return false;
+    const requestedExact = normalizeForExactKey(requestedArtist);
+    const candidateExact = normalizeForExactKey(candidateArtist);
+    if (!requestedExact || !candidateExact) {
+        const requestedSymbol = normalizedFoldedSymbolKey(requestedArtist);
+        const candidateSymbol = normalizedFoldedSymbolKey(candidateArtist);
+        return requestedSymbol !== null && requestedSymbol === candidateSymbol;
+    }
     if (candidateExact === requestedExact) return true;
 
     const requestedTokens = normalizedArtistTokens(requestedArtist);
@@ -109,18 +178,20 @@ function findInTier<T>(
 
 /**
  * Pick the first acceptable provider candidate in the strongest title tier.
- * Exact-title matches take precedence over edition-stripped matches while
- * provider order is retained within each tier.
+ * Exact and edition-stripped matches take precedence over folded matches.
+ * Provider order is retained within each tier.
  */
 export function pickBestAlbumMatch<T>(
     request: AlbumMatchRequest,
     candidates: T[],
     read: (candidate: T) => AlbumMatchCandidate,
 ): T | null {
-    if (!normalizedExact(request.artistName)) return null;
-    if (!normalizedExact(request.albumTitle)) return null;
+    if (!normalizedComparisonKey(request.artistName)) return null;
+    if (!normalizedComparisonKey(request.albumTitle)) return null;
 
-    const exact = findInTier(request, candidates, read, "exact");
-    if (exact) return exact;
-    return findInTier(request, candidates, read, "edition");
+    for (const tier of TITLE_MATCH_TIERS) {
+        const match = findInTier(request, candidates, read, tier);
+        if (match) return match;
+    }
+    return null;
 }
