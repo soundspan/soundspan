@@ -126,8 +126,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/rssParser.ts": 1,
     // simpleDownloadManager.ts remaining 4: download-job status objects (~L350, ~L371, ~L415, ~L436) persisted for the admin download-queue surface; frozen under the slice-E scope guard.
     "backend/src/services/simpleDownloadManager.ts": 4,
-    // soulseek.ts remaining 9: download-result error objects and downstream aggregations/passthroughs in Soulseek orchestration; the session log is client-visible and its raw error/path entries are sanitized rather than frozen.
-    "backend/src/services/soulseek.ts": 9,
+    // soulseek.ts remaining 6: download-result error objects and downstream aggregations/passthroughs in Soulseek orchestration; the session log is client-visible and its raw error/path entries are sanitized rather than frozen.
+    "backend/src/services/soulseek.ts": 6,
     "backend/src/services/spotify.ts": 0,
     // spotifyImport modules retain only server-side job-state and retry-classification values.
     "backend/src/services/spotifyImport/jobManagement.ts": 1,

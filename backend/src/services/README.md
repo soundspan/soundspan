@@ -211,6 +211,9 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/simpleDownloadManager.ts` | Core |
 | `backend/src/services/soulseek/albumCoherence.ts` | Pure Soulseek album-folder grouping, coherence eligibility, and peer-signal ranking |
 | `backend/src/services/soulseek/albumFolderDownload.ts` | Soulseek coherent-folder batch orchestration with per-track retry fallback |
+| `backend/src/services/soulseek/downloadErrorCategory.ts` | Pure Soulseek download-failure classification that decides whether a peer counts toward the failed-user circuit breaker |
+| `backend/src/services/soulseek/slskSession.ts` | slsk-client adapter: client creation, login with cleanup on failure, the credential test, and search-result normalization |
+| `backend/src/services/soulseek/trackTitleNormalization.ts` | Pure track-title cleanup that strips live, remaster, and similar descriptors before a Soulseek search |
 | `backend/src/services/soulseekLibraryDownload.ts` | Soulseek album track-list resolution, batch download, and download-job persistence |
 | `backend/src/services/socialPresenceEvents.ts` | Core |
 | `backend/src/services/soulseek.ts` | Core |
