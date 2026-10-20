@@ -79,6 +79,11 @@ MusicBrainz matches for the albums of liked TIDAL and YouTube Music songs, 25
 albums an hour. It shares the normal MusicBrainz rate limit, so other metadata
 lookups can run a little slower while it works through a large backlog.
 
+Another migration adds a table for saved artist discographies and clears the
+catalog sync time of every artist. It runs automatically at startup and needs
+no action. The next time an artist page is opened, soundspan rebuilds that
+artist's saved discography from MusicBrainz data.
+
 ---
 
 ## 2.6.0: scrobbling, AcoustID, and database changes
