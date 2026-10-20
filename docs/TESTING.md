@@ -162,6 +162,34 @@ npm run verify:python
 npm run verify:python-quality
 ```
 
+### Backend PostgreSQL integration
+
+The `Backend PostgreSQL Integration` CI job runs the real-PostgreSQL suites in
+`backend/tests-integration/` and the analyzer queue-claim test
+`services/audio-analyzer/tests/test_queue_claim_postgres_integration.py`. No
+`verify:*` script runs them against a database: without
+`INTEGRATION_DATABASE_URL`, the backend suites skip, and without
+`TEST_DATABASE_URL`, the analyzer test skips.
+
+> **Warning:** Use throwaway local infrastructure only. The backend suites
+> create and force-drop uniquely named databases on the server named by
+> `INTEGRATION_DATABASE_URL`. The analyzer test creates and drops a schema in
+> the `TEST_DATABASE_URL` database. Never point either URL at shared or
+> production services.
+
+Start the local PostgreSQL on its +1 port from `docker-compose.local.yml`, then
+run the same steps as the CI job:
+
+```bash
+docker compose -f docker-compose.local.yml up -d postgres-local
+export INTEGRATION_DATABASE_URL=postgresql://soundspan:soundspan@127.0.0.1:5433/soundspan
+export TEST_DATABASE_URL="$INTEGRATION_DATABASE_URL"
+pytest services/audio-analyzer/tests/test_queue_claim_postgres_integration.py -q
+npm --prefix backend run pretest:integration
+npm --prefix backend exec -- tsc --noEmit -p backend/tsconfig.integration.json
+npm --prefix backend run test:integration
+```
+
 ### Scale smoke tier
 
 The scale smoke tier exercises real boundaries at production-like volume. It
@@ -254,18 +282,20 @@ Quality visibility workflow:
 
 | CI job                                 | Blocking     | Checks                                                                                                                                                                                                                                                                                                                |
 | -------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend Tests + Coverage               | Configurable | Backend Jest tests plus coverage summary and artifacts.                                                                                                                                                                                                                                                               |
+| Backend Tests + Coverage               | **Yes**      | Backend Jest tests plus coverage summary and artifacts. The summary step fails the job below the `COVERAGE_*_MIN` floors unless `CI_ENFORCE_TEST_GATE` is `false`.                                                                                                                                                    |
+| Backend PostgreSQL Integration         | Configurable | The analyzer queue-claim PostgreSQL test, a typecheck of `backend/tests-integration/`, and the backend real-PostgreSQL Jest suites, all against a pgvector service container. See [Backend PostgreSQL integration](#backend-postgresql-integration).                                                                  |
 | Frontend Quality Visibility            | Configurable | ESLint with the enforced 181-warning ceiling, Next build, targeted unit coverage, component tests, and E2E inventory visibility.                                                                                                                                                                                      |
 | Python Sidecar Tests (matrix)          | Configurable | The four sidecar `pytest` suites. The root AIO image-hardening suite runs in Python Quality and is also included by local `npm run verify:python`.                                                                                                                                                                    |
-| Backend Typecheck / Frontend Typecheck | Configurable | Standalone TypeScript checks.                                                                                                                                                                                                                                                                                         |
+| Backend Typecheck / Frontend Typecheck | **Yes**      | Standalone TypeScript checks.                                                                                                                                                                                                                                                                                         |
 | Helm Chart Visibility                  | Configurable | Helm lint and render assertions.                                                                                                                                                                                                                                                                                      |
 | Python Quality                         | **Yes**      | Root AIO image-hardening tests, `ruff check`, `ruff format --check`, the aggregate `mypy` run, and four per-sidecar `mypy` runs that avoid top-level module collisions.                                                                                                                                               |
 | Enforcement Gates                      | **Yes**      | Route-error canonicalization, the source-file-size ratchet, the environment-variable documentation and deployment parity ratchet, the source-scrape ratchet, the routes README index check, and npm override staleness, each with its self-test; the infrastructure and release helper tests (`npm run check:infra-release:test`); Dockerfile hygiene; and the 130-use hardcoded-hex baseline. The companion Enforcement Gates Build job runs OpenAPI route synchronization and repository-wide Prettier checks. Local `npm run verify:gates` runs the checks from both jobs. |
 
-The configurable visibility jobs are non-blocking by default and can be made
-blocking through repository variables. `Python Quality`, `Enforcement Gates`,
-and `Enforcement Gates Build` do not use `continue-on-error`; failures always
-fail the workflow.
+Configurable jobs set `continue-on-error` unless the repository variable
+`CI_NON_BLOCKING_TEST_VISIBILITY` is `false`. With the variable unset or set to
+any other value, their failures do not fail the workflow. The jobs marked
+**Yes** and `Enforcement Gates Build` do not use `continue-on-error`; their
+failures always fail the workflow.
 
 ### Enforced ratchets
 
