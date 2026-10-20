@@ -13,6 +13,7 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
+import { toErrorMessage } from "../utils/errors";
 import { pickBestAlbumMatch } from "./albumMatchPolicy";
 import { buildAlbumSearchQueries } from "./albumSearchQueries";
 
@@ -99,10 +100,6 @@ export interface TidalAlbumDownloadResult {
 interface TidalAlbumSearchAttempt {
     match: TidalAlbumResult | null;
     candidateCount: number;
-}
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }
 
 // ── Service ────────────────────────────────────────────────────────
@@ -421,7 +418,7 @@ class TidalService {
             });
             return null;
         } catch (error: unknown) {
-            logger.error("[TIDAL] Album search failed:", errorMessage(error));
+            logger.error("[TIDAL] Album search failed:", toErrorMessage(error));
             return null;
         }
     }
