@@ -62,6 +62,7 @@ import {
 import { resolveArtistImage } from "../../services/metadata/artistImageResolver";
 import { isRealArtistMbid } from "../../utils/musicIds";
 import { filterLibraryArtistReleaseGroups } from "../../services/metadata/discographyFiltering";
+import { discographyCacheTtlSeconds } from "../../services/metadata/discographyCachePolicy";
 import {
     findFreshArtistCatalogReleaseGroups,
     logCatalogPersistenceError,
@@ -494,8 +495,7 @@ export async function handleGetArtist(
         ? await loadRemoteLibrarySet(req.user?.id, { artistId: artist.id })
         : null;
 
-    // For enriched artists with ownedAlbums, skip expensive MusicBrainz calls.
-    // Only fetch from MusicBrainz if the artist hasn't been enriched yet.
+    // Fetch MusicBrainz only when the artist needs external discography data.
     let albumsWithOwnership = [];
     const ownedRgMbids = new Set(artist.ownedAlbums.map((o) => o.rgMbid));
 
@@ -640,7 +640,7 @@ export async function handleGetArtist(
                     }
                     await redisClient.setEx(
                         discoCacheKey,
-                        24 * 60 * 60,
+                        discographyCacheTtlSeconds(releaseGroups.length),
                         JSON.stringify(releaseGroups),
                     );
                 }
@@ -659,7 +659,7 @@ export async function handleGetArtist(
                 if (fetchedFromProvider) {
                     void persistCatalogReleaseGroups({
                         artistId: artist.id,
-                        releaseGroups: filteredReleaseGroups,
+                        releaseGroups,
                     }).catch(logCatalogPersistenceError);
                 }
 
