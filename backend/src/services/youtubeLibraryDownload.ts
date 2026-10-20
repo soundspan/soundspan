@@ -8,6 +8,7 @@ import {
 import { patchDownloadJobMetadata } from "./downloadJobStatus";
 import { logger } from "../utils/logger";
 import { pickBestAlbumMatch } from "./albumMatchPolicy";
+import { buildAlbumSearchQueries } from "./albumSearchQueries";
 import {
     type YtAlbumDownloadJobStatus,
     watchYouTubeDownloadJobUntilTerminal,
@@ -25,6 +26,11 @@ interface AlbumSearchCandidate {
 interface CandidateArtist {
     candidate: AlbumSearchCandidate;
     artistName: string;
+}
+
+interface AlbumBrowseIdSearchAttempt {
+    browseId: string | null;
+    candidateCount: number;
 }
 
 /** Controls hand-off behavior when this processor is itself a fallback. */
@@ -67,14 +73,27 @@ function selectAlbumBrowseId(
         }),
     );
     if (match) return match.candidate.browseId;
-    if (candidates.length > 0) {
-        youtubeLibraryDownloadLogger.debug("No acceptable album match found", {
-            artistName,
-            albumTitle,
-            candidateCount: candidates.length,
-        });
-    }
     return null;
+}
+
+async function findAlbumBrowseIdForQuery(
+    query: string,
+    artistName: string,
+    albumTitle: string,
+): Promise<AlbumBrowseIdSearchAttempt> {
+    const result = await youtubeDownloadService.searchAlbums(query);
+    const candidates = Array.isArray(result)
+        ? result
+              .map(asAlbumSearchCandidate)
+              .filter(
+                  (candidate): candidate is AlbumSearchCandidate =>
+                      candidate !== null,
+              )
+        : [];
+    return {
+        browseId: selectAlbumBrowseId(candidates, artistName, albumTitle),
+        candidateCount: candidates.length,
+    };
 }
 
 /** Find the best public album-search result using TIDAL-compatible matching. */
@@ -82,17 +101,24 @@ export async function findAlbumBrowseId(
     artistName: string,
     albumTitle: string,
 ): Promise<string | null> {
-    const result = await youtubeDownloadService.searchAlbums(
-        `${artistName} ${albumTitle}`,
-    );
-    if (!Array.isArray(result)) return null;
-    const candidates = result
-        .map(asAlbumSearchCandidate)
-        .filter(
-            (candidate): candidate is AlbumSearchCandidate =>
-                candidate !== null,
+    const queries = buildAlbumSearchQueries(artistName, albumTitle);
+    let candidateCount = 0;
+    for (const query of queries) {
+        const attempt = await findAlbumBrowseIdForQuery(
+            query,
+            artistName,
+            albumTitle,
         );
-    return selectAlbumBrowseId(candidates, artistName, albumTitle);
+        candidateCount += attempt.candidateCount;
+        if (attempt.browseId) return attempt.browseId;
+    }
+    youtubeLibraryDownloadLogger.debug("No acceptable album match found", {
+        artistName,
+        albumTitle,
+        candidateCount,
+        queryCount: queries.length,
+    });
+    return null;
 }
 
 async function updateProgress(

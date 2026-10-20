@@ -139,6 +139,24 @@ describe("youtubeLibraryDownload", () => {
         );
     });
 
+    it("tries the next symbol-title query and stops after a match", async () => {
+        mockSearch.mockResolvedValueOnce([]).mockResolvedValueOnce([
+            {
+                browseId: "MINUS",
+                title: "- (Deluxe)",
+                artists: ["Ed Sheeran"],
+            },
+        ]);
+
+        await expect(findAlbumBrowseId("Ed Sheeran", "−")).resolves.toBe(
+            "MINUS",
+        );
+        expect(mockSearch.mock.calls.map(([query]) => query)).toEqual([
+            "Ed Sheeran −",
+            "Ed Sheeran -",
+        ]);
+    });
+
     it("prefers an exact normalized title and artist match", async () => {
         mockSearch.mockResolvedValueOnce([
             {
@@ -202,6 +220,7 @@ describe("youtubeLibraryDownload", () => {
                 artistName: "Artist",
                 albumTitle: "Album",
                 candidateCount: 2,
+                queryCount: 1,
             },
         );
         expect(mockLoggerDebug).toHaveBeenCalledTimes(1);

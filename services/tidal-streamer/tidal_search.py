@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from fastapi import Depends, HTTPException, Query
+from tidal_album_artist import _album_artist_credit
 from tidal_auth import _run_user_api_call, require_admin_credentials
 from tidal_models import AdminCredentials, BatchSearchQuery, SearchRequest
 from tidal_runtime import JsonObject, _build_api, _sanitized_http_error, app, log
@@ -34,7 +35,7 @@ def _serialize_admin_search(results: Any) -> JsonObject:
             {
                 "id": album.id,
                 "title": album.title,
-                "artist": album.artist.name if album.artist else "Unknown",
+                "artist": _album_artist_credit(album) or "Unknown",
                 "numberOfTracks": album.numberOfTracks,
                 "releaseDate": str(album.releaseDate) if album.releaseDate else None,
                 "type": album.type,
@@ -71,7 +72,7 @@ def _serialize_user_search(results: Any) -> JsonObject:
             {
                 "id": album.id,
                 "title": album.title,
-                "artist": album.artist.name if album.artist else "Unknown",
+                "artist": _album_artist_credit(album) or "Unknown",
                 "numberOfTracks": album.numberOfTracks,
                 "releaseDate": str(album.releaseDate) if album.releaseDate else None,
                 "type": album.type,
