@@ -797,6 +797,7 @@ describe("artists routes runtime", () => {
             artistMbid: "artist-mbid-1",
             releaseGroups: [
                 expect.objectContaining({ id: "rg-older" }),
+                expect.objectContaining({ id: "rg-live" }),
                 expect.objectContaining({ id: "rg-newer" }),
             ],
         });

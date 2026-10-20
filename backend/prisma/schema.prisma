@@ -295,39 +295,40 @@ model SystemSettings {
 }
 
 model Artist {
-  id                  String                   @id @default(cuid())
-  mbid                String                   @unique
-  name                String
-  normalizedName      String                   @default("")
-  summary             String?
-  heroUrl             String?
-  genres              Json?
-  lastSynced          DateTime                 @default(now())
-  updatedAt           DateTime                 @default(now()) @updatedAt
-  lastEnriched        DateTime?
-  enrichmentStatus    String                   @default("pending")
-  searchVector        Unsupported("tsvector")?
-  similarArtistsJson  Json?
-  displayName         String?
-  hasUserOverrides    Boolean                  @default(false)
-  userGenres          Json?
-  userHeroUrl         String?
-  userSummary         String?
-  countsLastUpdated   DateTime?
-  discoveryAlbumCount Int                      @default(0)
-  libraryAlbumCount   Int                      @default(0)
-  totalTrackCount     Int                      @default(0)
-  remoteTrackCount    Int                      @default(0)
-  catalogSyncedAt     DateTime?
-  peerId              String?
-  remoteId            String?
-  albums              Album[]
-  ownedAlbums         OwnedAlbum[]
-  similarFrom         SimilarArtist[]          @relation("FromArtist")
-  similarTo           SimilarArtist[]          @relation("ToArtist")
-  tracksTidal         TrackTidal[]
-  tracksYtMusic       TrackYtMusic[]
-  federationPeer      FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
+  id                   String                      @id @default(cuid())
+  mbid                 String                      @unique
+  name                 String
+  normalizedName       String                      @default("")
+  summary              String?
+  heroUrl              String?
+  genres               Json?
+  lastSynced           DateTime                    @default(now())
+  updatedAt            DateTime                    @default(now()) @updatedAt
+  lastEnriched         DateTime?
+  enrichmentStatus     String                      @default("pending")
+  searchVector         Unsupported("tsvector")?
+  similarArtistsJson   Json?
+  displayName          String?
+  hasUserOverrides     Boolean                     @default(false)
+  userGenres           Json?
+  userHeroUrl          String?
+  userSummary          String?
+  countsLastUpdated    DateTime?
+  discoveryAlbumCount  Int                         @default(0)
+  libraryAlbumCount    Int                         @default(0)
+  totalTrackCount      Int                         @default(0)
+  remoteTrackCount     Int                         @default(0)
+  catalogSyncedAt      DateTime?
+  peerId               String?
+  remoteId             String?
+  albums               Album[]
+  catalogReleaseGroups ArtistCatalogReleaseGroup[]
+  ownedAlbums          OwnedAlbum[]
+  similarFrom          SimilarArtist[]             @relation("FromArtist")
+  similarTo            SimilarArtist[]             @relation("ToArtist")
+  tracksTidal          TrackTidal[]
+  tracksYtMusic        TrackYtMusic[]
+  federationPeer       FederationPeer?             @relation(fields: [peerId], references: [id], onDelete: Cascade)
 
   @@unique([peerId, remoteId])
   @@index([name])
@@ -339,6 +340,19 @@ model Artist {
   @@index([totalTrackCount])
   @@index([remoteTrackCount])
   @@index([updatedAt, id])
+}
+
+model ArtistCatalogReleaseGroup {
+  artistId         String
+  rgMbid           String
+  position         Int
+  title            String
+  firstReleaseDate String?
+  primaryType      String
+  secondaryTypes   String[] @default([])
+  artist           Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@id([artistId, rgMbid])
 }
 
 model Album {
