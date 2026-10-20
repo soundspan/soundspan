@@ -47,7 +47,7 @@ When you like a song that plays from TIDAL or YouTube Music, it appears in your 
 
 - Only your own likes appear. Other people's likes stay in their own Library.
 - Search finds them too, in their own **From your streaming services** group below your library songs.
-- Artists you only know from streaming appear in `Artists` with the number of streaming albums or songs you liked. Their artist page lists those albums together with your own, each with its badge.
+- Artists you only know from streaming appear in `Artists` with the number of streaming albums or songs you liked. Their artist page lists those albums under `Discography` together with your own, each with its badge. If MusicBrainz lists an album with the same title, that album still appears under `Albums Available` or `Singles and EPs`, so admins can download it, and other users can request it when requests are on. The exception is the MusicBrainz album that soundspan matched your streaming album to: it appears only once, as your streaming album, whose page offers `Download` or `Request`.
 - If you sign out of TIDAL, or an admin turns a service off, its songs leave your Library until it is back. Your likes are kept, and `My Liked` still lists them.
 - To take a streaming song out of your Library, unlike it. Streaming songs have no `Delete` option, because there is no file to delete.
 - Sorting artists by `Most Tracks` counts only your own files.
@@ -68,7 +68,7 @@ When your library already has the matched album, for example after you add it, s
 
 - A liked song that the album did not bring in, such as a streaming-only bonus track, offers neither `Add album to library` nor `Request album`. Admins see `Add song to library` instead, under the same rules as a song whose album has no MusicBrainz match: a TIDAL song needs TIDAL set up as a download source.
 - The streaming album's page shows no `Download` or `Request`.
-- The streaming album does not appear in the `Albums` list, so with `All` the album shows once, as your own copy. Its leftover liked songs stay in `Songs` and still open the streaming album's page.
+- The streaming album does not appear in the `Albums` list or on the artist page, so with `All` the album shows once, as your own copy. Its leftover liked songs stay in `Songs` and still open the streaming album's page.
 
 After the files arrive and the next library scan matches the song to them, only your own copy shows, without the badge.
 

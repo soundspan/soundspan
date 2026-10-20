@@ -132,9 +132,18 @@ TrackMapping is **advisory, not authoritative**:
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 
-- Artist pages showing both local and remote tracks
-- Album pages with mixed local/remote content
+- Artist pages that list a user's liked `REMOTE` albums next to the library albums
+- Album pages for those `REMOTE` albums, which list the user's liked songs
 - Unified play counts across providers
+
+An artist page lists a `REMOTE` album only to a user who liked one of its
+`TrackTidal` or `TrackYtMusic` rows. The provider must be connected for that
+user, at least one liked row must not be linked to a visible library track,
+and the library must not hold the album's match (see below). A `REMOTE` album
+hides a MusicBrainz discography entry only when the entry's release group equals
+its `matchedRgMbid`, because its album page then offers that download. A
+matching title alone never hides an entry: the placeholder `rgMbid` is not a
+release group that can be downloaded.
 
 A `REMOTE` album that `albumResolutionService` cannot match starts with a
 placeholder `rgMbid` of the form `remote:<hash>`. The
@@ -147,9 +156,9 @@ with at least one visible local track has `rgMbid` equal to an album's
 `matchedRgMbid`. Song rows and the album detail response then report
 `matchedInLibrary: true`, the album is not offered for download or request, and
 a `REMOTE` placeholder leaves the per-user remote album lookups behind album
-lists and artist album counts. This is decided when each response is built:
-the placeholder's `TrackTidal` and `TrackYtMusic` rows keep their `albumId`, so
-a cleared or replaced match takes effect without moving rows back. A library
+lists, artist pages, and artist album counts. This is decided when each response
+is built: the placeholder's `TrackTidal` and `TrackYtMusic` rows keep their
+`albumId`, so a cleared or replaced match takes effect without moving rows back. A library
 scan can adopt a placeholder by title; it then becomes a `LIBRARY` album that
 keeps its `remote:` `rgMbid` and its `matchedRgMbid`, and the job, which only
 checks `REMOTE` albums, leaves that match as it is. `rgMbidCheckedAt` records
