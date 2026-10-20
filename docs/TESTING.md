@@ -260,11 +260,12 @@ Quality visibility workflow:
 | Backend Typecheck / Frontend Typecheck | Configurable | Standalone TypeScript checks.                                                                                                                                                                                                                                                                                         |
 | Helm Chart Visibility                  | Configurable | Helm lint and render assertions.                                                                                                                                                                                                                                                                                      |
 | Python Quality                         | **Yes**      | Root AIO image-hardening tests, `ruff check`, `ruff format --check`, the aggregate `mypy` run, and four per-sidecar `mypy` runs that avoid top-level module collisions.                                                                                                                                               |
-| Enforcement Gates                      | **Yes**      | Route-error canonicalization and its self-test, Dockerfile hygiene, the 130-use hardcoded-hex baseline, OpenAPI route synchronization, and repository-wide Prettier checks. Local `npm run verify:gates` also runs the infrastructure/release helper tests; the CI enforcement job does not currently run that check. |
+| Enforcement Gates                      | **Yes**      | Route-error canonicalization, the source-file-size ratchet, the environment-variable documentation and deployment parity ratchet, the source-scrape ratchet, the routes README index check, and npm override staleness, each with its self-test; the infrastructure and release helper tests (`npm run check:infra-release:test`); Dockerfile hygiene; and the 130-use hardcoded-hex baseline. The companion Enforcement Gates Build job runs OpenAPI route synchronization and repository-wide Prettier checks. Local `npm run verify:gates` runs the checks from both jobs. |
 
 The configurable visibility jobs are non-blocking by default and can be made
-blocking through repository variables. `Python Quality` and `Enforcement Gates`
-do not use `continue-on-error`; failures always fail the workflow.
+blocking through repository variables. `Python Quality`, `Enforcement Gates`,
+and `Enforcement Gates Build` do not use `continue-on-error`; failures always
+fail the workflow.
 
 ### Enforced ratchets
 

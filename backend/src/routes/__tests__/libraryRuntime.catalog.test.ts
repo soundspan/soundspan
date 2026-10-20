@@ -996,6 +996,7 @@ describe("library catalog list runtime coverage", () => {
                         },
                     ],
                 },
+                // The real artist read never returns CATALOG albums; this guards the handler's defensive surface-location filter.
                 {
                     id: "album-catalog",
                     title: "Catalog Skeleton",
@@ -1114,6 +1115,7 @@ describe("library catalog list runtime coverage", () => {
             releaseGroups: [
                 expect.objectContaining({ id: "rg-db-same" }),
                 expect.objectContaining({ id: "rg-new-1" }),
+                expect.objectContaining({ id: "rg-live-1" }),
             ],
         });
         expect(mockRedisSetEx).toHaveBeenCalledWith(
@@ -1181,6 +1183,43 @@ describe("library catalog list runtime coverage", () => {
         );
         expect(res.body.albums).not.toContainEqual(
             expect.objectContaining({ id: "album-catalog" }),
+        );
+    });
+
+    it("short-caches an empty MusicBrainz discography", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce({
+            id: "artist-empty-discography",
+            name: "Empty Discography Artist",
+            mbid: "empty-discography-mbid",
+            heroUrl: null,
+            userHeroUrl: null,
+            similarArtistsJson: null,
+            catalogSyncedAt: null,
+            ownedAlbums: [],
+            albums: [],
+        });
+        mockMusicBrainzGetReleaseGroups.mockResolvedValueOnce([]);
+        mockRedisGet.mockResolvedValue(null);
+        mockGetArtistImage.mockResolvedValueOnce(null);
+
+        const req = {
+            params: { id: "artist-empty-discography" },
+            query: {
+                includeDiscography: "true",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-empty-discography" },
+        } as any;
+        const res = createRes();
+
+        await artistByIdHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "discography:empty-discography-mbid",
+            120,
+            "[]",
         );
     });
 
