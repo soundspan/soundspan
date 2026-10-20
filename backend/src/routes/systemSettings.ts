@@ -17,6 +17,7 @@ import { config } from "../config";
 import { federationInstanceNameSchema } from "./systemSettingsFederationSchema";
 import { isPlaybackSourceOrder } from "../services/playbackSourcePriority";
 import { invalidateUserProviderProfileCache } from "../services/listenTogetherResolution";
+import { testSoulseekCredentials } from "../services/soulseek/slskSession";
 import {
     cancelQueuedQueueCleanerWorkerJob,
     enqueueQueueCleanerWorkerJob,
@@ -1007,7 +1008,12 @@ router.post("/test-soulseek", async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        if (!username || !password) {
+        if (
+            typeof username !== "string" ||
+            typeof password !== "string" ||
+            !username ||
+            !password
+        ) {
             return res.status(400).json({
                 error: "Soulseek username and password are required",
             });
@@ -1015,31 +1021,9 @@ router.post("/test-soulseek", async (req, res) => {
 
         logger.debug(`[SOULSEEK-TEST] Testing connection as "${username}"...`);
 
-        // Import soulseek service
-        const { soulseekService } = await import("../services/soulseek");
-
-        // Temporarily set credentials for test
-        // The service will use the provided credentials
         try {
-            // Try to connect with the provided credentials
-            const slsk = require("slsk-client");
-
-            await new Promise<void>((resolve, reject) => {
-                slsk.connect(
-                    { user: username, pass: password },
-                    (err: Error | null, client: any) => {
-                        if (err) {
-                            logger.debug(
-                                `[SOULSEEK-TEST] Connection failed: ${err.message}`,
-                            );
-                            return reject(err);
-                        }
-                        logger.debug(`[SOULSEEK-TEST] Connected successfully`);
-                        // We don't need to keep the connection open for the test
-                        resolve();
-                    },
-                );
-            });
+            await testSoulseekCredentials(username, password);
+            logger.debug(`[SOULSEEK-TEST] Connected successfully`);
 
             res.json({
                 success: true,

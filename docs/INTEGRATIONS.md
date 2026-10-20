@@ -71,10 +71,12 @@ soundspan can connect directly to Soulseek for discovery/download flows.
 
 1. Open **Admin** → **Download Services**
 2. Enter Soulseek username/password
-3. Save
+3. Optional: select **Test Connection** to check the login. The test opens its own short Soulseek session and closes it when it finishes.
+4. Save
 
 ### Notes
 
+- Use the Soulseek account only for soundspan. The Soulseek server allows one session per account: when another client (or the **Test Connection** check) logs in with the same account, it ends soundspan's session. soundspan logs in again on its next search or download, which ends the other client's session in turn.
 - Discovery results include filename, size, bitrate, and parsed metadata
 - Download progress appears in Activity Panel
 - Quality/availability depends on peer uptime and speed

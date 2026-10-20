@@ -117,6 +117,26 @@ npm --prefix backend run test:smoke:subsonic-proxy
 npm --prefix backend run test:analyzer:phase4
 ```
 
+The Jest suites mock `slsk-client`, so they cannot prove that soundspan still
+talks to the live Soulseek network. After an `slsk-client` upgrade, run the
+live Soulseek smoke with your own Soulseek account. It tests the credentials
+the way the settings `Test Connection` button does, logs in, runs one search,
+downloads one small audio file from a peer into a temporary directory, and then
+deletes it. CI never runs it. `read -rs` keeps the password out of your shell
+history; the script never prints it.
+
+```bash
+export SOULSEEK_SMOKE_USERNAME=<user>
+read -rs SOULSEEK_SMOKE_PASSWORD && export SOULSEEK_SMOKE_PASSWORD
+npm --prefix backend run test:smoke:soulseek
+```
+
+Stop any soundspan instance that uses the same Soulseek account first: the
+Soulseek server allows one session per account, so the smoke and the instance
+end each other's sessions. `SOULSEEK_SMOKE_QUERY` changes the search (default
+`aphex twin xtal`), and `SOULSEEK_SMOKE_MAX_BYTES` caps the size of the
+downloaded file (default 15 MiB).
+
 ### Frontend
 
 ```bash

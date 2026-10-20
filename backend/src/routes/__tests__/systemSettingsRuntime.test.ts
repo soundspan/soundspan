@@ -99,12 +99,6 @@ jest.mock("../../services/lastfm", () => ({
     },
 }));
 
-jest.mock("../../services/soulseek", () => ({
-    soulseekService: {
-        disconnect: jest.fn(),
-    },
-}));
-
 jest.mock("../../services/tidal", () => ({
     tidalService: {
         isSidecarHealthy: jest.fn(),
@@ -130,24 +124,18 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("axios");
 
-const mockSlskClient = {
-    connect: jest.fn(),
-};
-
-jest.mock("slsk-client", () => mockSlskClient);
-
 const mockSoulseekService = {
     disconnect: jest.fn(),
 };
-let throwSoulseekImport = false;
 
 jest.mock("../../services/soulseek", () => ({
-    get soulseekService() {
-        if (throwSoulseekImport) {
-            throw new Error("Soulseek service mock import failure");
-        }
-        return mockSoulseekService;
-    },
+    soulseekService: mockSoulseekService,
+}));
+
+const mockTestSoulseekCredentials = jest.fn();
+jest.mock("../../services/soulseek/slskSession", () => ({
+    testSoulseekCredentials: (...args: unknown[]) =>
+        mockTestSoulseekCredentials(...args),
 }));
 
 jest.mock("../../config", () => ({
@@ -188,8 +176,6 @@ const mockNotificationService = notificationService as jest.Mocked<
     typeof notificationService
 >;
 const mockRedisClient = redisClient as jest.Mocked<typeof redisClient>;
-const mockSlskClientConnect = mockSlskClient.connect as jest.Mock;
-
 function getRouteHandler(
     path: string,
     method: "get" | "post" | "patch" | "delete",
@@ -254,7 +240,6 @@ describe("systemSettings runtime routes", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        throwSoulseekImport = false;
         authFailureState.mode = "ok";
         mockSystemSettingsFindUnique.mockResolvedValue({
             id: "default",
@@ -322,14 +307,7 @@ describe("systemSettings runtime routes", () => {
         mockAxiosGet.mockResolvedValue({ data: { version: "2.0.0" } });
         mockAxiosPost.mockResolvedValue({ data: { model: "gpt-4o-mini" } });
         mockAxiosPut.mockResolvedValue({ data: {} });
-        mockSlskClientConnect.mockImplementation(
-            (
-                _options: Record<string, unknown>,
-                cb: (err: Error | null, client: unknown) => void,
-            ) => {
-                cb(null, {});
-            },
-        );
+        mockTestSoulseekCredentials.mockResolvedValue(undefined);
     });
 
     it("returns decrypted settings and handles decryption failures safely", async () => {
@@ -1259,20 +1237,25 @@ describe("systemSettings runtime routes", () => {
         await testSoulseekHandler(missingReq, missingRes);
         expect(missingRes.statusCode).toBe(400);
 
+        for (const body of [
+            { username: 1, password: "p" },
+            { username: "u", password: false },
+        ]) {
+            const nonStringRes = createRes();
+            await testSoulseekHandler({ body } as any, nonStringRes);
+            expect(nonStringRes.statusCode).toBe(400);
+        }
+
         const okReq = { body: { username: "u", password: "p" } } as any;
         const okRes = createRes();
         await testSoulseekHandler(okReq, okRes);
         expect(okRes.statusCode).toBe(200);
         expect(okRes.body.success).toBe(true);
         expect(okRes.body.soulseekUsername).toBe("u");
+        expect(mockTestSoulseekCredentials).toHaveBeenCalledWith("u", "p");
 
-        mockSlskClientConnect.mockImplementation(
-            (
-                _options: Record<string, unknown>,
-                cb: (err: Error | null, client: unknown) => void,
-            ) => {
-                cb(new Error("invalid credentials"), null);
-            },
+        mockTestSoulseekCredentials.mockRejectedValueOnce(
+            new Error("invalid credentials"),
         );
         const failReq = { body: { username: "u", password: "bad" } } as any;
         const failRes = createRes();
@@ -1655,10 +1638,12 @@ describe("systemSettings runtime routes", () => {
         expect(tokenRes.body.error).toBe("Failed to complete TIDAL auth");
     });
 
-    it("handles Soulseek dynamic import failures in test endpoint", async () => {
-        throwSoulseekImport = true;
-
-        const req = { body: { username: "u", password: "p" } } as any;
+    it("returns 500 when the Soulseek request body cannot be read", async () => {
+        const req = Object.defineProperty({}, "body", {
+            get: () => {
+                throw new Error("request body unavailable");
+            },
+        }) as any;
         const res = createRes();
 
         await testSoulseekHandler(req, res);
