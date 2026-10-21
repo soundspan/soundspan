@@ -445,13 +445,13 @@ describe("search service", () => {
         },
     );
 
-    it("keeps remote-only albums, hides removed-only albums, and keeps mixed albums", async () => {
+    it("keeps empty non-remote albums, hides removed-only albums, and keeps mixed albums", async () => {
         prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) => {
             expect(strings.join(" ")).toContain('t."removedAt" IS NULL AND');
             return [
                 {
-                    id: "album-remote",
-                    title: "Remote Album",
+                    id: "album-empty",
+                    title: "Empty Album",
                     artistId: "artist-1",
                     artistName: "Remote Artist",
                     year: 2026,
@@ -473,7 +473,7 @@ describe("search service", () => {
         const results = await searchService.searchAlbums({ query: "***" });
 
         expect(results.map((album) => album.id)).toEqual([
-            "album-remote",
+            "album-empty",
             "album-mixed",
         ]);
         expect(results).not.toContainEqual(
@@ -524,7 +524,68 @@ describe("search service", () => {
         );
     });
 
-    it("uses the remote-only escape in both album FTS branches", async () => {
+    it.each(["all", "local"] as const)(
+        "excludes REMOTE locations from both album FTS branches for source=%s",
+        async (source) => {
+            prisma.$queryRaw.mockImplementationOnce(
+                async (strings: TemplateStringsArray, ...values: unknown[]) => {
+                    const query = collectSql({ strings: [...strings], values });
+                    expect(query.values).not.toContain("REMOTE");
+                    expect(query.values).toEqual(
+                        expect.arrayContaining([
+                            "LIBRARY",
+                            "DISCOVER",
+                            "FEDERATED",
+                        ]),
+                    );
+                    return [
+                        {
+                            id: "album-library",
+                            title: "Library Album",
+                            artistId: "artist-1",
+                            artistName: "Artist",
+                            year: 2026,
+                            coverUrl: null,
+                            rank: 1,
+                        },
+                    ];
+                },
+            );
+
+            await searchService.searchAlbums({ query: "library", source });
+        },
+    );
+
+    it("excludes REMOTE locations from the album fallback query", async () => {
+        await searchService.searchAlbums({ query: "***", source: "all" });
+
+        const [strings, ...values] = prisma.$queryRaw.mock.calls[0];
+        const query = collectSql({ strings: [...strings], values });
+        expect(query.values).not.toContain("REMOTE");
+        expect(query.values).toEqual(
+            expect.arrayContaining(["LIBRARY", "DISCOVER", "FEDERATED"]),
+        );
+    });
+
+    it("keeps REMOTE locations in artist album visibility queries", async () => {
+        prisma.$queryRaw.mockResolvedValueOnce([
+            {
+                id: "artist-remote",
+                name: "Remote Artist",
+                mbid: "remote-artist",
+                heroUrl: null,
+                rank: 1,
+            },
+        ]);
+
+        await searchService.searchArtists({ query: "remote" });
+
+        const [strings, ...values] = prisma.$queryRaw.mock.calls[0];
+        const query = collectSql({ strings: [...strings], values });
+        expect(query.values).toContain("REMOTE");
+    });
+
+    it("keeps the empty-album clause in both album FTS branches", async () => {
         prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) => {
             const sql = strings.join(" ");
             expect(
@@ -532,8 +593,8 @@ describe("search service", () => {
             ).toHaveLength(2);
             return [
                 {
-                    id: "album-remote",
-                    title: "Remote Album",
+                    id: "album-empty",
+                    title: "Empty Album",
                     artistId: "artist-1",
                     artistName: "Remote Artist",
                     year: 2026,
@@ -544,8 +605,8 @@ describe("search service", () => {
         });
 
         await expect(
-            searchService.searchAlbums({ query: "remote" }),
-        ).resolves.toEqual([expect.objectContaining({ id: "album-remote" })]);
+            searchService.searchAlbums({ query: "empty" }),
+        ).resolves.toEqual([expect.objectContaining({ id: "album-empty" })]);
     });
 
     it("excludes removed tracks from FTS and ILIKE fallback searches", async () => {

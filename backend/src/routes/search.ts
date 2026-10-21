@@ -12,7 +12,7 @@ import axios from "axios";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
 import { LIBRARY_ORIGIN_VALUES } from "../utils/librarySorting";
-import { searchRemoteLibraryTracks } from "../services/remoteLibrary/remoteLibrarySearch";
+import { searchRemoteLibrary } from "../services/remoteLibrary/remoteLibrarySearch";
 
 const router = Router();
 
@@ -62,15 +62,22 @@ export function remoteSearchLimitFor(input: RemoteSearchEligibility): number {
     return input.type === "tracks" && input.offset === 0 ? input.limit : 0;
 }
 
-async function loadRemoteSearchTracks(input: RemoteSearchRequest) {
-    const limit = remoteSearchLimitFor(input);
-    if (limit < 1) return [];
+/** Resolves whether a search request gets a remote album group and its size. */
+export function remoteAlbumSearchLimitFor(
+    input: RemoteSearchEligibility,
+): number {
+    if (!input.userId || input.source !== "all" || input.genre) return 0;
+    if (input.type === "all") return 6;
+    return input.type === "albums" && input.offset === 0 ? input.limit : 0;
+}
+
+async function loadRemoteSearch(input: RemoteSearchRequest) {
+    const limits = {
+        tracks: remoteSearchLimitFor(input),
+        albums: remoteAlbumSearchLimitFor(input),
+    };
     try {
-        return await searchRemoteLibraryTracks(
-            input.userId,
-            input.query,
-            limit,
-        );
+        return await searchRemoteLibrary(input.userId, input.query, limits);
     } catch (error) {
         logger
             .child("RemoteLibrarySearch")
@@ -78,7 +85,7 @@ async function loadRemoteSearchTracks(input: RemoteSearchRequest) {
                 error,
                 queryLength: input.query.length,
             });
-        return [];
+        return { tracks: [], albums: [] };
     }
 }
 
@@ -269,8 +276,12 @@ async function transformSearchResultsForUser(
     serviceResults: SearchResults,
     input: RemoteSearchRequest,
 ) {
-    const remoteTracks = await loadRemoteSearchTracks(input);
-    return { ...transformSearchResults(serviceResults), remoteTracks };
+    const remoteResults = await loadRemoteSearch(input);
+    return {
+        ...transformSearchResults(serviceResults),
+        remoteTracks: remoteResults.tracks,
+        remoteAlbums: remoteResults.albums,
+    };
 }
 
 async function searchCachedLibrary(
@@ -301,7 +312,7 @@ router.use(requireAuth);
  * /api/search:
  *   get:
  *     summary: Search across your music library
- *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search. remoteTracks is a per-user, uncached group populated only without a genre filter for source=all and either type=all or the first page of type=tracks.
+ *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search. remoteTracks and remoteAlbums are per-user, uncached groups populated only without a genre filter for source=all; type=all includes both groups, while the first page of type=tracks or type=albums includes its corresponding group.
  *     tags: [Search]
  *     security:
  *       - apiKeyAuth: []
@@ -453,6 +464,43 @@ router.use(requireAuth);
  *                                 nullable: true
  *                               name:
  *                                 type: string
+ *                 remoteAlbums:
+ *                   type: array
+ *                   description: Liked remote-only albums from the signed-in user's connected streaming services. This group is loaded per user after the cached library search and remains uncached. It is populated only without a genre filter for source=all with type=all (up to 6 rows) or the first page of type=albums. Rows carry source remote and the contributing remoteSources.
+ *                   items:
+ *                     type: object
+ *                     required: [id, title, artistId, year, coverUrl, source, remoteSources, artist]
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       title:
+ *                         type: string
+ *                       artistId:
+ *                         type: string
+ *                       year:
+ *                         type: integer
+ *                         nullable: true
+ *                       coverUrl:
+ *                         type: string
+ *                         nullable: true
+ *                       source:
+ *                         type: string
+ *                         enum: [remote]
+ *                       remoteSources:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                           enum: [tidal, youtube]
+ *                       artist:
+ *                         type: object
+ *                         required: [id, name, mbid]
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           mbid:
+ *                             type: string
  *                 audiobooks:
  *                   type: array
  *                   items:
@@ -488,6 +536,7 @@ router.get("/", async (req, res) => {
                 podcasts: [],
                 episodes: [],
                 remoteTracks: [],
+                remoteAlbums: [],
             });
         }
 

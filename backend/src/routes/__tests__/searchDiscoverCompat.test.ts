@@ -48,7 +48,7 @@ jest.mock("../../services/search", () => ({
 }));
 
 jest.mock("../../services/remoteLibrary/remoteLibrarySearch", () => ({
-    searchRemoteLibraryTracks: jest.fn(),
+    searchRemoteLibrary: jest.fn(),
 }));
 
 import router from "../search";

@@ -9,17 +9,24 @@ jest.mock("../setLoader", () => ({
     loadRemoteLibrarySet: jest.fn(),
 }));
 
+jest.mock("../remoteAlbumSearch", () => ({
+    searchRemoteLibraryAlbums: jest.fn(),
+}));
+
 import { prisma } from "../../../utils/db";
 import { loadRemoteLibrarySet } from "../setLoader";
 import {
     rankRemoteLibraryTracks,
+    searchRemoteLibrary,
     searchRemoteLibraryTracks,
 } from "../remoteLibrarySearch";
-import type { RemoteLibraryTrack } from "../types";
+import { searchRemoteLibraryAlbums } from "../remoteAlbumSearch";
+import type { RemoteLibrarySet, RemoteLibraryTrack } from "../types";
 
 const mockLoadRemoteLibrarySet = loadRemoteLibrarySet as jest.Mock;
 const mockTidalFindMany = prisma.trackTidal.findMany as jest.Mock;
 const mockYoutubeFindMany = prisma.trackYtMusic.findMany as jest.Mock;
+const mockSearchRemoteLibraryAlbums = searchRemoteLibraryAlbums as jest.Mock;
 
 function remoteRow(
     provider: "tidal" | "youtube",
@@ -114,6 +121,7 @@ describe("remote library search", () => {
         });
         mockTidalFindMany.mockResolvedValue([]);
         mockYoutubeFindMany.mockResolvedValue([]);
+        mockSearchRemoteLibraryAlbums.mockResolvedValue([]);
     });
 
     it.each([
@@ -183,6 +191,69 @@ describe("remote library search", () => {
             }),
         ]);
     });
+
+    it("loads one remote set for track and album groups", async () => {
+        const exact = remoteRow("tidal", "tidal-exact", "ALPHA");
+        const set: RemoteLibrarySet = {
+            tracks: [exact],
+            byArtistId: new Map(),
+            byAlbumId: new Map([["album-1", ["tidal"]]]),
+        };
+        const remoteAlbums = [{ id: "album-1", source: "remote" }];
+        mockLoadRemoteLibrarySet.mockResolvedValueOnce(set);
+        mockTidalFindMany
+            .mockResolvedValueOnce([{ id: "tidal-exact" }])
+            .mockResolvedValueOnce([tidalDisplayRow("tidal-exact", "ALPHA")]);
+        mockSearchRemoteLibraryAlbums.mockResolvedValueOnce(remoteAlbums);
+
+        const result = await searchRemoteLibrary("user-1", " alpha ", {
+            tracks: 5,
+            albums: 6,
+        });
+
+        expect(mockLoadRemoteLibrarySet).toHaveBeenCalledTimes(1);
+        expect(mockLoadRemoteLibrarySet).toHaveBeenCalledWith("user-1", {
+            reportCap: false,
+        });
+        expect(mockSearchRemoteLibraryAlbums).toHaveBeenCalledWith(
+            set,
+            "alpha",
+            6,
+        );
+        expect(result.tracks).toEqual([
+            expect.objectContaining({ id: "tidal:42", title: "ALPHA" }),
+        ]);
+        expect(result.albums).toEqual(remoteAlbums);
+    });
+
+    it.each([
+        [{ tracks: 0, albums: 5 }, false, true],
+        [{ tracks: 5, albums: 0 }, true, false],
+        [{ tracks: 0, albums: 0 }, false, false],
+    ])(
+        "skips zero-limit paths for limits %o",
+        async (limits, expectsTracks, expectsAlbums) => {
+            const set: RemoteLibrarySet = {
+                tracks: [remoteRow("tidal", "tidal-1", "Alpha")],
+                byArtistId: new Map(),
+                byAlbumId: new Map([["album-1", ["tidal"]]]),
+            };
+            if (limits.tracks >= 1 || limits.albums >= 1) {
+                mockLoadRemoteLibrarySet.mockResolvedValueOnce(set);
+            }
+
+            const result = await searchRemoteLibrary("user-1", "alpha", limits);
+
+            expect(mockTidalFindMany.mock.calls.length > 0).toBe(expectsTracks);
+            expect(mockSearchRemoteLibraryAlbums.mock.calls.length > 0).toBe(
+                expectsAlbums,
+            );
+            expect(result).toEqual({ tracks: [], albums: [] });
+            expect(mockLoadRemoteLibrarySet).toHaveBeenCalledTimes(
+                limits.tracks < 1 && limits.albums < 1 ? 0 : 1,
+            );
+        },
+    );
 
     it("requires every term to match provider or linked display fields", async () => {
         const tidal = remoteRow("tidal", "tidal-1", "Provider title");

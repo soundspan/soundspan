@@ -125,6 +125,13 @@ function albumLocationSql(alias: "a" | "alb"): Prisma.Sql {
     return Prisma.sql`${column} IN (${Prisma.join([...LIBRARY_SURFACE_ALBUM_LOCATIONS])})`;
 }
 
+function albumSearchLocationSql(): Prisma.Sql {
+    const locations = LIBRARY_SURFACE_ALBUM_LOCATIONS.filter(
+        (location) => location !== "REMOTE",
+    );
+    return Prisma.sql`a."location" IN (${Prisma.join(locations)})`;
+}
+
 function peerProjectionSql(alias: "a" | "t"): Prisma.Sql {
     return Prisma.raw(
         `CASE WHEN ${alias}."peerId" IS NOT NULL THEN json_build_object('id', fp.id, 'name', fp.name, 'online', COALESCE(fp."outboundStatus" = 'ACTIVE', false)) ELSE NULL END`,
@@ -285,7 +292,7 @@ export class SearchService {
     }: SearchOptions): Promise<AlbumSearchResult[]> {
         const pattern = `%${escapeLikePattern(query)}%`;
         const sourceSql = trackSourceSql(source);
-        const albumLocation = albumLocationSql("a");
+        const albumLocation = albumSearchLocationSql();
         const peerSql = peerProjectionSql("a");
         const includeEmpty = source !== "peers";
         const rows = await prisma.$queryRaw<
@@ -342,7 +349,7 @@ export class SearchService {
 
         try {
             const sourceSql = trackSourceSql(source);
-            const albumLocation = albumLocationSql("a");
+            const albumLocation = albumSearchLocationSql();
             const peerSql = peerProjectionSql("a");
             const includeEmpty = source !== "peers";
             const results = await prisma.$queryRaw<AlbumSearchResult[]>`

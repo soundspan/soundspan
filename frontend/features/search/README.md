@@ -37,6 +37,7 @@ Start-here guide for `frontend/features/search`.
 | `hooks/useYouTubePlaylist.ts` | hooks |
 | `hooks/useYouTubeUrl.ts` | hooks |
 | `discoverySelection.ts` | root |
+| `searchAlbumGroups.ts` | root |
 | `searchSongGroups.ts` | root |
 | `songDedup.ts` | root |
 | `types.ts` | root |

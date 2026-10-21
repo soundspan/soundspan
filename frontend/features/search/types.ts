@@ -1,4 +1,5 @@
 import type { Track as LibraryBrowseTrack } from "@/features/library/types";
+import type { RemoteBadgeSource } from "@/components/ui/RemoteSourceBadges";
 import type {
     FederatedTrackPeer,
     UnifiedTrackSource,
@@ -30,8 +31,11 @@ export interface Album {
     artist?: {
         name: string;
     };
-    source?: UnifiedTrackSource;
+    /** `remote` marks one of the viewer's streaming-only albums. */
+    source?: UnifiedTrackSource | "remote";
     peer?: FederatedTrackPeer;
+    /** Streaming services the viewer liked this album's songs on. */
+    remoteSources?: RemoteBadgeSource[];
 }
 
 export interface Podcast {
@@ -99,6 +103,8 @@ export interface SearchResult {
     episodes?: Episode[];
     /** The viewer's liked TIDAL / YouTube Music songs that are not in the library. */
     remoteTracks?: LibraryBrowseTrack[];
+    /** The viewer's streaming-only albums (albums of their liked streaming songs). */
+    remoteAlbums?: Album[];
 }
 
 export interface DiscoverResult {

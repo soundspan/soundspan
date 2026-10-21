@@ -24,6 +24,7 @@ import { DiscoverTracksList } from "@/features/search/components/DiscoverTracksL
 import { StreamingLikesList } from "@/features/search/components/StreamingLikesList";
 import { SongsSubheading } from "@/features/search/components/SongsSubheading";
 import { selectSearchSongGroups } from "@/features/search/searchSongGroups";
+import { selectSearchAlbumGroups } from "@/features/search/searchAlbumGroups";
 import { useRemoteTrackAcquisition } from "@/features/library/hooks/useRemoteTrackAcquisition";
 import {
     deriveDiscoverySelection,
@@ -178,7 +179,13 @@ export default function SearchPage() {
             libraryResults,
             discoverTracks,
         });
-    const libraryAlbums = libraryResults?.albums ?? [];
+    // Albums: library albums, then the viewer's streaming-only albums in
+    // their own group.
+    const { libraryAlbums, streamingAlbums } = selectSearchAlbumGroups({
+        filterTab,
+        showLibrary,
+        libraryResults,
+    });
     const libraryPodcasts = libraryResults?.podcasts ?? [];
     const hasPodcastResults =
         libraryPodcasts.length > 0 || discoverPodcastResults.length > 0;
@@ -587,6 +594,22 @@ export default function SearchPage() {
                         </section>
                     )}
 
+                {/* Streaming-only albums of the viewer's liked songs */}
+                {hasSearched &&
+                    showLibrary &&
+                    !isPodcastTab &&
+                    (sectionView === null || isAlbumsView) &&
+                    streamingAlbums.length > 0 && (
+                        <section>
+                            <SectionHeader title="Albums from your streaming services" />
+                            <LibraryAlbumsGrid
+                                albums={streamingAlbums}
+                                limit={isAlbumsView ? null : 6}
+                                tvSection="search-results-streaming-albums"
+                            />
+                        </section>
+                    )}
+
                 {/* Library Podcasts */}
                 {hasSearched &&
                     showPodcastResults &&
@@ -673,6 +696,7 @@ export default function SearchPage() {
                               !libraryResults ||
                               (!libraryResults.artists?.length &&
                                   !libraryResults.albums?.length &&
+                                  streamingAlbums.length === 0 &&
                                   !libraryResults.tracks?.length &&
                                   streamingTracks.length === 0 &&
                                   !libraryResults.audiobooks?.length &&
