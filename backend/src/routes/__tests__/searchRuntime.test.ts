@@ -64,16 +64,19 @@ jest.mock("../../services/search", () => ({
 }));
 
 jest.mock("../../services/remoteLibrary/remoteLibrarySearch", () => ({
-    searchRemoteLibraryTracks: jest.fn(),
+    searchRemoteLibrary: jest.fn(),
 }));
 
 import axios from "axios";
-import router, { remoteSearchLimitFor } from "../search";
+import router, {
+    remoteAlbumSearchLimitFor,
+    remoteSearchLimitFor,
+} from "../search";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { lastFmService } from "../../services/lastfm";
 import { searchService } from "../../services/search";
-import { searchRemoteLibraryTracks } from "../../services/remoteLibrary/remoteLibrarySearch";
+import { searchRemoteLibrary } from "../../services/remoteLibrary/remoteLibrarySearch";
 
 const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
 const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
@@ -89,7 +92,7 @@ const mockEnrichSimilarArtists =
     lastFmService.enrichSimilarArtists as jest.Mock;
 const mockSearchAll = searchService.searchAll as jest.Mock;
 const mockSearchByType = searchService.searchByType as jest.Mock;
-const mockSearchRemoteLibraryTracks = searchRemoteLibraryTracks as jest.Mock;
+const mockSearchRemoteLibrary = searchRemoteLibrary as jest.Mock;
 const mockAxiosGet = (axios as any).get as jest.Mock;
 
 function getGetHandler(path: string) {
@@ -153,6 +156,62 @@ describe("remote search eligibility", () => {
     ] as const)("returns zero for an ineligible request", (input) => {
         expect(remoteSearchLimitFor({ ...input, limit: 20 })).toBe(0);
     });
+
+    it.each([
+        [
+            "no user",
+            { userId: undefined, source: "all", type: "albums", offset: 0 },
+            0,
+        ],
+        [
+            "local source",
+            { userId: "user-1", source: "local", type: "albums", offset: 0 },
+            0,
+        ],
+        [
+            "peers source",
+            { userId: "user-1", source: "peers", type: "albums", offset: 0 },
+            0,
+        ],
+        [
+            "genre filter",
+            {
+                userId: "user-1",
+                source: "all",
+                type: "albums",
+                offset: 0,
+                genre: "ambient",
+            },
+            0,
+        ],
+        [
+            "all type",
+            { userId: "user-1", source: "all", type: "all", offset: 20 },
+            6,
+        ],
+        [
+            "first albums page",
+            { userId: "user-1", source: "all", type: "albums", offset: 0 },
+            37,
+        ],
+        [
+            "later albums page",
+            { userId: "user-1", source: "all", type: "albums", offset: 1 },
+            0,
+        ],
+        [
+            "tracks type",
+            { userId: "user-1", source: "all", type: "tracks", offset: 0 },
+            0,
+        ],
+    ] as const)(
+        "returns the remote album limit for %s",
+        (_name, input, expected) => {
+            expect(remoteAlbumSearchLimitFor({ ...input, limit: 37 })).toBe(
+                expected,
+            );
+        },
+    );
 });
 
 describe("search route runtime behavior", () => {
@@ -190,7 +249,7 @@ describe("search route runtime behavior", () => {
             podcasts: [],
             episodes: [],
         });
-        mockSearchRemoteLibraryTracks.mockResolvedValue([]);
+        mockSearchRemoteLibrary.mockResolvedValue({ tracks: [], albums: [] });
         mockAxiosGet.mockResolvedValue({ data: { results: [] } });
     });
 
@@ -209,10 +268,11 @@ describe("search route runtime behavior", () => {
             podcasts: [],
             episodes: [],
             remoteTracks: [],
+            remoteAlbums: [],
         });
         expect(mockSearchAll).not.toHaveBeenCalled();
         expect(mockSearchByType).not.toHaveBeenCalled();
-        expect(mockSearchRemoteLibraryTracks).not.toHaveBeenCalled();
+        expect(mockSearchRemoteLibrary).not.toHaveBeenCalled();
     });
 
     it("uses searchAll with clamped limit and transforms response shape", async () => {
@@ -307,13 +367,17 @@ describe("search route runtime behavior", () => {
                 podcasts: [{ id: "pod-1" }],
                 episodes: [{ id: "ep-1" }],
                 remoteTracks: [],
+                remoteAlbums: [],
             }),
         );
     });
 
     it("adds up to five remote tracks after an all-type library search", async () => {
         const remoteTracks = [{ id: "tidal:42", source: "tidal" }];
-        mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
+        mockSearchRemoteLibrary.mockResolvedValueOnce({
+            tracks: remoteTracks,
+            albums: [],
+        });
         const req = {
             query: { q: "radiohead", type: "all" },
             user: { id: "user-1" },
@@ -327,20 +391,24 @@ describe("search route runtime behavior", () => {
             limit: 20,
             genre: undefined,
         });
-        expect(mockSearchRemoteLibraryTracks).toHaveBeenCalledWith(
+        expect(mockSearchRemoteLibrary).toHaveBeenCalledWith(
             "user-1",
             "radiohead",
-            5,
+            { tracks: 5, albums: 6 },
         );
         expect(mockSearchAll.mock.invocationCallOrder[0]).toBeLessThan(
-            mockSearchRemoteLibraryTracks.mock.invocationCallOrder[0],
+            mockSearchRemoteLibrary.mock.invocationCallOrder[0],
         );
         expect(res.body.remoteTracks).toEqual(remoteTracks);
+        expect(res.body.remoteAlbums).toEqual([]);
     });
 
     it("adds remote tracks when an all-type search includes an ignored offset", async () => {
         const remoteTracks = [{ id: "tidal:42", source: "tidal" }];
-        mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
+        mockSearchRemoteLibrary.mockResolvedValueOnce({
+            tracks: remoteTracks,
+            albums: [],
+        });
         const req = {
             query: { q: "radiohead", type: "all", offset: "20" },
             user: { id: "user-1" },
@@ -349,17 +417,20 @@ describe("search route runtime behavior", () => {
 
         await rootHandler(req, res);
 
-        expect(mockSearchRemoteLibraryTracks).toHaveBeenCalledWith(
+        expect(mockSearchRemoteLibrary).toHaveBeenCalledWith(
             "user-1",
             "radiohead",
-            5,
+            { tracks: 5, albums: 6 },
         );
         expect(res.body.remoteTracks).toEqual(remoteTracks);
     });
 
     it("uses the requested limit for remote track-only search", async () => {
         const remoteTracks = [{ id: "yt:video-1", source: "youtube" }];
-        mockSearchRemoteLibraryTracks.mockResolvedValueOnce(remoteTracks);
+        mockSearchRemoteLibrary.mockResolvedValueOnce({
+            tracks: remoteTracks,
+            albums: [],
+        });
         const req = {
             query: {
                 q: "boards",
@@ -381,12 +452,35 @@ describe("search route runtime behavior", () => {
             genre: undefined,
             source: "all",
         });
-        expect(mockSearchRemoteLibraryTracks).toHaveBeenCalledWith(
+        expect(mockSearchRemoteLibrary).toHaveBeenCalledWith(
             "user-1",
             "boards",
-            7,
+            { tracks: 7, albums: 0 },
         );
         expect(res.body.remoteTracks).toEqual(remoteTracks);
+    });
+
+    it("adds remote albums to the first album-only page", async () => {
+        const remoteAlbums = [{ id: "album-remote", source: "remote" }];
+        mockSearchRemoteLibrary.mockResolvedValueOnce({
+            tracks: [],
+            albums: remoteAlbums,
+        });
+        const req = {
+            query: { q: "boards", type: "albums", limit: "7" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchRemoteLibrary).toHaveBeenCalledWith(
+            "user-1",
+            "boards",
+            { tracks: 0, albums: 7 },
+        );
+        expect(res.body.remoteTracks).toEqual([]);
+        expect(res.body.remoteAlbums).toEqual(remoteAlbums);
     });
 
     it.each([
@@ -411,15 +505,16 @@ describe("search route runtime behavior", () => {
 
             await rootHandler(req, res);
 
-            expect(mockSearchRemoteLibraryTracks).not.toHaveBeenCalled();
+            expect(mockSearchRemoteLibrary).toHaveBeenCalledTimes(1);
             expect(res.statusCode).toBe(200);
             expect(res.body.remoteTracks).toEqual([]);
+            expect(res.body.remoteAlbums).toEqual([]);
         },
     );
 
     it("isolates remote search failures from the main search response", async () => {
         const remoteError = new Error("remote unavailable");
-        mockSearchRemoteLibraryTracks.mockRejectedValueOnce(remoteError);
+        mockSearchRemoteLibrary.mockRejectedValueOnce(remoteError);
         const req = {
             query: { q: "radiohead", type: "all" },
             user: { id: "user-1" },
@@ -430,6 +525,7 @@ describe("search route runtime behavior", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.remoteTracks).toEqual([]);
+        expect(res.body.remoteAlbums).toEqual([]);
         expect(mockRemoteSearchWarn).toHaveBeenCalledWith(
             "Remote library search failed",
             { error: remoteError, queryLength: 9 },

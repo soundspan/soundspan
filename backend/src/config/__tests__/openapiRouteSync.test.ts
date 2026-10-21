@@ -127,6 +127,45 @@ describe("openapi route sync", () => {
         );
     });
 
+    test("search documents the per-user remote album response shape", () => {
+        const { swaggerSpec } = require("../swagger");
+        const remoteAlbumSchema =
+            swaggerSpec.paths["/api/search"].get.responses["200"].content[
+                "application/json"
+            ].schema.properties.remoteAlbums;
+
+        expect(remoteAlbumSchema.description).toContain("per user");
+        expect(remoteAlbumSchema.description).toContain("uncached");
+        expect(remoteAlbumSchema.items.required).toEqual([
+            "id",
+            "title",
+            "artistId",
+            "year",
+            "coverUrl",
+            "source",
+            "remoteSources",
+            "artist",
+        ]);
+        expect(remoteAlbumSchema.items.properties).toEqual(
+            expect.objectContaining({
+                source: { type: "string", enum: ["remote"] },
+                remoteSources: {
+                    type: "array",
+                    items: { type: "string", enum: ["tidal", "youtube"] },
+                },
+                artist: {
+                    type: "object",
+                    required: ["id", "name", "mbid"],
+                    properties: {
+                        id: { type: "string" },
+                        name: { type: "string" },
+                        mbid: { type: "string" },
+                    },
+                },
+            }),
+        );
+    });
+
     test("album detail documents matched library state", () => {
         const { swaggerSpec } = require("../swagger");
         const albumSchema =

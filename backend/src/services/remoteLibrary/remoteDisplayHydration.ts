@@ -63,7 +63,15 @@ function providerIds(
         .map((row) => row.providerRowId);
 }
 
-function textTerms(query: string): string[] {
+/** Ranks a title against a lowercased query: exact, then prefix, then other. */
+export function titleMatchRank(title: string, normalizedQuery: string): number {
+    const normalizedTitle = title.toLocaleLowerCase("en");
+    if (normalizedTitle === normalizedQuery) return 0;
+    return normalizedTitle.startsWith(normalizedQuery) ? 1 : 2;
+}
+
+/** Returns the bounded non-empty text terms shared by remote searches. */
+export function textTerms(query: string): string[] {
     return query
         .trim()
         .split(/\s+/)

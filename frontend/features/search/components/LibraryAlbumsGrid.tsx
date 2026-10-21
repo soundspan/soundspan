@@ -4,10 +4,13 @@ import Image from "next/image";
 import { api } from "@/lib/api";
 import { Album } from "../types";
 import { PeerBadge } from "@/components/ui/PeerBadge";
+import { RemoteSourceBadges } from "@/components/ui/RemoteSourceBadges";
 
 interface LibraryAlbumsGridProps {
     albums: Album[];
     limit?: number | null;
+    /** TV navigation section name; each grid on the page needs its own. */
+    tvSection?: string;
 }
 
 /**
@@ -16,6 +19,7 @@ interface LibraryAlbumsGridProps {
 export function LibraryAlbumsGrid({
     albums,
     limit = 6,
+    tvSection = "search-results-albums",
 }: LibraryAlbumsGridProps) {
     const visibleAlbums =
         typeof limit === "number" ? albums.slice(0, limit) : albums;
@@ -23,7 +27,7 @@ export function LibraryAlbumsGrid({
     return (
         <div
             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-4"
-            data-tv-section="search-results-albums"
+            data-tv-section={tvSection}
         >
             {visibleAlbums.map((album, index) => {
                 const coverArtId = album.coverUrl || album.albumId;
@@ -66,6 +70,9 @@ export function LibraryAlbumsGrid({
                                         online={album.peer.online}
                                     />
                                 )}
+                                <RemoteSourceBadges
+                                    sources={album.remoteSources}
+                                />
                             </div>
                         </div>
                     </Link>
