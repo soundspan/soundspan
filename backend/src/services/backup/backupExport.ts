@@ -11,6 +11,7 @@ import {
     encodeBackupRecord,
     type BackupHeader,
     type BackupMigration,
+    type BackupRecord,
     type WrappedEncryptionKey,
     MAX_BACKUP_RECORD_BYTES,
 } from "./backupFormat";
@@ -24,7 +25,12 @@ import { BackupBusyError } from "./backupErrors";
 
 export const BACKUP_ADVISORY_LOCK = 5_331_001_001;
 const QUERY_ROW_LIMIT = 1_000;
-const QUERY_BYTE_TARGET = 15 * 1024 * 1024;
+// PostgreSQL's jsonb text has no raw control characters, so re-encoding the rows string only escapes
+// quotes and backslashes: an encoded record is at most twice its raw batch plus the envelope.
+const BATCH_RAW_BYTE_TARGET = 4 * 1024 * 1024;
+const INLINE_ROW_BYTES = 64 * 1024;
+const RECORD_ENVELOPE_BYTES = 64 * 1024;
+const FETCH_ROWS = 256;
 const EXPORT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const MAX_BATCHES_PER_TABLE = 10_000_000;
 
@@ -42,11 +48,8 @@ export interface OpenBackupExport {
 async function writeCompressed(
     gzip: Writable,
     outputFinished: Promise<void>,
-    value: string,
+    value: Buffer,
 ): Promise<void> {
-    if (Buffer.byteLength(value, "utf8") > MAX_BACKUP_RECORD_BYTES) {
-        throw new Error("Backup record exceeds the restore reader limit");
-    }
     if (!gzip.write(value)) {
         await Promise.race([
             once(gzip, "drain"),
@@ -55,6 +58,19 @@ async function writeCompressed(
             }),
         ]);
     }
+}
+
+function encodeRecordBuffer(record: BackupRecord): Buffer {
+    const buffer = Buffer.from(encodeBackupRecord(record), "utf8");
+    if (buffer.length > MAX_BACKUP_RECORD_BYTES) {
+        if (record.type === "rows") {
+            throw new Error(
+                `Backup record for table ${record.table} exceeds the restore reader limit`,
+            );
+        }
+        throw new Error("Backup record exceeds the restore reader limit");
+    }
+    return buffer;
 }
 
 async function readMigrations(client: Client): Promise<BackupMigration[]> {
@@ -113,8 +129,16 @@ async function declareTableCursor(
     client: Client,
     table: CatalogTable,
 ): Promise<void> {
+    const rowExpression = cursorRowExpression(table);
+    // OFFSET 0 prevents PostgreSQL from recomputing the JSON expression for each outer reference.
     await client.query(
-        `DECLARE backup_rows NO SCROLL CURSOR FOR SELECT (${cursorRowExpression(table)})::text AS row FROM public.${quoteIdent(table.name)} t`,
+        `DECLARE backup_rows NO SCROLL CURSOR FOR
+         SELECT CASE WHEN octet_length(x.row) <= ${INLINE_ROW_BYTES} THEN x.row END AS row,
+                octet_length(x.row) AS bytes,
+                CASE WHEN octet_length(x.row) > ${INLINE_ROW_BYTES} THEN x.tableoid::text END AS tableoid,
+                CASE WHEN octet_length(x.row) > ${INLINE_ROW_BYTES} THEN x.ctid::text END AS ctid
+           FROM (SELECT (${rowExpression})::text AS row, t.tableoid, t.ctid
+                   FROM public.${quoteIdent(table.name)} t OFFSET 0) x`,
     );
 }
 
@@ -132,16 +156,18 @@ async function flushTableBatch(
     batch: TableBatch,
 ): Promise<void> {
     if (batch.rows.length === 0) return;
-    const encoded = encodeBackupRecord({
-        type: "rows",
-        table: table.name,
-        rowCount: batch.rows.length,
-        rows: `[${batch.rows.join(",")}]`,
-    });
-    hmac.update(encoded, "utf8");
-    await writeCompressed(gzip, outputFinished, encoded);
+    const rowCount = batch.rows.length;
+    const rows = `[${batch.rows.join(",")}]`;
     batch.rows = [];
     batch.bytes = 2;
+    const buffer = encodeRecordBuffer({
+        type: "rows",
+        table: table.name,
+        rowCount,
+        rows,
+    });
+    hmac.update(buffer);
+    await writeCompressed(gzip, outputFinished, buffer);
     batch.count += 1;
     if (batch.count > MAX_BATCHES_PER_TABLE) {
         throw new Error("Table exceeds the supported backup batch limit");
@@ -149,28 +175,89 @@ async function flushTableBatch(
 }
 
 async function appendCursorRow(
-    item: { row: string },
+    row: string,
     batch: TableBatch,
     flush: () => Promise<void>,
 ): Promise<void> {
-    const rowBytes = Buffer.byteLength(item.row, "utf8");
+    const rowBytes = Buffer.byteLength(row, "utf8");
     const separator = batch.rows.length === 0 ? 0 : 1;
     if (
         batch.rows.length >= QUERY_ROW_LIMIT ||
         (batch.rows.length > 0 &&
-            batch.bytes + separator + rowBytes > QUERY_BYTE_TARGET)
+            batch.bytes + separator + rowBytes > BATCH_RAW_BYTE_TARGET)
     ) {
         await flush();
     }
-    batch.rows.push(item.row);
+    batch.rows.push(row);
     batch.bytes += (batch.rows.length === 1 ? 0 : 1) + rowBytes;
-    if (batch.rows.length === 1 && batch.bytes > QUERY_BYTE_TARGET) {
+    if (batch.rows.length === 1 && batch.bytes > BATCH_RAW_BYTE_TARGET) {
         await flush();
     }
 }
 
+interface CursorRow {
+    row: unknown;
+    bytes: unknown;
+    tableoid: unknown;
+    ctid: unknown;
+}
+
+function readCursorBytes(table: CatalogTable, item: CursorRow): number {
+    if (!Number.isSafeInteger(item.bytes) || Number(item.bytes) < 0) {
+        throw new Error(`Table ${table.name} returned an invalid row size`);
+    }
+    return Number(item.bytes);
+}
+
+async function fetchOversizedRow(
+    client: Client,
+    table: CatalogTable,
+    tableoid: string,
+    ctid: string,
+): Promise<string> {
+    const result = await client.query<{ row: unknown }>(
+        `SELECT (${cursorRowExpression(table)})::text AS row
+           FROM public.${quoteIdent(table.name)} t
+          WHERE t.tableoid = $1::oid AND t.ctid = $2::tid`,
+        [tableoid, ctid],
+    );
+    const row = result.rows[0]?.row;
+    if (result.rows.length !== 1 || typeof row !== "string") {
+        throw new Error(`Table ${table.name} changed during backup`);
+    }
+    return row;
+}
+
+async function resolveCursorRow(
+    client: Client,
+    table: CatalogTable,
+    item: CursorRow,
+): Promise<string> {
+    const bytes = readCursorBytes(table, item);
+    if (typeof item.row === "string" && bytes <= INLINE_ROW_BYTES) {
+        return item.row;
+    }
+    if (item.row !== null || bytes <= INLINE_ROW_BYTES) {
+        throw new Error(`Table ${table.name} returned an invalid cursor row`);
+    }
+    if (bytes > MAX_BACKUP_RECORD_BYTES - RECORD_ENVELOPE_BYTES) {
+        throw new Error(
+            `Table ${table.name} has a row larger than the backup record limit`,
+        );
+    }
+    if (
+        typeof item.tableoid !== "string" ||
+        !/^[0-9]+$/.test(item.tableoid) ||
+        typeof item.ctid !== "string"
+    ) {
+        throw new Error(`Table ${table.name} changed during backup`);
+    }
+    return fetchOversizedRow(client, table, item.tableoid, item.ctid);
+}
+
 async function writeCursorRows(
     client: Client,
+    table: CatalogTable,
     batch: TableBatch,
     flush: () => Promise<void>,
 ): Promise<void> {
@@ -179,13 +266,19 @@ async function writeCursorRows(
         fetchCount < MAX_BATCHES_PER_TABLE;
         fetchCount += 1
     ) {
-        const result = await client.query<{ row: string }>(
-            "FETCH FORWARD 500 FROM backup_rows",
+        const result = await client.query<CursorRow>(
+            `FETCH FORWARD ${FETCH_ROWS} FROM backup_rows`,
         );
-        for (const item of result.rows) {
-            await appendCursorRow(item, batch, flush);
+        if (result.rows.length > FETCH_ROWS) {
+            throw new Error("Table cursor returned too many rows");
         }
-        if (result.rows.length < 500) {
+        for (let index = 0; index < FETCH_ROWS; index += 1) {
+            const item = result.rows[index];
+            if (!item) break;
+            const row = await resolveCursorRow(client, table, item);
+            await appendCursorRow(row, batch, flush);
+        }
+        if (result.rows.length < FETCH_ROWS) {
             await flush();
             return;
         }
@@ -205,7 +298,7 @@ async function writeTableRows(
     const flush = () =>
         flushTableBatch(gzip, outputFinished, table, hmac, batch);
     try {
-        await writeCursorRows(client, batch, flush);
+        await writeCursorRows(client, table, batch, flush);
     } finally {
         await client.query("CLOSE backup_rows").catch(() => undefined);
     }
@@ -253,20 +346,17 @@ async function streamSnapshot(
         await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
         const { header, tables } = await buildHeader(client, options);
         const hmac = crypto.createHmac("sha256", options.macKey);
-        const encodedHeader = encodeBackupRecord(header);
-        hmac.update(encodedHeader, "utf8");
+        const encodedHeader = encodeRecordBuffer(header);
+        hmac.update(encodedHeader);
         await writeCompressed(gzip, outputFinished, encodedHeader);
         for (const table of tables) {
             await writeTableRows(client, gzip, outputFinished, table, hmac);
         }
-        await writeCompressed(
-            gzip,
-            outputFinished,
-            encodeBackupRecord({
-                type: "end",
-                mac: hmac.digest("base64"),
-            }),
-        );
+        const encodedEnd = encodeRecordBuffer({
+            type: "end",
+            mac: hmac.digest("base64"),
+        });
+        await writeCompressed(gzip, outputFinished, encodedEnd);
         gzip.end();
         await outputPipeline;
         await client.query("COMMIT");

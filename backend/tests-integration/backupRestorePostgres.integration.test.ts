@@ -338,11 +338,16 @@ describeWithPostgres("data-only backup and restore", () => {
     it("round-trips rows, preserves extensions, constraints, triggers, and rotates credentials", async () => {
         const encryptedSetting = encryptWithKey("setting-secret", backupKey);
         const encryptedPassword = encryptWithKey("app-password", backupKey);
+        const profilePicture = crypto.randomBytes(100 * 1024);
         await seedTypeFamilies(
             source,
             userId,
             encryptedSetting,
             encryptedPassword,
+        );
+        await source.query(
+            `UPDATE "User" SET "profilePicture" = $1 WHERE "id" = $2`,
+            [profilePicture, userId],
         );
         const sourceState = await captureDatabaseState(source);
 
@@ -410,9 +415,7 @@ describeWithPostgres("data-only backup and restore", () => {
             [userId],
         );
         expect(restored.rows[0]?.username).toBe("backup-user");
-        expect(restored.rows[0]?.profilePicture).toEqual(
-            Buffer.from([0, 1, 2, 255]),
-        );
+        expect(restored.rows[0]?.profilePicture).toEqual(profilePicture);
         expect(
             decryptWithKey(restored.rows[0]!.encryptedSecret, currentKey),
         ).toBe("app-password");

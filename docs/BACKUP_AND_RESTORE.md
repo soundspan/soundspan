@@ -96,7 +96,8 @@ that is incomplete.
 
 The backup reads the whole database in one consistent snapshot, so people can
 keep listening while it runs. One backup runs at a time, and a backup must
-finish within six hours.
+finish within six hours. A backup stops if one database row needs more than
+16 MiB in the file; the server log names that row's table.
 
 > **Keep the passphrase.** A backup can't be restored without it, and nobody
 > can recover it for you. It protects the stored passwords and service
@@ -172,7 +173,8 @@ passphrase again.
 
 1. It checks the whole file before it changes anything: the format, the
    passphrase and integrity check, that every row the backup lists is present,
-   and the version.
+   and the version. It refuses a file that unpacks to more than 100 times its
+   own size (any file may unpack to 1 GiB) as damaged.
 2. It removes the fresh install's application tables, types, and functions.
    Database extensions stay.
 3. It rebuilds the database structure of the backup's version from this

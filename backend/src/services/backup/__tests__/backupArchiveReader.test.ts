@@ -72,6 +72,40 @@ describe("backup archive reader", () => {
         });
     });
 
+    it("validates the exporter MAC for multi-byte UTF-8 records", async () => {
+        const archiveHeader = {
+            ...header,
+            tables: [
+                {
+                    name: "Track",
+                    columns: [{ name: "title", type: "text" }],
+                    rowCount: 1,
+                },
+            ],
+        };
+        const encodedHeader = encodeBackupRecord(archiveHeader);
+        const encodedRows = encodeBackupRecord({
+            type: "rows",
+            table: "Track",
+            rowCount: 1,
+            rows: '[{"title":"音楽"}]',
+        });
+        const authenticated = encodedHeader + encodedRows;
+        const mac = crypto
+            .createHmac("sha256", macKey)
+            .update(authenticated, "utf8")
+            .digest("base64");
+        const filePath = await write(
+            "unicode-mac",
+            gzipSync(authenticated + encodeBackupRecord({ type: "end", mac })),
+        );
+
+        await expect(validateBackupArchive(filePath, macKey)).resolves.toEqual({
+            header: archiveHeader,
+            rows: 1,
+        });
+    });
+
     it("stops validation when its abort signal is already cancelled", async () => {
         const filePath = await write(
             "cancelled",
@@ -197,5 +231,32 @@ describe("backup archive reader", () => {
         await expect(readBackupHeader(filePath)).rejects.toMatchObject({
             code: "BACKUP_FORMAT_INVALID",
         });
+    });
+
+    it("rejects an archive that expands beyond the decompressed limit", async () => {
+        jest.resetModules();
+        jest.doMock("../backupFormat", () => {
+            const actual = jest.requireActual("../backupFormat") as object;
+            return {
+                ...actual,
+                MAX_BACKUP_EXPANSION_RATIO: 1,
+                MIN_BACKUP_DECOMPRESSED_LIMIT_BYTES: 64,
+            };
+        });
+        try {
+            const { readBackupRecords: readWithSmallLimit } =
+                await import("../backupArchiveReader");
+            const filePath = await write(
+                "expansion-limit",
+                gzipSync("x\n".repeat(128)),
+            );
+
+            await expect(readWithSmallLimit(filePath).next()).rejects.toThrow(
+                "Backup expands beyond the supported size",
+            );
+        } finally {
+            jest.dontMock("../backupFormat");
+            jest.resetModules();
+        }
     });
 });
