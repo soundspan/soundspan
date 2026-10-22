@@ -61,7 +61,13 @@ async function* readBackupRecordLines(
         maximumLineBytes: maximumRecordBytes,
         maximumTotalBytes,
     });
-    const completion = pipeline(source, gunzip, stream, { signal });
+    const controller = new AbortController();
+    const pipelineSignal = signal
+        ? AbortSignal.any([signal, controller.signal])
+        : controller.signal;
+    const completion = pipeline(source, gunzip, stream, {
+        signal: pipelineSignal,
+    });
     let consumed = false;
     try {
         for await (const line of stream) {
@@ -82,10 +88,11 @@ async function* readBackupRecordLines(
             cause,
         });
     } finally {
-        source.destroy();
-        gunzip.destroy();
-        stream.destroy();
-        if (!consumed) await completion.catch(() => undefined);
+        if (!consumed) {
+            // Abort through pipeline so early-return cleanup always settles its promise.
+            controller.abort();
+            await completion.catch(() => undefined);
+        }
     }
 }
 

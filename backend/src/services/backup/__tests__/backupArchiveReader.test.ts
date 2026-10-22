@@ -34,6 +34,7 @@ const header: BackupHeader = {
 };
 
 const macKey = Buffer.alloc(32, 7);
+const SETTLEMENT_TIMEOUT_MS = 5_000;
 
 function archive(...records: string[]): Buffer {
     const body = records.join("");
@@ -42,6 +43,53 @@ function archive(...records: string[]): Buffer {
         .update(body)
         .digest("base64");
     return gzipSync(body + encodeBackupRecord({ type: "end", mac }));
+}
+
+function largeArchiveFixture(): { bytes: Buffer; header: BackupHeader } {
+    const largeHeader: BackupHeader = {
+        ...header,
+        migrations: Array.from({ length: 6 }, (_, index) => ({
+            name: `migration_${index}`,
+            checksum: "x".repeat(10_000),
+        })),
+        tables: [
+            {
+                name: "User",
+                columns: [{ name: "data", type: "text" }],
+                rowCount: 1,
+            },
+        ],
+    };
+    const rows = encodeBackupRecord({
+        type: "rows",
+        table: "User",
+        rowCount: 1,
+        rows: JSON.stringify([
+            {
+                id: "x",
+                data: crypto.randomBytes(100 * 1024).toString("hex"),
+            },
+        ]),
+    });
+    return {
+        bytes: archive(encodeBackupRecord(largeHeader), rows),
+        header: largeHeader,
+    };
+}
+
+async function settlesWithin<T>(operation: Promise<T>): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+            () => reject(new Error("readBackupHeader did not settle")),
+            SETTLEMENT_TIMEOUT_MS,
+        );
+    });
+    try {
+        return await Promise.race([operation, deadline]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
 }
 
 describe("backup archive reader", () => {
@@ -118,6 +166,38 @@ describe("backup archive reader", () => {
             validateBackupArchive(filePath, macKey, controller.signal),
         ).rejects.toThrow("connection lost");
     });
+
+    it(
+        "returns the header without waiting on the rest of a large archive",
+        async () => {
+            const fixture = largeArchiveFixture();
+            const filePath = await write("large-header", fixture.bytes);
+
+            await expect(
+                settlesWithin(readBackupHeader(filePath)),
+            ).resolves.toEqual(fixture.header);
+        },
+        SETTLEMENT_TIMEOUT_MS * 2,
+    );
+
+    it(
+        "settles when a consumer stops reading records early",
+        async () => {
+            const fixture = largeArchiveFixture();
+            const filePath = await write("large-early-stop", fixture.bytes);
+            const consumeFirstRecord = async (): Promise<void> => {
+                for await (const record of readBackupRecords(filePath)) {
+                    expect(record).toEqual(fixture.header);
+                    break;
+                }
+            };
+
+            await expect(settlesWithin(consumeFirstRecord())).resolves.toBe(
+                undefined,
+            );
+        },
+        SETTLEMENT_TIMEOUT_MS * 2,
+    );
 
     it("rejects a truncated gzip stream", async () => {
         const complete = gzipSync(encodeBackupRecord(header));
