@@ -1,83 +1,34 @@
 import fs from "fs";
 import crypto from "crypto";
-import { Transform, type TransformCallback } from "stream";
 import { pipeline } from "stream/promises";
 import { createGunzip } from "zlib";
 import {
+    MAX_BACKUP_EXPANSION_RATIO,
     MAX_BACKUP_RECORD_BYTES,
+    MIN_BACKUP_DECOMPRESSED_LIMIT_BYTES,
     parseBackupRecord,
     type BackupHeader,
     type BackupRecord,
 } from "./backupFormat";
 import { BackupFormatError } from "./backupErrors";
+import { BoundedLineSplitter } from "./backupLineSplitter";
 
-class BoundedLineSplitter extends Transform {
-    private readonly parts: Buffer[] = [];
-    private bufferedBytes = 0;
+const NEWLINE = Buffer.from("\n");
 
-    constructor(private readonly maximumBytes = MAX_BACKUP_RECORD_BYTES) {
-        super({ readableObjectMode: true });
-    }
-
-    override _transform(
-        chunk: Buffer,
-        _encoding: BufferEncoding,
-        callback: TransformCallback,
-    ): void {
-        try {
-            this.consumeChunk(chunk);
-            callback();
-        } catch (error) {
-            callback(error as Error);
-        }
-    }
-
-    override _flush(callback: TransformCallback): void {
-        if (this.bufferedBytes !== 0) {
-            callback(
-                new BackupFormatError(
-                    "Backup record is not newline terminated",
-                ),
-            );
-            return;
-        }
-        callback();
-    }
-
-    private addPart(part: Buffer): void {
-        if (part.length === 0) return;
-        this.parts.push(part);
-        this.bufferedBytes += part.length;
-        if (this.bufferedBytes > this.maximumBytes) {
-            throw new BackupFormatError("Backup record exceeds the size limit");
-        }
-    }
-
-    private emitLine(part: Buffer): void {
-        this.addPart(part);
-        if (this.bufferedBytes === 0) {
-            throw new BackupFormatError("Backup contains an empty record");
-        }
-        this.push(
-            Buffer.concat(this.parts, this.bufferedBytes).toString("utf8"),
+async function maximumDecompressedBytes(filePath: string): Promise<number> {
+    try {
+        const { size } = await fs.promises.stat(filePath);
+        return Math.min(
+            Number.MAX_SAFE_INTEGER,
+            Math.max(
+                MIN_BACKUP_DECOMPRESSED_LIMIT_BYTES,
+                size * MAX_BACKUP_EXPANSION_RATIO,
+            ),
         );
-        this.parts.length = 0;
-        this.bufferedBytes = 0;
-    }
-
-    private consumeChunk(chunk: Buffer): void {
-        let offset = 0;
-        for (
-            let lineCount = 0;
-            lineCount <= this.maximumBytes;
-            lineCount += 1
-        ) {
-            const newline = chunk.indexOf(0x0a, offset);
-            if (newline === -1) break;
-            this.emitLine(chunk.subarray(offset, newline));
-            offset = newline + 1;
-        }
-        this.addPart(chunk.subarray(offset));
+    } catch (cause) {
+        throw new BackupFormatError("Backup archive is truncated or invalid", {
+            cause,
+        });
     }
 }
 
@@ -103,18 +54,30 @@ async function* readBackupRecordLines(
     signal?: AbortSignal,
 ): AsyncGenerator<{ record: BackupRecord; bytes: Buffer }> {
     signal?.throwIfAborted();
+    const maximumTotalBytes = await maximumDecompressedBytes(filePath);
     const source = fs.createReadStream(filePath);
     const gunzip = createGunzip();
-    const stream = new BoundedLineSplitter(maximumRecordBytes);
-    const completion = pipeline(source, gunzip, stream, { signal });
+    const stream = new BoundedLineSplitter({
+        maximumLineBytes: maximumRecordBytes,
+        maximumTotalBytes,
+    });
+    const controller = new AbortController();
+    const pipelineSignal = signal
+        ? AbortSignal.any([signal, controller.signal])
+        : controller.signal;
+    const completion = pipeline(source, gunzip, stream, {
+        signal: pipelineSignal,
+    });
     let consumed = false;
     try {
         for await (const line of stream) {
             signal?.throwIfAborted();
-            const text = String(line);
+            if (!Buffer.isBuffer(line)) {
+                throw new BackupFormatError("Backup record is invalid");
+            }
             yield {
-                record: parseBackupRecord(text),
-                bytes: Buffer.from(`${text}\n`, "utf8"),
+                record: parseBackupRecord(line.toString("utf8")),
+                bytes: line,
             };
         }
         await completion;
@@ -125,10 +88,11 @@ async function* readBackupRecordLines(
             cause,
         });
     } finally {
-        source.destroy();
-        gunzip.destroy();
-        stream.destroy();
-        if (!consumed) await completion.catch(() => undefined);
+        if (!consumed) {
+            // Abort through pipeline so early-return cleanup always settles its promise.
+            controller.abort();
+            await completion.catch(() => undefined);
+        }
     }
 }
 
@@ -197,6 +161,7 @@ export async function validateBackupArchive(
             }
             header = record;
             hmac.update(item.bytes);
+            hmac.update(NEWLINE);
             continue;
         }
         if (record.type === "header") {
@@ -208,6 +173,7 @@ export async function validateBackupArchive(
             continue;
         }
         hmac.update(item.bytes);
+        hmac.update(NEWLINE);
         const nextCount = (counts.get(record.table) ?? 0) + record.rowCount;
         if (!Number.isSafeInteger(nextCount)) {
             throw new BackupFormatError(

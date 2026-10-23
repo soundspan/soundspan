@@ -3,7 +3,13 @@ import { BackupFormatError } from "./backupErrors";
 
 export const BACKUP_FORMAT_MAGIC = "soundspan-backup" as const;
 export const BACKUP_FORMAT_VERSION = 1 as const;
-export const MAX_BACKUP_RECORD_BYTES = 64 * 1024 * 1024;
+// User-written JSON is capped by the 1 MB API limit, and profile pictures are resized to 512x512 before storage.
+// Batched records stay far below this, so 16 MiB leaves wide headroom for one oversized row.
+export const MAX_BACKUP_RECORD_BYTES = 16 * 1024 * 1024;
+// Deflate can expand up to about 1032:1; 100x keeps validation work proportional to the uploaded file.
+export const MAX_BACKUP_EXPANSION_RATIO = 100;
+// Small archives may always expand to 1 GiB, so tiny databases with repetitive rows stay restorable.
+export const MIN_BACKUP_DECOMPRESSED_LIMIT_BYTES = 1024 * 1024 * 1024;
 
 const boundedString = z.string().min(1).max(10_000);
 const base64String = z
