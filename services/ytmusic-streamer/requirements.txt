@@ -1,4 +1,4 @@
-fastapi>=0.143.0
+fastapi>=0.156.8
 uvicorn>=0.54.0
 ytmusicapi>=1.12.3
 yt-dlp[default]>=2026.8.19
