@@ -18,7 +18,7 @@ def test_docker_python_matches_lock_target() -> None:
     assert target_match is not None
     image_version = tuple(int(part) for part in image_match.groups())
     lock_version = tuple(int(part) for part in target_match.groups())
-    assert image_version == (3, 14)
+    assert image_version == (3, 15)
     assert lock_version == image_version
 
 

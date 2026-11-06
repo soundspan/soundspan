@@ -195,13 +195,13 @@ jobs:
         # -- the versions checked are exactly what the image installs. Only
         # environment markers are evaluated on the runner's interpreter.
         include:
-          # ytmusic-streamer + tidal-streamer images are python:3.14-slim.
+          # ytmusic-streamer + tidal-streamer images are python:3.15-slim.
           - requirements: services/ytmusic-streamer/requirements.lock
-            python-version: "3.14"
+            python-version: "3.15"
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
           - requirements: services/tidal-streamer/requirements.lock
-            python-version: "3.14"
+            python-version: "3.15"
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
           # audio-analyzer's image is python:3.11-slim (roadmap F51). Its lock is
@@ -259,13 +259,13 @@ jobs:
           # Loose full manifests via requirements-test.txt (-> requirements.txt):
           # audits the un-locked floors, INCLUDING the deliberately-exempt
           # yt-dlp/ytmusicapi that never appear in a lock. Images are
-          # python:3.14-slim.
+          # python:3.15-slim.
           - requirements: services/tidal-streamer/requirements-test.txt
-            python-version: "3.14"
+            python-version: "3.15"
             audit-args: ""
             ignore-vulns: ""
           - requirements: services/ytmusic-streamer/requirements-test.txt
-            python-version: "3.14"
+            python-version: "3.15"
             audit-args: ""
             ignore-vulns: ""
     steps:
