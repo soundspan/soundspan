@@ -232,6 +232,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/staleJobCleanup.ts` | Core |
 | `backend/src/services/textEmbedding.ts` | Provider-backed text embedding and registered search-space routing |
 | `backend/src/services/tidal.ts` | Core |
+| `backend/src/services/tidalAccountMode.ts` | Dependency-free check for the admin's shared TIDAL account mode and its sidecar session key |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
 | `backend/src/services/trackAlbumResolution.ts` | Bounded external-track to MusicBrainz release-group resolution |

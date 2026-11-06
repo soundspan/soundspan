@@ -86,7 +86,17 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
+const mockTidalService = {
+    getAccountCredentials: jest.fn(),
+    saveTokens: jest.fn(),
+};
+
+jest.mock("../tidal", () => ({
+    tidalService: mockTidalService,
+}));
+
 import { tidalStreamingService } from "../tidalStreaming";
+import { TIDAL_INSTANCE_SESSION_ID } from "../tidalAccountMode";
 
 type MatchTrackInput = {
     artist: string;
@@ -135,6 +145,8 @@ const privateService =
 function resetServiceState(service: TidalStreamingPrivate): void {
     service.loadAvailability.clear();
     service.loadEnabled.clear();
+    tidalStreamingService.clearAccountModeCache();
+    tidalStreamingService.invalidateInstanceSession();
     service.qualityCache?.clear?.();
 }
 
@@ -172,6 +184,8 @@ describe("tidal streaming service", () => {
         mockPrisma.systemSettings.findUnique.mockReset();
         mockPrisma.userSettings.findUnique.mockReset();
         mockPrisma.userSettings.update.mockReset();
+        mockTidalService.getAccountCredentials.mockReset();
+        mockTidalService.saveTokens.mockReset();
         mockConfig.internalApiSecret = undefined;
         mockConfig.tidal = { sidecarUrl: "http://127.0.0.1:8585" };
         mockConfig.nodeEnv = "test";
@@ -269,6 +283,206 @@ describe("tidal streaming service", () => {
 
             await expect(tidalStreamingService.isEnabled()).resolves.toBe(
                 false,
+            );
+        });
+    });
+
+    describe("instance account mode", () => {
+        const instanceCreds = {
+            accessToken: "instance-access",
+            refreshToken: "instance-refresh",
+            userId: "tidal-instance-user",
+            countryCode: "GB",
+        };
+
+        function enableInstanceMode(): void {
+            mockPrisma.systemSettings.findUnique.mockResolvedValue({
+                tidalEnabled: true,
+                tidalStreamingUseInstanceAccount: true,
+            });
+        }
+
+        it("is active only when TIDAL is enabled and the admin toggle is on", async () => {
+            mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+                tidalEnabled: true,
+                tidalStreamingUseInstanceAccount: false,
+            });
+            await expect(
+                tidalStreamingService.usesInstanceAccount(),
+            ).resolves.toBe(false);
+
+            tidalStreamingService.clearAccountModeCache();
+            mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+                tidalEnabled: false,
+                tidalStreamingUseInstanceAccount: true,
+            });
+            await expect(
+                tidalStreamingService.usesInstanceAccount(),
+            ).resolves.toBe(false);
+
+            tidalStreamingService.clearAccountModeCache();
+            mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+                tidalEnabled: true,
+                tidalStreamingUseInstanceAccount: true,
+            });
+            await expect(
+                tidalStreamingService.usesInstanceAccount(),
+            ).resolves.toBe(true);
+        });
+
+        it("restores the instance credentials once and routes every user's requests through the shared session", async () => {
+            enableInstanceMode();
+            mockTidalService.getAccountCredentials.mockResolvedValue(
+                instanceCreds,
+            );
+            mockClient.get.mockResolvedValueOnce({
+                data: { authenticated: false },
+            });
+            mockClient.post.mockImplementation(async (url: string) => {
+                if (url.startsWith("/user/auth/restore")) {
+                    return { data: { success: true } };
+                }
+                return { data: { tracks: [] } };
+            });
+
+            await tidalStreamingService.search("user-a", "first");
+            await tidalStreamingService.search("user-b", "second");
+
+            const restoreCalls = mockClient.post.mock.calls.filter(([url]) =>
+                String(url).startsWith("/user/auth/restore"),
+            );
+            expect(restoreCalls).toEqual([
+                [
+                    `/user/auth/restore?user_id=${TIDAL_INSTANCE_SESSION_ID}`,
+                    {
+                        access_token: "instance-access",
+                        refresh_token: "instance-refresh",
+                        user_id: "tidal-instance-user",
+                        country_code: "GB",
+                    },
+                ],
+            ]);
+            expect(mockClient.post).toHaveBeenCalledWith(
+                `/user/search?user_id=${TIDAL_INSTANCE_SESSION_ID}`,
+                { query: "first" },
+            );
+            expect(mockClient.post).toHaveBeenCalledWith(
+                `/user/search?user_id=${TIDAL_INSTANCE_SESSION_ID}`,
+                { query: "second" },
+            );
+            expect(mockPrisma.userSettings.findUnique).not.toHaveBeenCalled();
+        });
+
+        it("uses the shared session for stream and browse requests", async () => {
+            enableInstanceMode();
+            mockTidalService.getAccountCredentials.mockResolvedValue(
+                instanceCreds,
+            );
+            mockClient.get.mockImplementation(async (url: string) => {
+                if (url.startsWith("/user/auth/status")) {
+                    return { data: { authenticated: true } };
+                }
+                return { data: { shelves: [] } };
+            });
+
+            await tidalStreamingService.getStreamInfo("user-a", 42, "HIGH");
+            await tidalStreamingService.getHomeShelves("user-a", "HIGH");
+
+            expect(mockClient.get).toHaveBeenCalledWith(
+                `/user/stream-info/42?user_id=${TIDAL_INSTANCE_SESSION_ID}&quality=HIGH`,
+            );
+            expect(mockClient.get).toHaveBeenCalledWith(
+                `/user/browse/home?user_id=${TIDAL_INSTANCE_SESSION_ID}&quality=HIGH`,
+                { timeout: 15000 },
+            );
+            expect(mockClient.post).not.toHaveBeenCalled();
+        });
+
+        it("keeps per-user sessions when the toggle is off", async () => {
+            mockPrisma.systemSettings.findUnique.mockResolvedValue({
+                tidalEnabled: true,
+                tidalStreamingUseInstanceAccount: false,
+            });
+            mockClient.post.mockResolvedValueOnce({ data: { tracks: [] } });
+
+            await tidalStreamingService.search("user-a", "query");
+
+            expect(mockClient.post).toHaveBeenCalledTimes(1);
+            expect(mockClient.post).toHaveBeenCalledWith(
+                "/user/search?user_id=user-a",
+                { query: "query" },
+            );
+            expect(
+                mockTidalService.getAccountCredentials,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("persists a sidecar token refresh to the instance account, not to a user", async () => {
+            enableInstanceMode();
+            mockTidalService.getAccountCredentials.mockResolvedValue(
+                instanceCreds,
+            );
+            mockClient.get.mockResolvedValueOnce({
+                data: { authenticated: false },
+            });
+            mockClient.post.mockResolvedValueOnce({
+                data: {
+                    success: true,
+                    refreshed: true,
+                    access_token: "fresh-access",
+                    user_id: "tidal-instance-user",
+                    country_code: "GB",
+                },
+            });
+
+            await expect(
+                tidalStreamingService.ensureInstanceSession(),
+            ).resolves.toBe(true);
+
+            expect(mockTidalService.saveTokens).toHaveBeenCalledWith({
+                accessToken: "fresh-access",
+                refreshToken: "instance-refresh",
+                userId: "tidal-instance-user",
+                countryCode: "GB",
+            });
+            expect(mockPrisma.userSettings.update).not.toHaveBeenCalled();
+        });
+
+        it("reports no session when the instance account has no stored credentials", async () => {
+            enableInstanceMode();
+            mockTidalService.getAccountCredentials.mockResolvedValue(null);
+            mockClient.get.mockResolvedValueOnce({
+                data: { authenticated: false },
+            });
+
+            await expect(
+                tidalStreamingService.ensureInstanceSession(),
+            ).resolves.toBe(false);
+            expect(mockClient.post).not.toHaveBeenCalled();
+        });
+
+        it("reports instance credentials as every user's auth status", async () => {
+            enableInstanceMode();
+            mockClient.get.mockResolvedValueOnce({
+                data: { authenticated: true },
+            });
+
+            await expect(
+                tidalStreamingService.getAuthStatus("user-without-link"),
+            ).resolves.toEqual({
+                authenticated: true,
+                credentialsConfigured: true,
+            });
+            expect(mockPrisma.userSettings.findUnique).not.toHaveBeenCalled();
+        });
+
+        it("drops the shared sidecar session when the instance account is reset", async () => {
+            mockClient.post.mockResolvedValueOnce({ data: { success: true } });
+
+            await tidalStreamingService.resetInstanceSession();
+
+            expect(mockClient.post).toHaveBeenCalledWith(
+                `/user/auth/clear?user_id=${TIDAL_INSTANCE_SESSION_ID}`,
             );
         });
     });

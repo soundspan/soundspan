@@ -27,6 +27,9 @@ const tidalStreamingService = {
     findMatchesForAlbum: jest.fn(),
     getStreamInfo: jest.fn(),
     getStreamProxy: jest.fn(),
+    usesInstanceAccount: jest.fn(),
+    ensureInstanceSession: jest.fn(),
+    invalidateInstanceSession: jest.fn(),
 };
 jest.mock("../../services/tidalStreaming", () => ({
     tidalStreamingService,
@@ -176,6 +179,8 @@ describe("tidal streaming route runtime", () => {
         // Sidecar reports an existing in-memory session by default (F31: this
         // now flows through the authenticated tidalStreaming client).
         tidalStreamingService.checkSidecarAuthStatus.mockResolvedValue(true);
+        tidalStreamingService.usesInstanceAccount.mockResolvedValue(false);
+        tidalStreamingService.ensureInstanceSession.mockResolvedValue(true);
     });
 
     it("reports status and handles status errors", async () => {
@@ -189,6 +194,7 @@ describe("tidal streaming route runtime", () => {
             available: true,
             authenticated: true,
             credentialsConfigured: true,
+            accountMode: "user",
         });
         // Fifth call site (F31): the sidecar session probe goes through the
         // authenticated service client, not a bare axios.get.
@@ -224,6 +230,7 @@ describe("tidal streaming route runtime", () => {
             available: true,
             authenticated: true,
             credentialsConfigured: true,
+            accountMode: "user",
         });
         expect(tidalStreamingService.restoreOAuth).toHaveBeenCalledWith(
             "u1",
@@ -248,8 +255,8 @@ describe("tidal streaming route runtime", () => {
 
         const firstRequest = searchHandler(req, firstRes);
         const secondRequest = searchHandler(req, secondRes);
-        await Promise.resolve();
-        await Promise.resolve();
+        // Drain pending microtasks so both requests reach the coalesced probe.
+        await new Promise((resolve) => setImmediate(resolve));
         expect(
             tidalStreamingService.checkSidecarAuthStatus,
         ).toHaveBeenCalledTimes(1);
@@ -387,6 +394,121 @@ describe("tidal streaming route runtime", () => {
         expect(clearRes.body).toEqual({ success: true });
         expect(prisma.userSettings.upsert).not.toHaveBeenCalled();
         expect(tidalStreamingService.restoreOAuth).not.toHaveBeenCalled();
+    });
+
+    describe("instance account mode", () => {
+        beforeEach(() => {
+            tidalStreamingService.usesInstanceAccount.mockResolvedValue(true);
+            prisma.userSettings.findUnique.mockResolvedValue(null);
+        });
+
+        it("reports the shared account as connected for users without their own link", async () => {
+            tidalStreamingService.getAuthStatus.mockResolvedValue({
+                authenticated: true,
+                credentialsConfigured: true,
+            });
+            const res = createRes();
+            await statusHandler({ user: { id: "no-link" } } as any, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual({
+                enabled: true,
+                available: true,
+                authenticated: true,
+                credentialsConfigured: true,
+                accountMode: "instance",
+            });
+            expect(
+                tidalStreamingService.ensureInstanceSession,
+            ).toHaveBeenCalled();
+            expect(tidalStreamingService.restoreOAuth).not.toHaveBeenCalled();
+            expect(prisma.userSettings.findUnique).not.toHaveBeenCalled();
+        });
+
+        it("serves search for a user who never linked TIDAL", async () => {
+            const res = createRes();
+            await searchHandler(
+                { user: { id: "no-link" }, body: { query: "song" } } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(200);
+            expect(tidalStreamingService.search).toHaveBeenCalledWith(
+                "no-link",
+                "song",
+            );
+            expect(
+                tidalStreamingService.checkSidecarAuthStatus,
+            ).not.toHaveBeenCalled();
+            expect(prisma.userSettings.findUnique).not.toHaveBeenCalled();
+        });
+
+        it("returns 401 when the shared session cannot be restored", async () => {
+            tidalStreamingService.ensureInstanceSession.mockResolvedValue(
+                false,
+            );
+            const res = createRes();
+            await streamHandler(
+                {
+                    user: { id: "no-link" },
+                    params: { trackId: "42" },
+                    query: {},
+                    headers: {},
+                } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(401);
+            expect(tidalStreamingService.getStreamProxy).not.toHaveBeenCalled();
+        });
+
+        it("re-verifies the shared session after the sidecar rejects its token", async () => {
+            tidalStreamingService.getStreamInfo.mockRejectedValueOnce(
+                Object.assign(new Error("expired"), {
+                    response: { status: 401 },
+                }),
+            );
+            const res = createRes();
+            await streamInfoHandler(
+                {
+                    user: { id: "no-link" },
+                    params: { trackId: "42" },
+                    query: {},
+                } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(500);
+            expect(
+                tidalStreamingService.invalidateInstanceSession,
+            ).toHaveBeenCalled();
+        });
+
+        it("rejects per-user account linking while the shared account is on", async () => {
+            for (const path of [
+                "/auth/device-code",
+                "/auth/device-code/poll",
+                "/auth/save-token",
+            ]) {
+                const layer = getRouteLayer(path, "post");
+                const guard = layer.route.stack[2].handle;
+                const res = createRes();
+                const next = jest.fn();
+                await guard({ user: { id: "u1" } } as any, res, next);
+                expect(res.statusCode).toBe(409);
+                expect(next).not.toHaveBeenCalled();
+            }
+
+            tidalStreamingService.usesInstanceAccount.mockResolvedValue(false);
+            const layer = getRouteLayer("/auth/device-code", "post");
+            const next = jest.fn();
+            await layer.route.stack[2].handle(
+                { user: { id: "u1" } } as any,
+                createRes(),
+                next,
+            );
+            expect(next).toHaveBeenCalled();
+        });
     });
 
     it("evaluates the tidal-enabled middleware for 404, 503, and success", async () => {
