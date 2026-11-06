@@ -204,6 +204,8 @@ function createRes() {
         redirect: jest.Mock;
         cookie: jest.Mock;
         clearCookie: jest.Mock;
+        /** Express links res.req to the request; auto-mode cookies read it. */
+        req?: unknown;
     } = {
         statusCode: 200,
         body: undefined as unknown,
@@ -469,6 +471,61 @@ describe("OIDC auth routes", () => {
             "__Host-soundspan_oidc_flow",
             expect.objectContaining({ secure: true, path: "/" }),
         );
+    });
+
+    it.each([
+        [true, "__Host-soundspan_oidc_flow"],
+        [false, "soundspan_oidc_flow"],
+    ])(
+        "in auto mode, follows the request scheme (secure=%p sets %s)",
+        async (secure, expectedName) => {
+            (mockConfig as { secureCookies: unknown }).secureCookies = "auto";
+            const loginReq = { secure, query: { returnTo: "/" } };
+            const loginRes = createRes();
+            loginRes.req = loginReq;
+
+            await getHandler("/oidc/login", "get")(loginReq, loginRes);
+
+            expect(loginRes.cookie).toHaveBeenCalledWith(
+                expectedName,
+                expect.any(String),
+                expect.objectContaining({ secure, path: "/" }),
+            );
+        },
+    );
+
+    it("in auto mode, rejects an unprefixed flow cookie on an HTTPS request", async () => {
+        (mockConfig as { secureCookies: unknown }).secureCookies = "auto";
+        // An unprefixed cookie (which a sibling subdomain or plain-HTTP page
+        // could plant) must not satisfy the binding on an HTTPS request.
+        values.set("oidc:exchange:tossed-exchange", {
+            userId: "u1",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        const tossedReq = {
+            secure: true,
+            body: { code: "tossed-exchange" },
+            headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+        };
+        const tossedRes = createRes();
+        tossedRes.req = tossedReq;
+        await getHandler("/oidc/exchange", "post")(tossedReq, tossedRes);
+        expect(tossedRes.statusCode).not.toBe(200);
+
+        // Positive control: the __Host- cookie on the same HTTPS request works.
+        values.set("oidc:exchange:hosted-exchange", {
+            userId: "u1",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        const hostedReq = {
+            secure: true,
+            body: { code: "hosted-exchange" },
+            headers: { cookie: `__Host-soundspan_oidc_flow=${FLOW_BINDING}` },
+        };
+        const hostedRes = createRes();
+        hostedRes.req = hostedReq;
+        await getHandler("/oidc/exchange", "post")(hostedReq, hostedRes);
+        expect(hostedRes.statusCode).toBe(200);
     });
 
     it.each(["//evil.test", "https://evil.test", "\\evil", "/\\evil"])(

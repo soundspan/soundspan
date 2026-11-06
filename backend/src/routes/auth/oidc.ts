@@ -36,6 +36,11 @@ import { runDummyBcrypt } from "../../utils/dummyCredential";
 import { sendRouteError } from "../../utils/routeErrorResponse";
 import { readCookie } from "../../utils/cookies";
 import {
+    secureCookiePrefixedName,
+    shouldUseSecureCookie,
+    type SecureCookieRequest,
+} from "../../utils/secureCookies";
+import {
     hasErrorCode,
     oidcLog,
     sendLoginSuccess,
@@ -136,34 +141,36 @@ function hashOpaqueValue(value: string): string {
     return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-function flowCookieOptions(): CookieOptions {
+function flowCookieOptions(req: SecureCookieRequest): CookieOptions {
     return {
         httpOnly: true,
         sameSite: "lax",
-        secure: config.secureCookies,
+        secure: shouldUseSecureCookie(config.secureCookies, req),
         path: "/",
     };
 }
 
-function flowCookieName(): string {
-    return config.secureCookies
-        ? `__Host-${OIDC_FLOW_COOKIE_BASE_NAME}`
-        : OIDC_FLOW_COOKIE_BASE_NAME;
+function flowCookieName(req: SecureCookieRequest): string {
+    return secureCookiePrefixedName(
+        OIDC_FLOW_COOKIE_BASE_NAME,
+        "__Host-",
+        shouldUseSecureCookie(config.secureCookies, req),
+    );
 }
 
 function setFlowBindingCookie(res: Response, binding: string): void {
-    res.cookie(flowCookieName(), binding, {
-        ...flowCookieOptions(),
+    res.cookie(flowCookieName(res.req), binding, {
+        ...flowCookieOptions(res.req),
         maxAge: OIDC_PENDING_TTL_SECONDS * 1000,
     });
 }
 
 function clearFlowBindingCookie(res: Response): void {
-    res.clearCookie(flowCookieName(), flowCookieOptions());
+    res.clearCookie(flowCookieName(res.req), flowCookieOptions(res.req));
 }
 
 function hasMatchingFlowBinding(req: Request, bindingHash: string): boolean {
-    const binding = readCookie(req, flowCookieName());
+    const binding = readCookie(req, flowCookieName(req));
     if (!binding) return false;
     return timingSafeCompare(hashOpaqueValue(binding), bindingHash);
 }

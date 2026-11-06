@@ -613,12 +613,18 @@ describe("config module", () => {
         });
     });
 
-    it("defaults secureCookies to true in production and false otherwise", async () => {
-        const prod = await loadConfigModule({ NODE_ENV: "production" });
-        expect(prod.config.secureCookies).toBe(true);
+    it("defaults secureCookies to auto (follow the request scheme) in every environment", async () => {
+        const prod = await loadConfigModule({
+            NODE_ENV: "production",
+            SECURE_COOKIES: undefined,
+        });
+        expect(prod.config.secureCookies).toBe("auto");
 
-        const dev = await loadConfigModule({ NODE_ENV: "development" });
-        expect(dev.config.secureCookies).toBe(false);
+        const dev = await loadConfigModule({
+            NODE_ENV: "development",
+            SECURE_COOKIES: undefined,
+        });
+        expect(dev.config.secureCookies).toBe("auto");
     });
 
     it("honors an explicit SECURE_COOKIES override in any environment", async () => {

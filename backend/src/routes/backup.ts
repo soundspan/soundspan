@@ -15,6 +15,10 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { backupLimiter } from "../middleware/rateLimiter";
 import { prisma } from "../utils/db";
 import { readCookie } from "../utils/cookies";
+import {
+    secureCookiePrefixedName,
+    shouldUseSecureCookie,
+} from "../utils/secureCookies";
 import { logger as rootLogger } from "../utils/logger";
 import { getSettingsEncryptionKey } from "../utils/encryption";
 import { getPepperFingerprint } from "../utils/apiKeyHash";
@@ -51,17 +55,19 @@ const downloadSessionSchema = z
     })
     .strict();
 
-function cookieName(): string {
-    return config.secureCookies
-        ? `__Secure-${COOKIE_BASE_NAME}`
-        : COOKIE_BASE_NAME;
+function cookieName(req: Request): string {
+    return secureCookiePrefixedName(
+        COOKIE_BASE_NAME,
+        "__Secure-",
+        shouldUseSecureCookie(config.secureCookies, req),
+    );
 }
 
-function cookieOptions() {
+function cookieOptions(req: Request) {
     return {
         httpOnly: true,
         sameSite: "strict" as const,
-        secure: config.secureCookies,
+        secure: shouldUseSecureCookie(config.secureCookies, req),
         path: "/api/backup/download",
         maxAge: BACKUP_DOWNLOAD_TTL_SECONDS * 1000,
     };
@@ -79,7 +85,7 @@ interface DownloadIdentity {
 async function authenticateDownload(
     req: Request,
 ): Promise<DownloadIdentity | null> {
-    const token = readCookie(req, cookieName());
+    const token = readCookie(req, cookieName(req));
     if (!token) return null;
     let payload;
     try {
@@ -142,7 +148,7 @@ async function downloadBackup(req: Request, res: Response): Promise<void> {
         return;
     }
     const stored = await consumeDownloadSession(identity);
-    res.clearCookie(cookieName(), cookieOptions());
+    res.clearCookie(cookieName(req), cookieOptions(req));
     if (!stored) {
         sendRouteError(res, 401, "Backup session is invalid");
         return;
@@ -224,9 +230,9 @@ router.post(
             select: { id: true, tokenVersion: true },
         });
         res.cookie(
-            cookieName(),
+            cookieName(req),
             generateBackupDownloadToken(user, downloadId),
-            cookieOptions(),
+            cookieOptions(req),
         );
         res.sendStatus(204);
     }),

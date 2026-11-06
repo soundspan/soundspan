@@ -233,7 +233,7 @@ async function resolveQueueDashboardTokenUser(
 }
 
 async function authenticateQueueDashboardCookie(req: Request) {
-    const token = readCookie(req, queueDashboardCookieName());
+    const token = readCookie(req, queueDashboardCookieName(req));
     if (!token) return null;
     try {
         return await resolveQueueDashboardTokenUser(token);
