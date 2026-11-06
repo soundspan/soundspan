@@ -46,8 +46,6 @@ describe("secureCookiePrefixedName", () => {
         expect(secureCookiePrefixedName("name", "__Host-", true)).toBe(
             "__Host-name",
         );
-        expect(secureCookiePrefixedName("name", "__Host-", false)).toBe(
-            "name",
-        );
+        expect(secureCookiePrefixedName("name", "__Host-", false)).toBe("name");
     });
 });
