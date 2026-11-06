@@ -77,6 +77,7 @@ soundspan can connect directly to Soulseek for discovery/download flows.
 ### Notes
 
 - Use the Soulseek account only for soundspan. The Soulseek server allows one session per account: when another client (or the **Test Connection** check) logs in with the same account, it ends soundspan's session. soundspan logs in again on its next search or download, which ends the other client's session in turn.
+- A Soulseek download that runs past its time limit is cancelled. It does not keep going in the background.
 - Discovery results include filename, size, bitrate, and parsed metadata
 - Download progress appears in Activity Panel
 - Quality/availability depends on peer uptime and speed

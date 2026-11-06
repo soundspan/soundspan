@@ -27,6 +27,7 @@ soundspan is built for people who want streaming convenience without giving up o
 - Unified song search that ranks owned and discoverable songs together, with shareable per-song links
 - Multiple users with isolated playlists, likes, history, and settings, plus admin roles, optional 2FA, and Listen Together group sessions
 - Federated library sharing between trusted soundspan instances, opt-in and disabled by default
+- Whole-server backup from the Admin page and restore on a fresh install's first-run screen, with no rescan or re-analysis
 - OIDC/SSO login with explicit account linking and revocable app passwords for OpenSubsonic clients
 - Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
@@ -82,6 +83,7 @@ For deployment variants, release channels, compose files, and updates, see [`doc
 - Usage guide (navigation, playback, admin): [`docs/USAGE_GUIDE.md`](docs/USAGE_GUIDE.md)
 - Deployment modes and updates: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - Configuration and security: [`docs/CONFIGURATION_AND_SECURITY.md`](docs/CONFIGURATION_AND_SECURITY.md)
+- Backup and restore: [`docs/BACKUP_AND_RESTORE.md`](docs/BACKUP_AND_RESTORE.md)
 - OIDC and SSO setup: [`docs/OIDC_SSO.md`](docs/OIDC_SSO.md)
 - Environment variables reference: [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md)
 - Integration setup (Lidarr, Soulseek, YouTube Music, TIDAL, OpenSubsonic): [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)

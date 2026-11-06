@@ -80,6 +80,13 @@ const options: swaggerJsdoc.Options = {
                     description:
                         "Scoped federation peer credential issued by an administrator",
                 },
+                backupDownloadCookie: {
+                    type: "apiKey",
+                    in: "cookie",
+                    name: "soundspan-backup",
+                    description:
+                        "One-use backup download credential set by POST /api/backup/session; HttpOnly, SameSite=Strict, path /api/backup/download, 5-minute lifetime, named __Secure-soundspan-backup when secure cookies are on",
+                },
             },
             schemas: {
                 User: {

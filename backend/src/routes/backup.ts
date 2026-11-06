@@ -177,9 +177,11 @@ async function downloadBackup(req: Request, res: Response): Promise<void> {
  * /api/backup/session:
  *   post:
  *     summary: Create a one-use full database backup download session
+ *     description: Requires an administrator's interactive session (API keys are refused). Sets an HttpOnly, SameSite=Strict cookie scoped to /api/backup/download; the one-use credential expires after 5 minutes.
  *     tags: [Backup]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
- *       204: { description: Backup session created }
+ *       204: { description: Backup session created and download cookie set }
  *       400: { description: Invalid passphrase }
  *       409: { description: Backup already in progress }
  */
@@ -235,7 +237,9 @@ router.post(
  * /api/backup/download:
  *   get:
  *     summary: Download a full data-only database backup
+ *     description: Accepts only the one-use download cookie set by POST /api/backup/session; bearer tokens and API keys are not accepted here.
  *     tags: [Backup]
+ *     security: [{ backupDownloadCookie: [] }]
  *     responses:
  *       200: { description: Gzip-compressed backup stream }
  *       401: { description: Invalid or used download session }
