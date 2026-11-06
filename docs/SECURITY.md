@@ -30,6 +30,8 @@ register and removal policy live in
 | Advisory | Reachability assessment | Removal condition |
 | --- | --- | --- |
 | [`GHSA-w5hq-g745-h8pq`](https://github.com/advisories/GHSA-w5hq-g745-h8pq) (`uuid <11.1.1`) | The affected UUID v3, v5, and v6-with-caller-buffer paths are not exercised; Bull uses UUID v4 without a caller-provided buffer. | Upgrade Bull when its dependency graph can resolve a fixed `uuid`, then remove the override. |
+| [`GHSA-3g3m-2fjr-6pw4`](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) (`glob <14.0.2`) | The AbortSignal bypass needs a caller that cancels a glob walk; `swagger-jsdoc` runs `glob.sync` over fixed route patterns at startup and passes no signal. The override still moves every copy to a fixed release. | Upgrade `swagger-jsdoc` and Jest when their ranges resolve a fixed `glob`, then remove the override. |
+| [`GHSA-g3hv-75wg-m249`](https://github.com/advisories/GHSA-g3hv-75wg-m249) (`minimatch <11.0.1`) | The DoS needs an attacker-controlled pattern; archiver's `readdir-glob` only runs for `glob()`/`directory()`, and soundspan only calls `append()`. The override still moves every copy to a fixed release. | Upgrade `archiver`/`readdir-glob`, Jest, and ESLint when their ranges resolve a fixed `minimatch`, then remove the override. |
 
 `npm audit fix --force` is not an acceptable remediation when it proposes a
 breaking direct-dependency change. Revisit the override whenever Bull or Bull
