@@ -195,13 +195,9 @@ export function TidalStreamingCard({
 
     const statusText = statusLoading
         ? "Checking..."
-        : usesSharedAccount
-          ? isAuthenticated
-              ? "Using the server's TIDAL account"
-              : "Server's TIDAL account is unavailable"
-          : isAuthenticated
-            ? "Connected"
-            : "Not connected";
+        : isAuthenticated
+          ? "Connected"
+          : "Not connected";
 
     const statusColor: "green" | "red" | "gray" = statusLoading
         ? "gray"
@@ -220,6 +216,10 @@ export function TidalStreamingCard({
         </div>
     );
 
+    // A shared server account leaves users nothing to link or choose here:
+    // Playback quality picks the TIDAL tier instead.
+    if (usesSharedAccount) return null;
+
     return (
         <IntegrationCard
             icon={<Music2 className="w-5 h-5 text-cyan-400" />}
@@ -227,8 +227,8 @@ export function TidalStreamingCard({
             statusText={statusText}
             statusColor={statusColor}
             connected={isAuthenticated}
-            onConnect={usesSharedAccount ? undefined : handleLinkAccount}
-            onDisconnect={usesSharedAccount ? undefined : handleDisconnect}
+            onConnect={handleLinkAccount}
+            onDisconnect={handleDisconnect}
             isLoading={statusLoading || authState === "loading"}
             expanded={isExpanded}
             disabled={isDisabled}
@@ -236,7 +236,7 @@ export function TidalStreamingCard({
             warning={warningBanner}
         >
             {/* Device Code Auth Flow (not authenticated) */}
-            {!isAuthenticated && tidalAvailable && !usesSharedAccount && (
+            {!isAuthenticated && tidalAvailable && (
                 <div className="space-y-3">
                     {/* In linking flow — show device code + verification URL */}
                     {userCode && authState === "polling" && (

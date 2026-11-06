@@ -101,7 +101,7 @@ function buttonLabels(container: HTMLElement): string[] {
     );
 }
 
-test("user card shows the server account and no link controls in shared mode", async () => {
+test("user card disappears from Integrations in shared mode", async () => {
     streamingStatus = {
         enabled: true,
         available: true,
@@ -119,10 +119,8 @@ test("user card shows the server account and no link controls in shared mode", a
         }),
     );
 
-    assert.match(view.container.textContent ?? "", /server's TIDAL account/);
-    assert.ok(!buttonLabels(view.container).includes("Disconnect"));
-    assert.ok(!buttonLabels(view.container).includes("Connect"));
-    assert.match(view.container.textContent ?? "", /Streaming Quality/);
+    assert.equal(view.container.textContent, "");
+    assert.equal(buttonLabels(view.container).length, 0);
     await view.unmount();
 });
 

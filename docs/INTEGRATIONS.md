@@ -188,7 +188,16 @@ An admin can let every user stream TIDAL through the admin download account inst
 2. Turn on **Share this account with all users** in the same card
 3. Save
 
-While it is on, every user's TIDAL search, browse, matching, and streaming use that one account, users see **Using the server's TIDAL account** in their TIDAL card instead of a Connect button, and linking a personal account is turned off. Each user's streaming quality still applies, up to what the shared subscription allows. Personal accounts users linked before are kept but not used; turning the setting off goes back to them. Relinking the admin account takes effect on the next request.
+While it is on, every user's TIDAL search, browse, matching, and streaming use that one account, the TIDAL card disappears from users' **Settings** → **Integrations**, and linking a personal account is turned off. Each user's **Playback** → **Streaming Quality** picks the TIDAL quality, up to what the shared subscription allows:
+
+| Streaming Quality   | TIDAL quality         |
+| ------------------- | --------------------- |
+| Original (Lossless) | Max / Hi-Res          |
+| High (320 kbps)     | High (AAC 320 kbps)   |
+| Medium (192 kbps)   | High (AAC 320 kbps)   |
+| Low (128 kbps)      | Low (AAC 96 kbps)     |
+
+TIDAL has no 192 kbps tier, so Medium uses High. The TIDAL card's own quality and **Show on Explore Page** settings are kept but hidden; TIDAL shelves stay on Explore for anyone who had not turned them off. Personal accounts users linked before are kept but not used; turning the setting off goes back to them. Relinking the admin account takes effect on the next request.
 
 TIDAL may allow only one stream at a time per account, so two users playing TIDAL at the same moment can interrupt each other. Sharing an account may also be against TIDAL's terms for your plan.
 

@@ -1126,6 +1126,66 @@ describe("tidal streaming service", () => {
             expect(mockPrisma.userSettings.findUnique).toHaveBeenCalledTimes(2);
         });
 
+        it.each([
+            ["original", "HI_RES_LOSSLESS"],
+            ["high", "HIGH"],
+            ["medium", "HIGH"],
+            ["low", "LOW"],
+            [null, "HIGH"],
+        ])(
+            "maps Playback quality %s to TIDAL %s while the instance account is shared",
+            async (playbackQuality, expected) => {
+                mockPrisma.systemSettings.findUnique.mockResolvedValue({
+                    tidalEnabled: true,
+                    tidalStreamingUseInstanceAccount: true,
+                });
+                mockPrisma.userSettings.findUnique.mockResolvedValueOnce({
+                    playbackQuality,
+                });
+
+                await expect(
+                    tidalStreamingService.getUserPreferredQuality("user-1"),
+                ).resolves.toBe(expected);
+                expect(mockPrisma.userSettings.findUnique).toHaveBeenCalledWith(
+                    {
+                        where: { userId: "user-1" },
+                        select: { playbackQuality: true },
+                    },
+                );
+            },
+        );
+
+        it("drops cached qualities when the account mode is re-read", async () => {
+            mockConfig.nodeEnv = "production";
+            const productionService = loadIsolatedService() as unknown as {
+                getUserPreferredQuality(userId: string): Promise<string>;
+                clearAccountModeCache(): void;
+            };
+            mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+                tidalEnabled: true,
+                tidalStreamingUseInstanceAccount: false,
+            });
+            mockPrisma.userSettings.findUnique.mockResolvedValueOnce({
+                tidalStreamingQuality: "HIGH",
+            });
+            await expect(
+                productionService.getUserPreferredQuality("user-1"),
+            ).resolves.toBe("HIGH");
+
+            productionService.clearAccountModeCache();
+            mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+                tidalEnabled: true,
+                tidalStreamingUseInstanceAccount: true,
+            });
+            mockPrisma.userSettings.findUnique.mockResolvedValueOnce({
+                playbackQuality: "original",
+            });
+
+            await expect(
+                productionService.getUserPreferredQuality("user-1"),
+            ).resolves.toBe("HI_RES_LOSSLESS");
+        });
+
         it("falls back to HIGH when reading the quality preference fails", async () => {
             mockPrisma.userSettings.findUnique.mockRejectedValueOnce(
                 new Error("read failed"),

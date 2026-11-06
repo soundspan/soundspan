@@ -17,6 +17,29 @@ export interface TidalAccountModeSettings {
     tidalStreamingUseInstanceAccount?: boolean | null;
 }
 
+/**
+ * TIDAL quality for a user's Playback streaming quality while the instance
+ * account is shared. TIDAL has no 192 kbps tier, so Medium rounds up to
+ * AAC 320; Original (lossless) asks for TIDAL's best (Max / Hi-Res).
+ */
+const TIDAL_QUALITY_BY_PLAYBACK_QUALITY: Record<string, string> = {
+    original: "HI_RES_LOSSLESS",
+    high: "HIGH",
+    medium: "HIGH",
+    low: "LOW",
+};
+
+/** Maps a Playback quality setting to a TIDAL quality, defaulting to HIGH. */
+export function tidalQualityForPlaybackQuality(
+    playbackQuality: string | null | undefined,
+): string {
+    return (
+        (playbackQuality &&
+            TIDAL_QUALITY_BY_PLAYBACK_QUALITY[playbackQuality]) ||
+        "HIGH"
+    );
+}
+
 /** Returns whether every user should use the instance TIDAL account. */
 export function usesTidalInstanceAccount(
     settings: TidalAccountModeSettings | null | undefined,

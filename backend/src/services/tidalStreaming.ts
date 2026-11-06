@@ -22,6 +22,7 @@ import { cachedSingleflight } from "../utils/singleflight";
 import { tidalService } from "./tidal";
 import {
     TIDAL_INSTANCE_SESSION_ID,
+    tidalQualityForPlaybackQuality,
     usesTidalInstanceAccount,
 } from "./tidalAccountMode";
 
@@ -344,9 +345,14 @@ class TidalStreamingService {
         return this.loadInstanceAccountMode();
     }
 
-    /** Re-read the account mode on the next request (after a settings save). */
+    /**
+     * Re-read the account mode on the next request (after a settings save).
+     * Cached qualities are dropped too, because the mode decides which user
+     * setting supplies the TIDAL quality.
+     */
     clearAccountModeCache(): void {
         this.loadInstanceAccountMode.clear();
+        this.qualityCache.clear();
     }
 
     /**
@@ -917,11 +923,7 @@ class TidalStreamingService {
             }
         }
         try {
-            const userSettings = await prisma.userSettings.findUnique({
-                where: { userId },
-                select: { tidalStreamingQuality: true },
-            });
-            const quality = userSettings?.tidalStreamingQuality || "HIGH";
+            const quality = await this.loadPreferredQuality(userId);
             if (TidalStreamingService.QUALITY_CACHE_TTL_MS > 0) {
                 this.qualityCache.set(userId, {
                     quality,
@@ -933,6 +935,27 @@ class TidalStreamingService {
         } catch {
             return "HIGH";
         }
+    }
+
+    /**
+     * Shared instance account: the user's Playback streaming quality, mapped
+     * to TIDAL tiers. Per-user accounts: the TIDAL card's own quality.
+     */
+    private async loadPreferredQuality(userId: string): Promise<string> {
+        if (await this.usesInstanceAccount()) {
+            const userSettings = await prisma.userSettings.findUnique({
+                where: { userId },
+                select: { playbackQuality: true },
+            });
+            return tidalQualityForPlaybackQuality(
+                userSettings?.playbackQuality,
+            );
+        }
+        const userSettings = await prisma.userSettings.findUnique({
+            where: { userId },
+            select: { tidalStreamingQuality: true },
+        });
+        return userSettings?.tidalStreamingQuality || "HIGH";
     }
 
     /**
