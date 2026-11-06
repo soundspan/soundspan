@@ -85,6 +85,7 @@ const INTERACTIVE_MANAGEMENT_OPERATIONS = [
     ["post", "/api/auth/2fa/setup"],
     ["post", "/api/auth/2fa/enable"],
     ["post", "/api/auth/2fa/disable"],
+    ["post", "/api/backup/session"],
 ] as const;
 
 function operationSecurity(spec: any, expectation: AuthExpectation): unknown {
@@ -291,5 +292,22 @@ describe("OpenAPI authentication contract", () => {
                 { bearerAuth: [] },
             ]);
         }
+    });
+
+    test("documents the backup download as cookie-only", () => {
+        const { swaggerSpec } = require("../swagger");
+
+        expect(swaggerSpec.paths["/api/backup/download"].get.security).toEqual([
+            { backupDownloadCookie: [] },
+        ]);
+        expect(
+            swaggerSpec.components.securitySchemes.backupDownloadCookie,
+        ).toEqual(
+            expect.objectContaining({
+                type: "apiKey",
+                in: "cookie",
+                name: "soundspan-backup",
+            }),
+        );
     });
 });

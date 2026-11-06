@@ -142,7 +142,10 @@ labels.
 
 ## Authentication and Credential Security
 
-Every authenticated request uses an explicit credential transport — there is no cookie-session authentication, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests. The one deliberate exception is the queue dashboard: Bull Board is a server-rendered page that cannot carry a bearer token, so `Open queue dashboard` on the Admin page mints a 15-minute, HTTP-only, `SameSite=Strict` cookie whose path is limited to `/api/admin/queues`. Only that mount accepts it, only for administrators, and the token inside it carries a dashboard-only purpose claim that every other route rejects.
+Every authenticated request uses an explicit credential transport — there is no cookie-session authentication, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests. There are two deliberate exceptions, both for pages a browser opens directly, which cannot carry a bearer token. Each is an HTTP-only, `SameSite=Strict` cookie limited to one path, and the token inside it carries a purpose claim that every other route rejects:
+
+- **Queue dashboard.** `Open queue dashboard` on the Admin page mints a 15-minute cookie whose path is limited to `/api/admin/queues`. Only that mount accepts it, and only for administrators.
+- **Backup download.** `Admin → Backup` mints a 5-minute, one-use cookie whose path is limited to `/api/backup/download`. That route accepts only this cookie, and only for the administrator who started the backup.
 
 | Surface | Credential transport | Lifetime | Revocation path |
 | ------- | -------------------- | -------- | --------------- |
@@ -150,13 +153,14 @@ Every authenticated request uses an explicit credential transport — there is n
 | OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. App-password credentials remain valid until revoked. The legacy dedicated Subsonic password is deprecated: it cannot be set from Settings, but direct API updates remain possible and existing stored values are honored. | Revoke an app password individually. Account password changes and administrator-set passwords clear any legacy dedicated Subsonic password. |
 | External API clients | `X-API-Key` header | 90 days from creation | Delete the API key. |
 | Queue dashboard (`/api/admin/queues`) | Bearer token, API key, or the path-scoped dashboard cookie minted by `POST /api/admin/queues/session` | Cookie: 15 minutes. | `DELETE /api/admin/queues/session` (`End dashboard access` on the Admin page), or let it expire. |
+| Backup download (`/api/backup/download`) | Only the path-scoped, one-use cookie minted by `POST /api/backup/session`, which needs an administrator's bearer token (API keys are refused) | Cookie: 5 minutes, and spent by the first download. | Download the backup or let the cookie expire. A password change invalidates it. |
 | Federation peer API | Dedicated opaque `Authorization: Bearer` peer credential | No automatic expiry. | Rotate the credential, revoke the peer, or delete the peer. |
 | Internal sidecar requests | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |
 
 - Token refresh uses `/api/auth/refresh`.
 - `SESSION_SECRET` remains required as the JWT signing fallback when `JWT_SECRET` is unset.
 - Encryption key validity is checked at startup.
-- Secure OIDC flow cookies default on when `NODE_ENV=production` and can be overridden with `SECURE_COOKIES`. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
+- The OIDC flow, queue-dashboard, and backup-download cookies are `Secure` by default when `NODE_ENV=production`, which the Compose files and the all-in-one image set. `SECURE_COOKIES` overrides it. A plain-HTTP install must set `SECURE_COOKIES=false`, because browsers refuse a `Secure` cookie from an `http://` page (except `localhost`), and the queue dashboard and backup download then fail. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
 
 ## Reverse Proxy Trust and Rate Limits
 
@@ -164,14 +168,16 @@ soundspan is designed to run behind a reverse proxy. The backend uses its
 configured Express `trust proxy` policy, so the trusted `X-Forwarded-For` chain
 determines the client IP used by per-IP rate limits. Some authentication,
 registration, OIDC, OpenSubsonic, share-link, webhook, and federation endpoints
-can be unauthenticated and exposed to the internet. Set `TRUST_PROXY_HOPS` to
+can be unauthenticated and exposed to the internet, and so can the restore
+endpoints while the server has no accounts. Set `TRUST_PROXY_HOPS` to
 the actual number of trusted proxy hops. Do not leave a permissive proxy chain
 in a deployment where clients can connect to the backend directly and supply
 their own forwarding headers.
 
 Security-relevant counters use the existing `REDIS_URL` connection. This makes
 authentication and account-management, admin and invite-management, OIDC,
-OpenSubsonic authentication, share-link, webhook, and federation limits common
+OpenSubsonic authentication, share-link, webhook, federation, backup, and
+restore limits common
 to every backend replica and preserves them across backend restarts. Redis keys
 are separated by limiter name. A Redis command has a 250 ms deadline. If Redis
 is disconnected or a command fails or times out, credential-guarding limits

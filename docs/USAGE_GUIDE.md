@@ -24,7 +24,7 @@ Moving from another server? Instead of creating an account, select `Restore from
 - Search understands artist and album names, tolerates typos, and ranks near-misses by similarity instead of alphabetically
 - Discovery search supports preview/download/subscription actions
 - Explore and `/radio` station tiles (Quick Start, genres, decades) open a generated station playlist you can inspect before playing; Shuffle All still starts playback immediately
-- The Vibe Map in the main navigation plots your analyzed library as an explorable similarity map. Laying out the map is slow, so it is built once and kept for about a day; the chip in the bottom-right corner says when it was built and how many songs it covers. Songs analyzed after that build appear on the next one, and the server starts that next build on its own, in the background, once enough new songs have been analyzed (at least 50 and at least a tenth of the map); the current map stays on screen until the fresh one is ready. Very large libraries show a sample of songs (the chip says `Sample`); the same songs stay on the map from one build to the next, and raising `VIBE_MAP_WORKER_MEMORY_MB` lets the map hold more of them. A song that is not in the sample still gets a spot when it plays: the map places it next to its closest sampled songs, marks the beacon with a dashed ring, and `Find on map` flies there. If a newer audio analysis is still running, the chip shows a `Re-analyzing` badge with how far along it is; the map keeps using the previous results and switches to the new ones automatically once enough songs are done.
+- The Vibe Map in the main navigation plots your analyzed library as an explorable similarity map. Laying out the map is slow, so it is built once and kept for about a day; the chip in the bottom-right corner says when it was built and how many songs it covers. Songs analyzed after that build appear on the next one, and the server starts that next build on its own, in the background, once enough new songs have been analyzed (at least 50 and at least a tenth of the map); the current map stays on screen until the fresh one is ready. Very large libraries show a sample of songs (the chip says `Sample` and how many songs it was drawn from, for example `sample of 7,500 from 21,000 songs`); the same songs stay on the map from one build to the next, and raising `VIBE_MAP_WORKER_MEMORY_MB` lets the map hold more of them. A song that is not in the sample still gets a spot when it plays: the map places it next to its closest sampled songs, marks the beacon with a dashed ring, and `Find on map` flies there. If a newer audio analysis is still running, the chip shows a `Re-analyzing` badge with how far along it is; the map keeps using the previous results and switches to the new ones automatically once enough songs are done. If a rebuild fails, the chip says so and the server tries again on its own. When you leave the Vibe Map and come back within a few minutes, it shows the map it already loaded instead of fetching it again.
 - Artists and albums you browse are remembered locally. Repeat visits load instantly, and the pages keep working during MusicBrainz outages. Entries untouched for 180 days are cleaned up automatically.
 
 ### Sharing a song
@@ -65,7 +65,7 @@ Open the song's menu (the `⋮` button at the end of the row). What it offers de
 - When the album has no MusicBrainz match, admins see `Add song to library`. It downloads that one song. A TIDAL song needs TIDAL set up as a download source (see [TIDAL Downloads](INTEGRATIONS.md#tidal-downloads)).
 - Otherwise the menu has no add option. This is the case for users who are not admins when the album has no MusicBrainz match, and for admins on a TIDAL song when TIDAL is not set up as a download source.
 
-soundspan looks up MusicBrainz matches for the albums of your liked streaming songs in the background, about once an hour. A song whose album gets a sure match offers `Add album to library` or `Request album`, the same as a song on an album with a MusicBrainz match. The streaming album's page offers `Download` or `Request` for it too. An album without a sure match is checked again a week later, and a match is checked again after a month.
+soundspan looks up MusicBrainz matches for the albums of your liked streaming songs in the background, about once an hour. A song whose album gets a sure match offers `Add album to library` or `Request album`, the same as a song on an album with a MusicBrainz match. The streaming album's page offers `Download` or `Request` for it too. An album without a sure match is checked again a week later, and a match is checked again after a month. Various Artists albums are never matched, so their songs do not offer `Add album to library` or `Request album`.
 
 When your library already has the matched album, for example after you add it, soundspan does not offer that album again:
 
@@ -145,11 +145,12 @@ You get a notification when your request is approved, declined, or failed, and w
 
 ### Reviewing requests (admins)
 
-The `Requests` entry in the avatar menu shows how many requests are waiting. On the `Requests` page:
+Your avatar and the `Requests` entry in the avatar menu and the phone side menu show how many requests are waiting. The `Requests` and `My Requests` entries are hidden while music requests are turned off. On the `Requests` page:
 
 - `Approve` sends the album into the download queue. `Decline` asks for an optional reason, which the requester sees.
 - `Approve all from <user>` approves that user's pending requests, up to 25 at a time. Run it again to approve the rest.
 - `Decline stale` declines every pending request older than the age you pick (7, 14, 30, or 90 days), up to 200 at a time, with an optional reason.
+- A bulk action that takes longer than 85 seconds shows a message that the server is still working on it.
 - A failed request shows `Retry` and `Decline`. `Retry` starts a new download. Admins also get a notification when an approved request fails.
 - Use the status filter and the page buttons to move through long lists.
 

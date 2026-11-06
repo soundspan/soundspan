@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (69 models, 1569 lines)
+Schema source: `backend/prisma/schema.prisma` (69 models, 1570 lines)
 
 ## Entity Relationship Overview
 
@@ -30,6 +30,7 @@ erDiagram
     Artist ||--o{ TrackTidal : "resolved from"
     Artist ||--o{ TrackYtMusic : "resolved from"
     Artist ||--o{ SimilarArtist : "similar to"
+    Artist ||--o{ ArtistCatalogReleaseGroup : "catalog lists"
 
     Album ||--o{ Track : contains
     Album ||--o{ TrackTidal : "resolved from"

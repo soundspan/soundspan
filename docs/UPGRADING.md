@@ -111,8 +111,38 @@ runs automatically at startup.
 **Breaking for API-key clients of the request API:** `GET /api/requests` and
 `GET /api/requests/mine` now return one page as
 `{ requests, total, offset, limit }` (50 rows by default, `limit` up to 100,
-`offset` to move through pages) instead of a plain list. The soundspan web app
-is already updated.
+`offset` up to 10,000 to move through pages) instead of a plain list. The
+soundspan web app is already updated.
+
+**Heads-up for API-key clients of the Library and search APIs:** the Library
+list endpoints (`GET /api/library/artists`, `/albums`, and `/tracks`) default
+to `origin=all`, and `all` now also includes the signed-in user's liked TIDAL
+and YouTube Music songs that are not in the library. Those rows have no file,
+and artist and album counts include them. Pass `origin=local` to get only the
+files on this server. `GET /api/search` no longer lists streaming albums under
+`albums`; each user's own streaming albums come back under `remoteAlbums`.
+
+**Plain-HTTP installs:** if you open soundspan over plain `http://` (no HTTPS
+and no TLS-terminating proxy), set `SECURE_COOKIES=false`. Without it,
+downloads from `Admin → Backup` and the `Open queue dashboard` button fail:
+their cookies are marked `Secure`, and browsers refuse a `Secure` cookie from an
+`http://` page (except `localhost`). Installs that followed the 1.6.0 section of
+this guide already set it.
+
+**If you run the TIDAL or YouTube Music sidecar:** the all-in-one compose file
+pulls only the all-in-one image. Pull the sidecar images too. The TIDAL album
+download fix is in `soundspan-tidal-streamer`, and the YouTube Music fix for the
+Brotli flaw CVE-2026-111497 is in `soundspan-ytmusic-streamer`. Both sidecars
+now run Python 3.15; no settings change.
+
+**Heads-up, no action needed:** the Vibe Map now rebuilds itself in the
+background when enough songs change. The first time someone opens it after the
+upgrade, it starts one fresh build, and the current map stays on screen until
+the new one is ready.
+
+Another migration clears the saved change markers of every podcast feed, so
+each podcast's next refresh downloads its whole feed once. It runs
+automatically at startup and needs no action.
 
 ---
 
