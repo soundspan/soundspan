@@ -122,12 +122,15 @@ and artist and album counts include them. Pass `origin=local` to get only the
 files on this server. `GET /api/search` no longer lists streaming albums under
 `albums`; each user's own streaming albums come back under `remoteAlbums`.
 
-**Plain-HTTP installs:** if you open soundspan over plain `http://` (no HTTPS
-and no TLS-terminating proxy), set `SECURE_COOKIES=false`. Without it,
-downloads from `Admin → Backup` and the `Open queue dashboard` button fail:
-their cookies are marked `Secure`, and browsers refuse a `Secure` cookie from an
-`http://` page (except `localhost`). Installs that followed the 1.6.0 section of
-this guide already set it.
+**Cookies now follow the browser's scheme:** with `SECURE_COOKIES` unset, the
+OIDC flow, queue-dashboard, and backup-download cookies are `Secure` only when
+the request came over HTTPS, which soundspan reads from the proxy's
+`X-Forwarded-Proto` header. Before, unset meant `Secure` in production, so a
+plain-`http://` install needed `SECURE_COOKIES=false` for these cookies. Now it
+needs nothing, and an existing `SECURE_COOKIES=false` keeps working. If you use
+HTTPS through a proxy that does not send `X-Forwarded-Proto` (plain nginx
+without `proxy_set_header X-Forwarded-Proto $scheme;`), set
+`SECURE_COOKIES=true` to keep `Secure` cookies.
 
 **If you run the TIDAL or YouTube Music sidecar:** the all-in-one compose file
 pulls only the all-in-one image. Pull the sidecar images too. The TIDAL album

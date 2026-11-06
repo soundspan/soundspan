@@ -4,6 +4,7 @@ import * as fs from "fs";
 import { validateMusicConfig, MusicConfig } from "./utils/configValidator";
 import { logger } from "./utils/logger";
 import { validateEncryptionKey } from "./utils/encryption";
+import { parseSecureCookieSetting } from "./utils/secureCookies";
 import {
     isEnvFlagEnabled,
     parseEnvBool,
@@ -753,14 +754,13 @@ export const config = {
     // the settings layer is readable; see docs/ENVIRONMENT_VARIABLES.md.
     secretsDbOnly,
 
-    // Session cookie `secure` flag. Defaults to true in production (cookies
-    // should only travel over HTTPS); HTTP-only local-network deploys must set
-    // SECURE_COOKIES=false explicitly. An explicit SECURE_COOKIES is honored in
-    // any environment. Routed through config to satisfy the env-boundary rule.
-    secureCookies: parseEnvBool(
-        process.env.SECURE_COOKIES,
-        (process.env.NODE_ENV || "development") === "production",
-    ),
+    // `Secure` flag policy for soundspan's cookies (OIDC flow, queue
+    // dashboard, backup download). Unset means "auto": each cookie follows the
+    // scheme the browser used (`req.secure`, which honors X-Forwarded-Proto
+    // through `trust proxy`), so plain-HTTP installs work without setup and
+    // TLS-terminated installs get Secure cookies. An explicit SECURE_COOKIES
+    // true/false overrides it. See utils/secureCookies.ts.
+    secureCookies: parseSecureCookieSetting(process.env.SECURE_COOKIES),
 
     // Express `trust proxy` value: a numeric hop count for spoof-resistant IP
     // resolution, or `true` (trust all) by default. Set TRUST_PROXY_HOPS to your

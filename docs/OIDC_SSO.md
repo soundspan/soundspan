@@ -64,11 +64,11 @@ Use one canonical SSO hostname per deployment. soundspan has one `OIDC_REDIRECT_
 
 ## Secure cookies
 
-Set `SECURE_COOKIES=true` whenever the browser opens soundspan over HTTPS. This includes a reverse proxy or tunnel, such as Cloudflare Tunnel, that terminates TLS before forwarding plain HTTP to the container. The OIDC flow cookie then uses the hardened `__Host-soundspan_oidc_flow` name.
+With `SECURE_COOKIES` unset, soundspan picks the flow cookie per request. When the browser opens soundspan over HTTPS, including through a reverse proxy or tunnel such as Cloudflare Tunnel that terminates TLS and sends `X-Forwarded-Proto: https`, the cookie is `Secure` and uses the hardened `__Host-soundspan_oidc_flow` name. Set `SECURE_COOKIES=true` to force that even when the proxy does not send `X-Forwarded-Proto`.
 
 **Warning:** A browser will not send a Secure cookie over plain HTTP.
 
-Set `SECURE_COOKIES=false` for a plain-HTTP LAN deployment. soundspan then uses the unprefixed `soundspan_oidc_flow` cookie. This keeps login working, but it gives up the `__Host-` prefix protections. Prefer HTTPS when possible.
+On a plain-HTTP LAN deployment, soundspan uses the unprefixed `soundspan_oidc_flow` cookie without the `Secure` flag, with no setting needed (`SECURE_COOKIES=false` forces the same). This keeps login working, but it gives up the `__Host-` prefix protections. Prefer HTTPS when possible.
 
 ## Provider client requirements
 
@@ -233,7 +233,7 @@ soundspan owns MFA for local password login. Local TOTP also applies to the loca
 | `oidc_failed`                                                                 | Discovery, token exchange, claim parsing, nonce validation, or provider communication failed. Clock skew can also invalidate tokens.                                             | Check backend logs. Verify the issuer discovery URL from the backend network. Verify the client secret, `client_secret_post` support, callback URI, required claims, and system time. |
 | “No soundspan account is linked to this identity” or the user needs an invite | No `(provider, sub)` link or local email match exists, and automatic provisioning is off.                                                                                        | Ask an administrator for an invite code. Enter it in the prompt. Use automatic provisioning only for a restricted private IdP.                                                        |
 | The SSO button is missing                                                     | OIDC is disabled, or the browser cannot load `GET /api/auth/config`.                                                                                                             | Set `OIDC_ENABLED=true`, restart, and inspect the auth-config request and backend startup logs.                                                                                       |
-| Login loops when using plain HTTP                                             | `SECURE_COOKIES=true` prevents the browser from returning the flow cookie.                                                                                                       | Set `SECURE_COOKIES=false`, restart, and accept the reduced cookie hardening.                                                                                                         |
+| Login loops when using plain HTTP                                             | `SECURE_COOKIES=true` forces a `Secure` flow cookie, which the browser does not return over plain HTTP.                                                                                                       | Remove `SECURE_COOKIES` (or set it to `false`), restart, and accept the reduced cookie hardening.                                                                                                         |
 | All login methods are unavailable                                             | Local login was disabled before SSO was verified, or the IdP is unavailable.                                                                                                     | Use the break-glass procedure below.                                                                                                                                                  |
 
 ## Break-glass recovery

@@ -48,9 +48,9 @@ async function createQueueDashboardSession(
         }
         const token = generateQueueDashboardToken(user);
         res.cookie(
-            queueDashboardCookieName(),
+            queueDashboardCookieName(req),
             token,
-            queueDashboardCookieOptions(QUEUE_DASHBOARD_TTL_SECONDS),
+            queueDashboardCookieOptions(req, QUEUE_DASHBOARD_TTL_SECONDS),
         );
         return res.status(204).end();
     } catch (error) {
@@ -62,10 +62,10 @@ async function createQueueDashboardSession(
     }
 }
 
-function deleteQueueDashboardSession(res: Response): Response {
+function deleteQueueDashboardSession(req: Request, res: Response): Response {
     res.clearCookie(
-        queueDashboardCookieName(),
-        queueDashboardCookieOptions(QUEUE_DASHBOARD_TTL_SECONDS),
+        queueDashboardCookieName(req),
+        queueDashboardCookieOptions(req, QUEUE_DASHBOARD_TTL_SECONDS),
     );
     return res.status(204).end();
 }
@@ -103,8 +103,8 @@ function deleteQueueDashboardSession(res: Response): Response {
  *         description: Queue dashboard access could not be closed
  */
 router.post("/queues/session", asyncHandler(createQueueDashboardSession));
-router.delete("/queues/session", (_req, res) =>
-    deleteQueueDashboardSession(res),
+router.delete("/queues/session", (req, res) =>
+    deleteQueueDashboardSession(req, res),
 );
 
 // Per-model row fetchers for the secrets-status check. Keyed by the same model

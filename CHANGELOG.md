@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- soundspan's cookies (the OIDC flow cookie, the queue-dashboard cookie, and the backup-download cookie) follow the scheme the browser used when `SECURE_COOKIES` is unset: `Secure` for an HTTPS request, as the proxy reports it in `X-Forwarded-Proto`, and plain for a plain-HTTP request. Before, unset meant `Secure` whenever `NODE_ENV=production`, so on a plain-`http://` install backup downloads and the queue dashboard failed unless `SECURE_COOKIES=false` was set. An explicit `SECURE_COOKIES=true` or `false` still overrides it; set `true` if your HTTPS proxy does not send `X-Forwarded-Proto`.
 - **BREAKING (request API clients):** `GET /api/requests` and `GET /api/requests/mine` return one page as `{ requests, total, offset, limit }` instead of a plain list, and take `status`, `limit` (1–100, default 50), and `offset`; the Requests page shows 25 requests per page with the status filter applied on the server (#725).
 - A failed music request's notification says whether the download failed or was stopped before it finished, and that an admin can retry or decline it, instead of only "The download failed." (#725).
 - The Library's source buttons (`All` / `Local` / `Peers` / `Remote`) use the shared segmented control and appear whenever peer libraries or a streaming service are available, not only when federation is on (#699).

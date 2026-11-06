@@ -143,6 +143,69 @@ describe("backup routes", () => {
         );
     });
 
+    it.each([
+        [true, "__Secure-soundspan-backup"],
+        [false, "soundspan-backup"],
+    ])(
+        "in auto mode, follows the request scheme (secure=%p sets %s)",
+        async (secure, expectedName) => {
+            const { config } = jest.requireMock("../../config") as {
+                config: { secureCookies: unknown };
+            };
+            config.secureCookies = "auto";
+            try {
+                const req = {
+                    secure,
+                    body: { passphrase: "long-enough-passphrase" },
+                    user: { id: "u1" },
+                };
+                const res = response();
+                await handler("/session", "post")(
+                    req,
+                    res,
+                    (error: unknown) => {
+                        if (error) throw error;
+                    },
+                );
+                expect(res.cookie).toHaveBeenCalledWith(
+                    expectedName,
+                    "cookie-token",
+                    expect.objectContaining({
+                        secure,
+                        path: "/api/backup/download",
+                    }),
+                );
+            } finally {
+                config.secureCookies = true;
+            }
+        },
+    );
+
+    it("in auto mode, reads the unprefixed cookie on a plain-HTTP request", async () => {
+        const { config } = jest.requireMock("../../config") as {
+            config: { secureCookies: unknown };
+        };
+        config.secureCookies = "auto";
+        try {
+            mockVerifyToken.mockReturnValue({
+                userId: "u1",
+                tokenVersion: 2,
+                purpose: "backup-download",
+                downloadId: "d1",
+            });
+            mockTakeOnce.mockResolvedValueOnce(null);
+            const req = {
+                secure: false,
+                headers: { cookie: "soundspan-backup=token" },
+            };
+            const res = response();
+            await handler("/download", "get")(req, res, jest.fn());
+            expect(mockVerifyToken).toHaveBeenCalledWith("token");
+        } finally {
+            config.secureCookies = true;
+        }
+    });
+
     it("consumes a download session once", async () => {
         mockVerifyToken.mockReturnValue({
             userId: "u1",

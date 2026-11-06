@@ -590,6 +590,39 @@ describe("admin queue dashboard session routes", () => {
         expect(res.end).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        [true, "__Secure-soundspan-queues"],
+        [false, "soundspan-queues"],
+    ])(
+        "in auto mode, follows the request scheme (secure=%p sets %s)",
+        async (secure, expectedName) => {
+            const { config } = jest.requireMock("../../config") as {
+                config: { secureCookies: unknown };
+            };
+            config.secureCookies = "auto";
+            try {
+                const req = {
+                    secure,
+                    user: { id: "admin-1", role: "admin" },
+                } as any;
+                const res = createRes();
+
+                await createSessionHandler(req, res, jest.fn());
+
+                expect(res.cookie).toHaveBeenCalledWith(
+                    expectedName,
+                    "dashboard-token",
+                    expect.objectContaining({
+                        secure,
+                        path: "/api/admin/queues",
+                    }),
+                );
+            } finally {
+                config.secureCookies = false;
+            }
+        },
+    );
+
     it("returns a canonical 500 when the current user cannot be loaded", async () => {
         mockUserFindUnique.mockRejectedValueOnce(new Error("database details"));
         const req = { user: { id: "admin-1", role: "admin" } } as any;

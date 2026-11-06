@@ -69,7 +69,7 @@ OIDC_REDIRECT_URI=https://api.example.com/api/auth/oidc/callback
 OIDC_WEB_BASE_URL=https://music.example.com
 ```
 
-Set `SECURE_COOKIES=true` when the browser uses HTTPS, including when Cloudflare or another edge terminates TLS.
+soundspan's cookies follow the scheme the browser used, which it reads from `X-Forwarded-Proto`. Make sure the proxy or edge that terminates TLS (Cloudflare, Traefik, Caddy, nginx) sends `X-Forwarded-Proto: https`; nginx needs `proxy_set_header X-Forwarded-Proto $scheme;`. If it cannot, set `SECURE_COOKIES=true`.
 
 ## Request body size
 

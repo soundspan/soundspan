@@ -160,7 +160,7 @@ Every authenticated request uses an explicit credential transport — there is n
 - Token refresh uses `/api/auth/refresh`.
 - `SESSION_SECRET` remains required as the JWT signing fallback when `JWT_SECRET` is unset.
 - Encryption key validity is checked at startup.
-- The OIDC flow, queue-dashboard, and backup-download cookies are `Secure` by default when `NODE_ENV=production`, which the Compose files and the all-in-one image set. `SECURE_COOKIES` overrides it. A plain-HTTP install must set `SECURE_COOKIES=false`, because browsers refuse a `Secure` cookie from an `http://` page (except `localhost`), and the queue dashboard and backup download then fail. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
+- The OIDC flow, queue-dashboard, and backup-download cookies follow the scheme the browser used when `SECURE_COOKIES` is unset: an HTTPS request, as the trusted proxy chain reports it in `X-Forwarded-Proto`, gets `Secure` cookies, and a plain-HTTP request gets cookies the browser keeps, so backup downloads and the queue dashboard work on either. Set `SECURE_COOKIES=true` to force `Secure` cookies when your HTTPS proxy does not send `X-Forwarded-Proto`, or `false` to force plain cookies. On an HTTPS request the OIDC flow cookie keeps its `__Host-` prefix, and soundspan ignores an unprefixed copy that a sibling subdomain or a plain-HTTP page could plant.
 
 ## Reverse Proxy Trust and Rate Limits
 
