@@ -270,6 +270,21 @@ export function TidalCard({
                     />
                 </SettingsRow>
 
+                {/* Download before play */}
+                <SettingsRow
+                    label="Download songs as they play"
+                    description="Every TIDAL song plays from its download: this account downloads it to the library at the highest quality, and listeners hear it as it arrives. Nothing plays without being saved."
+                    htmlFor="tidal-download-before-play"
+                >
+                    <SettingsToggle
+                        id="tidal-download-before-play"
+                        checked={!!settings.tidalDownloadBeforePlay}
+                        onChange={(checked) =>
+                            onUpdate({ tidalDownloadBeforePlay: checked })
+                        }
+                    />
+                </SettingsRow>
+
                 {/* Quality */}
                 <SettingsRow
                     label="Download Quality"

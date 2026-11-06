@@ -358,6 +358,27 @@ describe("systemSettings runtime routes", () => {
         ).toHaveBeenCalled();
     });
 
+    it("saves the TIDAL download-before-play toggle", async () => {
+        const res = createRes();
+
+        await postSettingsHandler(
+            {
+                user: { id: "admin-1" },
+                body: { tidalDownloadBeforePlay: true },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    tidalDownloadBeforePlay: true,
+                }),
+            }),
+        );
+    });
+
     it("rejects a non-boolean shared TIDAL account toggle", async () => {
         const res = createRes();
 

@@ -124,6 +124,7 @@ const systemSettingsSchema = z.object({
     tidalFileTemplate: z.string().nullable().optional(),
     // Share the admin TIDAL account for every user's streaming and browse.
     tidalStreamingUseInstanceAccount: z.boolean().optional(),
+    tidalDownloadBeforePlay: z.boolean().optional(),
 
     // YouTube Music streaming
     ytMusicEnabled: z.boolean().optional(),

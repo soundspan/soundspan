@@ -86,6 +86,22 @@ export interface TidalDownloadResult {
     file_size: number;
 }
 
+/** What a play download streams, known before its first byte. */
+export interface TidalPlayDownloadInfo {
+    contentType: string;
+    quality: string;
+    codec: string | null;
+    bitDepth: number | null;
+    sampleRate: number | null;
+}
+
+/** A running play download: its audio stream and its sidecar id. */
+export interface TidalPlayDownloadStart {
+    stream: NodeJS.ReadableStream;
+    downloadId: string;
+    info: TidalPlayDownloadInfo;
+}
+
 export interface TidalAlbumDownloadResult {
     album_id: number;
     album_title: string;
@@ -485,6 +501,73 @@ class TidalService {
                 output_template: creds.fileTemplate,
             },
             { headers: this.buildCredentialHeaders(creds) },
+        );
+        return res.data;
+    }
+
+    /**
+     * Start (or join) a play download: the sidecar downloads the track into
+     * /music with the admin account and streams its bytes as they arrive.
+     * Headers arrive before any audio, so an expired token refreshes here.
+     */
+    async startPlayDownload(
+        trackId: number,
+        quality: string,
+    ): Promise<TidalPlayDownloadStart> {
+        return this.requestWithSingleRefresh(() =>
+            this.startPlayDownloadOnce(trackId, quality),
+        );
+    }
+
+    private async startPlayDownloadOnce(
+        trackId: number,
+        quality: string,
+    ): Promise<TidalPlayDownloadStart> {
+        const creds = await this.getCredentials();
+        if (!creds) throw new Error("TIDAL not authenticated");
+
+        const res = await this.client.post(
+            "/download/track/play",
+            {
+                track_id: trackId,
+                quality,
+                output_template: creds.fileTemplate,
+            },
+            {
+                headers: this.buildCredentialHeaders(creds),
+                responseType: "stream",
+                // The body lasts as long as the download; never cut it off.
+                timeout: 0,
+            },
+        );
+        const header = (name: string): string | null => {
+            const value = res.headers?.[name];
+            return typeof value === "string" && value !== "" ? value : null;
+        };
+        const numberHeader = (name: string): number | null => {
+            const value = Number(header(name));
+            return Number.isFinite(value) && value > 0 ? value : null;
+        };
+        return {
+            stream: res.data,
+            downloadId: header("x-download-id") ?? "",
+            info: {
+                contentType: header("content-type") ?? "audio/mp4",
+                quality: header("x-tidal-quality") ?? "",
+                codec: header("x-tidal-codec"),
+                bitDepth: numberHeader("x-tidal-bit-depth"),
+                sampleRate: numberHeader("x-tidal-sample-rate"),
+            },
+        };
+    }
+
+    /** Wait for a play download to be installed and describe its file. */
+    async getPlayDownloadResult(
+        downloadId: string,
+    ): Promise<TidalDownloadResult> {
+        const res = await this.client.get(
+            `/download/track/play/${encodeURIComponent(downloadId)}`,
+            { timeout: 600_000 },
         );
         return res.data;
     }

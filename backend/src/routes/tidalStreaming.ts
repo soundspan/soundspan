@@ -6,7 +6,10 @@
  * via device-code OAuth. Admin must have TIDAL enabled for the
  * streaming option to appear. When the admin turns on
  * `tidalStreamingUseInstanceAccount`, every user shares the instance
- * account instead and per-user linking is rejected with 409.
+ * account instead and per-user linking is rejected with 409. With
+ * `tidalDownloadBeforePlay` on, /stream plays every song from its download
+ * (the local file, or the download's bytes as they arrive) and never streams
+ * straight from TIDAL; /stream-info describes that download.
  *
  * Routes:
  *   GET  /status                - Check if TIDAL streaming is available
@@ -25,12 +28,27 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { tidalStreamingService } from "../services/tidalStreaming";
+import {
+    awaitTidalPlayDownload,
+    findTidalPlayDownload,
+    isTidalPlayDownloadEnabled,
+    openTidalPlayDownload,
+    resolveTidalPlayDownloadQuality,
+    streamTidalPlayDownload,
+    tidalPlayDownloadInfo,
+    tidalPlayDownloadStartInfo,
+    tidalPlayDownloadStreamInfo,
+} from "../services/tidalPlayDownloads";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
 import { trackMappingService } from "../services/trackMappingService";
 import { coalesceInFlightByKey } from "../utils/singleflight";
 import { config } from "../config";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "../utils/routeErrorResponse";
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = config.nodeEnv === "test" ? 0 : 60_000;
@@ -171,6 +189,78 @@ async function rejectWhenInstanceAccount(
         });
     }
     next();
+}
+
+// ── Download as you play ──────────────────────────────────────────
+
+/** Whether the admin turned on download-as-you-play; never throws. */
+async function playDownloadsEnabled(): Promise<boolean> {
+    try {
+        return await isTidalPlayDownloadEnabled();
+    } catch (err: unknown) {
+        logger.warn(
+            "[TIDAL-STREAM] Download-as-you-play setting unavailable:",
+            toErrorMessage(err),
+        );
+        return false;
+    }
+}
+
+/** Whether a Range header asks for bytes after the start of the file. */
+function requestsLaterBytes(range: string | undefined): boolean {
+    const match = /^bytes=(\d+)-/.exec(range ?? "");
+    return Boolean(match && Number(match[1]) > 0);
+}
+
+/**
+ * Play a TIDAL song from its download: the local file once it exists,
+ * otherwise the download's bytes as they arrive. A request for later bytes
+ * (a seek, or a resumed player) waits for the whole file, because the
+ * stream itself cannot seek. Nothing streams straight from TIDAL.
+ */
+async function streamFromPlayDownload(
+    req: Request<{ trackId: string }>,
+    res: Response,
+    userId: string,
+    trackId: number,
+): Promise<void> {
+    let file = await findTidalPlayDownload(trackId);
+    if (!file && requestsLaterBytes(req.headers.range)) {
+        file = await awaitTidalPlayDownload(trackId, userId);
+        if (!file) throw new Error("TIDAL play download failed");
+    }
+    if (file) {
+        const quality = await resolveTidalPlayDownloadQuality(userId);
+        try {
+            await streamTidalPlayDownload(req, res, file, quality);
+        } catch (err: unknown) {
+            logger.error(
+                `[TIDAL-STREAM] Downloaded file failed for track ${trackId}:`,
+                toErrorMessage(err),
+            );
+            if (!res.headersSent) sendInternalRouteError(res, "Stream failed");
+        }
+        return;
+    }
+    const { stream, info } = await openTidalPlayDownload(trackId, userId);
+    res.status(200);
+    res.setHeader("Content-Type", info.contentType);
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Accept-Ranges", "none");
+    // Leaving early only stops this copy; the sidecar finishes the download.
+    res.on("close", () => {
+        (
+            stream as NodeJS.ReadableStream & { destroy?: () => void }
+        ).destroy?.();
+    });
+    stream.on("error", (streamErr: Error) => {
+        logger.warn(
+            `[TIDAL-STREAM] Play download stream error for track ${trackId}: ${streamErr.message}`,
+        );
+        if (!res.headersSent) sendRouteError(res, 502, "Download failed");
+        else res.end();
+    });
+    stream.pipe(res);
 }
 
 // ── Lazy OAuth restore ────────────────────────────────────────────
@@ -1008,6 +1098,27 @@ router.get(
 
         let quality = req.query.quality as string | undefined;
 
+        if (await playDownloadsEnabled()) {
+            try {
+                const file = await findTidalPlayDownload(trackId);
+                if (file) {
+                    const fileQuality =
+                        await resolveTidalPlayDownloadQuality(userId);
+                    return res.json(
+                        tidalPlayDownloadStreamInfo(file, fileQuality),
+                    );
+                }
+                const info = await tidalPlayDownloadInfo(trackId, userId);
+                return res.json(tidalPlayDownloadStartInfo(trackId, info));
+            } catch (err: unknown) {
+                logger.error(
+                    `[TIDAL-STREAM] Play download info failed for track ${trackId}:`,
+                    toErrorMessage(err),
+                );
+                return sendRouteError(res, 502, "Download failed");
+            }
+        }
+
         try {
             const hasAuth = await ensureUserOAuth(userId);
             if (!hasAuth) {
@@ -1086,6 +1197,20 @@ router.get(
         const trackId = parseInt(req.params.trackId, 10);
         if (isNaN(trackId)) {
             return res.status(400).json({ error: "Invalid trackId" });
+        }
+
+        if (await playDownloadsEnabled()) {
+            try {
+                await streamFromPlayDownload(req, res, userId, trackId);
+            } catch (err: unknown) {
+                logger.error(
+                    `[TIDAL-STREAM] Play download failed for track ${trackId}:`,
+                    toErrorMessage(err),
+                );
+                if (!res.headersSent)
+                    sendRouteError(res, 502, "Download failed");
+            }
+            return;
         }
 
         // Get user's preferred quality

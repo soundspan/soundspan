@@ -74,6 +74,7 @@ const systemSettings = {
     tidalQuality: "HIGH",
     tidalFileTemplate: "",
     tidalStreamingUseInstanceAccount: false,
+    tidalDownloadBeforePlay: false,
 } as SystemSettings;
 
 async function mount(element: React.ReactElement) {
@@ -177,5 +178,38 @@ test("admin card toggles sharing the TIDAL account with every user", async () =>
     });
 
     assert.deepEqual(updates, [{ tidalStreamingUseInstanceAccount: true }]);
+    await view.unmount();
+});
+
+test("admin card toggles downloading TIDAL songs before playing", async () => {
+    const { TidalCard } =
+        await import("../../features/settings/components/sections/TidalSection");
+    const updates: Array<Partial<SystemSettings>> = [];
+
+    const view = await mount(
+        React.createElement(TidalCard, {
+            settings: systemSettings,
+            onUpdate: (next: Partial<SystemSettings>) => updates.push(next),
+            onTest: async () => ({ success: true }),
+            isTesting: false,
+        }),
+    );
+
+    const toggle = view.container.querySelector<HTMLInputElement>(
+        "#tidal-download-before-play",
+    );
+    assert.ok(toggle, "expected the download-before-play toggle");
+    assert.equal(toggle.checked, false);
+    assert.match(
+        view.container.textContent ?? "",
+        /Download songs as they play/,
+    );
+
+    await React.act(async () => {
+        toggle.click();
+        await Promise.resolve();
+    });
+
+    assert.deepEqual(updates, [{ tidalDownloadBeforePlay: true }]);
     await view.unmount();
 });

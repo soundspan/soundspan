@@ -95,6 +95,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/itunes.ts` | Core |
 | `backend/src/services/lastfm.ts` | Core |
 | `backend/src/services/libraryDownloadProcessor.ts` | Shared provider-backed library album download orchestration and fallback handoff |
+| `backend/src/services/libraryFileScan.ts` | Queues a scan of specific files soundspan just wrote, instead of a full library scan |
 | `backend/src/services/libraryRadioBuilder.ts` | Core |
 | `backend/src/services/libraryRadioStationSelection.ts` | Shared Quick Start, genre, and decade radio selection |
 | `backend/src/services/libraryRadioTrackResponse.ts` | Library-radio playback response mapping |
@@ -233,6 +234,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/textEmbedding.ts` | Provider-backed text embedding and registered search-space routing |
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalAccountMode.ts` | Dependency-free check for the admin's shared TIDAL account mode and its sidecar session key |
+| `backend/src/services/tidalPlayDownloads.ts` | TIDAL download-as-you-play: streams a song from its sidecar download, records the installed file, and serves it on later plays |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
 | `backend/src/services/trackAlbumResolution.ts` | Bounded external-track to MusicBrainz release-group resolution |

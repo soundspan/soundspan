@@ -34,6 +34,7 @@ const baseSettings: SystemSettings = {
     tidalQuality: "HIGH",
     tidalFileTemplate: "",
     tidalStreamingUseInstanceAccount: false,
+    tidalDownloadBeforePlay: false,
     musicPath: "/music",
     downloadPath: "/downloads",
     transcodeCacheMaxGb: 10,
