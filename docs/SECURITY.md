@@ -3,19 +3,18 @@
 ## Python dependency audit exceptions
 
 The `pip-audit` CI job is blocking. Each hash-pinned runtime lock is audited
-without dependency resolution, and unexpected advisory IDs fail the job. The
-exact temporary exceptions live beside their matrix lanes in
+without dependency resolution, and unexpected advisory IDs fail the job. Any
+temporary exception lives beside its matrix lane in
 [`security-scanning.yml`](../.github/workflows/security-scanning.yml).
 
-Two legacy TensorFlow lanes have compatibility exceptions:
+No lane carries an exception. The analyzer and AIO images must not install the
+Python `tensorflow` package: Essentia runs MusiCNN through its own bundled
+TensorFlow C runtime, and the Python package pins Keras and protobuf releases
+whose advisories cannot be fixed inside its version constraints.
 
-| Lock | Constrained packages | Removal condition |
-| --- | --- | --- |
-| `services/audio-analyzer/requirements.lock` | Keras 2.15 and protobuf 4.25 | Move the analyzer off TensorFlow 2.15, whose dependency constraints prevent the audited fixed major versions (shares the AIO lane's exceptions after the roadmap F51 Python 3.11 rebase). |
-| `requirements-aio.lock` | Keras 2.15 and protobuf 4.25 | Move the AIO analyzer off TensorFlow 2.15, whose dependency constraints prevent the audited fixed major versions. |
-
-These entries are compatibility risk acceptances, not declarations that the
-affected releases are safe. Lock regeneration is performed with `uv pip
+An exception is a compatibility risk acceptance, not a declaration that the
+affected release is safe. Add one only with a reachability assessment and a
+removal condition recorded here. Lock regeneration is performed with `uv pip
 compile --upgrade-package`; if the resolver can select a compatible fixed
 release, remove the corresponding advisory ID in the same change. New IDs are
 never added automatically.
@@ -39,15 +38,14 @@ Board is upgraded, even if the transitive `uuid` range does not change.
 
 ## Container-image scan stream
 
-Trivy image SARIF currently reports approximately 95 OS and package CVEs in the
-pinned analyzer and sidecar images, including findings in `keras`, `wandb`,
-`pip`, and `cryptography`. Under the repository's pinned-analyzer-stack policy,
-maintainers review these findings with a tested stack or base-image upgrade
-rather than dismissing individual alerts ad hoc.
+Trivy image SARIF reports OS and package CVEs in the published images. Under
+the repository's pinned-analyzer-stack policy, maintainers review these findings
+with a tested stack or base-image upgrade rather than dismissing individual
+alerts ad hoc. Accepted image findings are listed with their rationale in
+[`.trivyignore`](../.trivyignore).
 
-This stream is separate from dependency-lock auditing. The compatibility-owned
-Python advisories and their removal conditions remain in the
-[pip-audit exception table](#python-dependency-audit-exceptions) above.
+This stream is separate from dependency-lock auditing, which follows the
+[pip-audit policy](#python-dependency-audit-exceptions) above.
 
 ## CodeQL alert dismissal record
 

@@ -5,13 +5,16 @@
 # sync — regenerate the lock (see its header) after any edit here.
 
 # Validated linux/amd64 platform matrix (issue #202, 2026-08-12): Python 3.11,
-# TensorFlow 2.15.1, essentia-tensorflow 2.1b6.dev1389, NumPy 1.26.4, and
-# redis-py 8.1.0. PyPI's newer essentia-tensorflow 2.1b6.dev1438 publishes only
-# CPython 3.14 wheels, so dev1389 remains the newest build available for this
-# image. Its wheel embeds TensorFlow C 2.5.0 and declares no Python TensorFlow
-# dependency; retain TensorFlow 2.15.x as the jointly locked, inference-validated
-# companion rather than treating the two packages as one shared ABI.
-tensorflow>=2.13.0,<2.16.0
+# essentia-tensorflow 2.1b6.dev1389, NumPy 1.26.4, and redis-py 8.1.0. PyPI's
+# newer essentia-tensorflow 2.1b6.dev1438 publishes only CPython 3.14 wheels,
+# so dev1389 remains the newest build available for this image.
+#
+# Do NOT add the Python `tensorflow` package. The Essentia wheel embeds its own
+# TensorFlow C 2.5.0 runtime, declares no Python TensorFlow dependency, and runs
+# every MusiCNN graph through it; analyzer.py never imports `tensorflow`. The
+# Python package was dead weight that shipped keras 2.15 and protobuf 4.25 and
+# their unfixable CVEs into the image (#717).
+
 # Essentia publishes only pre-release dev builds, making uv's unpinned selection
 # cache-sensitive across cold builds. Pin the newest CPython 3.11 build for
 # identical model behavior in both analyzers (roadmap F50 reproducible lock).
@@ -21,6 +24,6 @@ essentia-tensorflow==2.1b6.dev1389
 redis>=6.4.0
 psycopg2-binary>=2.9.13
 
-# NumPy 1.26.x is the last 1.x line and matches the jointly locked TensorFlow
-# 2.15 companion set used by AIO; TensorFlow 2.15 does not accept NumPy 2.x.
+# NumPy stays on the validated 1.26.x line: the Essentia wheel and the MusiCNN
+# outputs were validated against it, and the AIO image shares this pin.
 numpy>=1.26.0,<2.0.0

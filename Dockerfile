@@ -67,13 +67,14 @@ WORKDIR /app/audio-analyzer
 # Install ALL Python dependencies (Essentia analyzer + DCLAP provider) from ONE
 # hash-pinned lock (roadmap F50). requirements-aio.lock is the analyzer + DCLAP
 # manifests resolved JOINTLY for Python 3.11 (this image's system interpreter),
-# so both ML runtimes share one consistent transitive tree — subsuming the
-# former inline TensorFlow/essentia install here. Regenerate: see the lock header.
+# so both ML runtimes share one consistent transitive tree. There is no Python
+# `tensorflow` package: MusiCNN runs through the TensorFlow C runtime bundled in
+# the Essentia wheel (#717). Regenerate: see the lock header.
 COPY requirements-aio.lock /tmp/requirements-aio.lock
 RUN pip3 install --no-cache-dir --break-system-packages \
     --require-hashes -r /tmp/requirements-aio.lock \
     && rm -f /tmp/requirements-aio.lock \
-    && python3 -c "import numpy, onnxruntime, tensorflow; import importlib.util as i; assert i.find_spec('essentia')"
+    && python3 -c "import numpy, onnxruntime; import importlib.util as i; assert i.find_spec('essentia'); assert i.find_spec('tensorflow') is None"
 
 # Download Essentia ML models (~4MB total) - these enable Enhanced vibe matching
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
