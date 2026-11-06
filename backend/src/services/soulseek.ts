@@ -23,6 +23,7 @@ import {
 } from "./soulseek/slskSession";
 import { categorizeDownloadError } from "./soulseek/downloadErrorCategory";
 import { normalizeSoulseekTrackTitle } from "./soulseek/trackTitleNormalization";
+import { normalizeSoulseekSearchTerm } from "./soulseek/searchTermNormalization";
 
 export type { SearchResult } from "./soulseek/slskSession";
 
@@ -727,16 +728,14 @@ class SoulseekService {
         trackTitle: string,
     ): TrackMatch[] {
         // Normalize search terms for matching
-        const normalizedArtist = artistName
-            .toLowerCase()
-            .replace(/^the\s+/, "") // Remove leading "the"
-            .replace(/\s*&\s*/g, " and ")
-            .replace(/[^a-z0-9\s]/g, "");
-        const normalizedTitle = trackTitle
-            .toLowerCase()
-            .replace(/\s*&\s*/g, " and ")
-            .replace(/[^a-z0-9\s]/g, "")
-            .replace(/^\d+\s*[-.]?\s*/, ""); // Remove leading track numbers
+        const normalizedArtist = normalizeSoulseekSearchTerm(
+            artistName,
+            "artist",
+        );
+        const normalizedTitle = normalizeSoulseekSearchTerm(
+            trackTitle,
+            "title",
+        );
 
         // Get first word of artist for fuzzy matching
         const artistWords = normalizedArtist.split(/\s+/);
