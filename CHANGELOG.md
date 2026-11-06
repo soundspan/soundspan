@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [2.7.1] - 2026-11-06
+
+### Added
+
+### Changed
+
+### Fixed
+
 ### Security
 
 - The audio analyzer and all-in-one images no longer install the Python TensorFlow package, which removes keras 2.15 and protobuf 4.25 and every keras and protobuf advisory that had been accepted against them (#717). The analyzer never loaded that package: Essentia runs the MusiCNN models through its own bundled TensorFlow runtime, which does not change, so analysis results stay the same and nothing is re-analyzed. The all-in-one image's protobuf, still used by the vibe provider's ONNX runtime, moves to 7.36.2, and the analyzer image also drops the base image's unused setuptools and wheel. The analyzer image shrinks from about 3.0 GB to 1.4 GB and the all-in-one image from about 6.2 GB to 4.6 GB.
