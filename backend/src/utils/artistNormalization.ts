@@ -25,7 +25,7 @@ export function canonicalizeVariousArtists(name: string): string {
     // Case-insensitive regex patterns for Various Artists variations
     // Pattern 1: VA, V.A., V/A, V.A (with optional dots/slashes)
     // Pattern 2: Various, Various Artist, Various Artists
-    const vaPattern = /^v\.?\s*[\/.]?\s*a\.?$/i;
+    const vaPattern = /^v\.?(?:\s*[\/.])?\s*a\.?$/i;
     const variousPattern = /^various(\s+artists?)?$/i;
 
     if (vaPattern.test(cleaned) || variousPattern.test(cleaned)) {
@@ -100,8 +100,8 @@ export function normalizeArtistName(name: string): string {
     if (name == null) return "";
     let normalized = stripDiacritics(name.trim().toLowerCase());
 
-    // Normalize "&" to "and" (handles "Of Mice & Men" vs "Of Mice And Men")
-    normalized = normalized.replace(/\s*&\s*/g, " and ");
+    // Replace "&" with "and"; the whitespace collapse below normalizes spacing
+    normalized = normalized.replace(/&/g, " and ");
 
     // Normalize multiple spaces to single space
     normalized = normalized.replace(/\s+/g, " ");
@@ -127,7 +127,7 @@ export function normalizeAlbumTitle(title: string): string {
 export function normalizeForFuzzyMatch(value: string): string {
     const withCanonicalConjunctions = stripDiacritics(
         value.toLowerCase(),
-    ).replace(/\s*&\s*/g, " and ");
+    ).replace(/&/g, " and ");
     return removePunctuation(withCanonicalConjunctions)
         .replace(/\s+/g, " ")
         .trim();
@@ -351,7 +351,7 @@ export function parseArtistFromPath(folderName: string): string | null {
 
     // Pattern 1: "Artist - Album" or "Artist - Album (Year)"
     // Match everything before " - " separator
-    const dashPattern = /^([^-]+)\s*-\s*.+$/;
+    const dashPattern = /^([^-]+)-\s*.+$/;
     const dashMatch = folderName.match(dashPattern);
     if (dashMatch && dashMatch[1]) {
         const artist = dashMatch[1].trim();
