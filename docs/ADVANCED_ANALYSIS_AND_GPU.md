@@ -11,7 +11,6 @@ runtime matrix:
 | Component | Version |
 | --- | --- |
 | Python | 3.11 (Debian bookworm) |
-| TensorFlow Python package | 2.15.1 |
 | `essentia-tensorflow` | 2.1b6.dev1389 |
 | TensorFlow C runtime embedded in the Essentia wheel | 2.5.0 |
 | NumPy | 1.26.4 |
@@ -21,10 +20,11 @@ This matrix is intentionally retained. As checked on 2026-08-12, PyPI's newer
 [`essentia-tensorflow` 2.1b6.dev1438 release](https://pypi.org/project/essentia-tensorflow/2.1b6.dev1438/#files)
 provides CPython 3.14 wheels only; [2.1b6.dev1389](https://pypi.org/project/essentia-tensorflow/2.1b6.dev1389/#files)
 remains the newest release with a CPython 3.11 manylinux x86-64 wheel. The
-Essentia wheel declares no Python TensorFlow dependency and carries its own
-[TensorFlow C 2.5.0 runtime](https://github.com/MTG/essentia/blob/b9fa6cb674ca43dfb94d28d293aeda441c6745db/setup.py#L110-L115),
-while TensorFlow 2.15.1 remains the separately locked and inference-validated
-Python package.
+Essentia wheel declares no Python TensorFlow dependency and runs every MusiCNN
+graph through its own
+[TensorFlow C 2.5.0 runtime](https://github.com/MTG/essentia/blob/b9fa6cb674ca43dfb94d28d293aeda441c6745db/setup.py#L110-L115).
+The images do not install the Python `tensorflow` package. It would not change
+inference, and it pins Keras and protobuf releases with unfixable advisories.
 
 Treat these versions as one tested deployment set. After changing the analyzer
 manifest, regenerate both `services/audio-analyzer/requirements.lock` and

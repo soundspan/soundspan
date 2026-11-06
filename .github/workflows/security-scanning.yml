@@ -205,29 +205,12 @@ jobs:
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
           # audio-analyzer's image is python:3.11-slim (roadmap F51). Its lock is
-          # compiled FOR 3.11 and shares the TensorFlow 2.15 stack with the AIO
-          # image, so its exceptions mirror the requirements-aio.lock lane below.
-          # Exact-pin audits do not re-resolve, so the versions checked are the
-          # ones shipped.
+          # compiled FOR 3.11. Exact-pin audits do not re-resolve, so the
+          # versions checked are the ones shipped.
           - requirements: services/audio-analyzer/requirements.lock
             python-version: "3.11"
             audit-args: --disable-pip --no-deps
-            # TensorFlow 2.15 compatibility exceptions: docs/SECURITY.md. Any new ID fails.
-            ignore-vulns: >-
-              --ignore-vuln CVE-2025-12060
-              --ignore-vuln CVE-2026-12479
-              --ignore-vuln CVE-2026-12480
-              --ignore-vuln CVE-2026-12481
-              --ignore-vuln CVE-2026-12482
-              --ignore-vuln CVE-2026-12484
-              --ignore-vuln CVE-2026-9335
-              --ignore-vuln PYSEC-2025-121
-              --ignore-vuln PYSEC-2025-76
-              --ignore-vuln PYSEC-2026-1487
-              --ignore-vuln PYSEC-2026-1805
-              --ignore-vuln PYSEC-2026-2324
-              --ignore-vuln PYSEC-2026-2547
-              --ignore-vuln PYSEC-2026-3856
+            ignore-vulns: ""
           # DCLAP provider image is python:3.12-slim; its hash-pinned lock is
           # compiled for 3.12, so the audit checks exactly the shipped tree.
           - requirements: services/vibe-provider-dclap/requirements.lock
@@ -240,22 +223,7 @@ jobs:
           - requirements: requirements-aio.lock
             python-version: "3.11"
             audit-args: --disable-pip --no-deps
-            # TensorFlow 2.15 compatibility exceptions: docs/SECURITY.md.
-            ignore-vulns: >-
-              --ignore-vuln CVE-2025-12060
-              --ignore-vuln CVE-2026-12479
-              --ignore-vuln CVE-2026-12480
-              --ignore-vuln CVE-2026-12481
-              --ignore-vuln CVE-2026-12482
-              --ignore-vuln CVE-2026-12484
-              --ignore-vuln CVE-2026-9335
-              --ignore-vuln PYSEC-2025-121
-              --ignore-vuln PYSEC-2025-76
-              --ignore-vuln PYSEC-2026-1487
-              --ignore-vuln PYSEC-2026-1805
-              --ignore-vuln PYSEC-2026-2324
-              --ignore-vuln PYSEC-2026-2547
-              --ignore-vuln PYSEC-2026-3856
+            ignore-vulns: ""
           # Loose full manifests via requirements-test.txt (-> requirements.txt):
           # audits the un-locked floors, INCLUDING the deliberately-exempt
           # yt-dlp/ytmusicapi that never appear in a lock. Images are

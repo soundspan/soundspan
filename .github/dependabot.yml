@@ -91,9 +91,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     # essentia-tensorflow builds newer than dev1389 publish CPython 3.14 wheels
-    # only; this image is capped at Python 3.11 by that same package's wheel
-    # history (see services/audio-analyzer/requirements.txt). Unignore when a
-    # cp311 build appears or the interpreter ceiling moves.
+    # only, and this image stays on its validated Python 3.11 (see
+    # services/audio-analyzer/requirements.txt). Unignore when a cp311 build
+    # appears or the interpreter moves.
     ignore:
       - dependency-name: essentia-tensorflow
     groups:
@@ -163,7 +163,7 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    # The base interpreter is capped at Python 3.11 by essentia-tensorflow's wheel history
+    # The base interpreter stays on the validated Python 3.11 analysis stack
     # (see the Dockerfile comment and the lock-target guard test). Interpreter
     # bumps happen deliberately with a lock re-resolution, never via
     # unaccompanied base-image updates.

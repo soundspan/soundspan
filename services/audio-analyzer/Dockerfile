@@ -1,7 +1,7 @@
 # Audio Analyzer Service - Essentia with TensorFlow (MusiCNN)
-# Python 3.11 is the runtime ceiling for the validated TensorFlow 2.15.x stack:
-# PyPI publishes its Linux wheels only through CPython 3.11. Essentia dev1389
-# has newer-interpreter wheels, but cannot move this image without TensorFlow.
+# Python 3.11 is the validated interpreter for this analysis stack (Essentia
+# dev1389 + NumPy 1.26.4). Essentia dev1389 also publishes CPython 3.12/3.13
+# wheels, but moving the interpreter needs a fresh analysis-output validation.
 # Keep this base paired with the requirements.lock --python-version target.
 FROM python:3.11-slim@sha256:ff05d1a05204fb9f7444c435db8e8ec104e587a413280dc9ffc27a4797554182
 
@@ -40,16 +40,19 @@ WORKDIR /app
 COPY services/audio-analyzer/requirements.lock ./requirements.lock
 RUN pip3 install --no-cache-dir --require-hashes -r requirements.lock
 
-# pip is build-time tooling only; removing it from the runtime image drops
-# its vendored dependencies (msgpack, setuptools metadata) from the scan
-# surface alongside the other removed network tools.
-RUN python3 -m pip uninstall -y pip
+# pip, setuptools, and wheel are build-time tooling only; nothing in the lock
+# imports them at runtime. Removing them from the runtime image drops the base
+# image's copies and their vendored dependencies (msgpack, jaraco.context,
+# wheel) from the scan surface alongside the other removed network tools.
+RUN python3 -m pip uninstall -y setuptools wheel pip
 
-# Verify TensorFlow is importable and Essentia package is present.
+# Verify the Essentia package and its bundled TensorFlow C runtime are present.
+# The image deliberately has no Python `tensorflow` package (#717): MusiCNN runs
+# through Essentia's embedded libtensorflow.
 # Avoid importing `essentia.standard` at build time; some build environments can
 # fail entropy initialization (`random_device could not be read`) despite runtime
 # pods working normally.
-RUN python3 -c "import importlib.util; import tensorflow as tf; assert importlib.util.find_spec('essentia') is not None; print('TensorFlow:', tf.__version__); print('Essentia package present: OK')"
+RUN python3 -c "import glob, importlib.util, os, site; assert importlib.util.find_spec('essentia') is not None; assert importlib.util.find_spec('tensorflow') is None; libs = glob.glob(os.path.join(site.getsitepackages()[0], 'essentia_tensorflow.libs', 'libtensorflow-*.so*')); assert libs, 'Essentia TensorFlow C runtime missing'; print('Essentia TensorFlow C runtime:', os.path.basename(libs[0]))"
 
 # Create models directory
 RUN mkdir -p /app/models
