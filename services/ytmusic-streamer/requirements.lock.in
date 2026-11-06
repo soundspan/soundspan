@@ -16,13 +16,13 @@
 # with yt-dlp.
 #
 # Regenerate the lock: see the header of requirements.lock.
-fastapi>=0.143.0
+fastapi>=0.162.0
 uvicorn>=0.54.0
 mutagen>=1.48.1
 pydantic>=2.14.1
 httpx>=0.28.1
 requests>=2.34.2
 # yt-dlp[default] stable extras (see requirements-exempt.txt)
-brotli>=1.2.0
+brotli>=1.2.1
 pycryptodomex>=3.24.1
-websockets>=17.2
+websockets>=17.3
