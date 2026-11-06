@@ -301,15 +301,15 @@ jobs:
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     strategy:
       fail-fast: false
-      # Runtime/lock targets are tidal+ytmusic 3.14, DCLAP 3.12, and audio-analyzer 3.11.
+      # Runtime/lock targets are tidal+ytmusic 3.15, DCLAP 3.12, and audio-analyzer 3.11.
       # The analyzer stays on 3.11 because TensorFlow 2.15.x has no CPython 3.12+
       # wheels; its dependency-light test job remains on 3.12.
       matrix:
         include:
           - service: tidal-streamer
-            python-version: "3.14"
+            python-version: "3.15"
           - service: ytmusic-streamer
-            python-version: "3.14"
+            python-version: "3.15"
           - service: audio-analyzer
             python-version: "3.12"
           - service: vibe-provider-dclap
