@@ -36,6 +36,7 @@ restore; see [`BACKUP_AND_RESTORE.md`](BACKUP_AND_RESTORE.md).
 
 | Upgrading across | Action needed? |
 | ---------------- | -------------- |
+| **2.7.0** | Usually none — plain rolling update; five database migrations apply automatically. Upgrade promptly: this release fixes the Node2Shell Brotli flaw (CVE-2026-111497) and two Next.js remote code execution flaws. **Exception:** if your HTTPS proxy does not send `X-Forwarded-Proto`, set `SECURE_COOKIES=true` — with it unset, soundspan's own cookies now follow the browser's scheme. **Breaking for API-key clients of the request API:** `GET /api/requests` and `/mine` return one page as an object instead of a plain list. Heads-up: the Library list endpoints' default `origin=all` now includes each user's liked TIDAL/YouTube Music songs (`origin=local` for files only); declining an album request starts a 30-day re-request wait (`REQUESTS_DENIED_COOLDOWN_DAYS`); sidecar users must pull the TIDAL and YouTube Music images too. |
 | **2.6.1** | None — plain rolling update; no database migrations. Fixes the Last.fm connect flow's error reporting and makes every documented optional environment variable settable on Compose/AIO deployments. |
 | **2.6.0** | Usually none — plain rolling update; database migrations apply automatically. **Exception:** if you bring your own PostgreSQL and the app role cannot create extensions, run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` as a superuser first. Heads-up: the first start rebuilds database indexes (one-time, longer on large libraries); browsed artists/albums are now cached in the database by default (`CATALOG_PERSISTENCE=off` to disable); Last.fm scrobbling needs `LASTFM_API_KEY` + `LASTFM_SHARED_SECRET` set by the operator, and Helm existing-Secret users must add the shared secret to their Secret. |
 | **2.5.0** | Usually none — plain rolling update; database migrations apply automatically. **Heads-up on two default changes:** users who share online presence become visible to federated peer servers too (and public playlists are shared with peers) — turning off **Share online presence** or making a playlist private restores local-only behavior; and the new music-request feature is on by default (`FEATURE_REQUESTS=false` to disable). Federation pairing codes are removed — new peer connections use the host-credential flow, and both servers must be on versions that support it. The TIDAL sidecar is also renamed to `tidal-streamer`, but every old reference keeps working; see the section below. |
@@ -53,7 +54,7 @@ Anything not listed: drop-in.
 
 ---
 
-## Unreleased
+## 2.7.0: cookies, the request API, and database changes
 
 **Heads-up, no action needed:** the scheduled Audiobookshelf sync (every few
 minutes) now also removes audiobooks that were deleted in Audiobookshelf,
