@@ -2,7 +2,7 @@
 # Contains: Backend, Frontend, PostgreSQL, Redis, Audio Analyzer, DCLAP Vibe Provider
 # Usage: docker run -d -p 3030:3030 -v /path/to/music:/music ghcr.io/soundspan/soundspan-aio:latest
 
-FROM node:24-bookworm-slim@sha256:65932751ed4073ed02f5c04e494e4b2572a891b7dbea0568a863dc80341bf848
+FROM node:24-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
 
 # Add the PostgreSQL 16 repository and install runtime dependencies in one layer.
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \

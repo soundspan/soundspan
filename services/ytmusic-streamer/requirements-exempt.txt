@@ -14,5 +14,5 @@
 # to pull the matching yt-dlp-ejs without a lock regeneration.
 #
 # Floors here must match services/ytmusic-streamer/requirements.txt.
-yt-dlp[default]>=2026.8.19
+yt-dlp[default]>=2026.10.26
 ytmusicapi>=1.12.3

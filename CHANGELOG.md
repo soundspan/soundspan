@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native dropdown menus (sort, genre, and pagination on the Audiobooks and Podcasts pages, and other built-in selects) no longer render white text on a white popup; the app now declares its dark color scheme to the browser so native controls match the theme.
 - Audiobook listening progress and playback state are now tied to their audiobook at the database level: removing a book — scheduled prune, manual sync, or federation cleanup — atomically deletes its progress rows and nulls the active-audiobook reference in playback state, closing a race where progress saved mid-removal could linger as a phantom entry in Continue Listening; the upgrade migration also removes any orphaned progress rows left behind by earlier removals (#866).
 
+### Security
+
+- The backend, frontend, and all-in-one images now run Node.js 24.22.2, which fixes the Brotli decoder flaw known as Node2Shell (CVE-2026-111497). The flaw let a crafted Brotli-compressed request body or `fetch()` response corrupt server memory. Rebuilt images also get Debian's fixed system Brotli library through their existing `apt-get upgrade` step. The YouTube Music sidecar's Python `brotli` package moves to 1.2.1 for the same flaw. Next.js moves to 16.4.3, fixing two unauthenticated remote code execution flaws (in image optimization and in `use cache` functions) and a Server Actions denial of service. Backend `body-parser`, `multer`, `follow-redirects`, and `fast-uri` move to fixed releases for request-body and upload denial-of-service and credential-leak flaws. The sidecar Python locks pick up fixed `filelock`, `msgpack`, `pyasn1`, `setuptools`, and `oauthlib` releases.
+
 ## [2.6.1] - 2026-08-26
 
 ### Added
