@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import {
     VARIOUS_ARTISTS_CANONICAL,
     VARIOUS_ARTISTS_MBID,
@@ -32,6 +33,23 @@ describe("artistNormalization utilities", () => {
         );
     });
 
+    it.each([
+        ["without a trailing a", "x", null],
+        ["with a trailing a", "a", VARIOUS_ARTISTS_CANONICAL],
+    ])(
+        "canonicalizes a long various-artists whitespace run %s in bounded time",
+        (_, suffix, expected) => {
+            const input = `v${" ".repeat(50_000)}${suffix}`;
+            const startedAt = performance.now();
+
+            const canonical = canonicalizeVariousArtists(input);
+            const elapsedMs = performance.now() - startedAt;
+
+            expect(canonical).toBe(expected ?? input);
+            expect(elapsedMs).toBeLessThan(250);
+        },
+    );
+
     it("detects platform-specific various-artists ids", () => {
         expect(isVariousArtistsById("deezer", 5080)).toBe(true);
         expect(isVariousArtistsById("deezer", "5080")).toBe(true);
@@ -58,6 +76,31 @@ describe("artistNormalization utilities", () => {
         );
         expect(normalizeAlbumTitle(null as any)).toBe("");
     });
+
+    it.each([
+        ["Of Mice & Men", "of mice and men"],
+        ["Of Mice&Men", "of mice and men"],
+        ["Of Mice   &   Men", "of mice and men"],
+        [" & ", "and"],
+    ])("normalizes artist ampersand spacing in %p", (input, expected) => {
+        expect(normalizeArtistName(input)).toBe(expected);
+    });
+
+    it.each([
+        ["without an ampersand", " ".repeat(50_000), ""],
+        ["with a trailing ampersand", `${" ".repeat(50_000)}&`, "and"],
+    ])(
+        "normalizes an artist whitespace run %s in bounded time",
+        (_, input, expected) => {
+            const startedAt = performance.now();
+
+            const normalized = normalizeArtistName(input);
+            const elapsedMs = performance.now() - startedAt;
+
+            expect(normalized).toBe(expected);
+            expect(elapsedMs).toBeLessThan(250);
+        },
+    );
 
     describe("canonical match normalization", () => {
         it.each([
@@ -106,6 +149,22 @@ describe("artistNormalization utilities", () => {
             );
             expect(normalizeForExactKey(baseTitle)).toBe("beyoncerenaissance");
         });
+
+        it.each([
+            ["without an ampersand", " ".repeat(50_000), ""],
+            ["with a trailing ampersand", `${" ".repeat(50_000)}&`, "and"],
+        ])(
+            "normalizes a fuzzy-match whitespace run %s in bounded time",
+            (_, input, expected) => {
+                const startedAt = performance.now();
+
+                const normalized = normalizeForFuzzyMatch(input);
+                const elapsedMs = performance.now() - startedAt;
+
+                expect(normalized).toBe(expected);
+                expect(elapsedMs).toBeLessThan(250);
+            },
+        );
     });
 
     it("strips album edition markers and guards oversized input", () => {
@@ -174,4 +233,22 @@ describe("artistNormalization utilities", () => {
         expect(parseArtistFromPath("FLAC-2023")).toBe("FLAC");
         expect(parseArtistFromPath("")).toBeNull();
     });
+
+    it.each([
+        ["without a separator", "", false],
+        ["with a trailing separator", "-", true],
+    ])(
+        "parses a long folder-name whitespace run %s in bounded time",
+        (_, suffix, hasSceneSeparator) => {
+            const prefix = `Artist${" ".repeat(50_000)}x`;
+            const input = `${prefix}${suffix}`;
+            const startedAt = performance.now();
+
+            const artist = parseArtistFromPath(input);
+            const elapsedMs = performance.now() - startedAt;
+
+            expect(artist).toBe(hasSceneSeparator ? prefix : null);
+            expect(elapsedMs).toBeLessThan(250);
+        },
+    );
 });
