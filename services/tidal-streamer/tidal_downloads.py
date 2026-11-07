@@ -7,6 +7,7 @@ import logging
 import shutil
 import threading
 from base64 import b64decode
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -488,23 +489,31 @@ def _build_download_result(
     }
 
 
-def _download_track_sync(
+@dataclass(frozen=True)
+class _TrackDownloadPlan:
+    """Everything needed to fetch one track and install it into the library."""
+
+    track_id: int
+    track: Any
+    album: Any
+    stream: Any
+    urls: list[str]
+    file_extension: str
+    planned_file_path: Path
+    tmp_path: Path
+    dest_base: Path
+
+
+def _plan_track_download(
     api: TrackDownloadAPIProtocol,
     track_id: int,
     quality: str,
     output_template: str,
     dest_base: Path,
-) -> JsonObject:
-    """
-    Download a single track synchronously.
-
-    Returns a dict with file info on success.
-    """
-    # 1. Fetch track metadata
+) -> _TrackDownloadPlan:
+    """Resolve metadata, the library path, and stream URLs for one track."""
     track = api.get_track(track_id)
     album = api.get_album(track.album.id)
-
-    # 2. Build output path from template
     relative_path = format_template(
         template=output_template,
         item=track,
@@ -512,46 +521,65 @@ def _download_track_sync(
         with_asterisk_ext=False,
     )
     relative_stem = _sanitize_download_relative_path(relative_path)
-
-    # 3. Get stream data
     stream = api.get_track_stream(track_id=track_id, quality=quality)
     urls, file_extension = parse_track_stream(stream)
     urls = _prepend_dash_init_segment(stream, urls, track_id)
-
     _relative_file, planned_file_path, tmp_path = _build_download_file_path(
         relative_stem,
         file_extension,
         dest_base,
     )
+    return _TrackDownloadPlan(
+        track_id=track_id,
+        track=track,
+        album=album,
+        stream=stream,
+        urls=urls,
+        file_extension=file_extension,
+        planned_file_path=planned_file_path,
+        tmp_path=tmp_path,
+        dest_base=dest_base,
+    )
 
-    # Download raw bytes
-    from tiddl.core.utils.download import download as download_bytes
 
-    stream_data = download_bytes(urls)
-
-    # 4. Write to disk
-    planned_file_path.parent.mkdir(parents=True, exist_ok=True)
-
+def _install_track_download(plan: _TrackDownloadPlan, stream_data: bytes) -> JsonObject:
+    """Write downloaded bytes, install them with metadata, and describe the file."""
+    plan.planned_file_path.parent.mkdir(parents=True, exist_ok=True)
+    destination_root = plan.dest_base.resolve()
     try:
         # The 33-byte ``.<uuid4 hex>`` infix is included in the 255-byte name budget.
-        tmp_path.write_bytes(stream_data)
-
-        # 5-6. Install, embed identity, then clean only same-track codec siblings.
-        destination_root = dest_base.resolve()
+        plan.tmp_path.write_bytes(stream_data)
+        # Install, embed identity, then clean only same-track codec siblings.
         file_path = _install_download_with_metadata(
-            tmp_path,
-            planned_file_path,
-            file_extension,
+            plan.tmp_path,
+            plan.planned_file_path,
+            plan.file_extension,
             destination_root,
-            track_id,
-            track,
-            album,
+            plan.track_id,
+            plan.track,
+            plan.album,
         )
     except Exception:
-        _cleanup_staged_download(tmp_path, track_id)
+        _cleanup_staged_download(plan.tmp_path, plan.track_id)
         raise
     relative_file = file_path.relative_to(destination_root)
-    return _build_download_result(track, album, stream, track_id, file_path, relative_file)
+    return _build_download_result(
+        plan.track, plan.album, plan.stream, plan.track_id, file_path, relative_file
+    )
+
+
+def _download_track_sync(
+    api: TrackDownloadAPIProtocol,
+    track_id: int,
+    quality: str,
+    output_template: str,
+    dest_base: Path,
+) -> JsonObject:
+    """Download and install a single track synchronously; returns its file info."""
+    plan = _plan_track_download(api, track_id, quality, output_template, dest_base)
+    from tiddl.core.utils.download import download as download_bytes
+
+    return _install_track_download(plan, download_bytes(plan.urls))
 
 
 # Maximum decoded manifest size we're willing to parse (1 MiB).
