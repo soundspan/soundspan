@@ -49,10 +49,13 @@ jest.mock("../tidalStreaming", () => ({
     tidalStreamingService: {
         restoreOAuth: jest.fn(),
         findMatchesForAlbum: jest.fn(),
+        usesInstanceAccount: jest.fn(),
+        ensureInstanceSession: jest.fn(),
     },
 }));
 
 import { trackReconciliationService } from "../trackReconciliation";
+import { TIDAL_INSTANCE_SESSION_ID } from "../tidalAccountMode";
 import { trackMappingService } from "../trackMappingService";
 import { tidalStreamingService } from "../tidalStreaming";
 
@@ -886,6 +889,44 @@ describe("TrackReconciliationService", () => {
             expect(
                 tidalStreamingService.findMatchesForAlbum,
             ).not.toHaveBeenCalled();
+        });
+
+        it("matches through the shared instance account when it is enabled", async () => {
+            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([
+                {
+                    id: "yt-only-shared",
+                    trackId: "local-track-shared",
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-row-shared",
+                    confidence: 0.8,
+                    source: "gap-fill",
+                    trackYtMusic: {
+                        title: "Song",
+                        artist: "Artist",
+                        album: "Album",
+                        duration: 200,
+                    },
+                },
+            ]);
+            (
+                tidalStreamingService.usesInstanceAccount as jest.Mock
+            ).mockResolvedValueOnce(true);
+            (
+                tidalStreamingService.ensureInstanceSession as jest.Mock
+            ).mockResolvedValueOnce(true);
+            (
+                tidalStreamingService.findMatchesForAlbum as jest.Mock
+            ).mockResolvedValueOnce([null]);
+
+            await trackReconciliationService.reconcileYoutubeToTidal();
+
+            expect(
+                tidalStreamingService.findMatchesForAlbum,
+            ).toHaveBeenCalledWith(TIDAL_INSTANCE_SESSION_ID, [
+                expect.objectContaining({ title: "Song", artist: "Artist" }),
+            ]);
+            expect(tidalStreamingService.restoreOAuth).not.toHaveBeenCalled();
+            expect(mockPrisma.userSettings.findMany).not.toHaveBeenCalled();
         });
 
         it("upgrades YT-only mapping when TIDAL match is found", async () => {

@@ -8,6 +8,7 @@ Start-here guide for `frontend/features/explore`.
 2. Primary tests and route entrypoints for this domain are listed below.
 3. Targeted verification commands:
 - `npm --prefix backend test -- --runInBand src/routes/__tests__/libraryRuntime.test.ts src/routes/__tests__/homepageRuntime.test.ts`
+- `npm --prefix backend test -- --runInBand src/services/discovery/__tests__/exploreDiscovery.test.ts src/routes/__tests__/recommendationsExploreRoute.test.ts`
 - `npm --prefix frontend run test:component`
 - `npm --prefix frontend run test:unit`
 
@@ -23,6 +24,7 @@ Start-here guide for `frontend/features/explore`.
 | `components/BrowseCollectionPage.tsx` | components |
 | `components/FeaturedShelvesSection.tsx` | components |
 | `components/ExploreDegradedNotice.tsx` | components |
+| `components/ExploreDiscoverySection.tsx` | components (shelves of music not in the library) |
 | `components/MadeForYouSection.tsx` | components |
 | `components/MoodPills.tsx` | components |
 | `components/MoodsGenresSection.tsx` | components |
@@ -33,6 +35,7 @@ Start-here guide for `frontend/features/explore`.
 | `components/YtMusicMixesSection.tsx` | components |
 | `genreClassification.ts` | root |
 | `hooks/useExploreData.ts` | hooks |
+| `hooks/useExploreDiscovery.ts` | hooks (`GET /api/recommendations/explore`, discovery-gated) |
 | `hooks/useTidalExploreEnabled.ts` | hooks |
 | `hooks/useUserSettingsExplorePrefs.ts` | hooks |
 

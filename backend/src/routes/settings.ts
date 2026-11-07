@@ -189,7 +189,11 @@ router.post("/", async (req, res) => {
             update: settingsData,
         });
 
-        if (settingsData.tidalStreamingQuality !== undefined) {
+        // Playback quality also picks the TIDAL tier on a shared account.
+        if (
+            settingsData.tidalStreamingQuality !== undefined ||
+            settingsData.playbackQuality !== undefined
+        ) {
             tidalStreamingService.clearUserQualityCache(userId);
         }
 
