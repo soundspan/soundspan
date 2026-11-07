@@ -134,7 +134,7 @@ router.get("/radar", async (req, res) => {
             },
         });
         const libraryAlbumMbids = new Set(
-            libraryAlbums.map((a) => a.rgMbid).filter(Boolean),
+            libraryAlbums.flatMap((a) => (a.rgMbid ? [a.rgMbid] : [])),
         );
 
         // 5. Transform Lidarr releases

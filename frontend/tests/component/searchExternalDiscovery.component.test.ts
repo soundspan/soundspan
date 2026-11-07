@@ -152,3 +152,36 @@ test("discover tracks render artist links and album context", async () => {
     assert.match(html, /Orphan Song/);
     assert.doesNotMatch(html, /href="\/artist\//);
 });
+
+test("TIDAL and YouTube Music results carry their own playable match", async () => {
+    const { ownProviderMatch } =
+        await import("../../features/search/components/DiscoverTracksList");
+
+    assert.deepEqual(
+        ownProviderMatch({
+            type: "track",
+            name: "One More Time",
+            source: "tidal",
+            tidalTrackId: 123,
+            durationSec: 320,
+        }),
+        { source: "tidal", tidalTrackId: 123, duration: 320 },
+    );
+    assert.deepEqual(
+        ownProviderMatch({
+            type: "track",
+            name: "Around the World",
+            source: "youtube",
+            youtubeVideoId: "vid-1",
+        }),
+        { source: "youtube", youtubeVideoId: "vid-1", duration: undefined },
+    );
+    assert.equal(
+        ownProviderMatch({ type: "track", name: "Song", source: "deezer" }),
+        null,
+    );
+    assert.equal(
+        ownProviderMatch({ type: "track", name: "Song", source: "tidal" }),
+        null,
+    );
+});

@@ -130,7 +130,11 @@ async function ownedAlbumsByMbid(
         where: { rgMbid: { in: rgMbids }, location: "LIBRARY" },
         select: { id: true, rgMbid: true },
     });
-    return new Map(albums.map((album) => [album.rgMbid, album.id]));
+    return new Map(
+        albums.flatMap((album) =>
+            album.rgMbid ? [[album.rgMbid, album.id] as const] : [],
+        ),
+    );
 }
 
 async function transitionCandidate(

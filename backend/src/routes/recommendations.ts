@@ -414,7 +414,7 @@ router.get("/", async (req, res) => {
             }),
             prisma.ownedAlbum.findMany({
                 where: { artistId: { in: similarArtistIds } },
-                select: { artistId: true, rgMbid: true },
+                select: { artistId: true, albumId: true },
             }),
         ]);
 
@@ -428,7 +428,7 @@ router.get("/", async (req, res) => {
         const ownedByArtist = new Map<string, Set<string>>();
         for (const o of ownedAlbums) {
             const set = ownedByArtist.get(o.artistId) || new Set();
-            set.add(o.rgMbid);
+            set.add(o.albumId);
             ownedByArtist.set(o.artistId, set);
         }
 
@@ -437,7 +437,7 @@ router.get("/", async (req, res) => {
             const artistAlbums = (
                 albumsByArtist.get(similar.toArtistId) || []
             ).slice(0, 3);
-            const ownedRgMbids =
+            const ownedAlbumIds =
                 ownedByArtist.get(similar.toArtistId) || new Set();
 
             return {
@@ -450,7 +450,7 @@ router.get("/", async (req, res) => {
                 similarity: similar.weight,
                 topAlbums: artistAlbums.map((album) => ({
                     ...album,
-                    owned: ownedRgMbids.has(album.rgMbid),
+                    owned: ownedAlbumIds.has(album.id),
                 })),
             };
         });
@@ -588,13 +588,15 @@ router.get("/albums", async (req, res) => {
         ];
         const ownedAlbumsForRec = await prisma.ownedAlbum.findMany({
             where: { artistId: { in: artistIdsForOwnership } },
-            select: { rgMbid: true },
+            select: { albumId: true },
         });
-        const ownedRgMbidSet = new Set(ownedAlbumsForRec.map((o) => o.rgMbid));
+        const ownedAlbumIdSet = new Set(
+            ownedAlbumsForRec.map((o) => o.albumId),
+        );
 
         const recommendations = slicedAlbums.map((album) => ({
             ...album,
-            owned: ownedRgMbidSet.has(album.rgMbid),
+            owned: ownedAlbumIdSet.has(album.id),
         }));
 
         res.json({

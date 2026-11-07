@@ -9,7 +9,7 @@ export interface DiscoveryMarkers {
 
 export interface AlbumCandidate {
     id: string;
-    rgMbid: string;
+    rgMbid: string | null;
     title: string;
     artistId: string;
     artist: { name: string; mbid: string | null };
@@ -23,7 +23,7 @@ interface DiscoveryReference {
 
 interface OwnedReference {
     artistId: string;
-    rgMbid: string;
+    albumId: string;
 }
 
 function normalize(value: string): string {
@@ -149,16 +149,16 @@ export function findUnprotectedDiscoverAlbumIds(
         ),
     );
     const ownedKeys = new Set(
-        ownedReferences.map((row) => `${row.artistId}|${row.rgMbid}`),
+        ownedReferences.map((row) => `${row.artistId}|${row.albumId}`),
     );
     return albums
         .filter(
             (album) =>
-                !activeMbids.has(album.rgMbid) &&
+                (album.rgMbid === null || !activeMbids.has(album.rgMbid)) &&
                 !activeTitles.has(
                     titleArtistKey(album.title, album.artist.name),
                 ) &&
-                !ownedKeys.has(`${album.artistId}|${album.rgMbid}`),
+                !ownedKeys.has(`${album.artistId}|${album.id}`),
         )
         .map((album) => album.id);
 }

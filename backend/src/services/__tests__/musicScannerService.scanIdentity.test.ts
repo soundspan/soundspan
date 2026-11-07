@@ -816,6 +816,72 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.album.create).not.toHaveBeenCalled();
     });
 
+    it("stores no MusicBrainz id for an untagged album and owns it by album id", async () => {
+        mockPrisma.album.findFirst.mockResolvedValue(null);
+        mockPrisma.album.findMany.mockResolvedValue([]);
+        mockPrisma.album.create.mockResolvedValue({
+            id: "album-untagged",
+            title: "Basement Tapes",
+            coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: null,
+        });
+
+        const resolved = await resolveScannerAlbum({
+            albumPromotions: new Map(),
+            albumTitle: "Basement Tapes",
+            artistId: "artist-1",
+            isDiscoveryAlbum: false,
+            year: null,
+        });
+
+        expect(resolved).toEqual(
+            expect.objectContaining({
+                album: expect.objectContaining({ id: "album-untagged" }),
+                wasMissing: true,
+            }),
+        );
+        expect(mockPrisma.album.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ rgMbid: null }),
+            }),
+        );
+        expect(mockPrisma.ownedAlbum.create).toHaveBeenCalledWith({
+            data: {
+                artistId: "artist-1",
+                albumId: "album-untagged",
+                source: "native_scan",
+            },
+        });
+    });
+
+    it("stores no MusicBrainz id for an artist created from untagged files", async () => {
+        const scanner = new MusicScannerService();
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/New Artist/Album/01.flac"]);
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Song",
+                track: { no: 1 },
+                disk: { no: 1 },
+                albumartist: "New Artist",
+                album: "Album",
+            },
+            format: { duration: 180, codec: "audio/flac" },
+        } as any);
+        mockPrisma.artist.findFirst.mockResolvedValue(null);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.artist.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ mbid: null }),
+            }),
+        );
+    });
+
     it("prefers a sole real album across case and punctuation match tiers", async () => {
         mockPrisma.album.findFirst.mockResolvedValue(null);
         mockPrisma.album.findMany
@@ -825,7 +891,7 @@ describe("MusicScannerService.scanLibrary", () => {
                     title: "CAFE AND RAIN",
                     coverUrl: null,
                     location: "LIBRARY",
-                    rgMbid: "temp-existing",
+                    rgMbid: null,
                     _count: { tracks: 20 },
                 },
             ])
@@ -843,7 +909,7 @@ describe("MusicScannerService.scanLibrary", () => {
                     title: "CAFE AND RAIN",
                     coverUrl: null,
                     location: "LIBRARY",
-                    rgMbid: "temp-existing",
+                    rgMbid: null,
                     _count: { tracks: 20 },
                 },
             ]);

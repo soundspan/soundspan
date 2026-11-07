@@ -16,6 +16,7 @@ import {
 import { config } from "../config";
 import { federationInstanceNameSchema } from "./systemSettingsFederationSchema";
 import { isPlaybackSourceOrder } from "../services/playbackSourcePriority";
+import { searchProviderFields } from "../services/searchProviderSettings";
 import { invalidateUserProviderProfileCache } from "../services/listenTogetherResolution";
 import { testSoulseekCredentials } from "../services/soulseek/slskSession";
 import {
@@ -73,9 +74,7 @@ const systemSettingsSchema = z.object({
 
     fanartEnabled: z.boolean().optional(),
     fanartApiKey: z.string().nullable().optional(),
-
     lastfmApiKey: z.string().nullable().optional(),
-
     // Media Services
     audiobookshelfEnabled: z.boolean().optional(),
     audiobookshelfUrl: z.string().url().optional().or(z.literal("")),
@@ -107,6 +106,7 @@ const systemSettingsSchema = z.object({
         .string()
         .refine(isPlaybackSourceOrder, "Invalid playback source order")
         .optional(),
+    ...searchProviderFields,
     primaryFailureFallback: z
         .enum(["none", "lidarr", "soulseek", "tidal", "youtube"])
         .optional(),

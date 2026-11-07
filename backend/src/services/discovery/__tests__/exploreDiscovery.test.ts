@@ -219,7 +219,9 @@ describe("getExploreDiscovery", () => {
                 "first-release-date": "2026-10-25",
             },
         ]);
-        mocks.ownedAlbums.mockResolvedValue([{ rgMbid: OWNED_RG_MBID }]);
+        mocks.ownedAlbums.mockResolvedValue([
+            { album: { rgMbid: OWNED_RG_MBID } },
+        ]);
         mocks.chartTracks.mockResolvedValue([
             { name: "Hit", artist: { name: "Pop Star" }, listeners: "99" },
             { name: "Creep", artist: { name: "Radiohead" } },

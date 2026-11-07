@@ -121,6 +121,13 @@ export interface DiscoverResult {
     genres?: string[];
     trackCount?: number;
     listeners?: number;
+    /** Catalog provider an artist or song result came from. */
+    source?: "lastfm" | "deezer" | "tidal" | "youtube";
+    durationSec?: number | null;
+    /** Set on TIDAL song results, which play without matching. */
+    tidalTrackId?: number;
+    /** Set on YouTube Music song results, which play without matching. */
+    youtubeVideoId?: string;
 }
 
 export interface AliasInfo {

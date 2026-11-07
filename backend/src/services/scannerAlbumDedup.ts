@@ -28,7 +28,7 @@ export interface ScannerAlbumIdentityCandidate {
     hasUserOverrides: boolean;
     id: string;
     location: string;
-    rgMbid: string;
+    rgMbid: string | null;
     title: string;
 }
 
@@ -67,8 +67,8 @@ export interface ScannerAlbumDedupResult {
     skippedUserOverrides: number;
 }
 
-function isTemporaryAlbum(candidate: { rgMbid: string }): boolean {
-    return candidate.rgMbid.startsWith("temp-");
+function isTemporaryAlbum(candidate: { rgMbid: string | null }): boolean {
+    return candidate.rgMbid === null;
 }
 
 function duplicateKey(candidate: ScannerAlbumIdentityCandidate): string {
@@ -361,15 +361,13 @@ async function hasUnsafeOwnedAlbumReferences(
     transaction: Prisma.TransactionClient,
     plan: ScannerAlbumMergePlan,
 ): Promise<boolean> {
-    const loserByRgMbid = new Map(
-        plan.losers.map((loser) => [loser.rgMbid, loser]),
-    );
+    const loserById = new Map(plan.losers.map((loser) => [loser.id, loser]));
     const rows = await transaction.ownedAlbum.findMany({
-        where: { rgMbid: { in: [...loserByRgMbid.keys()] } },
-        select: { artistId: true, rgMbid: true },
+        where: { albumId: { in: [...loserById.keys()] } },
+        select: { artistId: true, albumId: true },
     });
     return rows.some((row) => {
-        const loser = loserByRgMbid.get(row.rgMbid);
+        const loser = loserById.get(row.albumId);
         return !loser || row.artistId !== loser.artistId;
     });
 }
@@ -380,18 +378,18 @@ async function repointOwnedAlbum(
     loser: ScannerAlbumDedupCandidate,
 ): Promise<number> {
     const key = {
-        artistId_rgMbid: {
+        artistId_albumId: {
             artistId: keeper.artistId,
-            rgMbid: keeper.rgMbid,
+            albumId: keeper.id,
         },
     };
     const [keeperOwnership, loserOwnership] = await Promise.all([
         transaction.ownedAlbum.findUnique({ where: key }),
         transaction.ownedAlbum.findUnique({
             where: {
-                artistId_rgMbid: {
+                artistId_albumId: {
                     artistId: loser.artistId,
-                    rgMbid: loser.rgMbid,
+                    albumId: loser.id,
                 },
             },
         }),
@@ -405,14 +403,14 @@ async function repointOwnedAlbum(
             where: key,
             create: {
                 artistId: keeper.artistId,
-                rgMbid: keeper.rgMbid,
+                albumId: keeper.id,
                 source,
             },
             update: { source },
         });
     }
     const deleted = await transaction.ownedAlbum.deleteMany({
-        where: { rgMbid: loser.rgMbid },
+        where: { albumId: loser.id },
     });
     return deleted.count;
 }

@@ -5,7 +5,7 @@ export interface FederationDedupIdentity {
     isrc: string | null;
     discNo: number;
     trackNo: number;
-    albumRgMbid: string;
+    albumRgMbid: string | null;
 }
 
 /** Restores a host release-group id from the collision-safe persisted form. */
@@ -26,6 +26,8 @@ export function federationDedupConfidence(
     }
     if (local.isrc && local.isrc === remote.isrc) return 0.9;
     if (
+        local.albumRgMbid &&
+        remote.albumRgMbid &&
         local.albumRgMbid === decodeFederationIdentity(remote.albumRgMbid) &&
         local.discNo === remote.discNo &&
         local.trackNo === remote.trackNo

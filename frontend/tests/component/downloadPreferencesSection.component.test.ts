@@ -47,6 +47,8 @@ const baseSettings: SystemSettings = {
     downloadSource: "soulseek",
     federationInstanceName: null,
     playbackSourceOrder: "library,peers,tidal,ytmusic",
+    searchProviderOrder: "lastfm,deezer,tidal,youtube",
+    searchProvidersEnabled: "lastfm,deezer",
     primaryFailureFallback: "none",
     ytMusicEnabled: false,
     ytMusicClientId: "",

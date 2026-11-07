@@ -1007,14 +1007,11 @@ describe("discover weekly runtime behavior", () => {
         );
     });
 
-    it("resolves owned albums by normalized name through owned-album rgMbid references", async () => {
+    it("resolves owned albums by normalized name through owned-album references", async () => {
         const { prisma } = setupDiscoverWeeklyMocks();
         (prisma.album.findFirst as jest.Mock).mockResolvedValueOnce(null);
         (prisma.ownedAlbum.findMany as jest.Mock).mockResolvedValueOnce([
-            { rgMbid: "rg-owned-1" },
-        ]);
-        (prisma.album.findMany as jest.Mock).mockResolvedValueOnce([
-            { title: "The Album Name [Deluxe]" },
+            { album: { title: "The Album Name [Deluxe]" } },
         ]);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires

@@ -36,7 +36,9 @@ export async function findLibraryHeldReleaseGroups(
             },
             select: { rgMbid: true },
         });
-        for (const album of albums) heldRgMbids.add(album.rgMbid);
+        for (const album of albums) {
+            if (album.rgMbid) heldRgMbids.add(album.rgMbid);
+        }
     }
     return heldRgMbids;
 }

@@ -55,6 +55,27 @@ jest.mock("axios", () => ({
     },
 }));
 
+jest.mock("../../services/deezer", () => ({
+    deezerService: {
+        searchArtists: jest.fn(async () => []),
+        searchTracks: jest.fn(async () => []),
+    },
+}));
+jest.mock("../../services/tidalStreaming", () => ({
+    tidalStreamingService: {
+        isEnabled: jest.fn(async () => false),
+        isAvailable: jest.fn(async () => false),
+        getAuthStatus: jest.fn(),
+        search: jest.fn(),
+    },
+}));
+jest.mock("../../services/youtubeMusic", () => ({
+    ytMusicService: { isAvailable: jest.fn(), searchCanonical: jest.fn() },
+}));
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: jest.fn(async () => ({})),
+}));
+
 jest.mock("../../services/search", () => ({
     searchService: {
         searchAll: jest.fn(),
@@ -831,7 +852,7 @@ describe("search route runtime behavior", () => {
             ]),
         );
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "search:discover:all:rh:50",
+            "search:discover:all:rh:50:lastfm,deezer",
             900,
             expect.any(String),
         );
@@ -859,7 +880,14 @@ describe("search route runtime behavior", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
-            results: [{ type: "track", id: "track-2", name: "Song B" }],
+            results: [
+                {
+                    type: "track",
+                    id: "track-2",
+                    name: "Song B",
+                    source: "lastfm",
+                },
+            ],
             aliasInfo: null,
         });
     });
@@ -876,7 +904,7 @@ describe("search route runtime behavior", () => {
         expect(mockArtistFindMany).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body.results).toEqual([
-            { type: "music", id: "x", name: 42 },
+            { type: "music", id: "x", name: 42, source: "lastfm" },
         ]);
     });
 
@@ -894,7 +922,14 @@ describe("search route runtime behavior", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
-            results: [{ type: "track", id: "track-live", name: "Live Result" }],
+            results: [
+                {
+                    type: "track",
+                    id: "track-live",
+                    name: "Live Result",
+                    source: "lastfm",
+                },
+            ],
             aliasInfo: null,
         });
     });

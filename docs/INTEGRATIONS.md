@@ -140,6 +140,26 @@ without a linked account, subject to sidecar availability and provider behavior.
 | Normally works without a linked account (sidecar-dependent) | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id`, `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch`, `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
 | Per-user OAuth required                                     | `GET /api/ytmusic/album/:browseId`, `GET /api/ytmusic/artist/:channelId`, `GET /api/ytmusic/song/:videoId`, `GET /api/ytmusic/stream-info/:videoId`, `GET /api/ytmusic/stream/:videoId`, `GET /api/ytmusic/library/songs`, `GET /api/ytmusic/library/albums`                                      |
 
+## Search Providers
+
+Search lists artists and songs that are not in the library from catalog
+providers that an admin orders and enables under `Admin → Search Providers`:
+
+| Provider      | Results          | Needs                                                   |
+| ------------- | ---------------- | ------------------------------------------------------- |
+| Last.fm       | Artists, songs   | The server's Last.fm key; also corrects artist spelling |
+| Deezer        | Artists, songs   | Nothing: Deezer's public API                            |
+| TIDAL         | Artists, songs   | A TIDAL session for the user, or the shared account     |
+| YouTube Music | Songs            | The YouTube Music integration enabled and reachable     |
+
+Last.fm and Deezer are enabled by default. Enabled providers are searched in
+parallel, and their results are merged in the admin's order: an artist, or an
+artist and song, that a higher provider already returned is dropped. A provider
+the user cannot use, or one that fails, is skipped. TIDAL and YouTube Music
+songs play straight from that service; other songs play when they match an
+enabled streaming service and otherwise link to the artist page. Results are
+cached for 15 minutes per query and provider list.
+
 ## Track Mapping and Playlist Import APIs
 
 soundspan also exposes provider mapping and playlist import routes for cross-provider workflows:

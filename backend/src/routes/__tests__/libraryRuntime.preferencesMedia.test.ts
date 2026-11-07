@@ -1412,7 +1412,7 @@ describe("library catalog list runtime coverage", () => {
             where: { id: "album-2" },
         });
         expect(mockOwnedAlbumDeleteMany).toHaveBeenCalledWith({
-            where: { rgMbid: "rg-album-2" },
+            where: { albumId: "album-2" },
         });
         expect(deleteAlbumResOk.statusCode).toBe(200);
         expect(deleteAlbumResOk.body).toEqual({
@@ -2018,7 +2018,7 @@ describe("library catalog list runtime coverage", () => {
             where: { id: "album-del" },
         });
         expect(mockOwnedAlbumDeleteMany).toHaveBeenCalledWith({
-            where: { rgMbid: "rg-album-del" },
+            where: { albumId: "album-del" },
         });
         expect(mockAlbumDelete.mock.invocationCallOrder[0]).toBeLessThan(
             unlinkSpy.mock.invocationCallOrder[0],

@@ -158,7 +158,7 @@ function duplicateError(code: MusicRequestErrorCode, message: string): never {
 }
 
 async function rejectIfOwned(rgMbid: string): Promise<void> {
-    // Library rows with synthetic `temp-` or `federation:` rgMbids cannot match
+    // Library rows with no rgMbid or a synthetic `federation:` one cannot match
     // a real release-group MBID here; administrator review is the backstop.
     const owned = await prisma.album.findFirst({
         where: { rgMbid, location: "LIBRARY" },
@@ -299,6 +299,7 @@ export async function createRequest(
 function mapPreferredAlbums(albums: AlbumLink[]): Map<string, AlbumLink> {
     const preferred = new Map<string, AlbumLink>();
     for (const album of albums) {
+        if (!album.rgMbid) continue;
         const current = preferred.get(album.rgMbid);
         if (
             !current ||
@@ -342,7 +343,11 @@ async function resolveFallbackArtists<T extends LinkableRequest>(
               select: { id: true, mbid: true },
           })
         : [];
-    return new Map(artists.map((artist) => [artist.mbid, artist.id]));
+    return new Map(
+        artists.flatMap((artist) =>
+            artist.mbid ? [[artist.mbid, artist.id] as const] : [],
+        ),
+    );
 }
 
 function addLibraryLinks<T extends LinkableRequest>(

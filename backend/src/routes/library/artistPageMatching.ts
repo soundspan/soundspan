@@ -90,3 +90,20 @@ export function filterDistinctDiscographyAlbums<
             !ownedTitles.has(normalizeDiscographyAlbumTitle(album.title)),
     );
 }
+
+/** Ownership lookups for an artist page: library album ids and release groups. */
+export function ownedAlbumKeys(
+    ownedAlbums: ReadonlyArray<{
+        albumId: string;
+        album: { rgMbid: string | null };
+    }>,
+): { ownedAlbumIds: Set<string>; ownedRgMbids: Set<string> } {
+    return {
+        ownedAlbumIds: new Set(ownedAlbums.map((owned) => owned.albumId)),
+        ownedRgMbids: new Set(
+            ownedAlbums.flatMap((owned) =>
+                owned.album.rgMbid ? [owned.album.rgMbid] : [],
+            ),
+        ),
+    };
+}

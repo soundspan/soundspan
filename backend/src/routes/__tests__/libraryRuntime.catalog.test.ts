@@ -624,8 +624,8 @@ describe("library catalog list runtime coverage", () => {
             },
         ]);
         mockOwnedAlbumGroupBy.mockResolvedValueOnce([
-            { artistId: "artist-1", _count: { rgMbid: 7 } },
-            { artistId: "artist-2", _count: { rgMbid: 2 } },
+            { artistId: "artist-1", _count: { albumId: 7 } },
+            { artistId: "artist-2", _count: { albumId: 2 } },
         ]);
 
         const req = {
@@ -971,7 +971,9 @@ describe("library catalog list runtime coverage", () => {
                 { name: "Similar One", mbid: "sim-1", match: 0.93 },
                 { name: "Similar Two", mbid: null, match: 0.61 },
             ],
-            ownedAlbums: [{ rgMbid: "rg-db-same" }],
+            ownedAlbums: [
+                { albumId: "album-db-1", album: { rgMbid: "rg-db-same" } },
+            ],
             albums: [
                 {
                     id: "album-db-1",
@@ -1234,7 +1236,9 @@ describe("library catalog list runtime coverage", () => {
             heroUrl: null,
             userHeroUrl: "user-hero.jpg",
             similarArtistsJson: null,
-            ownedAlbums: [{ rgMbid: "rg-owned" }],
+            ownedAlbums: [
+                { albumId: "album-owned", album: { rgMbid: "rg-owned" } },
+            ],
             albums: [
                 {
                     id: "album-owned",
@@ -1329,7 +1333,9 @@ describe("library catalog list runtime coverage", () => {
             similarArtistsJson: [
                 { name: "Should Ignore", mbid: "ignored", match: 0.7 },
             ],
-            ownedAlbums: [{ rgMbid: "rg-flags" }],
+            ownedAlbums: [
+                { albumId: "album-flags", album: { rgMbid: "rg-flags" } },
+            ],
             albums: [
                 {
                     id: "album-flags",
@@ -1720,7 +1726,12 @@ describe("library catalog list runtime coverage", () => {
             heroUrl: "hero-unknown.jpg",
             userHeroUrl: null,
             similarArtistsJson: null,
-            ownedAlbums: [{ rgMbid: "rg-unknown" }],
+            ownedAlbums: [
+                {
+                    albumId: "owned-rg-unknown",
+                    album: { rgMbid: "rg-unknown" },
+                },
+            ],
             albums: [],
         });
         mockMusicBrainzSearchArtist.mockResolvedValueOnce([
@@ -1776,7 +1787,12 @@ describe("library catalog list runtime coverage", () => {
             heroUrl: "hero-cacheless.jpg",
             userHeroUrl: null,
             similarArtistsJson: null,
-            ownedAlbums: [{ rgMbid: "rg-owned-cacheless" }],
+            ownedAlbums: [
+                {
+                    albumId: "album-cacheless",
+                    album: { rgMbid: "rg-owned-cacheless" },
+                },
+            ],
             albums: [
                 {
                     id: "album-cacheless",
@@ -1883,7 +1899,6 @@ describe("library catalog list runtime coverage", () => {
     });
 
     it("returns albums with ownership-aware filtering", async () => {
-        mockOwnedAlbumFindMany.mockResolvedValueOnce([{ rgMbid: "rg-1" }]);
         mockAlbumFindMany.mockResolvedValueOnce([
             {
                 id: "album-1",
@@ -1919,9 +1934,7 @@ describe("library catalog list runtime coverage", () => {
 
         await albumsHandler(req, res);
 
-        expect(mockOwnedAlbumFindMany).toHaveBeenCalledWith({
-            select: { rgMbid: true },
-        });
+        expect(mockOwnedAlbumFindMany).not.toHaveBeenCalled();
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
@@ -1971,7 +1984,7 @@ describe("library catalog list runtime coverage", () => {
                                     },
                                 },
                                 {
-                                    rgMbid: { in: ["rg-1"] },
+                                    ownedBy: { some: {} },
                                     location: {
                                         in: ["LIBRARY", "DISCOVER"],
                                     },

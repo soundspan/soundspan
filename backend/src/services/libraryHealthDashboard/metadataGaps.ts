@@ -27,17 +27,11 @@ const MISSING_ART_ARTIST_WHERE = {
 } satisfies Prisma.ArtistWhereInput;
 const MISSING_MBID_ARTIST_WHERE = {
     albums: { some: { location: "LIBRARY" } },
-    AND: [
-        { mbid: { startsWith: "temp-" } },
-        { NOT: { mbid: { startsWith: "temp-remote-" } } },
-    ],
+    mbid: null,
 } satisfies Prisma.ArtistWhereInput;
 const MISSING_MBID_ALBUM_WHERE = {
     location: "LIBRARY",
-    AND: [
-        { rgMbid: { startsWith: "temp-" } },
-        { NOT: { rgMbid: { startsWith: "remote:" } } },
-    ],
+    rgMbid: null,
 } satisfies Prisma.AlbumWhereInput;
 const MISSING_GENRES_WHERE = {
     ...VISIBLE_LOCAL_TRACK_WHERE,

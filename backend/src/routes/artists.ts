@@ -735,7 +735,7 @@ router.get<{ mbid: string }>(
                         },
                     ],
                 };
-                releaseGroupId = catalogAlbum.rgMbid;
+                releaseGroupId = catalogAlbum.rgMbid ?? mbid;
             } else {
                 try {
                     releaseGroup =

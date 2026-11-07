@@ -223,15 +223,14 @@ export class MusicScannerService {
     private async promoteNativeAlbum(album: {
         id: string;
         artistId: string;
-        rgMbid: string;
         location: string;
     }): Promise<void> {
         if (album.location === "LIBRARY") {
             const ownership = await prisma.ownedAlbum.findUnique({
                 where: {
-                    artistId_rgMbid: {
+                    artistId_albumId: {
                         artistId: album.artistId,
-                        rgMbid: album.rgMbid,
+                        albumId: album.id,
                     },
                 },
                 select: { source: true },
@@ -247,7 +246,6 @@ export class MusicScannerService {
         album: {
             id: string;
             artistId: string;
-            rgMbid: string;
             location: string;
         },
         albumPromotions: Map<string, Promise<void>>,
@@ -782,7 +780,7 @@ export class MusicScannerService {
         isrc: string | null;
         discNo: number;
         trackNo: number;
-        album: { rgMbid: string };
+        album: { rgMbid: string | null };
     }): FederationDedupIdentity {
         return { ...track, albumRgMbid: track.album.rgMbid };
     }
@@ -857,7 +855,9 @@ export class MusicScannerService {
     private positionalFederatedQuery(
         local: FederationLocalIdentityTrackRow,
     ): Prisma.TrackWhereInput | null {
-        if (local.album.location !== "LIBRARY") return null;
+        if (local.album.location !== "LIBRARY" || !local.album.rgMbid) {
+            return null;
+        }
         const encodedRgMbid = Buffer.from(local.album.rgMbid).toString(
             "base64url",
         );

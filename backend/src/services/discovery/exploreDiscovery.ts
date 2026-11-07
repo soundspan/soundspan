@@ -430,10 +430,14 @@ async function buildNewReleases(
     if (releases.length === 0) return [];
 
     const owned = await prisma.ownedAlbum.findMany({
-        where: { rgMbid: { in: releases.map((release) => release.rgMbid) } },
-        select: { rgMbid: true },
+        where: {
+            album: {
+                rgMbid: { in: releases.map((release) => release.rgMbid) },
+            },
+        },
+        select: { album: { select: { rgMbid: true } } },
     });
-    const ownedIds = new Set(owned.map((album) => album.rgMbid));
+    const ownedIds = new Set(owned.map((row) => row.album.rgMbid));
     return releases
         .filter((release) => !ownedIds.has(release.rgMbid))
         .sort((a, b) => b.releaseDate.localeCompare(a.releaseDate))

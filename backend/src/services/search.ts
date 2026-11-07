@@ -36,7 +36,7 @@ interface SearchPeerResult {
 export interface ArtistSearchResult {
     id: string;
     name: string;
-    mbid: string;
+    mbid: string | null;
     heroUrl: string | null;
     summary?: string;
     rank: number;

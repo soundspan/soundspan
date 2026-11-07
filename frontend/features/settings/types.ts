@@ -80,6 +80,9 @@ export interface SystemSettings {
     primaryFailureFallback: DownloadFallback;
     // Playback source priority (comma-separated provider order)
     playbackSourceOrder: string;
+    // Search's Discover providers: full priority order and the enabled subset
+    searchProviderOrder: string;
+    searchProvidersEnabled: string;
     // YouTube Music streaming (admin toggle + OAuth app credentials)
     ytMusicEnabled: boolean;
     ytMusicClientId: string;
