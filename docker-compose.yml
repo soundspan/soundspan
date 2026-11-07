@@ -504,6 +504,9 @@ services:
             # the backend's INTERNAL_API_SECRET or the sidecar rejects with 403.
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
             YTMUSIC_SPOOL_DIR: "${YTMUSIC_SPOOL_DIR:-}"
+            # Off by default. When enabled, a failed YouTube Music lookup retries once with yt-dlp's JavaScript-player clients, which start a ~300 MB Deno process (one at a time).
+            # Give the sidecar at least 512 MB of memory when enabling this fallback.
+            YTMUSIC_JS_CLIENT_FALLBACK: ${YTMUSIC_JS_CLIENT_FALLBACK:-false}
         volumes:
             - ytmusic_data:/data
             # Shared with the backend (read-write) so YouTube URL downloads

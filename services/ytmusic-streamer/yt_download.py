@@ -70,15 +70,12 @@ PROXY_AUDIO_FORMAT_SELECTORS = {
 }
 
 # yt-dlp InnerTube player clients for regular youtube.com extraction
-# (/yt/info, /yt/proxy, and /yt/download). The bare "android" client is
-# now PO-token-gated by YouTube and returns no usable progressive audio
-# formats for many videos, so the selectors above match nothing and yt-dlp
-# raises "Requested format is not available" (surfacing as a 502 on
-# /yt/info). "android_vr" and "android_music" still serve the DASH audio
-# formats anonymously; listing both lets yt-dlp fall through if one breaks.
-# NOTE: this is the regular-YouTube client. The authenticated
-# music.youtube.com stream path keeps its own ["android_music"] context.
-YT_PLAYER_CLIENTS = ["android_vr", "android_music"]
+# (/yt/info, /yt/proxy, and /yt/download). "android_vr" is JS-less and
+# returns usable audio formats anonymously. The bare "android" client stays
+# excluded because it is PO-token-gated and returns no usable progressive
+# audio formats for many videos. YouTube Music extraction uses the separate
+# YTMUSIC_INFO_PLAYER_CLIENTS policy in ytmusic_stream.py.
+YT_PLAYER_CLIENTS = ["android_vr"]
 
 
 class _WarningLogger(Protocol):

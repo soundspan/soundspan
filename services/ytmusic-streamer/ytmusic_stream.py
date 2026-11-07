@@ -6,7 +6,7 @@ import re
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
@@ -25,6 +25,11 @@ from yt_download import (
     extract_video_id as _extract_video_id,
 )
 from ytmusic_client import _get_ytmusic
+from ytmusic_js_fallback import (
+    SpoolLimitExceeded,
+    is_age_restricted_message,
+    run_with_js_fallback,
+)
 from ytmusic_runtime import (
     _USER_AGENT,
     JsonObject,
@@ -59,6 +64,18 @@ _yt_dlp_extract_executor = ThreadPoolExecutor(
 )
 BROWSE_TIMEOUT = env_float("YTMUSIC_BROWSE_TIMEOUT", "30")
 YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
+
+# yt-dlp's default tv_samsung client requires the JavaScript player, so every
+# lookup that includes it starts a roughly 300 MiB Deno challenge solver. The
+# other default clients return the same audio formats without it, so YouTube
+# Music lookups keep those defaults and exclude tv_samsung.
+YTMUSIC_INFO_PLAYER_CLIENTS = ("default", "-tv_samsung")
+YTMUSIC_SPOOL_PLAYER_CLIENTS = ("default", "-tv_samsung", "web_safari")
+# These are yt-dlp's stock client set, which can include JavaScript-player
+# clients such as tv_samsung and start a ~300 MiB Deno solver; they are used
+# only by the opt-in fallback.
+YTMUSIC_INFO_FALLBACK_PLAYER_CLIENTS = ("default",)
+YTMUSIC_SPOOL_FALLBACK_PLAYER_CLIENTS = ("default", "web_safari")
 
 # YouTube Music HLS spool. yt-dlp owns YouTube delivery; clients range-read
 # the completed local file instead of continuation-reading signed URLs.
@@ -123,11 +140,7 @@ def _stream_extraction_http_error(
     video_id: str, error_label: str, error: Exception
 ) -> HTTPException:
     """Convert an extraction failure to the existing sanitized HTTP error."""
-    error_str = str(error)
-    age_restricted = "Sign in to confirm your age" in error_str or (
-        "age" in error_str.lower() and "confirm" in error_str.lower()
-    )
-    if age_restricted:
+    if is_age_restricted_message(str(error)):
         log.error(
             "%s failed: %s",
             error_label,
@@ -159,20 +172,75 @@ def _best_audio_stream_url(info: JsonObject) -> str | None:
     return audio_formats[0].get("url") if audio_formats else None
 
 
+def _extract_stream_result(url: str, ydl_opts: JsonObject) -> JsonObject:
+    """Extract and normalize one raw yt-dlp stream result."""
+    import yt_dlp
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if not info:
+        raise ValueError("No info extracted")
+    stream_url = _best_audio_stream_url(info)
+    if not stream_url:
+        raise ValueError("No audio stream URL found")
+    return {
+        "url": stream_url,
+        "content_type": info.get("audio_ext", "m4a"),
+        "duration": info.get("duration", 0),
+        "title": info.get("title", ""),
+        "artist": info.get("artist") or info.get("uploader", ""),
+        "expires_at": time.time() + STREAM_CACHE_TTL,
+        "abr": info.get("abr", 0),
+        "acodec": info.get("acodec", ""),
+    }
+
+
+def _extract_fallback_stream_result(url: str, ydl_opts: JsonObject) -> JsonObject:
+    """Pace and execute the fallback extraction attempt."""
+    _extract_pacer.wait()
+    return _extract_stream_result(url, ydl_opts)
+
+
+def _store_stream_result(cache_key: str, result: JsonObject) -> None:
+    """Store one extraction result and enforce the stream cache bounds."""
+    with _stream_cache_lock:
+        _stream_cache[cache_key] = result
+        expired_count = _clean_stream_cache_locked()
+        _bound_cache(_stream_cache, STREAM_CACHE_MAX)
+    if expired_count:
+        log.debug(f"Cleaned {expired_count} expired stream cache entries")
+
+
+def _run_stream_extraction_attempts(
+    url: str,
+    ydl_opts: JsonObject,
+    fallback_opts: JsonObject | None,
+    video_id: str,
+) -> JsonObject:
+    """Run primary extraction and the optional paced fallback."""
+    if fallback_opts is None:
+        return _extract_stream_result(url, ydl_opts)
+    return run_with_js_fallback(
+        lambda: _extract_stream_result(url, ydl_opts),
+        lambda: _extract_fallback_stream_result(url, fallback_opts),
+        label=f"stream info for {video_id}",
+    )
+
+
 def _extract_stream_info(
     cache_key: str,
     url: str,
     ydl_opts: JsonObject,
     video_id: str,
     error_label: str,
+    *,
+    fallback_opts: JsonObject | None = None,
 ) -> JsonObject:
     """Extract a yt-dlp audio URL through the shared paced cache workflow.
 
     Performs cache lookup, paced extraction, result construction, cache store,
     and sanitized error mapping for both YouTube stream paths.
     """
-    import yt_dlp
-
     with _stream_cache_lock:
         cached = _stream_cache.get(cache_key)
     if cached and cached.get("expires_at", 0) > time.time():
@@ -180,36 +248,15 @@ def _extract_stream_info(
         return cached
     _extract_pacer.wait()
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                raise ValueError("No info extracted")
-            stream_url = _best_audio_stream_url(info)
-            if not stream_url:
-                raise ValueError("No audio stream URL found")
-            result = {
-                "url": stream_url,
-                "content_type": info.get("audio_ext", "m4a"),
-                "duration": info.get("duration", 0),
-                "title": info.get("title", ""),
-                "artist": info.get("artist") or info.get("uploader", ""),
-                "expires_at": time.time() + STREAM_CACHE_TTL,
-                "abr": info.get("abr", 0),
-                "acodec": info.get("acodec", ""),
-            }
-            with _stream_cache_lock:
-                _stream_cache[cache_key] = result
-                expired_count = _clean_stream_cache_locked()
-                _bound_cache(_stream_cache, STREAM_CACHE_MAX)
-            if expired_count:
-                log.debug(f"Cleaned {expired_count} expired stream cache entries")
-            log.debug(
-                "Extracted stream URL for %s: %s @ %skbps",
-                cache_key,
-                result["acodec"],
-                result["abr"],
-            )
-            return result
+        result = _run_stream_extraction_attempts(url, ydl_opts, fallback_opts, video_id)
+        _store_stream_result(cache_key, result)
+        log.debug(
+            "Extracted stream URL for %s: %s @ %skbps",
+            cache_key,
+            result["acodec"],
+            result["abr"],
+        )
+        return result
     except Exception as error:
         raise _stream_extraction_http_error(video_id, error_label, error) from error
 
@@ -249,7 +296,21 @@ def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> 
     }
     fmt = format_map.get(quality, format_map["HIGH"])
 
-    ydl_opts = {
+    ydl_opts = _build_ytmusic_info_options(fmt, YTMUSIC_INFO_PLAYER_CLIENTS)
+    fallback_opts = _build_ytmusic_info_options(fmt, YTMUSIC_INFO_FALLBACK_PLAYER_CLIENTS)
+    return _extract_stream_info(
+        f"{user_id}:{video_id}",
+        f"https://music.youtube.com/watch?v={video_id}",
+        ydl_opts,
+        video_id,
+        f"yt-dlp extraction for {video_id}",
+        fallback_opts=fallback_opts,
+    )
+
+
+def _build_ytmusic_info_options(fmt: str, player_clients: Sequence[str]) -> JsonObject:
+    """Build one YouTube Music stream-info yt-dlp option set."""
+    return {
         "format": fmt,
         "quiet": True,
         "no_warnings": True,
@@ -260,15 +321,8 @@ def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> 
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": "https://music.youtube.com/",
         },
-        "extractor_args": {"youtube": {"player_client": ["android_music"]}},
+        "extractor_args": {"youtube": {"player_client": list(player_clients)}},
     }
-    return _extract_stream_info(
-        f"{user_id}:{video_id}",
-        f"https://music.youtube.com/watch?v={video_id}",
-        ydl_opts,
-        video_id,
-        f"yt-dlp extraction for {video_id}",
-    )
 
 
 async def _extract_yt_dlp_bounded(
@@ -450,12 +504,12 @@ def _build_spool_progress_hook(started_at: float) -> Callable[[JsonObject], None
     def enforce_spool_limits(status: JsonObject) -> None:
         downloaded_bytes = status.get("downloaded_bytes", 0)
         if isinstance(downloaded_bytes, int) and downloaded_bytes > YTMUSIC_SPOOL_TRACK_MAX_BYTES:
-            raise RuntimeError(
+            raise SpoolLimitExceeded(
                 "YouTube Music spool downloaded bytes exceeded "
                 f"{YTMUSIC_SPOOL_TRACK_MAX_BYTES} byte limit"
             )
         if time.monotonic() - started_at > YTMUSIC_SPOOL_DOWNLOAD_TIMEOUT:
-            raise RuntimeError(
+            raise SpoolLimitExceeded(
                 "YouTube Music spool download timeout exceeded "
                 f"{YTMUSIC_SPOOL_DOWNLOAD_TIMEOUT:g} seconds"
             )
@@ -469,6 +523,7 @@ def _build_ytmusic_spool_options(
     *,
     match_filter: Callable[..., str | None],
     progress_hook: Callable[[JsonObject], None],
+    player_clients: Sequence[str] = YTMUSIC_SPOOL_PLAYER_CLIENTS,
 ) -> JsonObject:
     """Build yt-dlp options for one validated spool request."""
     fmt = _YTMUSIC_HLS_FORMATS.get(quality, _YTMUSIC_HLS_FORMATS["HIGH"])
@@ -489,7 +544,7 @@ def _build_ytmusic_spool_options(
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["default", "web_safari"],
+                "player_client": list(player_clients),
             },
         },
         "js_runtimes": {"deno": {}},
@@ -508,6 +563,42 @@ def _remove_failed_spool_partials(video_id: str, quality: str) -> None:
                 path.unlink()
 
 
+def _extract_ytmusic_spool(url: str, ydl_opts: JsonObject) -> JsonObject | None:
+    """Run one raw yt-dlp spool extraction attempt."""
+    import yt_dlp
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return cast(JsonObject | None, ydl.extract_info(url, download=True))
+
+
+def _run_ytmusic_spool_download(
+    video_id: str,
+    quality: str,
+    primary_opts: JsonObject,
+) -> JsonObject | None:
+    """Run the primary spool extraction with one eligible opt-in fallback."""
+    import yt_dlp
+
+    url = f"https://music.youtube.com/watch?v={video_id}"
+
+    def fallback() -> JsonObject | None:
+        _remove_failed_spool_partials(video_id, quality)
+        fallback_opts = _build_ytmusic_spool_options(
+            video_id,
+            quality,
+            match_filter=yt_dlp.utils.match_filter_func("!is_live"),
+            progress_hook=_build_spool_progress_hook(time.monotonic()),
+            player_clients=YTMUSIC_SPOOL_FALLBACK_PLAYER_CLIENTS,
+        )
+        return _extract_ytmusic_spool(url, fallback_opts)
+
+    return run_with_js_fallback(
+        lambda: _extract_ytmusic_spool(url, primary_opts),
+        fallback,
+        label=f"HLS spool for {video_id}",
+    )
+
+
 def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]:
     """Download a complete YouTube Music HLS stream into the bounded spool."""
     import yt_dlp
@@ -519,22 +610,17 @@ def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]
     if existing is not None:
         return str(existing), _spool_content_type(existing)
 
-    started_at = time.monotonic()
     ydl_opts = _build_ytmusic_spool_options(
         video_id,
         quality,
         match_filter=yt_dlp.utils.match_filter_func("!is_live"),
-        progress_hook=_build_spool_progress_hook(started_at),
+        progress_hook=_build_spool_progress_hook(time.monotonic()),
     )
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(
-                f"https://music.youtube.com/watch?v={video_id}",
-                download=True,
-            )
-            if not info:
-                raise ValueError("No info extracted while spooling stream")
+        info = _run_ytmusic_spool_download(video_id, quality, ydl_opts)
+        if not info:
+            raise ValueError("No info extracted while spooling stream")
 
         completed = _find_spooled_file(video_id, quality)
         if completed is None:

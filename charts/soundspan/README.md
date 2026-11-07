@@ -334,6 +334,18 @@ Notes:
   YouTube downloads then land on the pod's ephemeral filesystem and are
   lost on restart.
 
+#### YouTube Music memory and the playback fallback
+
+The streamer's default memory limit is 512Mi
+(`ytmusicStreamer.resources.limits.memory`). By default, song lookups skip
+the YouTube clients that need YouTube's JavaScript player, so one lookup
+uses about 60 MiB.
+
+`ytmusicStreamer.env.YTMUSIC_JS_CLIENT_FALLBACK: "true"` turns on a retry
+for songs those clients cannot play. The retry uses yt-dlp's full client
+set and starts a Deno process of about 300 MiB, one retry at a time. Keep
+the memory limit at 512Mi or higher while the fallback is on.
+
 ### Audio Analyzers (Individual Mode Only)
 
 ```yaml
