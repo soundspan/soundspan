@@ -26,6 +26,7 @@ import {
     hasConnectedProviderToken,
     toLikedResponseTrack,
 } from "../../services/libraryTrackPreferences";
+import { usesTidalInstanceAccount } from "../../services/tidalAccountMode";
 import {
     sendInternalRouteError,
     sendRouteError,
@@ -436,13 +437,12 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
             orderBy: [{ likedAt: "desc" }, { id: "asc" }],
             take: fetchTake,
         }),
-        prisma.systemSettings.findUnique({
-            where: { id: "default" },
-            select: { playbackSourceOrder: true },
-        }),
+        prisma.systemSettings.findUnique({ where: { id: "default" } }),
     ]);
 
-    const hasTidal = hasConnectedProviderToken(userSettings?.tidalOAuthJson);
+    const hasTidal =
+        hasConnectedProviderToken(userSettings?.tidalOAuthJson) ||
+        usesTidalInstanceAccount(systemSettings);
     const hasYtMusic = hasConnectedProviderToken(
         userSettings?.ytMusicOAuthJson,
     );

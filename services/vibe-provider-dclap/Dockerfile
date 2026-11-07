@@ -78,7 +78,13 @@ COPY services/common /app/services/common
 
 RUN useradd --create-home --uid 1000 dclap && chown -R dclap:dclap /app
 
-USER dclap
+# An arbitrary UID (OpenShift restricted-v2) has no passwd entry or home;
+# librosa's numba cache must not depend on one.
+ENV HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    NUMBA_CACHE_DIR=/tmp/numba-cache
+
+USER 1000
 
 EXPOSE 8092
 
