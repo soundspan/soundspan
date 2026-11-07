@@ -109,9 +109,15 @@ COPY services/common /app/services/common
 
 # Create non-root user
 RUN useradd -m -u 1000 analyzer && \
-    chown -R analyzer:analyzer /app
+    chown -R analyzer:analyzer /app && \
+    python3 -m compileall -q /app
 
-USER analyzer
+ENV PYTHONDONTWRITEBYTECODE=1
+# An arbitrary UID (OpenShift restricted-v2) has no passwd entry or home.
+ENV HOME=/tmp
+ENV XDG_CACHE_HOME=/tmp/.cache
+
+USER 1000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
