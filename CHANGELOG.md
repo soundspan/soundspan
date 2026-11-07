@@ -8,9 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- YouTube Music has an opt-in playback fallback for songs that the regular clients cannot play. Set `YTMUSIC_JS_CLIENT_FALLBACK=true` on the YouTube Music sidecar, and a failed song lookup or playback download is retried once with yt-dlp's full client set, which includes the clients that need YouTube's JavaScript player. Each retry starts a Deno process of about 300 MB, and the sidecar runs one retry at a time. The setting is off by default; turn it on only when the sidecar has at least 512 MB of memory. The sidecar logs at startup whether the fallback is on, and logs each retry.
+
 ### Changed
 
 ### Fixed
+
+- YouTube Music songs and playlists play again when the YouTube Music sidecar runs with a tight memory limit. The yt-dlp release in 2.7.0 added a YouTube client (`tv_samsung`) to its defaults that needs YouTube's JavaScript player, so every song lookup started a JavaScript solver of about 300 MB inside the sidecar. With a 256 MiB limit, the sidecar ran out of memory and restarted each time a song started, and playback failed. Song lookups and playback downloads now leave that client out and use the same clients as 2.6.1, which return the same audio without the solver; one lookup peaks near 60 MB again. The sidecar also stops asking yt-dlp for `android_music`, a client yt-dlp no longer has and had been silently skipping.
 
 ## [2.7.1] - 2026-11-06
 

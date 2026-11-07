@@ -198,9 +198,17 @@ def test_ydl_opts_include_socket_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
     captured: list[dict[str, Any]] = []
 
     def fake_extract(
-        cache_key: Any, url: Any, ydl_opts: Any, video_id: Any, error_label: Any
+        cache_key: Any,
+        url: Any,
+        ydl_opts: Any,
+        video_id: Any,
+        error_label: Any,
+        *,
+        fallback_opts: Any = None,
     ) -> Any:
         captured.append(ydl_opts)
+        if fallback_opts is not None:
+            captured.append(fallback_opts)
         return {"url": "http://cdn/x"}
 
     monkeypatch.setattr(app, "_extract_stream_info", fake_extract)
@@ -208,7 +216,7 @@ def test_ydl_opts_include_socket_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
     app._get_stream_url_sync("u", VIDEO_ID, "HIGH")
     app._get_yt_stream_url_sync(VIDEO_ID, "HIGH")
 
-    assert len(captured) == 2
+    assert len(captured) == 3
     assert all(opts["socket_timeout"] == app.YTDLP_SOCKET_TIMEOUT for opts in captured)
 
 

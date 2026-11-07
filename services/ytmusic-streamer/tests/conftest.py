@@ -26,6 +26,7 @@ APP_MODULES = (
     "ytmusic_client",
     "ytmusic_downloads",
     "ytmusic_library",
+    "ytmusic_js_fallback",
     "ytmusic_lifecycle",
     "ytmusic_models",
     "ytmusic_runtime",

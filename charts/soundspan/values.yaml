@@ -498,6 +498,9 @@ ytmusicStreamer:
     # Max concurrent YouTube URL downloads. Downloads run on their own
     # thread pool so long jobs never starve streaming/search.
     # YT_DOWNLOAD_CONCURRENCY: "2"
+    # Off by default. When enabled, a failed YouTube Music lookup retries once with yt-dlp's JavaScript-player clients, which start a ~300 MB Deno process (one at a time).
+    # Set ytmusicStreamer.resources.limits.memory to at least 512Mi when enabled.
+    # YTMUSIC_JS_CLIENT_FALLBACK: "false"
   # -- Additional environment variable sources for YT Music streamer container.
   # Example:
   # envFrom:

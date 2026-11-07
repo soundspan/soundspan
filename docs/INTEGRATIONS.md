@@ -119,6 +119,16 @@ Songs you like from YouTube Music appear in your Library with a YouTube badge. T
 | High     | ~256 kbps           |
 | Lossless | Best available      |
 
+### Memory and the playback fallback
+
+The sidecar looks up each song with YouTube clients that do not need YouTube's JavaScript player. One lookup uses about 60 MB. If YouTube stops serving a song to those clients, that song does not play.
+
+The sidecar can retry such songs with yt-dlp's full client set. That retry runs YouTube's JavaScript player in a Deno process of about 300 MB. The sidecar runs one retry at a time.
+
+> Warning: Give the sidecar at least 512 MB of memory before you turn the fallback on. With less memory, a retry can run the sidecar out of memory and stop every song that is playing.
+
+To turn the fallback on, set `YTMUSIC_JS_CLIENT_FALLBACK=true` on the `ytmusic-streamer` container. With Helm, set `ytmusicStreamer.env.YTMUSIC_JS_CLIENT_FALLBACK: "true"`. The sidecar logs at startup whether the fallback is on, and logs each retry. Regular YouTube URL playback and downloads do not use the fallback.
+
 ### API access modes
 
 All routes below still require soundspan authentication and

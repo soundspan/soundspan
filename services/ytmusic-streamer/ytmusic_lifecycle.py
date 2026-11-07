@@ -8,6 +8,7 @@ from ytmusic_client import (
     _ytmusic_instances,
     _ytmusic_instances_lock,
 )
+from ytmusic_js_fallback import JS_CLIENT_FALLBACK_ENABLED
 from ytmusic_library import shutdown_library_playlist_provider
 from ytmusic_runtime import DATA_PATH, JsonObject, app, log
 from ytmusic_search import (
@@ -46,6 +47,10 @@ async def startup() -> None:
     log.info(
         f"Browse config: language={YTMUSIC_LANGUAGE}, "
         f"home_filtered_shelves={YTMUSIC_HOME_FILTERED_SHELVES or '(none)'}"
+    )
+    log.info(
+        "JavaScript-client fallback: %s",
+        "enabled" if JS_CLIENT_FALLBACK_ENABLED else "disabled",
     )
 
     # Ensure data directory exists and is writable
