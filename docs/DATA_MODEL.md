@@ -128,8 +128,16 @@ TrackMapping is **advisory, not authoritative**:
 
 | Entity   | Purpose                                | Notes                                                                                                                                    |
 | -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `Artist` | Universal artist (MusicBrainz-backed)  | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, nullable `catalogSyncedAt`, optional peer identity                       |
-| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`, `CATALOG`), nullable `catalogTouchedAt`, nullable `matchedRgMbid` and `rgMbidCheckedAt`, optional peer identity |
+| `Artist` | Universal artist (MusicBrainz-backed)  | `mbid` (unique, null when MusicBrainz has no match), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, nullable `catalogSyncedAt`, optional peer identity                       |
+| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique, null when MusicBrainz has no match), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`, `CATALOG`), nullable `catalogTouchedAt`, nullable `matchedRgMbid` and `rgMbidCheckedAt`, optional peer identity |
+
+Every artist and album is identified by its own `id`, and every relation points
+at that `id`. The MusicBrainz id is an optional attribute: an artist or album
+that MusicBrainz has no match for stores `mbid` / `rgMbid` as null, and a
+`REMOTE` or `FEDERATED` album can hold a synthetic `rgMbid` (below) that keeps
+provider copies of one album on a single row. Federation exports a missing id
+as `temp-<id>`, and Discover Weekly records such an album under that key,
+because both require a non-empty identity string.
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 
@@ -281,7 +289,7 @@ password and no other linked identity.
 | `UserDiscoverConfig` / `UserMoodMix` | Per-user discovery preferences           |
 | `UnavailableAlbum`                   | Albums that couldn't be acquired         |
 | `SimilarArtist`                      | Weighted artist similarity graph         |
-| `OwnedAlbum`                         | Album ownership tracking                 |
+| `OwnedAlbum`                         | Album ownership tracking, keyed by artist and album `id` |
 
 ### Content & Media
 
@@ -348,7 +356,8 @@ permanently deletes rows after `TRACK_REMOVAL_RETENTION_DAYS` (default `90`;
 provenance.
 
 The sync worker compares each federated track with active local tracks by audio
-hash, recording MBID, ISRC, then release-group/disc/track position. When a local
+hash, recording MBID, ISRC, then release-group/disc/track position; the position
+tier applies only when both albums have a release-group id. When a local
 match exists, the federated row remains as the peer-owned alternate and sets
 `dedupOfTrackId` to the winning local `Track.id`. Browse and search suppress
 federated rows with a dedup target by default; `showDedupedCopies` exposes only

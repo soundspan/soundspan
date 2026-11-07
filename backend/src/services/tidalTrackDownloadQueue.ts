@@ -1,4 +1,4 @@
-import { requestCoalescedLibraryScan } from "./coalescedLibraryScan";
+import { requestLibraryFileScan } from "./libraryFileScan";
 import { tidalService } from "./tidal";
 import { logger, type Logger } from "../utils/logger";
 
@@ -16,10 +16,8 @@ interface TidalTrackDownloadResult {
 
 interface TidalTrackDownloadQueueDependencies {
     downloadTrack: (tidalTrackId: number) => Promise<TidalTrackDownloadResult>;
-    requestScan: (
-        userId: string,
-        triggerSource: "tidal-download",
-    ) => Promise<void>;
+    /** Add the downloaded file (relative to the music folder) to the library. */
+    requestScan: (userId: string, relativePath: string) => Promise<void>;
     maxPending: number;
     log: Pick<Logger, "info" | "warn">;
 }
@@ -135,12 +133,15 @@ class InProcessTidalTrackDownloadQueue implements TidalTrackDownloadQueue {
             tidalTrackId: item.tidalTrackId,
             relative_path: result.relative_path,
         });
-        await this.requestScan(item);
+        await this.requestScan(item, result.relative_path);
     }
 
-    private async requestScan(item: TidalTrackDownloadItem): Promise<void> {
+    private async requestScan(
+        item: TidalTrackDownloadItem,
+        relativePath: string,
+    ): Promise<void> {
         try {
-            await this.dependencies.requestScan(item.userId, "tidal-download");
+            await this.dependencies.requestScan(item.userId, relativePath);
         } catch (error) {
             this.dependencies.log.warn(
                 "Failed to request library scan after TIDAL track download",
@@ -197,7 +198,9 @@ export function createTidalTrackDownloadQueue(
 // occupied paths tagged with another id receive identity-suffixed candidates.
 const tidalTrackDownloadQueue = createTidalTrackDownloadQueue({
     downloadTrack: (tidalTrackId) => tidalService.downloadTrack(tidalTrackId),
-    requestScan: requestCoalescedLibraryScan,
+    // Only the downloaded file is new, so scan just that file.
+    requestScan: (userId, relativePath) =>
+        requestLibraryFileScan(userId, [relativePath], "tidal-download"),
     maxPending: 25,
     log: logger.child("TidalTrackDownloadQueue"),
 });

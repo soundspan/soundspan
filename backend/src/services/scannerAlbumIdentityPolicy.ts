@@ -3,11 +3,11 @@ export interface PreferredScannerAlbumCandidate {
     activeTrackCount: number;
     id: string;
     location: string;
-    rgMbid: string;
+    rgMbid: string | null;
 }
 
 function isTemporaryAlbum(candidate: PreferredScannerAlbumCandidate): boolean {
-    return candidate.rgMbid.startsWith("temp-");
+    return candidate.rgMbid === null;
 }
 
 function preferredByTrackCountThenId<T extends PreferredScannerAlbumCandidate>(

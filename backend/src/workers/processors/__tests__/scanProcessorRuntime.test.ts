@@ -225,6 +225,7 @@ describe("scanProcessor runtime behavior", () => {
             progressCallback: (progress: ProgressEvent) => void;
             coverCachePath: string;
             scanLibrary: jest.Mock;
+            scanFiles: jest.Mock;
         }> = [];
 
         const MusicScannerService = jest
@@ -250,6 +251,7 @@ describe("scanProcessor runtime behavior", () => {
                         progressCallback,
                         coverCachePath,
                         scanLibrary,
+                        scanFiles: jest.fn(async () => scanResult),
                     };
                     scannerInstances.push(instance);
                     return instance;
@@ -659,6 +661,31 @@ describe("scanProcessor runtime behavior", () => {
         expect(job.progress).toHaveBeenCalledWith(0);
         expect(job.progress).toHaveBeenCalledWith(100);
         expect(prisma.downloadJob.findMany).not.toHaveBeenCalled();
+    });
+
+    it("scans only the listed files when a job names them", async () => {
+        const scanResult: ScanResult = {
+            tracksAdded: 1,
+            tracksUpdated: 0,
+            tracksRemoved: 0,
+            errors: [],
+            duration: 5,
+        };
+        const { module, scannerInstances, config } = loadScanProcessor({
+            scanResult,
+        });
+        const job = createJob({
+            source: "tidal-play-download",
+            paths: ["Say She She/Prism (2022)/01-01 - Prism.flac"],
+        });
+
+        await expect(module.processScan(job)).resolves.toEqual(scanResult);
+
+        expect(scannerInstances[0].scanFiles).toHaveBeenCalledWith(
+            config.music.musicPath,
+            ["Say She She/Prism (2022)/01-01 - Prism.flac"],
+        );
+        expect(scannerInstances[0].scanLibrary).not.toHaveBeenCalled();
     });
 
     it("updates artist, album, and lidarr-ref jobs for lidarr-triggered scans", async () => {

@@ -1,4 +1,7 @@
-import { filterDistinctDiscographyAlbums } from "../library/artistPageMatching";
+import {
+    filterDistinctDiscographyAlbums,
+    ownedAlbumKeys,
+} from "../library/artistPageMatching";
 
 describe("artist page discography album matching", () => {
     const musicBrainzAlbum = { title: "The Album", rgMbid: "rg-musicbrainz" };
@@ -93,5 +96,17 @@ describe("artist page discography album matching", () => {
                 [remote],
             ),
         ).toEqual([remote]);
+    });
+});
+
+describe("ownedAlbumKeys", () => {
+    it("keys ownership by album id and skips albums without a release group", () => {
+        const keys = ownedAlbumKeys([
+            { albumId: "album-1", album: { rgMbid: "rg-1" } },
+            { albumId: "album-2", album: { rgMbid: null } },
+        ]);
+
+        expect([...keys.ownedAlbumIds]).toEqual(["album-1", "album-2"]);
+        expect([...keys.ownedRgMbids]).toEqual(["rg-1"]);
     });
 });

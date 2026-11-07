@@ -25,7 +25,7 @@ async function seedAlbum(input: {
     hasUserOverrides?: boolean;
     id: string;
     location?: "LIBRARY" | "DISCOVER";
-    rgMbid: string;
+    rgMbid: string | null;
     title: string;
 }): Promise<void> {
     await prisma.album.create({
@@ -161,7 +161,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await seedAlbum({
             id: "album-loser",
             artistId: "merge-artist",
-            rgMbid: "temp-loser",
+            rgMbid: null,
             title: "Cafe and Rain",
         });
         await seedTrack(
@@ -196,12 +196,12 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
             data: [
                 {
                     artistId: "merge-artist",
-                    rgMbid: "real-keeper",
+                    albumId: "album-keeper",
                     source: "enrichment",
                 },
                 {
                     artistId: "merge-artist",
-                    rgMbid: "temp-loser",
+                    albumId: "album-loser",
                     source: "discovery_liked",
                 },
             ],
@@ -249,10 +249,10 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await expect(
             prisma.ownedAlbum.findMany({
                 where: { artistId: "merge-artist" },
-                select: { rgMbid: true, source: true },
+                select: { albumId: true, source: true },
             }),
         ).resolves.toEqual([
-            { rgMbid: "real-keeper", source: "discovery_liked" },
+            { albumId: "album-keeper", source: "discovery_liked" },
         ]);
     });
 
@@ -267,7 +267,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await seedAlbum({
             id: "stale-guard-loser",
             artistId: "stale-guard-artist",
-            rgMbid: "temp-stale-guard",
+            rgMbid: null,
             title: "some album",
         });
         await seedTrack(
@@ -299,13 +299,13 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await seedAlbum({
             id: "temporary-keeper",
             artistId: "temporary-artist",
-            rgMbid: "temp-a",
+            rgMbid: null,
             title: "Temporary Album",
         });
         await seedAlbum({
             id: "temporary-loser",
             artistId: "temporary-artist",
-            rgMbid: "temp-b",
+            rgMbid: null,
             title: "temporary album",
         });
         await seedTrack(
@@ -343,7 +343,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
             id: "promotion-loser",
             artistId: "promotion-artist",
             location: "LIBRARY",
-            rgMbid: "temp-promotion",
+            rgMbid: null,
             title: "promotion album",
         });
         await seedTrack(
@@ -359,7 +359,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await prisma.ownedAlbum.create({
             data: {
                 artistId: "promotion-artist",
-                rgMbid: "temp-promotion",
+                albumId: "promotion-loser",
                 source: "native_scan",
             },
         });
@@ -376,10 +376,10 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await expect(
             prisma.ownedAlbum.findMany({
                 where: { artistId: "promotion-artist" },
-                select: { rgMbid: true, source: true },
+                select: { albumId: true, source: true },
             }),
         ).resolves.toEqual([
-            { rgMbid: "real-promotion", source: "native_scan" },
+            { albumId: "promotion-keeper", source: "native_scan" },
         ]);
     });
 
@@ -394,7 +394,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await seedAlbum({
             id: "null-path-loser",
             artistId: "null-path-artist",
-            rgMbid: "temp-null-path",
+            rgMbid: null,
             title: "null path album",
         });
         await seedTrack(
@@ -431,7 +431,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
             id: "override-loser",
             artistId: "override-artist",
             hasUserOverrides: true,
-            rgMbid: "temp-override",
+            rgMbid: null,
             title: "override album",
         });
         await seedTrack(
@@ -463,7 +463,7 @@ describeWithPostgres("scanner album identity PostgreSQL behavior", () => {
         await seedAlbum({
             id: "guarded-loser",
             artistId: "guarded-artist",
-            rgMbid: "temp-guarded",
+            rgMbid: null,
             title: "some album",
         });
         await seedTrack(

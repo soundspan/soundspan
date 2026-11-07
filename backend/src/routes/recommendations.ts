@@ -8,6 +8,8 @@ import {
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { lastFmService } from "../services/lastfm";
+import { getExploreDiscovery } from "../services/discovery/exploreDiscovery";
+import { sendInternalRouteError } from "../utils/routeErrorResponse";
 import { normalizeForMatching, calculateSimilarity } from "../utils/fuzzyMatch";
 import {
     extractPrimaryArtist,
@@ -119,6 +121,36 @@ function scoreTrackCandidate(
         artistScore,
     };
 }
+
+/**
+ * @openapi
+ * /api/recommendations/explore:
+ *   get:
+ *     summary: Get Explore discovery shelves of music not in the library
+ *     description: >
+ *       Similar artists, recent releases (MusicBrainz), globally trending
+ *       tracks, and genre/tag shelves, tailored to the user's plays and likes
+ *       in soundspan using the instance-wide Last.fm key. Users without
+ *       history receive global popular content (`personalized: false`).
+ *     tags: [Recommendations]
+ *     security:
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Discovery shelves; each shelf may be empty
+ *       401:
+ *         description: Not authenticated
+ *       500:
+ *         description: Failed to build discovery shelves
+ */
+router.get("/explore", async (req, res) => {
+    try {
+        res.json(await getExploreDiscovery(req.user!.id));
+    } catch (error) {
+        logger.error("Get explore discovery error:", error);
+        sendInternalRouteError(res, "Failed to get explore discovery");
+    }
+});
 
 /**
  * @openapi
@@ -382,7 +414,7 @@ router.get("/", async (req, res) => {
             }),
             prisma.ownedAlbum.findMany({
                 where: { artistId: { in: similarArtistIds } },
-                select: { artistId: true, rgMbid: true },
+                select: { artistId: true, albumId: true },
             }),
         ]);
 
@@ -396,7 +428,7 @@ router.get("/", async (req, res) => {
         const ownedByArtist = new Map<string, Set<string>>();
         for (const o of ownedAlbums) {
             const set = ownedByArtist.get(o.artistId) || new Set();
-            set.add(o.rgMbid);
+            set.add(o.albumId);
             ownedByArtist.set(o.artistId, set);
         }
 
@@ -405,7 +437,7 @@ router.get("/", async (req, res) => {
             const artistAlbums = (
                 albumsByArtist.get(similar.toArtistId) || []
             ).slice(0, 3);
-            const ownedRgMbids =
+            const ownedAlbumIds =
                 ownedByArtist.get(similar.toArtistId) || new Set();
 
             return {
@@ -418,7 +450,7 @@ router.get("/", async (req, res) => {
                 similarity: similar.weight,
                 topAlbums: artistAlbums.map((album) => ({
                     ...album,
-                    owned: ownedRgMbids.has(album.rgMbid),
+                    owned: ownedAlbumIds.has(album.id),
                 })),
             };
         });
@@ -556,13 +588,15 @@ router.get("/albums", async (req, res) => {
         ];
         const ownedAlbumsForRec = await prisma.ownedAlbum.findMany({
             where: { artistId: { in: artistIdsForOwnership } },
-            select: { rgMbid: true },
+            select: { albumId: true },
         });
-        const ownedRgMbidSet = new Set(ownedAlbumsForRec.map((o) => o.rgMbid));
+        const ownedAlbumIdSet = new Set(
+            ownedAlbumsForRec.map((o) => o.albumId),
+        );
 
         const recommendations = slicedAlbums.map((album) => ({
             ...album,
-            owned: ownedRgMbidSet.has(album.rgMbid),
+            owned: ownedAlbumIdSet.has(album.id),
         }));
 
         res.json({

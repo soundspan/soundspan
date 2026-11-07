@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +37,12 @@ def test_tokenizer_is_commit_pinned_and_runtime_offline() -> None:
 
 def test_image_runs_nonroot_with_authenticated_healthcheck() -> None:
     """Retain the non-root runtime and internal-secret probe header."""
-    assert "USER dclap" in DOCKERFILE
+    # The dclap user is UID 1000; the numeric USER lets Kubernetes verify
+    # runAsNonRoot, and an arbitrary OpenShift UID must not need a home.
+    assert "useradd --create-home --uid 1000 dclap" in DOCKERFILE
+    assert re.search(r"^USER 1000$", DOCKERFILE, re.MULTILINE)
+    assert "HOME=/tmp" in DOCKERFILE
+    assert "NUMBA_CACHE_DIR=/tmp/numba-cache" in DOCKERFILE
     assert "X-Internal-Secret: ${INTERNAL_API_SECRET:-}" in DOCKERFILE
     assert "DCLAP_ONNX_INTRA_OP_THREADS=1" in DOCKERFILE
 

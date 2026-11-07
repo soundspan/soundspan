@@ -111,6 +111,7 @@ async function loadLocalAlbums(rgMbids: string[]): Promise<LocalAlbumLookup> {
     const albumIdByRgMbid = new Map<string, string>();
     const rgMbidByAlbumId = new Map<string, string>();
     for (const row of rows) {
+        if (!row.rgMbid) continue;
         albumIdByRgMbid.set(row.rgMbid, row.id);
         rgMbidByAlbumId.set(row.id, row.rgMbid);
     }
@@ -192,7 +193,7 @@ export async function loadDedupIndex(
 export function findDedupMatch(
     index: DedupIndex,
     item: TrackEnvelope,
-    albumRgMbid: string,
+    albumRgMbid: string | null,
 ): DedupMatch | null {
     const attributes = item.attributes;
     const audio = attributes.audioHash
@@ -205,6 +206,7 @@ export function findDedupMatch(
     if (recording) return { id: recording, confidence: 0.95 };
     const isrc = attributes.isrc ? index.isrc.get(attributes.isrc) : undefined;
     if (isrc) return { id: isrc, confidence: 0.9 };
+    if (!albumRgMbid) return null;
     const positional = index.position.get(
         positionKey(albumRgMbid, attributes.discNo, attributes.trackNo),
     );

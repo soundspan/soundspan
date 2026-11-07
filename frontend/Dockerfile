@@ -76,9 +76,19 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
     rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
-    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack && \
+    # Next.js writes its image and fetch cache here at runtime. Group 0 with
+    # owner permissions lets an arbitrary UID in group 0 (OpenShift
+    # restricted-v2) write it as well as UID 1000.
+    mkdir -p /app/.next/cache && \
+    chown -R node:node /app/.next/cache && \
+    chgrp -R 0 /app/.next/cache && \
+    chmod -R g=u /app/.next/cache
 
-USER node
+# An arbitrary UID has no passwd entry or home directory.
+ENV HOME=/tmp
+
+USER 1000
 
 EXPOSE 3030
 

@@ -166,21 +166,19 @@ async function resolveOrCreateByName(
 }
 
 /**
- * Create a new Artist entity with a temporary MBID.
+ * Create a new Artist entity with no MusicBrainz id.
  * Handles P2002 unique constraint races by retrying with a find.
  */
 async function createNewArtist(
     name: string,
     normalizedName: string,
 ): Promise<ArtistResolutionResult> {
-    const tempMbid = `temp-remote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
     try {
         const created = await prisma.artist.create({
             data: {
                 name,
                 normalizedName,
-                mbid: tempMbid,
+                mbid: null,
                 enrichmentStatus: "pending",
             },
         });

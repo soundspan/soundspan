@@ -17,6 +17,29 @@ interface SimilarArtist {
     url: string;
 }
 
+/** Named Last.fm list entry (artist or tag) as returned by chart/tag APIs. */
+export interface LastFmNamedItem {
+    name: string;
+    mbid?: string;
+    url?: string;
+    image?: unknown;
+    listeners?: string;
+}
+
+/** Track entry returned by Last.fm `chart.getTopTracks`. */
+export interface LastFmChartTrack {
+    name: string;
+    mbid?: string;
+    url?: string;
+    listeners?: string;
+    playcount?: string;
+    artist?: { name?: string; mbid?: string } | string;
+    image?: unknown;
+}
+
+// Last.fm serves this image id as its "no artist image" star placeholder.
+const LASTFM_PLACEHOLDER_IMAGE_ID = "2a96cbd8b46e442fc41c2b86b821562f";
+
 class LastFmService {
     private client: AxiosInstance;
     private readonly envApiKey: string;
@@ -1075,45 +1098,11 @@ class LastFmService {
             // Get detailed info for each artist with images
             const detailedArtists = await Promise.all(
                 artists.map(async (artist: any) => {
-                    // Try to get image from Fanart.tv using MBID
-                    let image = null;
-                    if (artist.mbid) {
-                        try {
-                            image = await fanartService.getArtistImage(
-                                artist.mbid,
-                            );
-                        } catch (error) {
-                            // Silently fail
-                        }
-                    }
-
-                    // Fallback to Deezer (most reliable)
-                    if (!image) {
-                        try {
-                            const deezerImage =
-                                await deezerService.getArtistImage(artist.name);
-                            if (deezerImage) {
-                                image = deezerImage;
-                            }
-                        } catch (error) {
-                            // Silently fail
-                        }
-                    }
-
-                    // Last fallback to Last.fm images (but filter placeholders)
-                    if (!image) {
-                        const lastFmImage = this.getBestImage(
-                            normalizeToArray(artist.image),
-                        );
-                        if (
-                            lastFmImage &&
-                            !lastFmImage.includes(
-                                "2a96cbd8b46e442fc41c2b86b821562f",
-                            )
-                        ) {
-                            image = lastFmImage;
-                        }
-                    }
+                    const image = await this.resolveArtistImage(
+                        artist.name,
+                        artist.mbid,
+                        artist.image,
+                    );
 
                     return {
                         type: "music",
@@ -1144,6 +1133,117 @@ class LastFmService {
             logger.error("Last.fm chart artists error:", error);
             return [];
         }
+    }
+
+    /**
+     * Resolve a display image for an external artist: Fanart.tv by MBID,
+     * then Deezer by name, then Last.fm's own image when it is not the
+     * Last.fm placeholder star.
+     */
+    async resolveArtistImage(
+        artistName: string,
+        mbid?: string,
+        lastFmImages?: unknown,
+    ): Promise<string | null> {
+        if (mbid) {
+            try {
+                const fanartImage = await fanartService.getArtistImage(mbid);
+                if (fanartImage) return fanartImage;
+            } catch {
+                // Fall through to the next image source.
+            }
+        }
+
+        try {
+            const deezerImage = await deezerService.getArtistImage(artistName);
+            if (deezerImage) return deezerImage;
+        } catch {
+            // Fall through to the Last.fm image.
+        }
+
+        const lastFmImage = this.getBestImage(normalizeToArray(lastFmImages));
+        if (lastFmImage && !lastFmImage.includes(LASTFM_PLACEHOLDER_IMAGE_ID)) {
+            return lastFmImage;
+        }
+        return null;
+    }
+
+    /**
+     * Run a cached Last.fm list request. Failures and a missing API key
+     * return an empty list so discovery shelves degrade to empty.
+     */
+    private async cachedList<T>(
+        cacheKey: string,
+        ttlSeconds: number,
+        params: Record<string, unknown>,
+        pick: (data: any) => unknown,
+    ): Promise<T[]> {
+        await this.ensureInitialized();
+        if (!this.apiKey) return [];
+
+        try {
+            const cached = await redisClient.get(cacheKey);
+            if (cached) return JSON.parse(cached) as T[];
+        } catch (err) {
+            logger.warn("Redis get error:", err);
+        }
+
+        try {
+            const data = await this.request({
+                ...params,
+                api_key: this.apiKey,
+                format: "json",
+            });
+            const items = normalizeToArray(pick(data)) as T[];
+            try {
+                await redisClient.setEx(
+                    cacheKey,
+                    ttlSeconds,
+                    JSON.stringify(items),
+                );
+            } catch (err) {
+                logger.warn("Redis set error:", err);
+            }
+            return items;
+        } catch (error) {
+            logger.error(`Last.fm ${String(params.method)} error:`, error);
+            return [];
+        }
+    }
+
+    /** Global Last.fm top tracks right now (cached for six hours). */
+    async getTopChartTracks(limit = 50): Promise<LastFmChartTrack[]> {
+        return this.cachedList<LastFmChartTrack>(
+            `lastfm:chart:tracks:${limit}`,
+            21600,
+            { method: "chart.getTopTracks", limit },
+            (data) => data?.tracks?.track,
+        );
+    }
+
+    /** Global Last.fm top tags right now (cached for six hours). */
+    async getTopChartTags(limit = 10): Promise<LastFmNamedItem[]> {
+        return this.cachedList<LastFmNamedItem>(
+            `lastfm:chart:tags:${limit}`,
+            21600,
+            { method: "chart.getTopTags", limit },
+            (data) => data?.tags?.tag,
+        );
+    }
+
+    /** Top Last.fm artists for a tag (cached for one day). */
+    async getTopArtistsByTag(
+        tag: string,
+        limit = 30,
+    ): Promise<LastFmNamedItem[]> {
+        const normalizedTag = tag.trim().toLowerCase();
+        if (!normalizedTag) return [];
+        return this.cachedList<LastFmNamedItem>(
+            `lastfm:tag:artists:${normalizedTag}:${limit}`,
+            86400,
+            { method: "tag.getTopArtists", tag: normalizedTag, limit },
+            (data) => data?.topartists?.artist,
+        );
     }
 }
 

@@ -253,6 +253,38 @@ export function TidalCard({
                     </div>
                 </SettingsRow>
 
+                {/* Shared streaming account */}
+                <SettingsRow
+                    label="Share this account with all users"
+                    description="Every user searches, browses, and streams TIDAL through this account instead of linking their own. Turn off to return to per-user accounts."
+                    htmlFor="tidal-streaming-shared-account"
+                >
+                    <SettingsToggle
+                        id="tidal-streaming-shared-account"
+                        checked={!!settings.tidalStreamingUseInstanceAccount}
+                        onChange={(checked) =>
+                            onUpdate({
+                                tidalStreamingUseInstanceAccount: checked,
+                            })
+                        }
+                    />
+                </SettingsRow>
+
+                {/* Download before play */}
+                <SettingsRow
+                    label="Download songs as they play"
+                    description="Every TIDAL song plays from its download: this account downloads it to the library at the highest quality, and listeners hear it as it arrives. Nothing plays without being saved."
+                    htmlFor="tidal-download-before-play"
+                >
+                    <SettingsToggle
+                        id="tidal-download-before-play"
+                        checked={!!settings.tidalDownloadBeforePlay}
+                        onChange={(checked) =>
+                            onUpdate({ tidalDownloadBeforePlay: checked })
+                        }
+                    />
+                </SettingsRow>
+
                 {/* Quality */}
                 <SettingsRow
                     label="Download Quality"

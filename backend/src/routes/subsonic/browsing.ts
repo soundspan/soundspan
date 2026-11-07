@@ -564,7 +564,7 @@ async function loadArtistInfo(artistId: string, count: number) {
     if (!artist) return null;
     return {
         biography: artist.summary ?? "",
-        musicBrainzId: artist.mbid,
+        musicBrainzId: artist.mbid ?? undefined,
         smallImageUrl: artist.heroUrl ?? undefined,
         mediumImageUrl: artist.heroUrl ?? undefined,
         largeImageUrl: artist.heroUrl ?? undefined,
@@ -750,7 +750,7 @@ async function loadAlbumInfo(albumId: string) {
     if (!album) return null;
     return {
         notes: album.title,
-        musicBrainzId: album.rgMbid,
+        musicBrainzId: album.rgMbid ?? undefined,
         smallImageUrl: album.coverUrl ?? undefined,
         mediumImageUrl: album.coverUrl ?? undefined,
         largeImageUrl: album.coverUrl ?? undefined,

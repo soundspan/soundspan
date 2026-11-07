@@ -24,12 +24,16 @@ export type AudiobookEnvelope = Extract<
 >;
 
 /** Existing remote artist identity loaded for one page. */
-export type RemoteArtistRow = { id: string; remoteId: string; mbid: string };
+export type RemoteArtistRow = {
+    id: string;
+    remoteId: string;
+    mbid: string | null;
+};
 /** Existing remote album identity loaded for one page. */
 export type RemoteAlbumRow = {
     id: string;
     remoteId: string;
-    rgMbid: string;
+    rgMbid: string | null;
     artistId: string;
 };
 /** Existing remote track identity loaded for one page. */

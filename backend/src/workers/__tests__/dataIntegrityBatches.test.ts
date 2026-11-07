@@ -101,6 +101,20 @@ describe("data-integrity batch decisions", () => {
                 artistId: "artist-3",
                 artist: { name: "C", mbid: null },
             },
+            {
+                id: "owned-without-mbid",
+                rgMbid: null,
+                title: "Four",
+                artistId: "artist-4",
+                artist: { name: "D", mbid: null },
+            },
+            {
+                id: "orphan-without-mbid",
+                rgMbid: null,
+                title: "Five",
+                artistId: "artist-5",
+                artist: { name: "E", mbid: null },
+            },
         ];
 
         expect(
@@ -118,9 +132,12 @@ describe("data-integrity batch decisions", () => {
                         artistName: " b ",
                     },
                 ],
-                [{ artistId: "different", rgMbid: "rg-3" }],
+                [
+                    { artistId: "different", albumId: "orphan" },
+                    { artistId: "artist-4", albumId: "owned-without-mbid" },
+                ],
             ),
-        ).toEqual(["orphan"]);
+        ).toEqual(["orphan", "orphan-without-mbid"]);
     });
 
     it("rejects marker growth beyond the configured bound", () => {

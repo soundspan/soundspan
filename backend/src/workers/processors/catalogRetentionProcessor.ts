@@ -19,7 +19,7 @@ interface CatalogRetentionResult {
 
 interface CatalogCandidate {
     id: string;
-    rgMbid: string;
+    rgMbid: string | null;
     tracks: Array<{ id: string }>;
 }
 
@@ -92,7 +92,9 @@ async function loadCatalogReferences(
     candidates: readonly CatalogCandidate[],
     recentDownloadCutoff: Date,
 ): Promise<CatalogReferences> {
-    const rgMbids = candidates.map((album) => album.rgMbid);
+    const rgMbids = candidates.flatMap((album) =>
+        album.rgMbid ? [album.rgMbid] : [],
+    );
     const trackIds = candidates.flatMap((album) =>
         album.tracks.map((track) => track.id),
     );
@@ -111,7 +113,8 @@ function referencedAlbumIds(
         candidates
             .filter(
                 (album) =>
-                    references.rgMbids.has(album.rgMbid) ||
+                    (album.rgMbid !== null &&
+                        references.rgMbids.has(album.rgMbid)) ||
                     album.tracks.some((track) =>
                         references.trackIds.has(track.id),
                     ),

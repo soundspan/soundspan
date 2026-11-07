@@ -45,7 +45,7 @@ import { selectPreferredAlbumOwnershipSource } from "../albumOwnershipPromotion"
 function album(
     id: string,
     title: string,
-    rgMbid: string,
+    rgMbid: string | null,
     activeTrackCount: number,
     artistId = "artist-1",
     location: "LIBRARY" | "DISCOVER" = "LIBRARY",
@@ -107,10 +107,10 @@ describe("scanner album dedup policy", () => {
     it("groups scanner albums by artist and normalized exact title", () => {
         const groups = groupScannerAlbumDuplicates([
             album("album-1", "Café & Rain", "real-1", 10),
-            album("album-2", "Cafe and Rain", "temp-2", 1),
-            album("album-3", "Cafe—And—Rain", "temp-3", 2),
-            album("album-4", "Cafe and Rain", "temp-4", 1, "artist-2"),
-            album("album-5", "Take Care (Deluxe)", "temp-5", 1),
+            album("album-2", "Cafe and Rain", null, 1),
+            album("album-3", "Cafe—And—Rain", null, 2),
+            album("album-4", "Cafe and Rain", null, 1, "artist-2"),
+            album("album-5", "Take Care (Deluxe)", null, 1),
         ]);
 
         expect(groups).toHaveLength(1);
@@ -123,7 +123,7 @@ describe("scanner album dedup policy", () => {
 
     it("selects the sole real release-group identity as keeper", () => {
         const real = album("album-real", "Album", "real-rg", 1);
-        const temporary = album("album-temp", "album", "temp-rg", 20);
+        const temporary = album("album-temp", "album", null, 20);
 
         expect(selectScannerAlbumKeeper([temporary, real])).toEqual({
             keeper: real,
@@ -132,9 +132,9 @@ describe("scanner album dedup policy", () => {
     });
 
     it("uses active track count and then oldest id for temporary rows", () => {
-        const oldest = album("album-a", "Album", "temp-a", 5);
-        const newer = album("album-b", "album", "temp-b", 5);
-        const sparse = album("album-c", "ALBUM", "temp-c", 1);
+        const oldest = album("album-a", "Album", null, 5);
+        const newer = album("album-b", "album", null, 5);
+        const sparse = album("album-c", "ALBUM", null, 1);
 
         expect(selectScannerAlbumKeeper([newer, sparse, oldest])).toEqual({
             keeper: oldest,
@@ -146,7 +146,7 @@ describe("scanner album dedup policy", () => {
         const discover = album(
             "album-a",
             "Album",
-            "temp-a",
+            null,
             20,
             "artist-1",
             "DISCOVER",
@@ -154,7 +154,7 @@ describe("scanner album dedup policy", () => {
         const library = album(
             "album-b",
             "album",
-            "temp-b",
+            null,
             1,
             "artist-1",
             "LIBRARY",
@@ -171,7 +171,7 @@ describe("scanner album dedup policy", () => {
             selectScannerAlbumKeeper([
                 album("album-a", "Album", "real-a", 3),
                 album("album-b", "album", "real-b", 2),
-                album("album-c", "ALBUM", "temp-c", 1),
+                album("album-c", "ALBUM", null, 1),
             ]),
         ).toBeNull();
     });
@@ -204,7 +204,7 @@ describe("scanner album dedup policy", () => {
                 album(
                     `album-${index.toString().padStart(3, "0")}-b`,
                     `album ${index}`,
-                    `temp-${index}`,
+                    null,
                     1,
                 ),
             ],
@@ -233,7 +233,7 @@ describe("scanner album dedup policy", () => {
     it("locks track rows before album rows within the merge transaction", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -267,7 +267,7 @@ describe("scanner album dedup policy", () => {
     it("reparents only the locked loser track ids and refreshes derived state", async () => {
         const identities = [
             album("keeper", "Café & Rain", "real-keeper", 0),
-            album("loser", "Cafe and Rain", "temp-loser", 0),
+            album("loser", "Cafe and Rain", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -343,9 +343,18 @@ describe("scanner album dedup policy", () => {
         });
         expect(mockTransaction.ownedAlbum.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
+                where: {
+                    artistId_albumId: {
+                        artistId: "artist-1",
+                        albumId: "keeper",
+                    },
+                },
                 update: { source: "discovery_liked" },
             }),
         );
+        expect(mockTransaction.ownedAlbum.deleteMany).toHaveBeenCalledWith({
+            where: { albumId: "loser" },
+        });
         expect(mockTransaction.discoveryAlbum.updateMany).toHaveBeenCalled();
         expect(mockTransaction.trackTidal.updateMany).toHaveBeenCalled();
         expect(mockTransaction.trackYtMusic.updateMany).toHaveBeenCalled();
@@ -365,7 +374,7 @@ describe("scanner album dedup policy", () => {
     it("drops locked tracks that no longer belong to the revalidated group", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -405,7 +414,7 @@ describe("scanner album dedup policy", () => {
     it("skips the full group when a loser has an active local null path", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -444,15 +453,7 @@ describe("scanner album dedup policy", () => {
     it("skips the full group when a loser has user overrides", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album(
-                "loser",
-                "album",
-                "temp-loser",
-                0,
-                "artist-1",
-                "LIBRARY",
-                true,
-            ),
+            album("loser", "album", null, 0, "artist-1", "LIBRARY", true),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -484,7 +485,7 @@ describe("scanner album dedup policy", () => {
     it("promotes a DISCOVER real keeper before transferring LIBRARY ownership", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0, "artist-1", "DISCOVER"),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -531,7 +532,7 @@ describe("scanner album dedup policy", () => {
     it("does not let a soft-removed keeper path satisfy the guard", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -562,7 +563,7 @@ describe("scanner album dedup policy", () => {
     it("skips a loser with no active local tracks", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -586,7 +587,7 @@ describe("scanner album dedup policy", () => {
     it("skips a group above the total track-row ceiling", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -605,7 +606,7 @@ describe("scanner album dedup policy", () => {
     it("skips the full group when ownership references violate album identity", async () => {
         const identities = [
             album("keeper", "Album", "real-keeper", 0),
-            album("loser", "album", "temp-loser", 0),
+            album("loser", "album", null, 0),
         ];
         mockPrisma.album.findMany.mockResolvedValueOnce(identities);
         mockTransaction.album.findMany.mockResolvedValueOnce(identities);
@@ -629,7 +630,7 @@ describe("scanner album dedup policy", () => {
         mockTransaction.ownedAlbum.findMany.mockResolvedValueOnce([
             {
                 artistId: "different-artist",
-                rgMbid: "temp-loser",
+                albumId: "loser",
             },
         ]);
 
@@ -642,9 +643,9 @@ describe("scanner album dedup policy", () => {
     it("counts a failed group and continues to the next group", async () => {
         mockPrisma.album.findMany.mockResolvedValueOnce([
             album("a-keeper", "Album A", "real-a", 0),
-            album("a-loser", "album a", "temp-a", 0),
+            album("a-loser", "album a", null, 0),
             album("b-keeper", "Album B", "real-b", 0),
-            album("b-loser", "album b", "temp-b", 0),
+            album("b-loser", "album b", null, 0),
         ]);
         mockPrisma.$transaction
             .mockRejectedValueOnce(new Error("group failed"))
@@ -675,7 +676,7 @@ describe("scanner album dedup policy", () => {
     it("reports duplicate groups deferred by the group cap", async () => {
         const candidates = Array.from({ length: 201 }, (_unused, index) => [
             album(`keeper-${index}`, `Album ${index}`, `real-${index}`, 0),
-            album(`loser-${index}`, `album ${index}`, `temp-${index}`, 0),
+            album(`loser-${index}`, `album ${index}`, null, 0),
         ]).flat();
         for (let offset = 0; offset < candidates.length; offset += 100) {
             mockPrisma.album.findMany.mockResolvedValueOnce(

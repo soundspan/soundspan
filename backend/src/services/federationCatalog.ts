@@ -23,6 +23,7 @@ import {
 } from "./federationEmbeddingSpace";
 import { encodeFederationEmbeddingSpaceHeader } from "./federationEmbeddingSpaceHeader";
 import { resolveFederationInstanceName } from "./federationInstanceName";
+import { musicBrainzIdOrSynthetic } from "../utils/musicIds";
 
 const log = logger.child("FederationCatalog");
 const LEGACY_EXPORT_WARNING_INTERVAL_MS = 60_000;
@@ -233,7 +234,7 @@ function artistEnvelope(row: ArtistRow): FederationMediaItemEnvelope {
         updatedAt: row.updatedAt,
         attributes: {
             name: row.name,
-            mbid: row.mbid,
+            mbid: musicBrainzIdOrSynthetic(row.id, row.mbid),
             normalizedName: row.normalizedName,
         },
     };
@@ -247,7 +248,7 @@ function albumEnvelope(row: AlbumRow): FederationMediaItemEnvelope {
         parentRef: row.artistId,
         attributes: {
             title: row.title,
-            rgMbid: row.rgMbid,
+            rgMbid: musicBrainzIdOrSynthetic(row.id, row.rgMbid),
             year: row.year,
             primaryType: row.primaryType,
         },

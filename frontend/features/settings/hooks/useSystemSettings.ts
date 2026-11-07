@@ -29,6 +29,8 @@ const defaultSystemSettings: SystemSettings = {
     tidalQuality: "HIGH",
     tidalFileTemplate:
         "{album.artist}/{album.title}/{item.number:02d}. {item.title}",
+    tidalStreamingUseInstanceAccount: false,
+    tidalDownloadBeforePlay: false,
     musicPath: "/music",
     downloadPath: "/downloads",
     transcodeCacheMaxGb: 10,
@@ -42,6 +44,8 @@ const defaultSystemSettings: SystemSettings = {
     downloadSource: "soulseek",
     federationInstanceName: null,
     playbackSourceOrder: "library,peers,tidal,ytmusic",
+    searchProviderOrder: "lastfm,deezer,tidal,youtube",
+    searchProvidersEnabled: "lastfm,deezer",
     primaryFailureFallback: "none",
     // YouTube Music streaming
     ytMusicEnabled: false,

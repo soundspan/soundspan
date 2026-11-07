@@ -527,10 +527,10 @@ export async function handleGetRecentlyListened(req: Request, res: Response) {
     const albumCounts = await prisma.ownedAlbum.groupBy({
         by: ["artistId"],
         where: { artistId: { in: artistIds } },
-        _count: { rgMbid: true },
+        _count: { albumId: true },
     });
     const albumCountMap = new Map(
-        albumCounts.map((ac) => [ac.artistId, ac._count.rgMbid]),
+        albumCounts.map((ac) => [ac.artistId, ac._count.albumId]),
     );
 
     // Map results - no on-demand image fetching for performance

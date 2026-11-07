@@ -24,7 +24,7 @@ import { format, startOfWeek, subWeeks } from "date-fns";
 /** Artist identity returned for Discover Weekly metadata seeding. */
 export interface SeedArtist {
     name: string;
-    mbid?: string;
+    mbid?: string | null;
 }
 
 type RecentPlayCount = {
@@ -253,7 +253,7 @@ export class DiscoverySeeding {
      */
     async isAlbumOwned(albumMbid: string, userId: string): Promise<boolean> {
         const ownedAlbum = await prisma.ownedAlbum.findFirst({
-            where: { rgMbid: albumMbid },
+            where: { album: { rgMbid: albumMbid } },
         });
         if (ownedAlbum) return true;
 

@@ -28,7 +28,7 @@ const VARIOUS_ARTISTS_KEY = normalizeForExactKey("Various Artists");
 
 interface RemoteAlbumCandidate {
     id: string;
-    rgMbid: string;
+    rgMbid: string | null;
     title: string;
     matchedRgMbid: string | null;
     artist: { name: string; mbid: string | null };

@@ -32,7 +32,7 @@ export interface RemoteLibraryArtistEntity {
 export interface RemoteLibraryAlbumEntity {
     id: string;
     title: string;
-    rgMbid: string;
+    rgMbid: string | null;
     coverUrl: string | null;
     artistId: string;
     location: AlbumLocation;

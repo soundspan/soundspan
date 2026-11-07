@@ -31,17 +31,27 @@ COPY services/common ./services/common
 # Create writable directories and non-root user
 # - /data/.tiddl : tiddl library cache/config (RWO — single pod)
 # - /tmp/tidal   : ephemeral scratch space for in-progress downloads
+# Runtime-written paths also belong to group 0 with owner permissions so an
+# arbitrary UID in group 0 (OpenShift restricted-v2) can write them. Sources
+# are byte-compiled now because that UID cannot write /app at runtime.
 RUN useradd -m -u 1000 tidal && \
     mkdir -p /data/.tiddl /tmp/tidal && \
-    chown -R tidal:tidal /app /data /tmp/tidal
+    chown -R tidal:tidal /app /data /tmp/tidal && \
+    chgrp -R 0 /data /tmp/tidal && \
+    chmod -R g=u /data /tmp/tidal && \
+    python3 -m compileall -q /app
 
 ENV TIDDL_PATH=/data/.tiddl
 ENV MUSIC_PATH=/music
 ENV TIDAL_TRACK_DELAY=3
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+# An arbitrary UID has no passwd entry or home directory.
+ENV HOME=/tmp
+ENV XDG_CACHE_HOME=/tmp/.cache
 
 # Drop to non-root user (compatible with K8s runAsNonRoot / runAsUser: 1000)
-USER tidal
+USER 1000
 
 EXPOSE 8585
 
