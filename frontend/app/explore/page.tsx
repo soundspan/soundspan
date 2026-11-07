@@ -16,6 +16,8 @@ import { LastFmBadge } from "@/components/ui/LastFmBadge";
 import { LibraryBadge } from "@/components/ui/LibraryBadge";
 import { mapYtMusicChartsToFeaturedPlaylists } from "@/hooks/useQueries";
 import { useTidalExploreEnabled } from "@/features/explore/hooks/useTidalExploreEnabled";
+import { useExploreDiscovery } from "@/features/explore/hooks/useExploreDiscovery";
+import { ExploreDiscoverySection } from "@/features/explore/components/ExploreDiscoverySection";
 
 /**
  * Explore page — the unified discovery landing that consolidates
@@ -24,6 +26,7 @@ import { useTidalExploreEnabled } from "@/features/explore/hooks/useTidalExplore
 export default function ExplorePage() {
     const { showYtMusicExplore } = useUserSettingsExplorePrefs();
     const { showTidalExplore } = useTidalExploreEnabled();
+    const { discovery } = useExploreDiscovery();
 
     const {
         likedSummary,
@@ -89,6 +92,9 @@ export default function ExplorePage() {
                         isRefreshingMixes={isRefreshingMixes}
                         handleRefreshMixes={handleRefreshMixes}
                     />
+
+                    {/* Discovery: music outside the library */}
+                    <ExploreDiscoverySection discovery={discovery} />
 
                     {/* Quick Start Radio */}
                     <section>
