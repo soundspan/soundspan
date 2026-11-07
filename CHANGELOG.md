@@ -8,9 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [2.7.2] - 2026-11-07
+
+### Added
+
 - YouTube Music has an opt-in playback fallback for songs that the regular clients cannot play. Set `YTMUSIC_JS_CLIENT_FALLBACK=true` on the YouTube Music sidecar, and a failed song lookup or playback download is retried once with yt-dlp's full client set, which includes the clients that need YouTube's JavaScript player. Each retry starts a Deno process of about 300 MB, and the sidecar runs one retry at a time. The setting is off by default; turn it on only when the sidecar has at least 512 MB of memory. The sidecar logs at startup whether the fallback is on, and logs each retry.
 
 ### Changed
+
+- The frontend moves to Next.js 16.4.5, and the TIDAL and YouTube Music sidecars move to pydantic 2.14.3 and anyio 4.16.0 (#1002, #1008). These are maintenance updates with no behavior change.
 
 ### Fixed
 
