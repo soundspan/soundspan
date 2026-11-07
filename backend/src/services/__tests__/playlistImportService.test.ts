@@ -54,6 +54,8 @@ const mockYtMusicService = {
 
 const mockTidalStreamingService = {
     restoreOAuth: jest.fn(),
+    usesInstanceAccount: jest.fn(),
+    ensureInstanceSession: jest.fn(),
     findMatchesForAlbum: jest.fn(),
     getBrowsePlaylist: jest.fn(),
     getPublicBrowsePlaylist: jest.fn(),
@@ -1271,6 +1273,52 @@ describe("PlaylistImportService", () => {
             ]);
             expect(result.summary.tidal).toBe(1);
             expect(result.summary.unresolved).toBe(1);
+        });
+
+        it("matches TIDAL through the shared instance account for a user without a link", async () => {
+            mockSpotifyService.parseUrl.mockReturnValue({
+                type: "playlist",
+                id: "sp_tidal_shared",
+            });
+            mockSpotifyService.getPlaylist.mockResolvedValueOnce({
+                name: "Shared Account Playlist",
+                tracks: [
+                    {
+                        title: "Shared Song",
+                        artist: "Shared Artist",
+                        album: "Shared Album",
+                        durationMs: 190000,
+                        isrc: null,
+                    },
+                ],
+            });
+            mockPrisma.userSettings.findUnique.mockResolvedValueOnce(null);
+            mockTidalStreamingService.usesInstanceAccount.mockResolvedValueOnce(
+                true,
+            );
+            mockTidalStreamingService.ensureInstanceSession.mockResolvedValueOnce(
+                true,
+            );
+            mockTidalStreamingService.findMatchesForAlbum.mockResolvedValueOnce(
+                [null],
+            );
+            mockYtMusicService.findMatchesForAlbum.mockResolvedValueOnce([
+                null,
+            ]);
+
+            await playlistImportService.previewImport(
+                "user_1",
+                "https://open.spotify.com/playlist/sp_tidal_shared",
+            );
+
+            expect(
+                mockTidalStreamingService.findMatchesForAlbum,
+            ).toHaveBeenCalledWith("user_1", [
+                expect.objectContaining({ title: "Shared Song" }),
+            ]);
+            expect(
+                mockTidalStreamingService.restoreOAuth,
+            ).not.toHaveBeenCalled();
         });
 
         it("skips Tidal matching when session restore fails and falls back to YouTube", async () => {

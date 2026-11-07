@@ -1,6 +1,7 @@
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { hasConnectedProviderToken } from "../libraryTrackPreferences";
+import { usesTidalInstanceAccount } from "../tidalAccountMode";
 import {
     DEFAULT_PLAYBACK_SOURCE_ORDER,
     parsePlaybackSourceOrder,
@@ -33,7 +34,8 @@ export async function loadRemoteLibraryAccess(
         providers: {
             tidal:
                 systemSettings?.tidalEnabled === true &&
-                hasConnectedProviderToken(userSettings?.tidalOAuthJson),
+                (usesTidalInstanceAccount(systemSettings) ||
+                    hasConnectedProviderToken(userSettings?.tidalOAuthJson)),
             // YouTube Music playback has an authenticated public fallback.
             youtube: systemSettings?.ytMusicEnabled === true,
         },

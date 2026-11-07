@@ -109,6 +109,14 @@ jest.mock("../../services/tidal", () => ({
     },
 }));
 
+const mockTidalStreamingService = {
+    clearAccountModeCache: jest.fn(),
+    resetInstanceSession: jest.fn(),
+};
+jest.mock("../../services/tidalStreaming", () => ({
+    tidalStreamingService: mockTidalStreamingService,
+}));
+
 jest.mock("../../services/notificationService", () => ({
     notificationService: {
         notifySystem: jest.fn(),
@@ -326,6 +334,67 @@ describe("systemSettings runtime routes", () => {
         expect(res.body.lidarrApiKey).toBe("dec:lidarr-api");
         expect(res.body.fanartApiKey).toBeNull();
         expect(res.body.federationInstanceName).toBe("Living Room Library");
+    });
+
+    it("saves the shared TIDAL account toggle and applies it immediately", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { tidalStreamingUseInstanceAccount: true },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    tidalStreamingUseInstanceAccount: true,
+                }),
+            }),
+        );
+        expect(
+            mockTidalStreamingService.clearAccountModeCache,
+        ).toHaveBeenCalled();
+    });
+
+    it("rejects a non-boolean shared TIDAL account toggle", async () => {
+        const res = createRes();
+
+        await postSettingsHandler(
+            {
+                user: { id: "admin-1" },
+                body: { tidalStreamingUseInstanceAccount: "yes" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(mockSystemSettingsUpsert).not.toHaveBeenCalled();
+    });
+
+    it("drops the shared streaming session when the admin relinks TIDAL", async () => {
+        mockTidalService.pollDeviceAuth.mockResolvedValueOnce({
+            access_token: "new-access",
+            refresh_token: "new-refresh",
+            user_id: "tidal-1",
+            country_code: "GB",
+            username: "admin",
+            token_type: "Bearer",
+            expires_in: 3600,
+        });
+        const res = createRes();
+
+        await tidalTokenHandler(
+            { user: { id: "admin-1" }, body: { device_code: "dc" } } as any,
+            res,
+        );
+
+        expect(res.body).toEqual(expect.objectContaining({ success: true }));
+        expect(mockTidalService.saveTokens).toHaveBeenCalled();
+        expect(
+            mockTidalStreamingService.resetInstanceSession,
+        ).toHaveBeenCalled();
     });
 
     it("persists a trimmed federation instance name", async () => {

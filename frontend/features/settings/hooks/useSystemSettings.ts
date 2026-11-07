@@ -29,6 +29,7 @@ const defaultSystemSettings: SystemSettings = {
     tidalQuality: "HIGH",
     tidalFileTemplate:
         "{album.artist}/{album.title}/{item.number:02d}. {item.title}",
+    tidalStreamingUseInstanceAccount: false,
     musicPath: "/music",
     downloadPath: "/downloads",
     transcodeCacheMaxGb: 10,

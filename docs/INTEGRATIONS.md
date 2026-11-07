@@ -176,9 +176,21 @@ Stream unowned tracks via per-user TIDAL OAuth.
 3. Complete the provider authorization flow
 4. Choose quality and save
 
-Streaming auth is separate from admin download auth.
+Streaming auth is separate from admin download auth, unless an admin shares the download account (see below).
 
 Songs you like from TIDAL appear in your Library with a TIDAL badge while you are signed in. See [Your Library](USAGE_GUIDE.md#your-library).
+
+### Sharing one account with every user
+
+An admin can let every user stream TIDAL through the admin download account instead of linking their own:
+
+1. Connect TIDAL under **Admin** → **Download Services** (see [TIDAL Downloads](#tidal-downloads))
+2. Turn on **Share this account with all users** in the same card
+3. Save
+
+While it is on, every user's TIDAL search, browse, matching, and streaming use that one account, users see **Using the server's TIDAL account** in their TIDAL card instead of a Connect button, and linking a personal account is turned off. Each user's streaming quality still applies, up to what the shared subscription allows. Personal accounts users linked before are kept but not used; turning the setting off goes back to them. Relinking the admin account takes effect on the next request.
+
+TIDAL may allow only one stream at a time per account, so two users playing TIDAL at the same moment can interrupt each other. Sharing an account may also be against TIDAL's terms for your plan.
 
 ### Quality settings
 
