@@ -16,7 +16,7 @@
 # with yt-dlp.
 #
 # Regenerate the lock: see the header of requirements.lock.
-fastapi>=0.162.0
+fastapi>=0.162.4
 uvicorn>=0.54.0
 mutagen>=1.48.1
 pydantic>=2.14.2
