@@ -36,9 +36,9 @@ jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
     requireInteractiveSession: (req: any, res: any, next: () => void) =>
         jest
-            .requireActual<
-                typeof import("../../middleware/auth")
-            >("../../middleware/auth")
+            .requireActual<typeof import("../../middleware/auth")>(
+                "../../middleware/auth",
+            )
             .requireInteractiveSession(req, res, next),
     requireAdmin: (_req: any, _res: any, next: () => void) => next(),
     generateToken: jest.fn(),

@@ -6,12 +6,7 @@ import type {
 } from "@soundspan/media-metadata-contract";
 
 export type FilterTab =
-    | "all"
-    | "library"
-    | "discover"
-    | "podcasts"
-    | "peers"
-    | "soulseek";
+    "all" | "library" | "discover" | "podcasts" | "peers" | "soulseek";
 
 export interface Artist {
     id: string;

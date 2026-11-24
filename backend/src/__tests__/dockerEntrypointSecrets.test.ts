@@ -6,9 +6,7 @@ import path from "path";
 const ENTRYPOINT_PATH = path.resolve(__dirname, "../../docker-entrypoint.sh");
 const STRONG_SECRET = "s".repeat(32);
 type SecretName =
-    | "SESSION_SECRET"
-    | "SETTINGS_ENCRYPTION_KEY"
-    | "INTERNAL_API_SECRET";
+    "SESSION_SECRET" | "SETTINGS_ENCRYPTION_KEY" | "INTERNAL_API_SECRET";
 
 function deleteUndefinedOverride(
     env: NodeJS.ProcessEnv,

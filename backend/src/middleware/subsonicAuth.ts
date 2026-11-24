@@ -233,8 +233,7 @@ interface AuthFailure {
 }
 
 type AuthenticationResult =
-    | { user: SubsonicPrincipal }
-    | { failure: AuthFailure };
+    { user: SubsonicPrincipal } | { failure: AuthFailure };
 
 function readQueryString(req: Request, key: string): string {
     const value = req.query[key];

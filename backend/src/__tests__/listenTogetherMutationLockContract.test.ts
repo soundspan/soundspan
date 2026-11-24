@@ -580,8 +580,7 @@ describe("listen together mutation lock", () => {
             stateStoreEnabled: true,
         });
         let observedFence:
-            | { fencingToken: number; isFenced(): boolean }
-            | undefined;
+            { fencingToken: number; isFenced(): boolean } | undefined;
         let finishOperation: () => void = () => undefined;
         const operation = lock.withGroupMutationLock(
             "group-1",
@@ -632,8 +631,7 @@ describe("listen together mutation lock", () => {
             stateStoreEnabled: true,
         });
         let observedFence:
-            | { fencingToken: number; isFenced(): boolean }
-            | undefined;
+            { fencingToken: number; isFenced(): boolean } | undefined;
         let releaseOperation: () => void = () => undefined;
         const operationGate = new Promise<void>((resolve) => {
             releaseOperation = resolve;

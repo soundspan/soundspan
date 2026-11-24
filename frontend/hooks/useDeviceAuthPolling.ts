@@ -4,11 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Lifecycle phase for a device-code authentication attempt. */
 export type DeviceAuthPhase =
-    | "idle"
-    | "loading"
-    | "polling"
-    | "success"
-    | "error";
+    "idle" | "loading" | "polling" | "success" | "error";
 
 /** Normalized device-code session returned by an authentication initiator. */
 export interface DeviceAuthSession {

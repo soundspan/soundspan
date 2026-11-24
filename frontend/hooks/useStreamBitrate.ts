@@ -300,11 +300,7 @@ export interface PlaybackQualityBadge {
 }
 
 export type PlaybackStreamSource =
-    | "local"
-    | "peer"
-    | "tidal"
-    | "youtube"
-    | "youtube-direct";
+    "local" | "peer" | "tidal" | "youtube" | "youtube-direct";
 
 /**
  * Executes resolvePlaybackQualityBadge.

@@ -1435,8 +1435,7 @@ describe("api entrypoint runtime behavior", () => {
         await flushPromises();
 
         const intervalCallback = setIntervalSpy.mock.calls[0]?.[0] as
-            | (() => Promise<void>)
-            | undefined;
+            (() => Promise<void>) | undefined;
         expect(intervalCallback).toBeDefined();
         await intervalCallback?.();
 
@@ -1499,8 +1498,7 @@ describe("api entrypoint runtime behavior", () => {
         await flushPromises();
 
         const intervalCallback = setIntervalSpy.mock.calls[0]?.[0] as
-            | (() => Promise<void>)
-            | undefined;
+            (() => Promise<void>) | undefined;
         expect(intervalCallback).toBeDefined();
 
         await intervalCallback?.();

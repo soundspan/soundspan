@@ -16,11 +16,7 @@ import type { MapTrack } from "./types";
 
 /** Compass directions offered by the segmented control. */
 export type CompassDirection =
-    | "any"
-    | "happier"
-    | "sadder"
-    | "calmer"
-    | "more-energetic";
+    "any" | "happier" | "sadder" | "calmer" | "more-energetic";
 
 export const COMPASS_DIRECTIONS: readonly CompassDirection[] = [
     "any",

@@ -22,8 +22,7 @@ interface ParsedVibeSearchRequest {
 
 /** Result of validating and normalizing an untrusted vibe-search body. */
 export type VibeSearchRequestResult =
-    | { ok: true; value: ParsedVibeSearchRequest }
-    | { ok: false; error: string };
+    { ok: true; value: ParsedVibeSearchRequest } | { ok: false; error: string };
 
 interface RankedSearchTrack extends TextSearchResult {
     finalScore?: number;

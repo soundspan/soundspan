@@ -74,8 +74,7 @@ async function handleGetAlbumListLike(
         let albums: AlbumListRecord[] = [];
         let enrichmentByAlbumId = new Map<string, SongEnrichment>();
         let playEnrichmentByTrackId:
-            | ReadonlyMap<string, SongEnrichment>
-            | undefined;
+            ReadonlyMap<string, SongEnrichment> | undefined;
 
         if (type === "starred") {
             albums = [];

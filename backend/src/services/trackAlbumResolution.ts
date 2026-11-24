@@ -17,10 +17,7 @@ const CACHE_PREFIX = "track-album-resolution:";
 
 /** Provider rung that produced an external track album resolution. */
 export type TrackAlbumResolutionSource =
-    | "musicbrainz-album"
-    | "musicbrainz-recording"
-    | "lastfm"
-    | "deezer";
+    "musicbrainz-album" | "musicbrainz-recording" | "lastfm" | "deezer";
 
 const RESOLUTION_SOURCES = new Set<TrackAlbumResolutionSource>([
     "musicbrainz-album",

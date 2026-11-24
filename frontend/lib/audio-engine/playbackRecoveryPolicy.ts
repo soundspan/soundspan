@@ -41,10 +41,7 @@ export interface CorrelatedRecoveryResumeInput {
 }
 
 export type CorrelatedRecoveryResumeMismatchReason =
-    | "none"
-    | "track_mismatch"
-    | "load_mismatch"
-    | "session_mismatch";
+    "none" | "track_mismatch" | "load_mismatch" | "session_mismatch";
 
 export interface CorrelatedRecoveryResumeDecision {
     resumeAtSec: number;
@@ -53,9 +50,7 @@ export interface CorrelatedRecoveryResumeDecision {
 }
 
 export type BufferingRecoveryAction =
-    | "transition_playing"
-    | "force_playing"
-    | "noop";
+    "transition_playing" | "force_playing" | "noop";
 
 const DEFAULT_MAX_ENGINE_DRIFT_SEC = 15;
 const DEFAULT_SEEK_TOLERANCE_SEC = 5;

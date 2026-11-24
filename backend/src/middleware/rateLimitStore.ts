@@ -246,8 +246,7 @@ class BoundedMemorySlidingWindowStore {
         const existed = this.entries.delete(key);
         if (!existed && this.entries.size >= this.maxEntries) {
             const oldestKey = this.entries.keys().next().value as
-                | string
-                | undefined;
+                string | undefined;
             if (oldestKey !== undefined) this.entries.delete(oldestKey);
         }
         this.entries.set(key, value);

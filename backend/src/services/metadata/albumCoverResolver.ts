@@ -34,8 +34,7 @@ export interface AlbumCoverResolution {
 }
 
 type CacheLookup =
-    | { found: false }
-    | { found: true; value: AlbumCoverResolution | null };
+    { found: false } | { found: true; value: AlbumCoverResolution | null };
 
 type RungResult =
     | { status: "resolved"; value: AlbumCoverResolution }

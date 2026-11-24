@@ -19,9 +19,7 @@ export type DirectEngineSlot = "howler" | "native";
 
 /** Why a given direct engine was selected, for logs and tests. */
 export type DirectEngineSelectionReason =
-    | "android_webview_pin"
-    | "native_mode_flag"
-    | "default_direct_engine";
+    "android_webview_pin" | "native_mode_flag" | "default_direct_engine";
 
 export interface DirectEngineSelectionInput {
     /** Resolved STREAMING_ENGINE_MODE flag value. */

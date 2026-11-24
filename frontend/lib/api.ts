@@ -92,10 +92,7 @@ export interface AlbumRelease {
 }
 
 export type ImportResolutionSource =
-    | "local"
-    | "youtube"
-    | "tidal"
-    | "unresolved";
+    "local" | "youtube" | "tidal" | "unresolved";
 
 export interface PlaylistImportResolvedTrack {
     index: number;

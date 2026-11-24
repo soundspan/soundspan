@@ -1,9 +1,5 @@
 export type ActivityTab =
-    | "notifications"
-    | "active"
-    | "history"
-    | "imports"
-    | "social";
+    "notifications" | "active" | "history" | "imports" | "social";
 
 const ALL_ACTIVITY_TAB_IDS: ActivityTab[] = [
     "notifications",

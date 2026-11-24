@@ -135,8 +135,7 @@ export async function findApiKeyRecord<R>(
 }
 
 export type ApiKeyHashOutcome =
-    | { action: "skip-hashed" }
-    | { action: "hash"; value: string };
+    { action: "skip-hashed" } | { action: "hash"; value: string };
 
 /**
  * Decide what the F28 backfill should do with one stored `ApiKey.key`:

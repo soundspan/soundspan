@@ -524,8 +524,7 @@ router.post(
             if (metadata?.downloadType === "pending-track-retry") {
                 const playlistId = metadata.playlistId as string | undefined;
                 const pendingTrackId = metadata.pendingTrackId as
-                    | string
-                    | undefined;
+                    string | undefined;
 
                 if (!playlistId || !pendingTrackId) {
                     return sendRouteError(

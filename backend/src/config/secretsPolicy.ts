@@ -13,9 +13,7 @@ export const INSECURE_INTERNAL_API_SECRET =
 
 /** Stable reason codes returned by critical-secret validation. */
 export type CriticalSecretFailure =
-    | "missing"
-    | "published-default"
-    | "too-short";
+    "missing" | "published-default" | "too-short";
 
 /**
  * Resolve the primary settings-encryption key with the legacy key as fallback.

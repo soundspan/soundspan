@@ -13,10 +13,7 @@ export interface FanartArtistImageOptions {
 }
 
 type FanartArtistImageKind =
-    | "artistbackground"
-    | "artistthumb"
-    | "musicbanner"
-    | "hdmusiclogo";
+    "artistbackground" | "artistthumb" | "musicbanner" | "hdmusiclogo";
 
 const BACKGROUND_FIRST: readonly FanartArtistImageKind[] = [
     "artistbackground",

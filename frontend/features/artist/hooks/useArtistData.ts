@@ -86,8 +86,7 @@ export function useArtistData() {
         enabled: shouldHydrateDetails,
         staleTime: (query) => {
             const data = query.state.data as
-                | { discographyComplete?: boolean }
-                | undefined;
+                { discographyComplete?: boolean } | undefined;
             if (data?.discographyComplete === false) return 0;
             return 10 * 60 * 1000;
         },

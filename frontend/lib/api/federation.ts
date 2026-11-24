@@ -2,10 +2,7 @@ import { type ApiClientConstructor } from "./core";
 
 /** Scopes supported by the federation v1 host API. */
 export type FederationScope =
-    | "library:read"
-    | "stream:read"
-    | "embeddings:read"
-    | "social:read";
+    "library:read" | "stream:read" | "embeddings:read" | "social:read";
 
 export type FederationPeerDirection = "HOST" | "CONSUMER" | "BOTH";
 
@@ -59,11 +56,7 @@ export interface FederationPeerHealth {
     lastError: string | null;
     lastErrorAt: string | null;
     lastErrorClass:
-        | "unreachable"
-        | "tls"
-        | "unauthorized"
-        | "peer_invalid"
-        | null;
+        "unreachable" | "tls" | "unauthorized" | "peer_invalid" | null;
     lastEmbeddingOutcome: "active" | "skipped_mismatch" | null;
     health: FederationHealthState;
 }

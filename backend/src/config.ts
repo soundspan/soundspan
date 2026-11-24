@@ -766,8 +766,7 @@ export const config = {
     // resolution, or `true` (trust all) by default. Set TRUST_PROXY_HOPS to your
     // real reverse-proxy depth (usually 1) to enable spoof protection.
     trustProxy: (trustProxyHops >= 0 ? trustProxyHops : true) as
-        | number
-        | boolean,
+        number | boolean,
 
     // Worker event-loop stall watchdog (issue #43): a stall above the warn
     // threshold logs the active Bull jobs so liveness-probe kills can be

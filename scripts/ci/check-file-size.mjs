@@ -54,23 +54,23 @@ const FIXED_SCAN_ROOTS = Object.freeze([
 
 const BASELINE = Object.freeze({
     "backend/src/routes/browse.ts": 1540,
-    "backend/src/routes/enrichment.ts": 2249,
+    "backend/src/routes/enrichment.ts": 2246,
     "backend/src/routes/library/radio.ts": 1563,
     "backend/src/routes/library/tracks.ts": 1650,
     "backend/src/routes/playlists.ts": 2262,
-    "backend/src/routes/podcasts.ts": 2537,
-    "backend/src/routes/systemSettings.ts": 1490,
+    "backend/src/routes/podcasts.ts": 2536,
+    "backend/src/routes/systemSettings.ts": 1489,
     "backend/src/routes/youtubeMusic.ts": 1604,
     "backend/src/services/lidarr.ts": 1685,
     "backend/src/services/simpleDownloadManager.ts": 1191,
-    "backend/src/services/spotify.ts": 1624,
+    "backend/src/services/spotify.ts": 1623,
     "backend/src/workers/unifiedEnrichment.ts": 1825,
     "frontend/app/playlist/[id]/page.tsx": 1506,
     "frontend/components/player/AudioPlaybackOrchestrator.tsx": 1595,
     "frontend/components/player/OverlayPlayer.tsx": 1352,
     "frontend/hooks/useQueries.ts": 1453,
     "frontend/lib/audio-controls-context.tsx": 2305,
-    "frontend/lib/listen-together-context.tsx": 1949,
+    "frontend/lib/listen-together-context.tsx": 1948,
     "services/audio-analyzer/analyzer.py": 2248,
 });
 

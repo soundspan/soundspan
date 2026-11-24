@@ -128,8 +128,7 @@ test("applies limit to rendered rows but play action still queues all tracks", a
     assert.match(html, /items:1/);
 
     const onPlay = trackListRenderState.props?.onPlay as
-        | ((track: LibraryTrack, index: number) => void)
-        | undefined;
+        ((track: LibraryTrack, index: number) => void) | undefined;
     assert.ok(onPlay);
     onPlay(tracks[0], 0);
 
@@ -177,8 +176,7 @@ test("toggles pause/resume instead of requeueing when current track is selected"
     playbackState.isPlaying = true;
     renderToStaticMarkup(React.createElement(LibraryTracksList, { tracks }));
     let onPlay = trackListRenderState.props?.onPlay as
-        | ((track: LibraryTrack, index: number) => void)
-        | undefined;
+        ((track: LibraryTrack, index: number) => void) | undefined;
     assert.ok(onPlay);
     onPlay(tracks[0], 0);
     assert.equal(controlCalls.pause, 1);
@@ -188,8 +186,7 @@ test("toggles pause/resume instead of requeueing when current track is selected"
     playbackState.isPlaying = false;
     renderToStaticMarkup(React.createElement(LibraryTracksList, { tracks }));
     onPlay = trackListRenderState.props?.onPlay as
-        | ((track: LibraryTrack, index: number) => void)
-        | undefined;
+        ((track: LibraryTrack, index: number) => void) | undefined;
     assert.ok(onPlay);
     onPlay(tracks[0], 0);
     assert.equal(controlCalls.pause, 1);

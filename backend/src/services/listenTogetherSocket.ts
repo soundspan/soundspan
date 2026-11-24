@@ -1343,9 +1343,9 @@ function registerLifecycleHandlers(socket: AuthenticatedSocket): void {
                 handleLeaveRoomAdmitted(socket, true),
             );
         } catch (error) {
-            if (
-                !(error instanceof GroupError && error.code === "UNAVAILABLE")
-            ) {
+            if (!(
+                error instanceof GroupError && error.code === "UNAVAILABLE"
+            )) {
                 log.warn("Disconnect cleanup failed", { error });
             }
         }

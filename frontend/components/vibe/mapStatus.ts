@@ -7,12 +7,7 @@ import { formatRelativeTime } from "@/utils/formatTime";
 
 /** Lifecycle of an admin-requested rebuild as seen by the chip. */
 export type MapRebuildState =
-    | "idle"
-    | "requesting"
-    | "building"
-    | "stalled"
-    | "failed"
-    | "error";
+    "idle" | "requesting" | "building" | "stalled" | "failed" | "error";
 
 /** Progress of a newer embedding space that has not cut over yet. */
 export interface MapMigrationInput {

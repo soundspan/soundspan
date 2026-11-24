@@ -220,12 +220,10 @@ export default function SeriesDetailPage() {
                                             {book.coverUrl &&
                                             getCoverUrl(book.coverUrl, 100) ? (
                                                 <Image
-                                                    src={
-                                                        getCoverUrl(
-                                                            book.coverUrl,
-                                                            100,
-                                                        )!
-                                                    }
+                                                    src={getCoverUrl(
+                                                        book.coverUrl,
+                                                        100,
+                                                    )!}
                                                     alt={book.title}
                                                     fill
                                                     sizes="48px"

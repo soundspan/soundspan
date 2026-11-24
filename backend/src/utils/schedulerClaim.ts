@@ -29,8 +29,7 @@ export const SCHEDULER_CLAIM_OWNER_ID = `${SCHEDULER_CLAIM_PROCESS_ID}:scheduler
 
 /** Outcome from a non-blocking scheduler claim attempt. */
 export type SchedulerClaimResult<T> =
-    | Readonly<{ acquired: false }>
-    | Readonly<{ acquired: true; value: T }>;
+    Readonly<{ acquired: false }> | Readonly<{ acquired: true; value: T }>;
 
 type RedisOperation<T> = (client: Redis) => Promise<T>;
 

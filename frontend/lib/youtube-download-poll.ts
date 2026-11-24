@@ -9,11 +9,7 @@
 
 /** Lifecycle states reported by the backend download job proxy. */
 export type YouTubeDownloadJobState =
-    | "queued"
-    | "downloading"
-    | "processing"
-    | "completed"
-    | "failed";
+    "queued" | "downloading" | "processing" | "completed" | "failed";
 
 /** Decision derived from a single download job status poll. */
 export interface YouTubeDownloadPollResult {

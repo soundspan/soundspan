@@ -420,8 +420,7 @@ describe("federation HTTP client", () => {
                     callback: (
                         error: NodeJS.ErrnoException | null,
                         address:
-                            | string
-                            | Array<{ address: string; family: number }>,
+                            string | Array<{ address: string; family: number }>,
                         family?: number,
                     ) => void,
                 ) => void;

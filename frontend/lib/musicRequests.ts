@@ -7,12 +7,7 @@
  */
 
 export type MusicRequestStatus =
-    | "pending"
-    | "approved"
-    | "denied"
-    | "fulfilled"
-    | "failed"
-    | "cancelled";
+    "pending" | "approved" | "denied" | "fulfilled" | "failed" | "cancelled";
 
 export type MusicRequestFilter = "all" | MusicRequestStatus;
 
@@ -32,11 +27,7 @@ export const REQUEST_STATUS_LABELS: Record<MusicRequestStatus, string> = {
 };
 
 export type RequestBadgeVariant =
-    | "success"
-    | "warning"
-    | "error"
-    | "info"
-    | "default";
+    "success" | "warning" | "error" | "info" | "default";
 
 const STATUS_BADGE_VARIANTS: Record<MusicRequestStatus, RequestBadgeVariant> = {
     pending: "warning",

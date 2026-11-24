@@ -48,8 +48,7 @@ async function migrateModel(
     // hand-listed models, not runtime app code.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const delegate = (prisma as any)[modelName] as
-        | EncryptedModelDelegate
-        | undefined;
+        EncryptedModelDelegate | undefined;
     if (!delegate?.findMany) {
         console.warn(`[migrate-gcm] unknown model "${modelName}", skipping`);
         return emptyStats();

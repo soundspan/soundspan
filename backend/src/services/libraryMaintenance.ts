@@ -37,8 +37,7 @@ interface RejectedLibraryMaintenance {
 }
 
 type LibraryMaintenanceAdmission =
-    | AdmittedLibraryMaintenance
-    | RejectedLibraryMaintenance;
+    AdmittedLibraryMaintenance | RejectedLibraryMaintenance;
 
 const releaseRedisClaim = (key: string, token: string): Promise<void> =>
     releaseSchedulerClaim(key, token, "library maintenance admission");

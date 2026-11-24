@@ -250,8 +250,7 @@ class SpotifyService {
                                 ) {
                                     const albumKey = albumRef;
                                     const albumData = apolloData[albumKey] as
-                                        | Record<string, any>
-                                        | undefined;
+                                        Record<string, any> | undefined;
                                     if (albumData) {
                                         albumName = albumData.name;
                                         albumId = albumKey.split(":").pop();

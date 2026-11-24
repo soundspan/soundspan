@@ -86,8 +86,7 @@ interface SocialPresenceOptions {
 function useSocialPresencePushInvalidation(
     enabled: boolean,
     queryKey:
-        | typeof SOCIAL_ONLINE_QUERY_KEY
-        | typeof SOCIAL_CONNECTED_QUERY_KEY,
+        typeof SOCIAL_ONLINE_QUERY_KEY | typeof SOCIAL_CONNECTED_QUERY_KEY,
 ) {
     const { isAuthenticated } = useAuth();
     const queryClient = useQueryClient();

@@ -762,8 +762,7 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(res.statusCode).toBe(200);
         expect(res.headers["Content-Type"]).toBe("audio/mpeg");
         const getCallOptions = mockAxiosGet.mock.calls[0]?.[1] as
-            | Record<string, any>
-            | undefined;
+            Record<string, any> | undefined;
         expect(getCallOptions?.signal).toBeDefined();
         expect(upstream.pipe).toHaveBeenCalledWith(res);
 
@@ -984,8 +983,7 @@ describe("podcasts streaming/runtime behavior", () => {
         await streamHandler(req, res);
 
         const rangedCallOptions = mockAxiosGet.mock.calls[0]?.[1] as
-            | Record<string, any>
-            | undefined;
+            Record<string, any> | undefined;
         expect(rangedCallOptions?.validateStatus(206)).toBe(true);
         expect(rangedCallOptions?.validateStatus(500)).toBe(false);
 

@@ -1,6 +1,5 @@
 export type RangeParseResult =
-    | { ok: true; start: number; end: number }
-    | { ok: false; status: 416 };
+    { ok: true; start: number; end: number } | { ok: false; status: 416 };
 
 /**
  * Parse an HTTP Range header value into start/end byte offsets.

@@ -415,9 +415,7 @@ export function ReleaseSelectionModal({
                                 onChange={(event) =>
                                     setSeederFilter(
                                         event.target.value as
-                                            | "all"
-                                            | "1"
-                                            | "10",
+                                            "all" | "1" | "10",
                                     )
                                 }
                                 className="mt-1 w-full rounded border border-white/15 bg-surface-elevated px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"

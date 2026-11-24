@@ -1,9 +1,7 @@
 import { logger } from "../utils/logger";
 
 export type SocialPresenceUpdateReason =
-    | "heartbeat"
-    | "playback-state"
-    | "playback-state-cleared";
+    "heartbeat" | "playback-state" | "playback-state-cleared";
 
 export interface SocialPresenceUpdatedEvent {
     userId: string;

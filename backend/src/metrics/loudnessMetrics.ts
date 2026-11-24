@@ -6,9 +6,7 @@ export type LoudnessCoverageState = "measured" | "unmeasured";
 
 /** Closed loudness backfill outcome vocabulary shared with the analyzer. */
 export type LoudnessBackfillOutcome =
-    | "measured_success"
-    | "transient_failure"
-    | "permanently_skipped";
+    "measured_success" | "transient_failure" | "permanently_skipped";
 
 /** Bounded outcome labels used for Redis collection and exposition. */
 export const LOUDNESS_BACKFILL_OUTCOMES = [

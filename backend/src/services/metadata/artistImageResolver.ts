@@ -32,8 +32,7 @@ export interface ArtistImageResolution {
 }
 
 type CacheLookup =
-    | { found: false }
-    | { found: true; value: ArtistImageResolution | null };
+    { found: false } | { found: true; value: ArtistImageResolution | null };
 
 type RungResult =
     | { status: "resolved"; value: ArtistImageResolution }

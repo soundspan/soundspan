@@ -19,11 +19,7 @@ const EMPTY_TRAIL: readonly TrailPoint[] = [];
 const EMPTY_PLAN: readonly Point[] = [];
 
 type EscapeAction =
-    | "dismiss-sweep"
-    | "close-aux"
-    | "exit-mode"
-    | "exit-fullscreen"
-    | null;
+    "dismiss-sweep" | "close-aux" | "exit-mode" | "exit-fullscreen" | null;
 
 /** Select the single action owned by an Escape key press. */
 export function resolveEscapeAction(

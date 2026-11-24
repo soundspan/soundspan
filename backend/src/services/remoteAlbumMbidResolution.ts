@@ -71,11 +71,7 @@ const remoteAlbumCandidateSelect = {
 } satisfies Prisma.AlbumSelect;
 
 type AlbumOutcome =
-    | "matched"
-    | "missed"
-    | "skipped"
-    | "permanentError"
-    | "transientError";
+    "matched" | "missed" | "skipped" | "permanentError" | "transientError";
 
 /** Counts emitted by one bounded remote-album identity resolution run. */
 export interface RemoteAlbumMbidResolutionResult {

@@ -51,17 +51,10 @@ export type FederationPlaylistFetchOutcome =
     | "invalid_response"
     | "failure";
 export type FederationPlaylistFollowOutcome =
-    | "followed"
-    | "unfollowed"
-    | "failure";
+    "followed" | "unfollowed" | "failure";
 export type FederationPlaylistCopyOutcome = "success" | "failure";
 export type FederationStreamOutcome =
-    | "ok"
-    | "http_4xx"
-    | "http_5xx"
-    | "timeout"
-    | "aborted"
-    | "error";
+    "ok" | "http_4xx" | "http_5xx" | "timeout" | "aborted" | "error";
 export type FederationAuthFailureReason =
     | "scope"
     | "no_token"

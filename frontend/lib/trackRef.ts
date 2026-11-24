@@ -4,9 +4,7 @@ import type {
 } from "@soundspan/media-metadata-contract";
 
 export type TrackRef =
-    | { trackId: string }
-    | { tidalTrackId: number }
-    | { youtubeVideoId: string };
+    { trackId: string } | { tidalTrackId: number } | { youtubeVideoId: string };
 
 export type AddToPlaylistRef =
     | { trackId: string }
