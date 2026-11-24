@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Python images move to `opentelemetry-api` 1.45.2, which fixes CVE-2026-126360. The TIDAL and YouTube Music sidecars also move to FastAPI 0.165.0, pydantic 2.14.4, and a refreshed Python 3.15 base image, and the frontend moves to Next.js 16.4.6. These are maintenance updates with no behavior change.
+
 ### Fixed
 
 ## [2.7.2] - 2026-11-07
