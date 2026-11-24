@@ -7,6 +7,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { tidalStreamingService } from "./tidalStreaming";
+import { TIDAL_INSTANCE_SESSION_ID } from "./tidalAccountMode";
 import { ytMusicService } from "./youtubeMusic";
 
 const log = logger.child("RemoteTrackMetadataRefresh");
@@ -81,6 +82,23 @@ function dedupeUserIds(userIds: Array<string | null | undefined>): string[] {
 
 class RemoteTrackMetadataRefreshService {
     /**
+     * Sidecar sessions that can fetch TIDAL metadata: the shared instance
+     * session when the admin enabled it, otherwise every linked user.
+     */
+    private async getTidalCandidateUserIds(): Promise<string[]> {
+        if (await tidalStreamingService.usesInstanceAccount()) {
+            return (await tidalStreamingService.ensureInstanceSession())
+                ? [TIDAL_INSTANCE_SESSION_ID]
+                : [];
+        }
+        const tidalUsers = await prisma.userSettings.findMany({
+            where: { tidalOAuthJson: { not: null } },
+            select: { userId: true },
+        });
+        return dedupeUserIds(tidalUsers.map((user) => user.userId));
+    }
+
+    /**
      * Find remote provider rows with placeholder metadata and re-fetch from provider APIs.
      */
     async refreshUnknownMetadata(
@@ -119,13 +137,7 @@ class RemoteTrackMetadataRefreshService {
 
         // Refresh Tidal rows
         if (unknownTidal.length > 0) {
-            const tidalUsers = await prisma.userSettings.findMany({
-                where: { tidalOAuthJson: { not: null } },
-                select: { userId: true },
-            });
-            const tidalUserIds = dedupeUserIds(
-                tidalUsers.map((user) => user.userId),
-            );
+            const tidalUserIds = await this.getTidalCandidateUserIds();
             const tidalUserIdSet = new Set(tidalUserIds);
             let preferredTidalUserId: string | null = null;
 

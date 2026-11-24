@@ -39,6 +39,7 @@ export function TidalStreamingCard({
     const [tidalEnabled, setTidalEnabled] = useState(false);
     const [tidalAvailable, setTidalAvailable] = useState(false);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [usesSharedAccount, setUsesSharedAccount] = useState(false);
     const [statusLoading, setStatusLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export function TidalStreamingCard({
             setTidalEnabled(status.enabled);
             setTidalAvailable(status.available);
             setIsAuthenticated(status.authenticated);
+            setUsesSharedAccount(status.accountMode === "instance");
         } catch {
             // TIDAL streaming not available
         }
@@ -193,9 +195,13 @@ export function TidalStreamingCard({
 
     const statusText = statusLoading
         ? "Checking..."
-        : isAuthenticated
-          ? "Connected"
-          : "Not connected";
+        : usesSharedAccount
+          ? isAuthenticated
+              ? "Using the server's TIDAL account"
+              : "Server's TIDAL account is unavailable"
+          : isAuthenticated
+            ? "Connected"
+            : "Not connected";
 
     const statusColor: "green" | "red" | "gray" = statusLoading
         ? "gray"
@@ -221,8 +227,8 @@ export function TidalStreamingCard({
             statusText={statusText}
             statusColor={statusColor}
             connected={isAuthenticated}
-            onConnect={handleLinkAccount}
-            onDisconnect={handleDisconnect}
+            onConnect={usesSharedAccount ? undefined : handleLinkAccount}
+            onDisconnect={usesSharedAccount ? undefined : handleDisconnect}
             isLoading={statusLoading || authState === "loading"}
             expanded={isExpanded}
             disabled={isDisabled}
@@ -230,7 +236,7 @@ export function TidalStreamingCard({
             warning={warningBanner}
         >
             {/* Device Code Auth Flow (not authenticated) */}
-            {!isAuthenticated && tidalAvailable && (
+            {!isAuthenticated && tidalAvailable && !usesSharedAccount && (
                 <div className="space-y-3">
                     {/* In linking flow — show device code + verification URL */}
                     {userCode && authState === "polling" && (

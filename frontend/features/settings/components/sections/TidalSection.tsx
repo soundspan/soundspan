@@ -253,6 +253,23 @@ export function TidalCard({
                     </div>
                 </SettingsRow>
 
+                {/* Shared streaming account */}
+                <SettingsRow
+                    label="Share this account with all users"
+                    description="Every user searches, browses, and streams TIDAL through this account instead of linking their own. Turn off to return to per-user accounts."
+                    htmlFor="tidal-streaming-shared-account"
+                >
+                    <SettingsToggle
+                        id="tidal-streaming-shared-account"
+                        checked={!!settings.tidalStreamingUseInstanceAccount}
+                        onChange={(checked) =>
+                            onUpdate({
+                                tidalStreamingUseInstanceAccount: checked,
+                            })
+                        }
+                    />
+                </SettingsRow>
+
                 {/* Quality */}
                 <SettingsRow
                     label="Download Quality"

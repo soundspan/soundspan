@@ -58,6 +58,8 @@ export interface SystemSettings {
     tidalCountryCode: string;
     tidalQuality: "LOW" | "HIGH" | "LOSSLESS" | "HI_RES_LOSSLESS";
     tidalFileTemplate: string;
+    // Every user streams and browses TIDAL through the admin account above.
+    tidalStreamingUseInstanceAccount: boolean;
     // Storage
     musicPath: string;
     downloadPath: string;

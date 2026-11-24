@@ -242,6 +242,26 @@ class TidalService {
     }
 
     /**
+     * Decrypted instance-account tokens for sharing with TIDAL streaming.
+     * Returns null when the admin account is not connected or fails to decrypt.
+     */
+    async getAccountCredentials(): Promise<{
+        accessToken: string;
+        refreshToken: string;
+        userId: string;
+        countryCode: string;
+    } | null> {
+        const creds = await this.getCredentials();
+        if (!creds) return null;
+        return {
+            accessToken: creds.accessToken,
+            refreshToken: creds.refreshToken,
+            userId: creds.userId,
+            countryCode: creds.countryCode,
+        };
+    }
+
+    /**
      * Persist new tokens (encrypted) to SystemSettings.
      */
     async saveTokens(tokens: {

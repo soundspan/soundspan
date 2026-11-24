@@ -4,7 +4,9 @@
  * Per-user TIDAL streaming endpoints. Mirrors the YouTube Music
  * streaming pattern: each user connects their own TIDAL account
  * via device-code OAuth. Admin must have TIDAL enabled for the
- * streaming option to appear.
+ * streaming option to appear. When the admin turns on
+ * `tidalStreamingUseInstanceAccount`, every user shares the instance
+ * account instead and per-user linking is rejected with 409.
  *
  * Routes:
  *   GET  /status                - Check if TIDAL streaming is available
@@ -153,6 +155,24 @@ async function requireTidalStreamingEnabled(
     next();
 }
 
+/**
+ * Reject per-user account linking while every user shares the instance
+ * account, so a stale settings page cannot store a credential that would
+ * silently take no effect.
+ */
+async function rejectWhenInstanceAccount(
+    _req: Request,
+    res: Response,
+    next: Function,
+) {
+    if (await tidalStreamingService.usesInstanceAccount()) {
+        return res.status(409).json({
+            error: "TIDAL streaming uses the server's TIDAL account",
+        });
+    }
+    next();
+}
+
 // ── Lazy OAuth restore ────────────────────────────────────────────
 
 /**
@@ -160,6 +180,9 @@ async function requireTidalStreamingEnabled(
  * sidecar. Called before any per-user streaming request.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
+    if (await tidalStreamingService.usesInstanceAccount()) {
+        return tidalStreamingService.ensureInstanceSession();
+    }
     const cached = getCachedTidalOAuth(userId);
     if (cached !== null) {
         return cached;
@@ -170,6 +193,12 @@ async function ensureUserOAuth(userId: string): Promise<boolean> {
             restoreTidalUserOAuth(userId, generation),
         ),
     );
+}
+
+/** Forget a session the sidecar rejected so the next request re-verifies it. */
+function markTidalSessionStale(userId: string): void {
+    setTidalOAuthCache(userId, false);
+    tidalStreamingService.invalidateInstanceSession();
 }
 
 async function finishTidalOAuthRestore(
@@ -374,6 +403,10 @@ async function pollTidalOAuthCredential(
  *                   type: boolean
  *                 credentialsConfigured:
  *                   type: boolean
+ *                 accountMode:
+ *                   type: string
+ *                   enum: [user, instance]
+ *                   description: "instance when every user shares the admin TIDAL account"
  *       401:
  *         description: Not authenticated
  */
@@ -384,11 +417,13 @@ async function pollTidalOAuthCredential(
 router.get("/status", requireAuth, async (req: Request, res: Response) => {
     try {
         const userId = req.user!.id;
-        const [enabled, available, authStatus] = await Promise.all([
-            tidalStreamingService.isEnabled(),
-            tidalStreamingService.isAvailable(),
-            tidalStreamingService.getAuthStatus(userId),
-        ]);
+        const [enabled, available, authStatus, instanceAccount] =
+            await Promise.all([
+                tidalStreamingService.isEnabled(),
+                tidalStreamingService.isAvailable(),
+                tidalStreamingService.getAuthStatus(userId),
+                tidalStreamingService.usesInstanceAccount(),
+            ]);
         const authenticated =
             enabled && available ? await ensureUserOAuth(userId) : false;
 
@@ -397,6 +432,7 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
             available,
             authenticated,
             credentialsConfigured: authStatus.credentialsConfigured,
+            accountMode: instanceAccount ? "instance" : "user",
         });
     } catch (err: any) {
         logger.error("[TIDAL-STREAM] Status check failed:", err.message);
@@ -434,6 +470,8 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
  *                   type: integer
  *       401:
  *         description: Not authenticated
+ *       409:
+ *         description: Per-user linking is off because every user shares the instance TIDAL account
  *       404:
  *         description: TIDAL streaming is not enabled
  *       503:
@@ -447,6 +485,7 @@ router.post(
     "/auth/device-code",
     requireAuth,
     requireTidalStreamingEnabled,
+    rejectWhenInstanceAccount,
     async (req: Request, res: Response) => {
         try {
             const deviceAuth = await tidalStreamingService.initiateDeviceAuth();
@@ -491,6 +530,8 @@ router.post(
  *         description: deviceCode is required
  *       401:
  *         description: Not authenticated
+ *       409:
+ *         description: Per-user linking is off because every user shares the instance TIDAL account
  *       404:
  *         description: TIDAL streaming is not enabled
  *       503:
@@ -504,6 +545,7 @@ router.post(
     "/auth/device-code/poll",
     requireAuth,
     requireTidalStreamingEnabled,
+    rejectWhenInstanceAccount,
     async (req: Request, res: Response) => {
         const schema = z.object({ deviceCode: z.string() });
         const parsed = schema.safeParse(req.body);
@@ -563,6 +605,8 @@ router.post(
  *         description: oauthJson is required
  *       401:
  *         description: Not authenticated
+ *       409:
+ *         description: Per-user linking is off because every user shares the instance TIDAL account
  *       404:
  *         description: TIDAL streaming is not enabled
  *       503:
@@ -576,6 +620,7 @@ router.post(
     "/auth/save-token",
     requireAuth,
     requireTidalStreamingEnabled,
+    rejectWhenInstanceAccount,
     async (req: Request, res: Response) => {
         const schema = z.object({ oauthJson: z.string() });
         const parsed = schema.safeParse(req.body);
@@ -985,7 +1030,7 @@ router.get(
             res.json(info);
         } catch (err: any) {
             if (err?.response?.status === 401) {
-                setTidalOAuthCache(userId, false);
+                markTidalSessionStale(userId);
             }
             logger.error("[TIDAL-STREAM] Stream info failed:", err.message);
             res.status(500).json({ error: "Failed to get stream info" });
@@ -1110,7 +1155,7 @@ router.get(
             stream.data.pipe(res);
         } catch (err: any) {
             if (err?.response?.status === 401) {
-                setTidalOAuthCache(userId, false);
+                markTidalSessionStale(userId);
             }
             logger.error(
                 `[TIDAL-STREAM] Stream proxy failed for track ${trackId}:`,

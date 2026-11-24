@@ -1,6 +1,7 @@
 import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { usesTidalInstanceAccount } from "./tidalAccountMode";
 import {
     parsePlaybackSourceOrder,
     rankPlaybackSource,
@@ -126,6 +127,8 @@ export async function getUserProviderProfile(
                 select: {
                     ytMusicEnabled: true,
                     playbackSourceOrder: true,
+                    tidalEnabled: true,
+                    tidalStreamingUseInstanceAccount: true,
                 },
             }),
         ]),
@@ -135,7 +138,9 @@ export async function getUserProviderProfile(
     const profile: UserProviderProfile = {
         userId,
         hasLocal: true,
-        hasTidal: hasToken(settings?.tidalOAuthJson),
+        hasTidal:
+            hasToken(settings?.tidalOAuthJson) ||
+            usesTidalInstanceAccount(systemSettings),
         // YouTube playback/search has a public fallback path and should not require
         // per-user OAuth connectivity to mark tracks playable. Still respect
         // global system-level YouTube enablement.

@@ -33,6 +33,12 @@ import { WithPodcasts } from "./api/podcasts";
 import { WithPlays } from "./api/plays";
 import { WithScrobbling } from "./api/scrobbling";
 import { WithRecommendations } from "./api/recommendations";
+export type {
+    ExploreDiscovery,
+    ExploreDiscoveryArtist,
+    ExploreDiscoveryRelease,
+    ExploreDiscoveryTrack,
+} from "./api/recommendations";
 import { WithRequests } from "./api/requests";
 import { WithSettings } from "./api/settings";
 import { WithSoulseek } from "./api/soulseek";

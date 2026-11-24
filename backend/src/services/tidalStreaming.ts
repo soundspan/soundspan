@@ -2,8 +2,10 @@
  * TIDAL Streaming Service
  *
  * Communicates with the tidal-streamer Python sidecar for per-user
- * streaming. Each soundspan user connects their own TIDAL account via
- * device-code OAuth. Credentials are stored encrypted in UserSettings.
+ * streaming. By default each soundspan user connects their own TIDAL account
+ * via device-code OAuth, stored encrypted in UserSettings. When the admin
+ * enables `tidalStreamingUseInstanceAccount`, every user instead shares the
+ * instance (download) account through one sidecar session.
  *
  * This is the streaming counterpart of tidal.ts (which handles admin
  * download operations). Mirrors the youtubeMusic.ts service pattern.
@@ -17,6 +19,11 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { encrypt } from "../utils/encryption";
 import { cachedSingleflight } from "../utils/singleflight";
+import { tidalService } from "./tidal";
+import {
+    TIDAL_INSTANCE_SESSION_ID,
+    usesTidalInstanceAccount,
+} from "./tidalAccountMode";
 
 const SIDECAR_AGENT_OPTIONS = {
     keepAlive: true,
@@ -27,6 +34,15 @@ const SIDE_CAR_HTTP_AGENT = new http.Agent(SIDECAR_AGENT_OPTIONS);
 const SIDE_CAR_HTTPS_AGENT = new https.Agent(SIDECAR_AGENT_OPTIONS);
 const AVAILABILITY_CACHE_TTL_MS = 10_000;
 const ENABLED_CACHE_TTL_MS = 30_000;
+const INSTANCE_SESSION_CACHE_TTL_MS = 30_000;
+
+/** Token payload accepted by the sidecar's session-restore endpoint. */
+interface SidecarRestoreCredentials {
+    access_token: string;
+    refresh_token: string;
+    user_id: string;
+    country_code: string;
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -151,6 +167,24 @@ class TidalStreamingService {
             return false;
         }
     }, ENABLED_CACHE_TTL_MS);
+    private readonly loadInstanceAccountMode = cachedSingleflight(async () => {
+        try {
+            const settings = await prisma.systemSettings.findUnique({
+                where: { id: "default" },
+                select: {
+                    tidalEnabled: true,
+                    tidalStreamingUseInstanceAccount: true,
+                },
+            });
+            return usesTidalInstanceAccount(settings);
+        } catch {
+            return false;
+        }
+    }, ENABLED_CACHE_TTL_MS);
+    private readonly loadInstanceSession = cachedSingleflight(
+        () => this.restoreInstanceSession(),
+        INSTANCE_SESSION_CACHE_TTL_MS,
+    );
     private static readonly UNDESIRED_MISMATCH_TERMS = [
         "karaoke",
         "tribute",
@@ -214,6 +248,10 @@ class TidalStreamingService {
     async getAuthStatus(
         userId: string,
     ): Promise<{ authenticated: boolean; credentialsConfigured: boolean }> {
+        if (await this.usesInstanceAccount()) {
+            const authenticated = await this.ensureInstanceSession();
+            return { authenticated, credentialsConfigured: authenticated };
+        }
         try {
             const userSettings = await prisma.userSettings.findUnique({
                 where: { userId },
@@ -250,15 +288,12 @@ class TidalStreamingService {
     async restoreOAuth(userId: string, oauthJson: string): Promise<boolean> {
         try {
             const creds = JSON.parse(oauthJson);
-            const res = await this.client.post(
-                `/user/auth/restore?user_id=${encodeURIComponent(userId)}`,
-                {
-                    access_token: creds.access_token,
-                    refresh_token: creds.refresh_token,
-                    user_id: creds.tidal_user_id || creds.user_id || "",
-                    country_code: creds.country_code || "US",
-                },
-            );
+            const res = await this.postSessionRestore(userId, {
+                access_token: creds.access_token,
+                refresh_token: creds.refresh_token,
+                user_id: creds.tidal_user_id || creds.user_id || "",
+                country_code: creds.country_code || "US",
+            });
 
             // If the sidecar refreshed the token, persist the new one
             if (res.data?.refreshed && res.data?.access_token) {
@@ -287,6 +322,103 @@ class TidalStreamingService {
             );
             return false;
         }
+    }
+
+    private postSessionRestore(
+        sessionId: string,
+        credentials: SidecarRestoreCredentials,
+    ) {
+        return this.client.post(
+            `/user/auth/restore?user_id=${encodeURIComponent(sessionId)}`,
+            credentials,
+        );
+    }
+
+    // ── Instance (shared) account ──────────────────────────────────
+
+    /**
+     * Whether the admin has switched every user onto the instance account.
+     * Cached briefly; `clearAccountModeCache` applies a settings change now.
+     */
+    async usesInstanceAccount(): Promise<boolean> {
+        return this.loadInstanceAccountMode();
+    }
+
+    /** Re-read the account mode on the next request (after a settings save). */
+    clearAccountModeCache(): void {
+        this.loadInstanceAccountMode.clear();
+    }
+
+    /**
+     * Ensure the shared sidecar session holds the instance credentials.
+     * Coalesced and cached briefly so per-request callers stay cheap.
+     */
+    async ensureInstanceSession(): Promise<boolean> {
+        return this.loadInstanceSession();
+    }
+
+    /** Force the next shared-session check to re-verify with the sidecar. */
+    invalidateInstanceSession(): void {
+        this.loadInstanceSession.clear();
+    }
+
+    /**
+     * Drop the shared sidecar session, e.g. after the admin relinks the
+     * instance account, so the next request restores the new tokens.
+     */
+    async resetInstanceSession(): Promise<void> {
+        this.invalidateInstanceSession();
+        await this.clearAuth(TIDAL_INSTANCE_SESSION_ID);
+    }
+
+    private async restoreInstanceSession(): Promise<boolean> {
+        try {
+            if (await this.checkSidecarAuthStatus(TIDAL_INSTANCE_SESSION_ID)) {
+                return true;
+            }
+        } catch {
+            // The sidecar may have restarted; fall through to restore.
+        }
+
+        const creds = await tidalService.getAccountCredentials();
+        if (!creds) return false;
+
+        try {
+            const res = await this.postSessionRestore(
+                TIDAL_INSTANCE_SESSION_ID,
+                {
+                    access_token: creds.accessToken,
+                    refresh_token: creds.refreshToken,
+                    user_id: creds.userId,
+                    country_code: creds.countryCode,
+                },
+            );
+            if (res.data?.refreshed && res.data?.access_token) {
+                await tidalService.saveTokens({
+                    accessToken: res.data.access_token,
+                    refreshToken: creds.refreshToken,
+                    userId: res.data.user_id || creds.userId,
+                    countryCode: res.data.country_code || creds.countryCode,
+                });
+            }
+            return res.data?.success === true;
+        } catch (err: any) {
+            logger.error(
+                "[TIDAL-STREAM] Failed to restore the shared instance session:",
+                err.response?.data || err.message,
+            );
+            return false;
+        }
+    }
+
+    /**
+     * Sidecar session to use for a user's request: the shared instance
+     * session when the admin toggle is on, otherwise the user's own.
+     */
+    private async sessionIdFor(userId: string): Promise<string> {
+        if (!(await this.usesInstanceAccount())) return userId;
+        await this.ensureInstanceSession();
+        return TIDAL_INSTANCE_SESSION_ID;
     }
 
     /**
@@ -351,8 +483,9 @@ class TidalStreamingService {
      * Search TIDAL using a user's session.
      */
     async search(userId: string, query: string): Promise<any> {
+        const sessionId = await this.sessionIdFor(userId);
         const res = await this.client.post(
-            `/user/search?user_id=${encodeURIComponent(userId)}`,
+            `/user/search?user_id=${encodeURIComponent(sessionId)}`,
             { query },
         );
         return res.data;
@@ -365,8 +498,9 @@ class TidalStreamingService {
         userId: string,
         queries: Array<{ query: string; filter?: string; limit?: number }>,
     ): Promise<{ results: Array<{ query: string; results: any[] }> }> {
+        const sessionId = await this.sessionIdFor(userId);
         const res = await this.client.post(
-            `/user/search/batch?user_id=${encodeURIComponent(userId)}`,
+            `/user/search/batch?user_id=${encodeURIComponent(sessionId)}`,
             queries,
         );
         return res.data;
@@ -383,7 +517,7 @@ class TidalStreamingService {
         quality?: string,
     ): Promise<TidalStreamInfo> {
         const params = new URLSearchParams({
-            user_id: userId,
+            user_id: await this.sessionIdFor(userId),
         });
         if (quality) params.set("quality", quality);
 
@@ -408,7 +542,7 @@ class TidalStreamingService {
         status: number;
     }> {
         const params = new URLSearchParams({
-            user_id: userId,
+            user_id: await this.sessionIdFor(userId),
         });
         if (quality) params.set("quality", quality);
 
@@ -441,8 +575,9 @@ class TidalStreamingService {
         trackId: number,
     ): Promise<TidalTrackDetail | null> {
         try {
+            const sessionId = await this.sessionIdFor(userId);
             const res = await this.client.get(
-                `/user/track/${trackId}?user_id=${encodeURIComponent(userId)}`,
+                `/user/track/${trackId}?user_id=${encodeURIComponent(sessionId)}`,
             );
             return res.data;
         } catch (err: any) {
@@ -809,12 +944,15 @@ class TidalStreamingService {
 
     // ── Browse (proxy to sidecar tidalapi endpoints) ─────────────
 
-    private browseParams(
+    private async browseParams(
         userId: string,
         quality: string,
         extra?: Record<string, string>,
-    ): string {
-        const params = new URLSearchParams({ user_id: userId, quality });
+    ): Promise<string> {
+        const params = new URLSearchParams({
+            user_id: await this.sessionIdFor(userId),
+            quality,
+        });
         if (extra) {
             for (const [k, v] of Object.entries(extra)) params.set(k, v);
         }
@@ -829,7 +967,7 @@ class TidalStreamingService {
         quality: string,
     ): Promise<TidalBrowseShelf[]> {
         const res = await this.client.get(
-            `/user/browse/home?${this.browseParams(userId, quality)}`,
+            `/user/browse/home?${await this.browseParams(userId, quality)}`,
             { timeout: 15000 },
         );
         return res.data?.shelves ?? [];
@@ -843,7 +981,7 @@ class TidalStreamingService {
         quality: string,
     ): Promise<TidalBrowseShelf[]> {
         const res = await this.client.get(
-            `/user/browse/explore?${this.browseParams(userId, quality)}`,
+            `/user/browse/explore?${await this.browseParams(userId, quality)}`,
             { timeout: 15000 },
         );
         return res.data?.shelves ?? [];
@@ -854,7 +992,7 @@ class TidalStreamingService {
      */
     async getGenres(userId: string, quality: string): Promise<TidalGenre[]> {
         const res = await this.client.get(
-            `/user/browse/genres?${this.browseParams(userId, quality)}`,
+            `/user/browse/genres?${await this.browseParams(userId, quality)}`,
             { timeout: 15000 },
         );
         return res.data?.genres ?? [];
@@ -865,7 +1003,7 @@ class TidalStreamingService {
      */
     async getMoods(userId: string, quality: string): Promise<TidalGenre[]> {
         const res = await this.client.get(
-            `/user/browse/moods?${this.browseParams(userId, quality)}`,
+            `/user/browse/moods?${await this.browseParams(userId, quality)}`,
             { timeout: 15000 },
         );
         return res.data?.moods ?? [];
@@ -879,7 +1017,7 @@ class TidalStreamingService {
         quality: string,
     ): Promise<TidalMixPreview[]> {
         const res = await this.client.get(
-            `/user/browse/mixes?${this.browseParams(userId, quality)}`,
+            `/user/browse/mixes?${await this.browseParams(userId, quality)}`,
             { timeout: 15000 },
         );
         return res.data?.mixes ?? [];
@@ -894,7 +1032,7 @@ class TidalStreamingService {
         quality: string,
     ): Promise<TidalPlaylistPreview[]> {
         const res = await this.client.get(
-            `/user/browse/genre-playlists?${this.browseParams(userId, quality, { path })}`,
+            `/user/browse/genre-playlists?${await this.browseParams(userId, quality, { path })}`,
             { timeout: 15000 },
         );
         return res.data?.playlists ?? [];
@@ -912,7 +1050,7 @@ class TidalStreamingService {
         const extra: Record<string, string> = {};
         if (limit !== undefined) extra.limit = String(limit);
         const res = await this.client.get(
-            `/user/browse/playlist/${encodeURIComponent(playlistId)}?${this.browseParams(userId, quality, extra)}`,
+            `/user/browse/playlist/${encodeURIComponent(playlistId)}?${await this.browseParams(userId, quality, extra)}`,
             { timeout: 15000 },
         );
         return res.data;
@@ -947,7 +1085,7 @@ class TidalStreamingService {
         quality: string,
     ): Promise<TidalPlaylistDetail> {
         const res = await this.client.get(
-            `/user/browse/mix/${encodeURIComponent(mixId)}?${this.browseParams(userId, quality)}`,
+            `/user/browse/mix/${encodeURIComponent(mixId)}?${await this.browseParams(userId, quality)}`,
             { timeout: 15000 },
         );
         return res.data;

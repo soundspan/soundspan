@@ -265,6 +265,9 @@ model SystemSettings {
   tidalCountryCode            String?  @default("US")
   tidalQuality                String?  @default("HIGH")
   tidalFileTemplate           String?  @default("{album.artist}/{album.title}/{item.number:02d}. {item.title}")
+  /// When true, every user's TIDAL search, browse, matching, and streaming
+  /// use the admin download account above instead of per-user OAuth links.
+  tidalStreamingUseInstanceAccount Boolean @default(false)
   musicPath                   String?  @default("/music")
   downloadPath                String?  @default("/downloads")
   autoSync                    Boolean  @default(true)
