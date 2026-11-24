@@ -1,5 +1,5 @@
-jest.mock("../coalescedLibraryScan", () => ({
-    requestCoalescedLibraryScan: jest.fn(),
+jest.mock("../libraryFileScan", () => ({
+    requestLibraryFileScan: jest.fn(),
 }));
 
 jest.mock("../tidal", () => ({
@@ -124,9 +124,9 @@ describe("tidalTrackDownloadQueue", () => {
 
         expect(maximumActiveDownloads).toBe(1);
         expect(requestScan.mock.calls).toEqual([
-            ["user-1", "tidal-download"],
-            ["user-2", "tidal-download"],
-            ["user-3", "tidal-download"],
+            ["user-1", "Artist/Album/1.flac"],
+            ["user-2", "Artist/Album/2.flac"],
+            ["user-3", "Artist/Album/3.flac"],
         ]);
         expect(log.info.mock.calls).toEqual([
             [
@@ -219,7 +219,7 @@ describe("tidalTrackDownloadQueue", () => {
     it("swallows scan failures, logs them, and continues the queue", async () => {
         const log = createLog();
         const requestScan = jest
-            .fn<Promise<void>, [string, "tidal-download"]>()
+            .fn<Promise<void>, [string, string]>()
             .mockRejectedValueOnce(new Error("Redis unavailable"))
             .mockResolvedValueOnce(undefined);
         const downloadTrack = jest.fn(async (tidalTrackId: number) =>
@@ -240,8 +240,8 @@ describe("tidalTrackDownloadQueue", () => {
             30, 31,
         ]);
         expect(requestScan.mock.calls).toEqual([
-            ["user-1", "tidal-download"],
-            ["user-2", "tidal-download"],
+            ["user-1", "Artist/Album/30.flac"],
+            ["user-2", "Artist/Album/31.flac"],
         ]);
         expect(log.warn).toHaveBeenCalledWith(
             "Failed to request library scan after TIDAL track download",
@@ -278,7 +278,10 @@ describe("tidalTrackDownloadQueue", () => {
 
         expect(downloadTrack).toHaveBeenCalledTimes(2);
         expect(requestScan).toHaveBeenCalledTimes(1);
-        expect(requestScan).toHaveBeenCalledWith("user-2", "tidal-download");
+        expect(requestScan).toHaveBeenCalledWith(
+            "user-2",
+            "Artist/Album/41.flac",
+        );
         expect(log.warn).toHaveBeenCalledWith("TIDAL track download failed", {
             tidalTrackId: 40,
             httpStatus: 502,
@@ -315,7 +318,10 @@ describe("tidalTrackDownloadQueue", () => {
 
         expect(downloadTrack).toHaveBeenCalledTimes(2);
         expect(requestScan).toHaveBeenCalledTimes(1);
-        expect(requestScan).toHaveBeenCalledWith("user-1", "tidal-download");
+        expect(requestScan).toHaveBeenCalledWith(
+            "user-1",
+            "Artist/Album/50.flac",
+        );
     });
 
     it("allows a successful track to be queued again after becoming idle", async () => {
@@ -342,8 +348,8 @@ describe("tidalTrackDownloadQueue", () => {
 
         expect(downloadTrack).toHaveBeenCalledTimes(2);
         expect(requestScan.mock.calls).toEqual([
-            ["user-1", "tidal-download"],
-            ["user-2", "tidal-download"],
+            ["user-1", "Artist/Album/51.flac"],
+            ["user-2", "Artist/Album/51.flac"],
         ]);
     });
 
@@ -372,8 +378,8 @@ describe("tidalTrackDownloadQueue", () => {
             60, 61,
         ]);
         expect(requestScan.mock.calls).toEqual([
-            ["user-1", "tidal-download"],
-            ["user-2", "tidal-download"],
+            ["user-1", "Artist/Album/60.flac"],
+            ["user-2", "Artist/Album/61.flac"],
         ]);
     });
 });

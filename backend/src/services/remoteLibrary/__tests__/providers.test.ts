@@ -50,6 +50,40 @@ describe("remote library provider access", () => {
         });
     });
 
+    it("grants TIDAL to users without a link when the instance account is shared", async () => {
+        mockFindUserSettings.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: true,
+            tidalStreamingUseInstanceAccount: true,
+            ytMusicEnabled: true,
+            playbackSourceOrder: "library,peers,tidal,ytmusic",
+        });
+
+        const access = await loadRemoteLibraryAccess("user-1");
+
+        expect(access.providers.tidal).toBe(true);
+    });
+
+    it("keeps the shared instance account off while TIDAL is disabled", async () => {
+        mockFindUserSettings.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        mockGetSystemSettings.mockResolvedValueOnce({
+            tidalEnabled: false,
+            tidalStreamingUseInstanceAccount: true,
+            ytMusicEnabled: true,
+            playbackSourceOrder: "library,peers,tidal,ytmusic",
+        });
+
+        const access = await loadRemoteLibraryAccess("user-1");
+
+        expect(access.providers.tidal).toBe(false);
+    });
+
     it("allows enabled YouTube Music through its public playback path", async () => {
         mockFindUserSettings.mockResolvedValueOnce({
             tidalOAuthJson: null,

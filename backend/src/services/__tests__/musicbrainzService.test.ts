@@ -463,6 +463,55 @@ describe("musicBrainzService", () => {
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 
+    it("searches recent release groups for several artists in one query", async () => {
+        const otherArtistMbid = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
+        mockRedisGet.mockResolvedValueOnce(null);
+        mockHttpGet.mockResolvedValueOnce({
+            data: {
+                "release-groups": [
+                    { id: "rg-new", title: "New Album" },
+                    { title: "Malformed" },
+                ],
+            },
+        });
+
+        const result =
+            await musicBrainzService.searchRecentReleaseGroupsByArtists(
+                [VALID_ARTIST_MBID, "temp-123", otherArtistMbid],
+                "2026-08-07",
+                "2026-11-05",
+                25,
+            );
+
+        expect(result).toEqual([{ id: "rg-new", title: "New Album" }]);
+        expect(mockHttpGet).toHaveBeenCalledTimes(1);
+        const [path, options] = mockHttpGet.mock.calls[0];
+        expect(path).toBe("/release-group");
+        expect(options.params.limit).toBe(25);
+        expect(options.params.query).toBe(
+            `(arid:${VALID_ARTIST_MBID} OR arid:${otherArtistMbid}) AND firstreleasedate:[2026-08-07 TO 2026-11-05]` +
+                " AND (primarytype:album OR primarytype:ep OR primarytype:single)",
+        );
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            expect.stringContaining("mb:search:recent-rg:"),
+            43200,
+            JSON.stringify([{ id: "rg-new", title: "New Album" }]),
+        );
+    });
+
+    it("skips the recent release-group search when no artist MBID is valid", async () => {
+        const result =
+            await musicBrainzService.searchRecentReleaseGroupsByArtists(
+                ["temp-1", ""],
+                "2026-08-07",
+                "2026-11-05",
+            );
+
+        expect(result).toEqual([]);
+        expect(mockHttpGet).not.toHaveBeenCalled();
+        expect(mockRedisGet).not.toHaveBeenCalled();
+    });
+
     it("rejects a non-array release-groups payload", async () => {
         mockHttpGet.mockResolvedValueOnce({
             data: { "release-groups": { id: "not-an-array" } },

@@ -362,6 +362,16 @@ describe("settings routes integration", () => {
         expect(mockClearUserQualityCache).toHaveBeenCalledWith("user-1");
     });
 
+    it("clears the TIDAL quality cache when playbackQuality is updated", async () => {
+        const res = await request(app)
+            .post("/api/settings")
+            .set(AUTH_HEADER, AUTH_VALUE)
+            .send({ playbackQuality: "original" });
+
+        expect(res.status).toBe(200);
+        expect(mockClearUserQualityCache).toHaveBeenCalledWith("user-1");
+    });
+
     it("requires admin and returns cleanup results for stale-job cleanup", async () => {
         const forbiddenRes = await request(app)
             .post("/api/settings/cleanup-stale-jobs")

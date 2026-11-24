@@ -55,9 +55,17 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/
 # - /data: ytmusicapi OAuth token storage
 RUN useradd -m -u 1000 ytmusic && \
     mkdir -p /data && \
-    chown -R ytmusic:ytmusic /app /data
+    chown -R ytmusic:ytmusic /app /data && \
+    chgrp -R 0 /data && \
+    chmod -R g=u /data && \
+    python3 -m compileall -q /app
 
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+# An arbitrary UID has no passwd entry or home directory; yt-dlp and deno
+# cache under XDG_CACHE_HOME.
+ENV HOME=/tmp
+ENV XDG_CACHE_HOME=/tmp/.cache
 
 # The entrypoint repairs legacy /data ownership, then drops to ytmusic via
 # setpriv. Kubernetes deployments still enforce runAsNonRoot/runAsUser 1000

@@ -39,6 +39,7 @@ export function TidalStreamingCard({
     const [tidalEnabled, setTidalEnabled] = useState(false);
     const [tidalAvailable, setTidalAvailable] = useState(false);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [usesSharedAccount, setUsesSharedAccount] = useState(false);
     const [statusLoading, setStatusLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export function TidalStreamingCard({
             setTidalEnabled(status.enabled);
             setTidalAvailable(status.available);
             setIsAuthenticated(status.authenticated);
+            setUsesSharedAccount(status.accountMode === "instance");
         } catch {
             // TIDAL streaming not available
         }
@@ -213,6 +215,10 @@ export function TidalStreamingCard({
             </p>
         </div>
     );
+
+    // A shared server account leaves users nothing to link or choose here:
+    // Playback quality picks the TIDAL tier instead.
+    if (usesSharedAccount) return null;
 
     return (
         <IntegrationCard

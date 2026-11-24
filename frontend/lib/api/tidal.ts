@@ -10,6 +10,8 @@ export function WithTidal<TBase extends ApiClientConstructor>(Base: TBase) {
             available: boolean;
             authenticated: boolean;
             credentialsConfigured: boolean;
+            /** "instance" when every user shares the admin TIDAL account. */
+            accountMode?: "user" | "instance";
         }> {
             return this.request(`/tidal-streaming/status`);
         }

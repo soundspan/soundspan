@@ -30,6 +30,7 @@ import {
     deferred,
     waitForCondition,
     makeDirent,
+    mockDeduplicateScannerAlbums,
 } from "./musicScannerService.helpers";
 
 describe("MusicScannerService.scanLibrary", () => {
@@ -2119,5 +2120,85 @@ describe("MusicScannerService.scanLibrary", () => {
             "[Scan] Artist counts update failed:",
             expect.any(Error),
         );
+    });
+
+    describe("scanFiles", () => {
+        it("adds just the given file without walking the library or cleaning up", async () => {
+            const scanner = new MusicScannerService();
+            const findAudioFiles = jest.spyOn(
+                MusicScannerService.prototype as any,
+                "findAudioFiles",
+            );
+            const handleMissingTracks = jest.spyOn(
+                MusicScannerService.prototype as any,
+                "handleMissingTracks",
+            );
+
+            const result = await scanner.scanFiles("/music", [
+                "Artist/Test Track.flac",
+            ]);
+
+            expect(result).toEqual(
+                expect.objectContaining({
+                    tracksAdded: 1,
+                    tracksUpdated: 0,
+                    tracksRemoved: 0,
+                    errors: [],
+                }),
+            );
+            expect(mockParseFile).toHaveBeenCalledWith(
+                "/music/Artist/Test Track.flac",
+                { skipCovers: true },
+            );
+            expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: { filePath: "Artist/Test Track.flac" },
+                }),
+            );
+            expect(findAudioFiles).not.toHaveBeenCalled();
+            expect(handleMissingTracks).not.toHaveBeenCalled();
+            expect(mockDeduplicateScannerAlbums).not.toHaveBeenCalled();
+            expect(mockBumpSearchCacheVersion).toHaveBeenCalled();
+        });
+
+        it("leaves an unchanged known file alone", async () => {
+            const scanner = new MusicScannerService();
+            mockPrisma.track.findMany.mockResolvedValue([
+                identityTrack("track-1", "Artist/Test Track.flac", {
+                    fileModified: new Date("2026-03-01T00:00:00.000Z"),
+                }),
+            ]);
+
+            const result = await scanner.scanFiles("/music", [
+                "Artist/Test Track.flac",
+            ]);
+
+            expect(result.tracksAdded).toBe(0);
+            expect(result.tracksUpdated).toBe(0);
+            expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
+        });
+
+        it("reports an unreadable file without failing the scan", async () => {
+            const scanner = new MusicScannerService();
+            mockParseFile.mockRejectedValueOnce(new Error("bad header"));
+
+            const result = await scanner.scanFiles("/music", [
+                "Artist/Broken.flac",
+            ]);
+
+            expect(result.tracksAdded).toBe(0);
+            expect(result.errors).toEqual([
+                { file: "/music/Artist/Broken.flac", error: "bad header" },
+            ]);
+        });
+
+        it("refuses a path outside the music folder", async () => {
+            const scanner = new MusicScannerService();
+
+            const result = await scanner.scanFiles("/music", ["../etc/passwd"]);
+
+            expect(mockParseFile).not.toHaveBeenCalled();
+            expect(result.errors).toHaveLength(1);
+        });
     });
 });

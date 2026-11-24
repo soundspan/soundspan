@@ -22,6 +22,8 @@ export interface ScanJobData {
     downloadId?: string; // Optional: Lidarr download ID for precise job linking
     discoveryBatchId?: string; // Optional: Discovery Weekly batch ID
     spotifyImportJobId?: string; // Optional: Spotify Import job ID
+    /** Optional: scan only these files (relative to the music path). */
+    paths?: string[];
 }
 
 export interface ScanJobResult {
@@ -111,6 +113,7 @@ export async function processScan(
         downloadId,
         discoveryBatchId,
         spotifyImportJobId,
+        paths,
     } = job.data;
 
     jobLog.debug(`\n═══════════════════════════════════════════════`);
@@ -152,7 +155,10 @@ export async function processScan(
     jobLog.debug(`Scanning path: ${scanPath}`);
 
     try {
-        const result = await scanner.scanLibrary(scanPath);
+        // Known new files (e.g. a TIDAL download) skip the full library walk.
+        const result = paths?.length
+            ? await scanner.scanFiles(scanPath, paths)
+            : await scanner.scanLibrary(scanPath);
 
         await job.progress(100);
 

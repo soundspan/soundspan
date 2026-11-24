@@ -23,6 +23,7 @@ import {
 import { yieldToEventLoop } from "../utils/async";
 import { trackMappingService } from "./trackMappingService";
 import { tidalStreamingService } from "./tidalStreaming";
+import { TIDAL_INSTANCE_SESSION_ID } from "./tidalAccountMode";
 
 const log = logger.child("TrackReconciliation");
 
@@ -258,6 +259,11 @@ class TrackReconciliationService {
     }
 
     private async getRestoredTidalUserId(): Promise<string | null> {
+        if (await tidalStreamingService.usesInstanceAccount()) {
+            return (await tidalStreamingService.ensureInstanceSession())
+                ? TIDAL_INSTANCE_SESSION_ID
+                : null;
+        }
         let cursorUserId: string | null = null;
         while (true) {
             const usersWithTidal: Array<{

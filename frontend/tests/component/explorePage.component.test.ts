@@ -85,6 +85,27 @@ mock.module("@/features/explore/hooks/useExploreData", {
     },
 });
 
+mock.module("@/features/explore/hooks/useExploreDiscovery", {
+    namedExports: {
+        useExploreDiscovery: () => ({
+            discovery: {
+                personalized: true,
+                similarArtists: [],
+                newReleases: [],
+                trendingTracks: [],
+                tagShelves: [],
+            },
+            isLoading: false,
+        }),
+    },
+});
+
+mock.module("@/features/explore/components/ExploreDiscoverySection", {
+    namedExports: {
+        ExploreDiscoverySection: marker("explore-discovery-section"),
+    },
+});
+
 mock.module("@/features/explore/hooks/useUserSettingsExplorePrefs", {
     namedExports: {
         useUserSettingsExplorePrefs: () => ({
@@ -261,12 +282,14 @@ test("explore page renders sections in correct order", async () => {
     const html = renderToStaticMarkup(React.createElement(ExplorePage));
 
     const madeForYouIdx = html.indexOf("made-for-you-section");
+    const discoveryIdx = html.indexOf("explore-discovery-section");
     const quickStartIdx = html.indexOf("Quick Start");
     const providerTabIdx = html.indexOf("provider-tab-section");
     const popularIdx = html.indexOf("Popular Artists");
     const recommendedIdx = html.indexOf("Recommended For You");
 
-    assert.ok(madeForYouIdx < quickStartIdx, "Made For You before Quick Start");
+    assert.ok(madeForYouIdx < discoveryIdx, "Made For You before Discovery");
+    assert.ok(discoveryIdx < quickStartIdx, "Discovery before Quick Start");
     assert.ok(
         quickStartIdx < providerTabIdx,
         "Quick Start before Provider Tabs",
