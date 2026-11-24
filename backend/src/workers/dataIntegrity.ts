@@ -99,7 +99,13 @@ async function findDiscoveryReferences(albums: AlbumCandidate[]) {
                 where: {
                     status: { in: ["ACTIVE", "LIKED", "MOVED"] },
                     OR: [
-                        { rgMbid: { in: albums.map((album) => album.rgMbid) } },
+                        {
+                            rgMbid: {
+                                in: albums.flatMap((album) =>
+                                    album.rgMbid ? [album.rgMbid] : [],
+                                ),
+                            },
+                        },
                         ...albums.map((album) => ({
                             albumTitle: {
                                 equals: album.title,
@@ -125,10 +131,10 @@ async function findOwnedReferences(albums: AlbumCandidate[]) {
                 where: {
                     OR: albums.map((album) => ({
                         artistId: album.artistId,
-                        rgMbid: album.rgMbid,
+                        albumId: album.id,
                     })),
                 },
-                select: { artistId: true, rgMbid: true },
+                select: { artistId: true, albumId: true },
             }),
     );
 }
@@ -275,7 +281,6 @@ async function relocateLibraryBatch(
     );
     if (mislocated.length === 0) return 0;
     const ids = mislocated.map((album) => album.id);
-    const rgMbids = mislocated.map((album) => album.rgMbid);
     const updated = await withPrismaRetry(
         "runDataIntegrityCheck.album.updateMany.mislocatedBatch",
         () =>
@@ -289,7 +294,7 @@ async function relocateLibraryBatch(
         () =>
             prisma.ownedAlbum.deleteMany({
                 where: {
-                    rgMbid: { in: rgMbids },
+                    albumId: { in: ids },
                     source: { not: "native_scan" },
                 },
             }),
@@ -335,7 +340,10 @@ async function consolidateArtistBatch(
                     normalizedName: {
                         in: artists.map((row) => row.normalizedName),
                     },
-                    mbid: { not: { startsWith: "temp-" } },
+                    AND: [
+                        { mbid: { not: null } },
+                        { NOT: { mbid: { startsWith: "temp-" } } },
+                    ],
                 },
                 orderBy: { id: "asc" },
                 select: { id: true, normalizedName: true },
@@ -373,7 +381,7 @@ async function consolidateTempArtists(
         (cursor) =>
             prisma.artist.findMany({
                 where: {
-                    mbid: { startsWith: "temp-" },
+                    OR: [{ mbid: null }, { mbid: { startsWith: "temp-" } }],
                     ...artistRetentionWhere,
                     ...(cursor ? { id: { gt: cursor } } : {}),
                 },

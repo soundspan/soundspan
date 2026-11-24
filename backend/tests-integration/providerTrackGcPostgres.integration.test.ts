@@ -1,6 +1,4 @@
 import type { Prisma } from "@prisma/client";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
@@ -33,10 +31,6 @@ const userId = "provider-gc-user";
 const playlistId = "provider-gc-playlist";
 const CLAIM_RACE_TEST_TIMEOUT_MS = 10_000;
 const MAX_LOCK_POLLS = 200;
-const DATA_FIX_MIGRATION = join(
-    __dirname,
-    "../prisma/migrations/20260819204000_reconcile_discovery_ownership_sources/migration.sql",
-);
 
 function createResponse() {
     const response = {
@@ -339,7 +333,7 @@ describeWithPostgres(
             await prisma.ownedAlbum.create({
                 data: {
                     artistId: "owned-parent-artist",
-                    rgMbid: "owned-parent-album-mbid",
+                    albumId: "owned-parent-album",
                     source: "discover_liked",
                 },
             });
@@ -456,7 +450,7 @@ describeWithPostgres(
             await prisma.ownedAlbum.create({
                 data: {
                     artistId: "admin-delete-artist",
-                    rgMbid: "admin-delete-album-mbid",
+                    albumId: "admin-delete-album",
                     source: "discovery_liked",
                 },
             });
@@ -476,9 +470,9 @@ describeWithPostgres(
             await expect(
                 prisma.ownedAlbum.findUnique({
                     where: {
-                        artistId_rgMbid: {
+                        artistId_albumId: {
                             artistId: "admin-delete-artist",
-                            rgMbid: "admin-delete-album-mbid",
+                            albumId: "admin-delete-album",
                         },
                     },
                 }),
@@ -492,7 +486,7 @@ describeWithPostgres(
                 await createArtistAndAlbum(prefix);
                 await prisma.artist.update({
                     where: { id: `${prefix}-artist` },
-                    data: { mbid: `temp-${prefix}` },
+                    data: { mbid: null },
                 });
                 const discovery = await prisma.discoveryAlbum.create({
                     data: {
@@ -615,7 +609,7 @@ describeWithPostgres(
             await prisma.ownedAlbum.create({
                 data: {
                     artistId: "ownership-race-artist",
-                    rgMbid: "ownership-race-album-mbid",
+                    albumId: "ownership-race-album",
                     source: "discovery_liked",
                 },
             });
@@ -933,112 +927,6 @@ describeWithPostgres(
             ).resolves.not.toBeNull();
         });
 
-        it("reclassifies legacy discovery ownership and keeps it protected", async () => {
-            const prefix = "ownership-spelling";
-            const likedEnrichment = "ownership-liked-enrichment";
-            const noiseEnrichment = "ownership-noise-enrichment";
-            await createArtistAndAlbum(prefix);
-            await createArtistAndAlbum(likedEnrichment);
-            await createArtistAndAlbum(noiseEnrichment);
-            await prisma.ownedAlbum.create({
-                data: {
-                    artistId: `${prefix}-artist`,
-                    rgMbid: `${prefix}-album-mbid`,
-                    source: "discover_liked",
-                },
-            });
-            await prisma.discoveryAlbum.create({
-                data: {
-                    id: `${prefix}-liked`,
-                    userId,
-                    catalogAlbumId: `${prefix}-album`,
-                    rgMbid: `${prefix}-album-mbid`,
-                    artistName: `${prefix} artist`,
-                    albumTitle: `${prefix} album`,
-                    weekStartDate: old,
-                    status: "LIKED",
-                },
-            });
-            await prisma.ownedAlbum.createMany({
-                data: [
-                    {
-                        artistId: `${likedEnrichment}-artist`,
-                        rgMbid: `${likedEnrichment}-album-mbid`,
-                        source: "enrichment",
-                    },
-                    {
-                        artistId: `${noiseEnrichment}-artist`,
-                        rgMbid: `${noiseEnrichment}-album-mbid`,
-                        source: "enrichment",
-                    },
-                ],
-            });
-            await prisma.discoveryAlbum.create({
-                data: {
-                    id: `${likedEnrichment}-liked`,
-                    userId,
-                    catalogAlbumId: `${likedEnrichment}-album`,
-                    rgMbid: `${likedEnrichment}-album-mbid`,
-                    artistName: `${likedEnrichment} artist`,
-                    albumTitle: `${likedEnrichment} album`,
-                    weekStartDate: old,
-                    status: "LIKED",
-                },
-            });
-
-            await database.query(readFileSync(DATA_FIX_MIGRATION, "utf8"));
-
-            await expect(
-                prisma.ownedAlbum.findUnique({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: `${prefix}-artist`,
-                            rgMbid: `${prefix}-album-mbid`,
-                        },
-                    },
-                }),
-            ).resolves.toEqual(
-                expect.objectContaining({ source: "discovery_liked" }),
-            );
-            await expect(
-                prisma.ownedAlbum.findUnique({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: `${likedEnrichment}-artist`,
-                            rgMbid: `${likedEnrichment}-album-mbid`,
-                        },
-                    },
-                }),
-            ).resolves.toEqual(
-                expect.objectContaining({ source: "discovery_liked" }),
-            );
-            await expect(
-                prisma.ownedAlbum.findUnique({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: `${noiseEnrichment}-artist`,
-                            rgMbid: `${noiseEnrichment}-album-mbid`,
-                        },
-                    },
-                }),
-            ).resolves.toBeNull();
-            // Earlier cases leave their own collectable leftovers, so assert
-            // protection on the reclassified entities instead of global counts.
-            await cleanupOrphanedLibraryEntities(firstNow);
-            await expect(
-                prisma.album.findUnique({
-                    where: { id: `${likedEnrichment}-album` },
-                    select: { id: true },
-                }),
-            ).resolves.toEqual({ id: `${likedEnrichment}-album` });
-            await expect(
-                prisma.artist.findUnique({
-                    where: { id: `${likedEnrichment}-artist` },
-                    select: { id: true },
-                }),
-            ).resolves.toEqual({ id: `${likedEnrichment}-artist` });
-        });
-
         it("blocks discovery track deletion after the album is promoted", async () => {
             await createArtistAndAlbum("discovery-track-promotion");
             await prisma.track.create({
@@ -1072,7 +960,7 @@ describeWithPostgres(
             ).resolves.not.toBeNull();
         });
 
-        it("moves existing ownership but does not recreate unliked ownership after an album rgMbid correction", async () => {
+        it("keeps existing ownership and does not recreate unliked ownership after an album rgMbid correction", async () => {
             const oldRgMbid = "11111111-1111-4111-8111-111111111111";
             const newRgMbid = "22222222-2222-4222-8222-222222222222";
             await createArtistAndAlbum("rg-edit");
@@ -1083,7 +971,7 @@ describeWithPostgres(
             await prisma.ownedAlbum.create({
                 data: {
                     artistId: "rg-edit-artist",
-                    rgMbid: oldRgMbid,
+                    albumId: "rg-edit-album",
                     source: "native_scan",
                 },
             });
@@ -1094,19 +982,9 @@ describeWithPostgres(
             await expect(
                 prisma.ownedAlbum.findUnique({
                     where: {
-                        artistId_rgMbid: {
+                        artistId_albumId: {
                             artistId: "rg-edit-artist",
-                            rgMbid: oldRgMbid,
-                        },
-                    },
-                }),
-            ).resolves.toBeNull();
-            await expect(
-                prisma.ownedAlbum.findUnique({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: "rg-edit-artist",
-                            rgMbid: newRgMbid,
+                            albumId: "rg-edit-album",
                         },
                     },
                 }),
@@ -1126,7 +1004,7 @@ describeWithPostgres(
             await prisma.ownedAlbum.create({
                 data: {
                     artistId: "rg-edit-fresh-artist",
-                    rgMbid: "rg-edit-fresh-album-mbid",
+                    albumId: "rg-edit-fresh-album",
                     source: "discovery_liked",
                 },
             });
@@ -1142,9 +1020,9 @@ describeWithPostgres(
             await expect(
                 prisma.ownedAlbum.findUnique({
                     where: {
-                        artistId_rgMbid: {
+                        artistId_albumId: {
                             artistId: "rg-edit-fresh-artist",
-                            rgMbid: freshRgMbid,
+                            albumId: "rg-edit-fresh-album",
                         },
                     },
                 }),

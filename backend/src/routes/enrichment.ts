@@ -1798,7 +1798,7 @@ router.put<{ id: string }>(
             } else {
                 delete overrideBody.rgMbid;
             }
-            let existingAlbum: { rgMbid: string } | null = null;
+            let existingAlbum: { rgMbid: string | null } | null = null;
 
             if (normalizedRgMbid) {
                 existingAlbum = await prisma.album.findUnique({

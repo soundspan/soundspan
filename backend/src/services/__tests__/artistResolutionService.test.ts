@@ -135,6 +135,9 @@ describe("artistResolutionService", () => {
                 await resolveArtistForRemoteTrack("Brand New Artist");
             expect(result.id).toBe("new-artist-id");
             expect(result.created).toBe(true);
+            expect(mockPrisma.artist.create).toHaveBeenCalledWith({
+                data: expect.objectContaining({ mbid: null }),
+            });
         });
 
         it("handles P2002 race condition on create", async () => {

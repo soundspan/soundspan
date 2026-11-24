@@ -1,4 +1,5 @@
 import { addMonths, endOfWeek, startOfWeek, subDays, subWeeks } from "date-fns";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import {
     TRACK_BROWSE_WHERE,
@@ -11,6 +12,10 @@ import {
     resolveTrackPreference,
     TRACK_DISLIKE_ENTITY_TYPE,
 } from "../trackPreference";
+import {
+    musicBrainzIdOrSynthetic,
+    rowIdFromSyntheticId,
+} from "../../utils/musicIds";
 import { separateArtists } from "../../utils/separateArtists";
 import { applyArtistCap } from "../programmaticPlaylistArtistCap";
 
@@ -38,7 +43,7 @@ interface SelectedTrack {
     albumMbid: string;
     artistId: string;
     artistName: string;
-    artistMbid: string;
+    artistMbid: string | null;
     coverUrl: string | null;
     similarity: number;
     tier: RecommendationTier;
@@ -87,7 +92,7 @@ type ArtistIdentity = {
 
 type ResolvedArtistIdentity = {
     id: string;
-    mbid: string;
+    mbid: string | null;
     name: string;
 };
 
@@ -106,12 +111,12 @@ type SelectableDiscoveryTrack = {
     album: {
         artistId: string;
         title: string;
-        rgMbid: string;
+        rgMbid: string | null;
         coverUrl: string | null;
         artist: {
             id: string;
             name: string;
-            mbid: string;
+            mbid: string | null;
         };
     };
 };
@@ -192,6 +197,26 @@ function dedupeTracksByAlbum<T extends { albumId: string }>(tracks: T[]): T[] {
     return deduped;
 }
 
+/**
+ * Excludes albums by release-group id. A plain `notIn` would also drop every
+ * album without a MusicBrainz id (SQL NULL), so those match by synthetic key.
+ */
+function excludedAlbumsWhere(
+    excludedAlbumMbids: readonly string[],
+): Prisma.AlbumWhereInput {
+    if (excludedAlbumMbids.length === 0) return {};
+    const excludedAlbumIds = excludedAlbumMbids.flatMap((key) => {
+        const albumId = rowIdFromSyntheticId(key);
+        return albumId ? [albumId] : [];
+    });
+    return {
+        OR: [
+            { rgMbid: { notIn: [...excludedAlbumMbids] } },
+            { rgMbid: null, id: { notIn: excludedAlbumIds } },
+        ],
+    };
+}
+
 /** Map a selected library track into the persisted Discover Weekly shape. */
 function toSelectedTrack(
     track: SelectableDiscoveryTrack,
@@ -205,7 +230,7 @@ function toSelectedTrack(
         filePath: track.filePath ?? "",
         albumId: track.albumId,
         albumTitle: track.album.title,
-        albumMbid: track.album.rgMbid,
+        albumMbid: musicBrainzIdOrSynthetic(track.albumId, track.album.rgMbid),
         artistId: track.album.artist.id,
         artistName: track.album.artist.name,
         artistMbid: track.album.artist.mbid,
@@ -591,9 +616,7 @@ export class DiscoveryRecommendationsService {
                     ...(prioritizedArtistIds.length > 0
                         ? { artistId: { in: prioritizedArtistIds } }
                         : {}),
-                    ...(excludedAlbumMbids.length > 0
-                        ? { rgMbid: { notIn: excludedAlbumMbids } }
-                        : {}),
+                    ...excludedAlbumsWhere(excludedAlbumMbids),
                 },
             },
             include: {
@@ -623,9 +646,7 @@ export class DiscoveryRecommendationsService {
                 id: { notIn: selectedTrackIds },
                 album: {
                     location: { in: ["LIBRARY", "FEDERATED"] },
-                    ...(excludedAlbumMbids.length > 0
-                        ? { rgMbid: { notIn: excludedAlbumMbids } }
-                        : {}),
+                    ...excludedAlbumsWhere(excludedAlbumMbids),
                 },
             },
             include: {

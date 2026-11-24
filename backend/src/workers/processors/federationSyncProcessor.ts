@@ -276,7 +276,7 @@ async function resolveAlbumRgMbid(
     context: SyncContext,
     state: PageState,
     item: AlbumEnvelope,
-): Promise<string> {
+): Promise<string | null> {
     const existing = state.albums.get(item.id);
     if (existing) return existing.rgMbid;
     if (state.loadedAlbumRgMbids.has(item.attributes.rgMbid)) {
@@ -358,7 +358,7 @@ async function ensureRemoteAlbum(
             ...existing,
             rgMbid:
                 context.albumRgMbids.get(remoteId) ??
-                decodeFederationIdentity(existing.rgMbid),
+                (existing.rgMbid && decodeFederationIdentity(existing.rgMbid)),
         };
     }
     if (context.unavailableParents.album.has(remoteId)) {
@@ -386,7 +386,7 @@ async function ensureRemoteAlbum(
         ...imported,
         rgMbid:
             context.albumRgMbids.get(remoteId) ??
-            decodeFederationIdentity(imported.rgMbid),
+            (imported.rgMbid && decodeFederationIdentity(imported.rgMbid)),
     };
 }
 
@@ -663,7 +663,7 @@ async function applyArtists(
 ): Promise<void> {
     const rows: Array<{
         item: ArtistEnvelope;
-        mbid: string;
+        mbid: string | null;
         existingId?: string;
     }> = [];
     for (const item of items) {
@@ -709,7 +709,7 @@ async function applyAlbums(
     const rows: Array<{
         item: AlbumEnvelope;
         artistId: string;
-        rgMbid: string;
+        rgMbid: string | null;
         existingId?: string;
     }> = [];
     for (const item of items) {
@@ -755,7 +755,7 @@ function resolveTrackAlbums(
                 ...album,
                 rgMbid:
                     context.albumRgMbids.get(item.parentRef) ??
-                    decodeFederationIdentity(album.rgMbid),
+                    (album.rgMbid && decodeFederationIdentity(album.rgMbid)),
             });
         } else context.skippedInvalid += 1;
     }

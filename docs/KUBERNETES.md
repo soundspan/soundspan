@@ -116,6 +116,22 @@ writable mounts for every path used by the selected component. The AIO image
 runs as root internally due to supervisord orchestration; individual images are
 non-root.
 
+### OpenShift and arbitrary UIDs
+
+The individual images (backend API and worker, frontend, and the TIDAL,
+YouTube Music, audio analyzer, and DCLAP vibe sidecars) run under OpenShift's
+`restricted-v2` SCC, which starts each container as a random UID from the
+namespace range with group 0. Every path an image writes at runtime belongs to
+group 0 with the owner's permissions, `HOME` points at `/tmp`, and nothing writes
+into the application or dependency tree at startup. The images still run as UID
+1000 by default under Docker, Compose, or the chart's default `runAsUser`.
+
+On OpenShift, leave `runAsUser`, `runAsGroup`, and `fsGroup` unset so the SCC
+assigns them. Mounted volumes are separate from the image: the music library and
+the cache and data volumes must be writable by the pod's group, for example
+through `fsGroup` or `supplementalGroups` matching the volume's group. The AIO
+image needs root and does not run under `restricted-v2`.
+
 ## Process and Health Check Notes
 
 | Service                          | Tini (PID 1) | Healthcheck                                                                        |

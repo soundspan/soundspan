@@ -799,6 +799,105 @@ describe("tidalService", () => {
         });
     });
 
+    describe("play downloads", () => {
+        it("opens a play download stream with admin credentials and reads its headers", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const body = { pipe: jest.fn() };
+            mockClient.post.mockResolvedValueOnce({
+                data: body,
+                headers: {
+                    "content-type": "audio/mp4",
+                    "x-download-id": "dl-1",
+                    "x-tidal-quality": "HI_RES_LOSSLESS",
+                    "x-tidal-codec": "flac",
+                    "x-tidal-bit-depth": "24",
+                    "x-tidal-sample-rate": "96000",
+                },
+            });
+
+            const start = await tidalService.startPlayDownload(
+                42,
+                "HI_RES_LOSSLESS",
+            );
+
+            expect(mockClient.post).toHaveBeenCalledWith(
+                "/download/track/play",
+                {
+                    track_id: 42,
+                    quality: "HI_RES_LOSSLESS",
+                    output_template: "{album.artist}/{item.title}",
+                },
+                expect.objectContaining({
+                    responseType: "stream",
+                    timeout: 0,
+                    headers: expect.objectContaining({
+                        Authorization: `Bearer ${baseCreds.accessToken}`,
+                    }),
+                }),
+            );
+            expect(start).toEqual({
+                stream: body,
+                downloadId: "dl-1",
+                info: {
+                    contentType: "audio/mp4",
+                    quality: "HI_RES_LOSSLESS",
+                    codec: "flac",
+                    bitDepth: 24,
+                    sampleRate: 96000,
+                },
+            });
+        });
+
+        it("refreshes an expired admin token before any audio flows", async () => {
+            jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(
+                baseCreds,
+            );
+            const refreshSpy = jest
+                .spyOn(tidalService, "refreshAccessToken")
+                .mockResolvedValue(true);
+            mockClient.post
+                .mockRejectedValueOnce({ response: { status: 401 } })
+                .mockResolvedValueOnce({
+                    data: {},
+                    headers: {
+                        "content-type": "audio/flac",
+                        "x-download-id": "dl-2",
+                        "x-tidal-quality": "LOSSLESS",
+                        "x-tidal-codec": "flac",
+                    },
+                });
+
+            const start = await tidalService.startPlayDownload(
+                7,
+                "HI_RES_LOSSLESS",
+            );
+
+            expect(refreshSpy).toHaveBeenCalledTimes(1);
+            expect(start.info).toEqual({
+                contentType: "audio/flac",
+                quality: "LOSSLESS",
+                codec: "flac",
+                bitDepth: null,
+                sampleRate: null,
+            });
+        });
+
+        it("waits for a play download's installed file", async () => {
+            const result = { track_id: 42, relative_path: "A/B/01.flac" };
+            mockClient.get.mockResolvedValueOnce({ data: result });
+
+            await expect(
+                tidalService.getPlayDownloadResult("dl 1"),
+            ).resolves.toEqual(result);
+            expect(mockClient.get).toHaveBeenCalledWith(
+                "/download/track/play/dl%201",
+                { timeout: 600_000 },
+            );
+        });
+    });
+
     describe("downloadAlbum", () => {
         it("downloads an album with header credentials, quality, and output template", async () => {
             jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(

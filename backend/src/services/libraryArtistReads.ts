@@ -159,7 +159,9 @@ export async function readLibraryArtist(options: LibraryArtistReadOptions) {
         where: buildArtistWhere(options, albumWhere),
         include: {
             albums: buildAlbumRead(options, albumWhere, trackWhere),
-            ownedAlbums: true,
+            ownedAlbums: {
+                include: { album: { select: { rgMbid: true } } },
+            },
             federationPeer: { select: federationPeerSelect },
         },
     });

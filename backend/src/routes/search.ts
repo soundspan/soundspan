@@ -13,6 +13,12 @@ import { redisClient } from "../utils/redis";
 import { z } from "zod";
 import { LIBRARY_ORIGIN_VALUES } from "../utils/librarySorting";
 import { searchRemoteLibrary } from "../services/remoteLibrary/remoteLibrarySearch";
+import {
+    resolveUsableSearchProviders,
+    searchDiscoverMusic,
+} from "../services/discoverMusicSearch";
+import { resolveSearchProviders } from "../services/searchProviderSettings";
+import { getSystemSettings } from "../utils/systemSettings";
 
 const router = Router();
 
@@ -501,6 +507,7 @@ router.use(requireAuth);
  *                             type: string
  *                           mbid:
  *                             type: string
+ *                             nullable: true
  *                 audiobooks:
  *                   type: array
  *                   items:
@@ -636,6 +643,13 @@ router.get("/genres", async (req, res) => {
  * /api/search/discover:
  *   get:
  *     summary: Search for new content to discover (not in your library)
+ *     description: >-
+ *       Artists and songs come from the catalog providers an admin enabled
+ *       (Last.fm, Deezer, TIDAL, YouTube Music), searched in parallel and
+ *       merged in the admin's priority order; a lower-priority duplicate of an
+ *       artist, or of an artist and title, is dropped. TIDAL counts only for a
+ *       user with a TIDAL session and YouTube Music only while it is enabled
+ *       and available. Each result carries its `source` provider.
  *     tags: [Search]
  *     security:
  *       - apiKeyAuth: []
@@ -699,8 +713,18 @@ router.get("/discover", async (req, res) => {
             return res.json({ results: [], aliasInfo: null });
         }
 
-        // Cache TTL: 15 min (900s) -- external API data rarely changes
-        const cacheKey = `search:discover:${type}:${normalizeCacheQuery(query)}:${searchLimit}`;
+        const searchesMusic = type === "music" || type === "all";
+        const providers = searchesMusic
+            ? await resolveUsableSearchProviders(
+                  resolveSearchProviders((await getSystemSettings()) ?? {}),
+                  req.user?.id,
+              )
+            : [];
+
+        // Cache TTL: 15 min (900s) -- external API data rarely changes. The
+        // provider list is part of the key: it follows the admin order and
+        // whether this user can search TIDAL / YouTube Music.
+        const cacheKey = `search:discover:${type}:${normalizeCacheQuery(query)}:${searchLimit}:${providers.join(",")}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -723,7 +747,7 @@ router.get("/discover", async (req, res) => {
             mbid?: string;
         } | null = null;
 
-        if (type === "music" || type === "all") {
+        if (providers.includes("lastfm")) {
             try {
                 const correction =
                     await lastFmService.getArtistCorrection(query);
@@ -749,15 +773,13 @@ router.get("/discover", async (req, res) => {
         // Build parallel promises for independent external calls
         const promiseMap: Record<string, Promise<any>> = {};
 
-        if (type === "music" || type === "all") {
-            promiseMap.artists = lastFmService.searchArtists(
-                searchQuery,
-                searchLimit,
-            );
-            promiseMap.tracks = lastFmService.searchTracks(
-                searchQuery,
-                searchLimit,
-            );
+        if (searchesMusic) {
+            promiseMap.music = searchDiscoverMusic({
+                query: searchQuery,
+                limit: searchLimit,
+                userId: req.user?.id,
+                providers,
+            });
         }
 
         if (type === "podcasts" || type === "all") {
@@ -806,6 +828,13 @@ router.get("/discover", async (req, res) => {
             }
         });
 
+        if (resolved.music) {
+            const music = resolved.music as unknown as Awaited<
+                ReturnType<typeof searchDiscoverMusic>
+            >;
+            resolved.artists = music.artists;
+            resolved.tracks = music.tracks;
+        }
         if (resolved.artists) {
             logger.debug(
                 `[SEARCH DISCOVER] Found ${resolved.artists.length} artist results`,

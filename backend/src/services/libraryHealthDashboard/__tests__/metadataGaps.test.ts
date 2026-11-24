@@ -17,7 +17,7 @@ import { getMetadataGapSummary, listMetadataGap } from "../metadataGaps";
 describe("library health metadata gaps", () => {
     beforeEach(() => jest.clearAllMocks());
 
-    it("excludes remote temporary identities from missing MBID counts", async () => {
+    it("counts library artists and albums with no MusicBrainz id", async () => {
         artistCount.mockResolvedValueOnce(3);
         albumCount.mockResolvedValueOnce(4);
         albumFindMany.mockResolvedValueOnce([]);
@@ -28,20 +28,13 @@ describe("library health metadata gaps", () => {
         });
 
         expect(artistCount).toHaveBeenCalledWith({
-            where: expect.objectContaining({
-                AND: expect.arrayContaining([
-                    { mbid: { startsWith: "temp-" } },
-                    { NOT: { mbid: { startsWith: "temp-remote-" } } },
-                ]),
-            }),
+            where: {
+                albums: { some: { location: "LIBRARY" } },
+                mbid: null,
+            },
         });
         expect(albumCount).toHaveBeenCalledWith({
-            where: expect.objectContaining({
-                AND: expect.arrayContaining([
-                    { rgMbid: { startsWith: "temp-" } },
-                    { NOT: { rgMbid: { startsWith: "remote:" } } },
-                ]),
-            }),
+            where: { location: "LIBRARY", rgMbid: null },
         });
         expect(result.counts).toEqual({ artists: 3, albums: 4 });
     });

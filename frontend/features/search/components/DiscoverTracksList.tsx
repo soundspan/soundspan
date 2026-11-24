@@ -41,6 +41,24 @@ function rowKey(track: DiscoverResult, index: number): string {
     return `discover-track-${track.id || track.name}-${index}`;
 }
 
+/** A TIDAL or YouTube Music result is its own provider match. */
+export function ownProviderMatch(
+    track: DiscoverResult,
+): SearchProviderMatch | null {
+    const duration = track.durationSec ?? undefined;
+    if (track.source === "tidal" && track.tidalTrackId) {
+        return { source: "tidal", tidalTrackId: track.tidalTrackId, duration };
+    }
+    if (track.source === "youtube" && track.youtubeVideoId) {
+        return {
+            source: "youtube",
+            youtubeVideoId: track.youtubeVideoId,
+            duration,
+        };
+    }
+    return null;
+}
+
 function toPlaybackTrack(
     track: DiscoverResult,
     key: string,
@@ -60,9 +78,9 @@ function toPlaybackTrack(
 }
 
 /**
- * Renders external (Last.fm) track search results. Rows matched against an
- * enabled streaming provider play in place; unmatched rows link to the
- * artist page as before.
+ * Renders external catalog song results. TIDAL and YouTube Music results play
+ * from their own ids; other rows matched against an enabled streaming provider
+ * play in place, and unmatched rows link to the artist page.
  */
 export function DiscoverTracksList({
     tracks,
@@ -78,17 +96,29 @@ export function DiscoverTracksList({
 
     const matchTargets = useMemo(
         (): SearchMatchTarget[] =>
-            visibleTracks
-                .filter((track) => track.artist)
-                .map((track, index) => ({
-                    key: rowKey(track, index),
-                    artist: track.artist!,
-                    title: track.name,
-                    album: track.album ?? undefined,
-                })),
+            visibleTracks.flatMap((track, index) =>
+                track.artist && !ownProviderMatch(track)
+                    ? [
+                          {
+                              key: rowKey(track, index),
+                              artist: track.artist,
+                              title: track.name,
+                              album: track.album ?? undefined,
+                          },
+                      ]
+                    : [],
+            ),
         [visibleTracks],
     );
-    const { matches } = useSearchTrackMatches(matchTargets);
+    const { matches: providerMatches } = useSearchTrackMatches(matchTargets);
+    const matches = useMemo(() => {
+        const resolved = new Map(providerMatches);
+        visibleTracks.forEach((track, index) => {
+            const own = ownProviderMatch(track);
+            if (own) resolved.set(rowKey(track, index), own);
+        });
+        return resolved;
+    }, [providerMatches, visibleTracks]);
 
     const handleRowClick = useCallback(
         (track: DiscoverResult, key: string) => {

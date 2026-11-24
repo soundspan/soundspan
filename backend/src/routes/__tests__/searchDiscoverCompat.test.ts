@@ -10,6 +10,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -37,6 +43,27 @@ jest.mock("../../services/lastfm", () => ({
         searchArtists: jest.fn(),
         searchTracks: jest.fn(),
     },
+}));
+
+jest.mock("../../services/deezer", () => ({
+    deezerService: {
+        searchArtists: jest.fn(async () => []),
+        searchTracks: jest.fn(async () => []),
+    },
+}));
+jest.mock("../../services/tidalStreaming", () => ({
+    tidalStreamingService: {
+        isEnabled: jest.fn(async () => false),
+        isAvailable: jest.fn(async () => false),
+        getAuthStatus: jest.fn(),
+        search: jest.fn(),
+    },
+}));
+jest.mock("../../services/youtubeMusic", () => ({
+    ytMusicService: { isAvailable: jest.fn(), searchCanonical: jest.fn() },
+}));
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: jest.fn(async () => ({})),
 }));
 
 jest.mock("../../services/search", () => ({

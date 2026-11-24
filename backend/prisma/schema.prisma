@@ -265,6 +265,12 @@ model SystemSettings {
   tidalCountryCode            String?  @default("US")
   tidalQuality                String?  @default("HIGH")
   tidalFileTemplate           String?  @default("{album.artist}/{album.title}/{item.number:02d}. {item.title}")
+  /// When true, every user's TIDAL search, browse, matching, and streaming
+  /// use the admin download account above instead of per-user OAuth links.
+  tidalStreamingUseInstanceAccount Boolean @default(false)
+  /// When true, playing a TIDAL song first downloads it to the library with
+  /// the admin account above (highest quality) and plays the local file.
+  tidalDownloadBeforePlay     Boolean  @default(false)
   musicPath                   String?  @default("/music")
   downloadPath                String?  @default("/downloads")
   autoSync                    Boolean  @default(true)
@@ -275,6 +281,9 @@ model SystemSettings {
   transcodeCacheMaxGb         Int      @default(10)
   downloadSource              String   @default("soulseek")
   playbackSourceOrder         String   @default("library,peers,tidal,ytmusic")
+  // Search's Discover results: every catalog provider in priority order, and the enabled subset.
+  searchProviderOrder         String   @default("lastfm,deezer,tidal,youtube")
+  searchProvidersEnabled      String   @default("lastfm,deezer")
   primaryFailureFallback      String   @default("none")
   updatedAt                   DateTime @updatedAt
   createdAt                   DateTime @default(now())
@@ -296,7 +305,7 @@ model SystemSettings {
 
 model Artist {
   id                   String                      @id @default(cuid())
-  mbid                 String                      @unique
+  mbid                 String?                     @unique // MusicBrainz artist id; null when MusicBrainz has no match
   name                 String
   normalizedName       String                      @default("")
   summary              String?
@@ -357,7 +366,7 @@ model ArtistCatalogReleaseGroup {
 
 model Album {
   id                String                   @id @default(cuid())
-  rgMbid            String                   @unique
+  rgMbid            String?                  @unique // MusicBrainz release-group id or a synthetic remote:/federation: key; null when unknown
   artistId          String
   title             String
   year              Int?
@@ -858,14 +867,14 @@ model SimilarArtist {
 
 model OwnedAlbum {
   artistId String
-  rgMbid   String
+  albumId  String
   source   String
   artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  album    Album  @relation(fields: [rgMbid], references: [rgMbid], onDelete: NoAction)
+  album    Album  @relation(fields: [albumId], references: [id], onDelete: NoAction)
 
-  @@id([artistId, rgMbid])
+  @@id([artistId, albumId])
   @@index([artistId])
-  @@index([rgMbid])
+  @@index([albumId])
 }
 
 model DownloadJob {
@@ -1567,4 +1576,21 @@ model TrackMapping {
   @@index([trackYtMusicId])
   @@index([stale])
   @@index([stale, staleAt])
+}
+
+/// TIDAL songs downloaded because someone played them while
+/// SystemSettings.tidalDownloadBeforePlay was on. `lastPlayedAt` lets a later
+/// cleanup remove downloads nobody plays.
+model TidalPlayDownload {
+  tidalId      Int      @id
+  /// Path relative to the music folder, as returned by the TIDAL sidecar.
+  relativePath String
+  quality      String
+  codec        String?
+  bitDepth     Int?
+  sampleRate   Int?
+  downloadedAt DateTime @default(now())
+  lastPlayedAt DateTime @default(now())
+
+  @@index([lastPlayedAt])
 }

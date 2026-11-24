@@ -14,6 +14,13 @@ WORKDIR /app
 # Inject monorepo contract package into /packages so file:../packages/* links resolve.
 COPY --from=media-metadata-contract . /packages/media-metadata-contract
 
+# Prisma picks its schema engine by the OpenSSL it detects. Installing the same
+# OpenSSL 3 the runtime stages ship makes `npm ci` fetch the engine they use, so
+# `prisma migrate deploy` never downloads one into node_modules at startup
+# (which fails when the container runs as an arbitrary UID, e.g. OpenShift).
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy dependency manifests first for better layer caching
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -64,15 +71,22 @@ COPY --from=worker-deps --chown=node:node /app/dist ./dist
 COPY --from=worker-deps --chown=node:node /app/databaseUrl.js ./databaseUrl.js
 COPY --from=worker-deps --chown=node:node /packages/media-metadata-contract /packages/media-metadata-contract
 
-# Create writable runtime dirs and harden image
+# Create writable runtime dirs and harden image. Runtime-written paths belong
+# to group 0 with owner permissions so an arbitrary UID in group 0 (OpenShift
+# restricted-v2) can write them as well as UID 1000.
 RUN mkdir -p /app/cache /app/logs && \
     chown -R node:node /app/cache /app/logs && \
+    chgrp -R 0 /app/cache /app/logs && \
+    chmod -R g=u /app/cache /app/logs && \
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
     rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
     rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
-USER node
+# An arbitrary UID has no passwd entry or home directory.
+ENV HOME=/tmp
+
+USER 1000
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "dist/worker.js"]
@@ -111,8 +125,15 @@ COPY --from=build --chown=node:node /packages/media-metadata-contract /packages/
 COPY --chown=node:node healthcheck.js ./
 COPY docker-entrypoint.sh /usr/local/bin/
 
+# Runtime-written paths belong to group 0 with owner permissions so an
+# arbitrary UID in group 0 (OpenShift restricted-v2) can write them as well as
+# UID 1000. `prisma -v` resolves the schema engine for this exact runtime now,
+# so startup migrations never write into node_modules.
 RUN mkdir -p /app/cache/covers /app/cache/transcodes /app/logs && \
     chown -R node:node /app/cache /app/logs && \
+    chgrp -R 0 /app/cache /app/logs && \
+    chmod -R g=u /app/cache /app/logs && \
+    ./node_modules/.bin/prisma -v > /dev/null && \
     sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh && \
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
@@ -120,7 +141,10 @@ RUN mkdir -p /app/cache/covers /app/cache/transcodes /app/logs && \
     rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true && \
     rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
-USER node
+# An arbitrary UID has no passwd entry or home directory.
+ENV HOME=/tmp
+
+USER 1000
 
 EXPOSE 3006
 

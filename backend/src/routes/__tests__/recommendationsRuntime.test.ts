@@ -276,7 +276,7 @@ describe("recommendations routes runtime", () => {
             { id: "al-3", artistId: "sim-2", rgMbid: "rg-3", year: 2022 },
         ]);
         mockOwnedAlbumFindMany.mockResolvedValue([
-            { artistId: "sim-1", rgMbid: "rg-1" },
+            { artistId: "sim-1", albumId: "al-1" },
         ]);
 
         const req = { query: { seedArtistId: "seed-1" } } as any;
@@ -378,7 +378,7 @@ describe("recommendations routes runtime", () => {
                     artist: { name: "A1" },
                 },
             ]);
-        mockOwnedAlbumFindMany.mockResolvedValue([{ rgMbid: "rg-11" }]);
+        mockOwnedAlbumFindMany.mockResolvedValue([{ albumId: "rec-al-1" }]);
 
         const req = { query: { seedAlbumId: "seed-album" } } as any;
         const res = createRes();
@@ -427,7 +427,7 @@ describe("recommendations routes runtime", () => {
                 artist: { id: "sa-1", name: "Artist One" },
             },
         ]);
-        mockOwnedAlbumFindMany.mockResolvedValue([{ rgMbid: "rg-11" }]);
+        mockOwnedAlbumFindMany.mockResolvedValue([{ albumId: "rec-al-1" }]);
 
         const req = { query: { seedAlbumId: "seed-album" } } as any;
         const res = createRes();

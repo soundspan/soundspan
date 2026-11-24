@@ -725,13 +725,11 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         expect(mockPrisma.track.upsert).toHaveBeenCalledTimes(1);
     });
 
-    it("creates deterministic temporary IDs when Date and RNG are controlled", async () => {
+    it("stores no MusicBrainz ids for an untagged artist and album", async () => {
         const scanner = new MusicScannerService(
             undefined,
             "/tmp/covers",
         ) as any;
-        const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1700000000000);
-        const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.12345);
 
         mockPrisma.artist.findFirst.mockResolvedValue(null);
         mockPrisma.artist.findMany.mockResolvedValue([]);
@@ -740,7 +738,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             id: "artist-temp",
             name: "Temp Artist",
             normalizedName: "temp artist",
-            mbid: "temp-1700000000000-0.12345",
+            mbid: null,
         });
         mockPrisma.album.findFirst.mockResolvedValue(null);
         mockPrisma.album.create.mockResolvedValue({
@@ -748,7 +746,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             coverUrl: null,
             title: "Album Name",
             location: "LIBRARY",
-            rgMbid: "temp-1700000000000-0.12345",
+            rgMbid: null,
         });
         mockParseArtistFromPath.mockReturnValue("Temp Artist");
         mockParseFile.mockResolvedValue({
@@ -776,20 +774,17 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         expect(mockPrisma.artist.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({
-                    mbid: "temp-1700000000000-0.12345",
+                    mbid: null,
                 }),
             }),
         );
         expect(mockPrisma.album.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({
-                    rgMbid: "temp-1700000000000-0.12345",
+                    rgMbid: null,
                 }),
             }),
         );
-
-        nowSpy.mockRestore();
-        randomSpy.mockRestore();
     });
 
     it("falls back to raw artist name when extracted primary artist differs", async () => {
@@ -1201,16 +1196,16 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         });
         expect(mockPrisma.ownedAlbum.upsert).toHaveBeenCalledWith({
             where: {
-                artistId_rgMbid: {
+                artistId_albumId: {
                     artistId: "artist-hook",
-                    rgMbid: "remote:hook",
+                    albumId: "album-hook",
                 },
             },
             update: {
                 source: "native_scan",
             },
             create: {
-                rgMbid: "remote:hook",
+                albumId: "album-hook",
                 artistId: "artist-hook",
                 source: "native_scan",
             },

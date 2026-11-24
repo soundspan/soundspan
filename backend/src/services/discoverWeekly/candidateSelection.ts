@@ -82,8 +82,8 @@ export class CandidateSelectionService {
      *
      * Semantics MUST mirror isArtistInLibrary exactly -- see that method's
      * fast path, which this map feeds:
-     *  - MBID probe only considers non-"temp-" mbids (library artists carry
-     *    temp- MBIDs by convention and are deliberately excluded there).
+     *  - MBID probe only considers real mbids (artists without a MusicBrainz
+     *    id, or with a synthetic temp- id, are excluded there).
      *  - An MBID hit with zero albums is NOT a library hit -- it falls through
      *    to the name probe (two independent probes, not mbid-first-else-name).
      *  - Name matching is case-insensitive equality against Artist.name (NOT
@@ -155,10 +155,12 @@ export class CandidateSelectionService {
 
             for (const row of rows) {
                 const hasAlbum = row.albums.length > 0;
-                mbidHasAlbum.set(
-                    row.mbid,
-                    hasAlbum || mbidHasAlbum.get(row.mbid) === true,
-                );
+                if (row.mbid) {
+                    mbidHasAlbum.set(
+                        row.mbid,
+                        hasAlbum || mbidHasAlbum.get(row.mbid) === true,
+                    );
+                }
                 const key = row.name.toLowerCase();
                 nameHasAlbum.set(
                     key,
@@ -211,25 +213,18 @@ export class CandidateSelectionService {
             return true;
         }
 
-        // Check OwnedAlbum by looking up associated Album records through rgMbid
+        // Check OwnedAlbum by looking up the associated Album titles
         const ownedAlbumRefs = await discoverWeeklyPrisma.ownedAlbum.findMany({
             where: {
                 artist: {
                     name: { contains: normalizedArtist, mode: "insensitive" },
                 },
             },
-            select: { rgMbid: true },
+            select: { album: { select: { title: true } } },
         });
 
-        // Look up the actual album titles for these owned albums
         if (ownedAlbumRefs.length > 0) {
-            const rgMbids = ownedAlbumRefs.map((o) => o.rgMbid);
-            const ownedAlbumRecords = await discoverWeeklyPrisma.album.findMany(
-                {
-                    where: { rgMbid: { in: rgMbids } },
-                    select: { title: true },
-                },
-            );
+            const ownedAlbumRecords = ownedAlbumRefs.map((o) => o.album);
 
             for (const owned of ownedAlbumRecords) {
                 const ownedNormalized = owned.title

@@ -4,7 +4,7 @@ import type { LibraryBrowseOrigin } from "../../utils/librarySorting";
 /** Artist fields selected by the Library list query. */
 export interface LibraryArtistListRow {
     id: string;
-    mbid: string;
+    mbid: string | null;
     name: string;
     heroUrl: string | null;
     userHeroUrl: string | null;

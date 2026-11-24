@@ -34,7 +34,7 @@ export async function upsertFederationArtistPage(
     peerId: string,
     rows: readonly {
         item: ArtistEnvelope;
-        mbid: string;
+        mbid: string | null;
         existingId?: string;
     }[],
 ): Promise<RemoteArtistRow[]> {
@@ -84,7 +84,7 @@ export async function upsertFederationAlbumPage(
     rows: readonly {
         item: AlbumEnvelope;
         artistId: string;
-        rgMbid: string;
+        rgMbid: string | null;
         existingId?: string;
     }[],
 ): Promise<RemoteAlbumRow[]> {

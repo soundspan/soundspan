@@ -529,7 +529,10 @@ describe("DiscoveryRecommendationsService", () => {
             ]);
             (
                 mockPrisma.discoverExclusion.findMany as jest.Mock
-            ).mockResolvedValue([{ albumMbid: "excluded-rg" }]);
+            ).mockResolvedValue([
+                { albumMbid: "excluded-rg" },
+                { albumMbid: "temp-album-excluded" },
+            ]);
 
             const candidateTracks = [
                 {
@@ -579,12 +582,12 @@ describe("DiscoveryRecommendationsService", () => {
                     albumId: "album-2",
                     album: {
                         title: "Album Two",
-                        rgMbid: "rg-2",
+                        rgMbid: null,
                         coverUrl: null,
                         artist: {
                             id: "artist-fallback",
                             name: "Fallback Artist",
-                            mbid: "artist-mbid-2",
+                            mbid: null,
                         },
                     },
                 },
@@ -608,7 +611,20 @@ describe("DiscoveryRecommendationsService", () => {
                     album: {
                         location: { in: ["LIBRARY", "FEDERATED"] },
                         artistId: { in: ["artist-priority"] },
-                        rgMbid: { notIn: ["excluded-rg"] },
+                        OR: [
+                            {
+                                rgMbid: {
+                                    notIn: [
+                                        "excluded-rg",
+                                        "temp-album-excluded",
+                                    ],
+                                },
+                            },
+                            {
+                                rgMbid: null,
+                                id: { notIn: ["album-excluded"] },
+                            },
+                        ],
                     },
                 },
                 include: {
@@ -637,7 +653,20 @@ describe("DiscoveryRecommendationsService", () => {
                     id: { notIn: ["track-priority"] },
                     album: {
                         location: { in: ["LIBRARY", "FEDERATED"] },
-                        rgMbid: { notIn: ["excluded-rg"] },
+                        OR: [
+                            {
+                                rgMbid: {
+                                    notIn: [
+                                        "excluded-rg",
+                                        "temp-album-excluded",
+                                    ],
+                                },
+                            },
+                            {
+                                rgMbid: null,
+                                id: { notIn: ["album-excluded"] },
+                            },
+                        ],
                     },
                 },
                 include: {
@@ -680,10 +709,10 @@ describe("DiscoveryRecommendationsService", () => {
                     filePath: "/music/fallback.flac",
                     albumId: "album-2",
                     albumTitle: "Album Two",
-                    albumMbid: "rg-2",
+                    albumMbid: "temp-album-2",
                     artistId: "artist-fallback",
                     artistName: "Fallback Artist",
-                    artistMbid: "artist-mbid-2",
+                    artistMbid: null,
                     coverUrl: null,
                     similarity: 0.34,
                     tier: "explore",

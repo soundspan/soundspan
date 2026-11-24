@@ -69,7 +69,7 @@ async function loadSimilarArtists(
 ): Promise<SimilarArtistResult[]> {
     try {
         const similar = await lastFmService.getSimilarArtists(
-            artist.mbid,
+            artist.mbid ?? "",
             artist.name,
         );
         return similar.slice(0, MAX_SIMILAR_ARTISTS);

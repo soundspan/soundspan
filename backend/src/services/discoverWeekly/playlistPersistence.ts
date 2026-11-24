@@ -4,6 +4,7 @@ import {
     TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
+import { musicBrainzIdOrSynthetic } from "../../utils/musicIds";
 import { shuffleArray } from "../../utils/shuffle";
 import { discoveryBatchLogger, discoverySeeding } from "../discovery";
 import { discoveryTrackFileSnapshot, discoverWeeklyPrisma } from "./state";
@@ -507,13 +508,19 @@ export class PlaylistPersistenceService extends LidarrCleanupService {
                                 userId_weekStartDate_rgMbid: {
                                     userId: batch.userId,
                                     weekStartDate: batch.weekStart,
-                                    rgMbid: track.album.rgMbid,
+                                    rgMbid: musicBrainzIdOrSynthetic(
+                                        track.album.id,
+                                        track.album.rgMbid,
+                                    ),
                                 },
                             },
                             create: {
                                 userId: batch.userId,
                                 catalogAlbumId: track.album.id,
-                                rgMbid: track.album.rgMbid,
+                                rgMbid: musicBrainzIdOrSynthetic(
+                                    track.album.id,
+                                    track.album.rgMbid,
+                                ),
                                 artistName: track.album.artist.name,
                                 artistMbid: track.album.artist.mbid,
                                 albumTitle: track.album.title,
@@ -559,12 +566,18 @@ export class PlaylistPersistenceService extends LidarrCleanupService {
                                 where: {
                                     userId_albumMbid: {
                                         userId: batch.userId,
-                                        albumMbid: track.album.rgMbid,
+                                        albumMbid: musicBrainzIdOrSynthetic(
+                                            track.album.id,
+                                            track.album.rgMbid,
+                                        ),
                                     },
                                 },
                                 create: {
                                     userId: batch.userId,
-                                    albumMbid: track.album.rgMbid,
+                                    albumMbid: musicBrainzIdOrSynthetic(
+                                        track.album.id,
+                                        track.album.rgMbid,
+                                    ),
                                     artistName: track.album.artist.name,
                                     albumTitle: track.album.title,
                                     expiresAt,
@@ -805,7 +818,10 @@ export class PlaylistPersistenceService extends LidarrCleanupService {
                             data: {
                                 userId: batch.userId,
                                 catalogAlbumId: album.id,
-                                rgMbid: album.rgMbid,
+                                rgMbid: musicBrainzIdOrSynthetic(
+                                    album.id,
+                                    album.rgMbid,
+                                ),
                                 artistName: album.artist.name,
                                 artistMbid: album.artist.mbid,
                                 albumTitle: album.title,

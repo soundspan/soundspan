@@ -25,8 +25,14 @@ jest.mock("../../utils/db", () => ({ prisma: mockPrisma }));
 jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
 const mockTidalGetTrack = jest.fn();
+const mockUsesInstanceAccount = jest.fn();
+const mockEnsureInstanceSession = jest.fn();
 jest.mock("../tidalStreaming", () => ({
-    tidalStreamingService: { getTrack: mockTidalGetTrack },
+    tidalStreamingService: {
+        getTrack: mockTidalGetTrack,
+        usesInstanceAccount: mockUsesInstanceAccount,
+        ensureInstanceSession: mockEnsureInstanceSession,
+    },
 }));
 
 const mockYtGetSong = jest.fn();
@@ -35,6 +41,7 @@ jest.mock("../youtubeMusic", () => ({
 }));
 
 import { remoteTrackMetadataRefreshService } from "../remoteTrackMetadataRefresh";
+import { TIDAL_INSTANCE_SESSION_ID } from "../tidalAccountMode";
 
 describe("RemoteTrackMetadataRefreshService", () => {
     beforeEach(() => {
@@ -46,6 +53,8 @@ describe("RemoteTrackMetadataRefreshService", () => {
         mockPrisma.trackYtMusic.findMany.mockReset().mockResolvedValue([]);
         mockPrisma.trackYtMusic.update.mockReset();
         mockPrisma.userSettings.findMany.mockReset().mockResolvedValue([]);
+        mockUsesInstanceAccount.mockReset().mockResolvedValue(false);
+        mockEnsureInstanceSession.mockReset().mockResolvedValue(true);
     });
 
     describe("refreshUnknownMetadata", () => {
@@ -204,6 +213,30 @@ describe("RemoteTrackMetadataRefreshService", () => {
             expect(result.updated).toBe(0);
             expect(result.failed).toBe(1);
             expect(mockTidalGetTrack).not.toHaveBeenCalled();
+        });
+
+        it("refreshes TIDAL rows through the shared instance account when no user is linked", async () => {
+            mockUsesInstanceAccount.mockResolvedValue(true);
+            mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
+                { id: "tt-shared", tidalId: 555, likedBy: [] },
+            ]);
+            mockTidalGetTrack.mockResolvedValueOnce({
+                id: 555,
+                title: "Shared Title",
+                artist: "Shared Artist",
+                duration: 200,
+                album: { title: "Shared Album" },
+            });
+
+            const result =
+                await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
+
+            expect(result).toEqual({ updated: 1, failed: 0 });
+            expect(mockTidalGetTrack).toHaveBeenCalledWith(
+                TIDAL_INSTANCE_SESSION_ID,
+                555,
+            );
+            expect(mockPrisma.userSettings.findMany).not.toHaveBeenCalled();
         });
 
         it("only writes real fields from partial API response", async () => {

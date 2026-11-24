@@ -58,6 +58,7 @@ import {
     buildArtistTrackTitleIndex,
     filterDistinctDiscographyAlbums,
     findArtistTrackByTitle,
+    ownedAlbumKeys,
 } from "./artistPageMatching";
 import { resolveArtistImage } from "../../services/metadata/artistImageResolver";
 import { isRealArtistMbid } from "../../utils/musicIds";
@@ -498,13 +499,13 @@ export async function handleGetArtist(
 
     // Fetch MusicBrainz only when the artist needs external discography data.
     let albumsWithOwnership = [];
-    const ownedRgMbids = new Set(artist.ownedAlbums.map((o) => o.rgMbid));
+    const { ownedAlbumIds, ownedRgMbids } = ownedAlbumKeys(artist.ownedAlbums);
 
-    // If artist has temp MBID, try to find real MBID by searching MusicBrainz
-    let effectiveMbid = artist.mbid;
+    // If artist has no MBID, try to find the real MBID by searching MusicBrainz
+    let effectiveMbid: string | null = artist.mbid;
     if (shouldResolveMbid && !isRealArtistMbid(effectiveMbid)) {
         logger.debug(
-            ` Artist has temp/no MBID, searching MusicBrainz for ${artist.name}...`,
+            ` Artist has no MBID, searching MusicBrainz for ${artist.name}...`,
         );
         try {
             const searchResults = await musicBrainzService.searchArtist(
@@ -512,7 +513,7 @@ export async function handleGetArtist(
                 1,
             );
             if (searchResults.length > 0) {
-                effectiveMbid = searchResults[0].id;
+                effectiveMbid = searchResults[0].id as string;
                 logger.debug(`  Found MBID: ${effectiveMbid}`);
 
                 const existingOwner = await prisma.artist.findUnique({
@@ -570,8 +571,7 @@ export async function handleGetArtist(
             tracks: album.tracks.map(({ federationPeer, ...track }) =>
                 withFederatedTrackPlayback(track, federationPeer),
             ),
-            owned:
-                album.location === "LIBRARY" || ownedRgMbids.has(album.rgMbid),
+            owned: album.location === "LIBRARY" || ownedAlbumIds.has(album.id),
             coverArt: album.coverUrl,
             source:
                 album.location === "REMOTE"
@@ -605,10 +605,9 @@ export async function handleGetArtist(
     if (!includeDiscography) {
         albumsWithOwnership = dbAlbums;
     } else {
-        const shouldFetchDiscography = isRealArtistMbid(effectiveMbid);
-
-        if (shouldFetchDiscography) {
-            const discoCacheKey = `discography:${effectiveMbid}`;
+        if (isRealArtistMbid(effectiveMbid)) {
+            const discographyMbid = effectiveMbid;
+            const discoCacheKey = `discography:${discographyMbid}`;
             try {
                 let releaseGroups: any[] = [];
                 let fetchedFromProvider = false;
@@ -633,7 +632,7 @@ export async function handleGetArtist(
                         );
                         releaseGroups =
                             await musicBrainzService.getReleaseGroups(
-                                effectiveMbid,
+                                discographyMbid,
                                 ["album", "ep"],
                                 100,
                             );

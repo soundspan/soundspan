@@ -470,10 +470,12 @@ test("3. frontend runtime uses the base node image UID 1000 user", () => {
         !dockerfile.includes("1001"),
         `${relativePath}: must not contain UID or GID 1001`,
     );
+    // The base image's `node` user is UID 1000; the numeric form lets
+    // Kubernetes verify runAsNonRoot without resolving a user name.
     assert.match(
         dockerfile,
-        /^\s*USER\s+node\s*$/im,
-        `${relativePath}: runtime must end as USER node`,
+        /^\s*USER\s+(?:node|1000)\s*$/im,
+        `${relativePath}: runtime must end as USER node (UID 1000)`,
     );
 });
 

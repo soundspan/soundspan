@@ -342,6 +342,33 @@ describe("federation catalog exports", () => {
         });
     });
 
+    it("exports a stable synthetic id for artists and albums without a MusicBrainz id", async () => {
+        prisma.artist.findMany.mockResolvedValue([
+            { ...artist("a1"), mbid: null },
+        ]);
+        prisma.album.findMany.mockResolvedValue([
+            { ...album("album-1"), rgMbid: null },
+        ]);
+
+        const artists = await getFederationCatalogItems({
+            mediaType: "artist",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+        const albums = await getFederationCatalogItems({
+            mediaType: "album",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+
+        expect(artists.body.items[0].attributes).toEqual(
+            expect.objectContaining({ mbid: "temp-a1" }),
+        );
+        expect(albums.body.items[0].attributes).toEqual(
+            expect.objectContaining({ rgMbid: "temp-album-1" }),
+        );
+    });
+
     it("emits album and track parent refs and gates embeddings by scope", async () => {
         prisma.album.findMany.mockResolvedValue([album("album-1")]);
         prisma.track.findMany.mockResolvedValue([track("track-1")]);

@@ -224,6 +224,22 @@ describe("subsonic metadata compatibility handlers", () => {
         );
     });
 
+    it("omits musicBrainzId for an album without a MusicBrainz id", async () => {
+        mockAlbumFindFirst.mockResolvedValue({
+            rgMbid: null,
+            title: "Untagged Album",
+            coverUrl: null,
+        });
+
+        await handleGetAlbumInfo2(buildReq({ id: "al-album-1" }), buildRes());
+
+        const payload = mockSendSuccess.mock.calls.at(-1)?.[1];
+        expect(payload.albumInfo2.musicBrainzId).toBeUndefined();
+        expect(JSON.stringify(payload.albumInfo2)).not.toContain(
+            "musicBrainzId",
+        );
+    });
+
     it("returns classic artistInfo and albumInfo envelope keys", async () => {
         mockArtistFindFirst.mockResolvedValue({
             id: "artist-1",

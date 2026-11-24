@@ -64,8 +64,10 @@ export function MusicBrainzLookup({
         setSearchQuery(currentName || "");
     }, [currentName]);
 
-    const isTempMbid = currentValue?.startsWith("temp-");
-    const hasValidMbid = Boolean(currentValue && !isTempMbid);
+    // Artists and albums without a MusicBrainz id (empty, or a legacy
+    // synthetic temp- id) still need a match.
+    const needsMatching = !currentValue || currentValue.startsWith("temp-");
+    const hasValidMbid = !needsMatching;
 
     const performSearch = async () => {
         if (searchQuery.trim().length < 2) return;
@@ -146,17 +148,15 @@ export function MusicBrainzLookup({
         <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm">
                 <span className="text-gray-400">Current:</span>
-                {isTempMbid ? (
+                {needsMatching ? (
                     <span className="rounded bg-yellow-500/10 px-2 py-0.5 font-mono text-xs text-yellow-500">
-                        Temporary ID (needs matching)
+                        No MusicBrainz ID (needs matching)
                     </span>
-                ) : hasValidMbid ? (
+                ) : (
                     <span className="flex items-center gap-1 rounded bg-green-500/10 px-2 py-0.5 font-mono text-xs text-green-500">
                         <Check className="h-3 w-3" />
                         {currentValue.substring(0, 8)}...
                     </span>
-                ) : (
-                    <span className="text-xs text-gray-400">None</span>
                 )}
                 {hasValidMbid && (
                     <a

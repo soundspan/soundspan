@@ -244,7 +244,7 @@ describe("dataIntegrity worker", () => {
         });
         expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
             where: {
-                rgMbid: { in: ["rg-1"] },
+                albumId: { in: ["album-1"] },
                 source: { not: "native_scan" },
             },
         });
@@ -397,6 +397,23 @@ describe("dataIntegrity worker", () => {
             where: { artistId: "temp-artist-1" },
             data: { artistId: "real-artist-1" },
         });
+        expect(
+            (prisma.artist.findMany as jest.Mock).mock.calls[0][0].where,
+        ).toEqual(
+            expect.objectContaining({
+                OR: [{ mbid: null }, { mbid: { startsWith: "temp-" } }],
+            }),
+        );
+        expect(
+            (prisma.artist.findMany as jest.Mock).mock.calls[1][0].where,
+        ).toEqual(
+            expect.objectContaining({
+                AND: [
+                    { mbid: { not: null } },
+                    { NOT: { mbid: { startsWith: "temp-" } } },
+                ],
+            }),
+        );
         expect(prisma.artist.delete).not.toHaveBeenCalled();
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalled();
     });

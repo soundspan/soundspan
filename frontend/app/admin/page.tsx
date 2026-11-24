@@ -14,6 +14,7 @@ import { useFeatures } from "@/lib/features-context";
 
 const baseSidebarItems: SidebarItem[] = [
     { id: "playback-sources", label: "Playback Sources" },
+    { id: "search-providers", label: "Search Providers" },
     { id: "download-preferences", label: "Download Preferences" },
     { id: "download-services", label: "Download Services" },
     { id: "audiobookshelf", label: "Media Servers" },
@@ -49,6 +50,14 @@ const PlaybackSourcesSection = dynamic(
     () =>
         import("@/features/settings/components/sections/PlaybackSourcesSection").then(
             (mod) => mod.PlaybackSourcesSection,
+        ),
+    { loading: renderSectionFallback },
+);
+
+const SearchProvidersSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/SearchProvidersSection").then(
+            (mod) => mod.SearchProvidersSection,
         ),
     { loading: renderSectionFallback },
 );
@@ -301,6 +310,11 @@ export default function AdminPage() {
                 title="Admin"
             >
                 <PlaybackSourcesSection
+                    settings={systemSettings}
+                    onUpdate={updateSystemSettings}
+                />
+
+                <SearchProvidersSection
                     settings={systemSettings}
                     onUpdate={updateSystemSettings}
                 />

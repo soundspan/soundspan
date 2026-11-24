@@ -171,14 +171,16 @@ async function findStandardMatch(
         ],
         [track.isrc ? { isrc: track.isrc } : null, 0.9],
         [
-            {
-                discNo: track.discNo,
-                trackNo: track.trackNo,
-                album: {
-                    rgMbid: decodeFederationIdentity(track.album.rgMbid),
-                    location: "LIBRARY",
-                },
-            },
+            track.album.rgMbid
+                ? {
+                      discNo: track.discNo,
+                      trackNo: track.trackNo,
+                      album: {
+                          rgMbid: decodeFederationIdentity(track.album.rgMbid),
+                          location: "LIBRARY",
+                      },
+                  }
+                : null,
             0.8,
         ],
     ];

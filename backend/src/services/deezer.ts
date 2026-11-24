@@ -10,7 +10,8 @@ import { rateLimiter } from "./rateLimiter";
 /**
  * Deezer Service
  *
- * Fetches images, previews, and public playlist data from Deezer.
+ * Fetches images, previews, catalog search, and public playlist data from
+ * Deezer.
  * No authentication required - Deezer's API is completely public.
  */
 
@@ -26,6 +27,27 @@ export interface DeezerTrack {
     durationMs: number;
     previewUrl: string | null;
     coverUrl: string | null;
+}
+
+/** One artist from a Deezer catalog search. */
+export interface DeezerArtistSearchResult {
+    deezerId: string;
+    name: string;
+    fans: number;
+    url: string | null;
+    imageUrl: string | null;
+}
+
+/** One track from a Deezer catalog search. */
+export interface DeezerTrackSearchResult {
+    deezerId: string;
+    title: string;
+    artist: string;
+    album: string | null;
+    durationSec: number | null;
+    previewUrl: string | null;
+    coverUrl: string | null;
+    url: string | null;
 }
 
 export interface DeezerPlaylist {
@@ -581,6 +603,53 @@ class DeezerService {
     /**
      * Search for playlists
      */
+    /** Searches Deezer's artist catalog. Request failures propagate. */
+    async searchArtists(
+        query: string,
+        limit: number = 20,
+    ): Promise<DeezerArtistSearchResult[]> {
+        const response = await this.get(`${DEEZER_API}/search/artist`, {
+            params: { q: query, limit },
+            timeout: 5000,
+        });
+        return (response.data?.data || [])
+            .filter((artist: any) => artist?.id && artist?.name)
+            .map((artist: any) => ({
+                deezerId: String(artist.id),
+                name: artist.name,
+                fans: Number(artist.nb_fan) || 0,
+                url: artist.link || null,
+                imageUrl: artist.picture_xl || artist.picture_medium || null,
+            }));
+    }
+
+    /** Searches Deezer's track catalog. Request failures propagate. */
+    async searchTracks(
+        query: string,
+        limit: number = 20,
+    ): Promise<DeezerTrackSearchResult[]> {
+        const response = await this.get(`${DEEZER_API}/search/track`, {
+            params: { q: query, limit },
+            timeout: 5000,
+        });
+        return (response.data?.data || [])
+            .filter(
+                (track: any) =>
+                    track?.id && track?.title && track?.artist?.name,
+            )
+            .map((track: any) => ({
+                deezerId: String(track.id),
+                title: track.title,
+                artist: track.artist.name,
+                album: track.album?.title || null,
+                durationSec: Number(track.duration) || null,
+                previewUrl: track.preview || null,
+                coverUrl:
+                    track.album?.cover_xl || track.album?.cover_medium || null,
+                url: track.link || null,
+            }));
+    }
+
     async searchPlaylists(
         query: string,
         limit: number = 20,

@@ -38,7 +38,6 @@ export function selectPreferredAlbumOwnershipSource(
 export interface AlbumOwnershipPromotion {
     id: string;
     artistId: string;
-    rgMbid: string;
 }
 
 /** Promotes an album's catalog location within the caller's transaction. */
@@ -61,14 +60,14 @@ export async function promoteAlbumOwnership(
     await promoteAlbumLocation(transaction, album.id);
     await transaction.ownedAlbum.upsert({
         where: {
-            artistId_rgMbid: {
+            artistId_albumId: {
                 artistId: album.artistId,
-                rgMbid: album.rgMbid,
+                albumId: album.id,
             },
         },
         create: {
             artistId: album.artistId,
-            rgMbid: album.rgMbid,
+            albumId: album.id,
             source,
         },
         update: source === "native_scan" ? { source } : {},
@@ -77,7 +76,7 @@ export async function promoteAlbumOwnership(
     await transaction.ownedAlbum.updateMany({
         where: {
             artistId: album.artistId,
-            rgMbid: album.rgMbid,
+            albumId: album.id,
             source: {
                 in: [...ALBUM_OWNERSHIP_SOURCE_HIERARCHY.discoveryLikeUpgrades],
             },

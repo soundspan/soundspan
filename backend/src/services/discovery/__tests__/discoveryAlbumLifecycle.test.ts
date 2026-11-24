@@ -179,14 +179,14 @@ describe("DiscoveryAlbumLifecycle", () => {
 
             expect(mockPrisma.ownedAlbum.upsert).toHaveBeenCalledWith({
                 where: {
-                    artistId_rgMbid: {
+                    artistId_albumId: {
                         artistId: "artist-1",
-                        rgMbid: "rg-mbid-123",
+                        albumId: "album-db-1",
                     },
                 },
                 create: {
                     artistId: "artist-1",
-                    rgMbid: "rg-mbid-123",
+                    albumId: "album-db-1",
                     source: "discovery_liked",
                 },
                 update: {},

@@ -159,7 +159,7 @@ describe("openapi route sync", () => {
                     properties: {
                         id: { type: "string" },
                         name: { type: "string" },
-                        mbid: { type: "string" },
+                        mbid: { type: "string", nullable: true },
                     },
                 },
             }),

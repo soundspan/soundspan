@@ -140,6 +140,26 @@ without a linked account, subject to sidecar availability and provider behavior.
 | Normally works without a linked account (sidecar-dependent) | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id`, `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch`, `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
 | Per-user OAuth required                                     | `GET /api/ytmusic/album/:browseId`, `GET /api/ytmusic/artist/:channelId`, `GET /api/ytmusic/song/:videoId`, `GET /api/ytmusic/stream-info/:videoId`, `GET /api/ytmusic/stream/:videoId`, `GET /api/ytmusic/library/songs`, `GET /api/ytmusic/library/albums`                                      |
 
+## Search Providers
+
+Search lists artists and songs that are not in the library from catalog
+providers that an admin orders and enables under `Admin → Search Providers`:
+
+| Provider      | Results          | Needs                                                   |
+| ------------- | ---------------- | ------------------------------------------------------- |
+| Last.fm       | Artists, songs   | The server's Last.fm key; also corrects artist spelling |
+| Deezer        | Artists, songs   | Nothing: Deezer's public API                            |
+| TIDAL         | Artists, songs   | A TIDAL session for the user, or the shared account     |
+| YouTube Music | Songs            | The YouTube Music integration enabled and reachable     |
+
+Last.fm and Deezer are enabled by default. Enabled providers are searched in
+parallel, and their results are merged in the admin's order: an artist, or an
+artist and song, that a higher provider already returned is dropped. A provider
+the user cannot use, or one that fails, is skipped. TIDAL and YouTube Music
+songs play straight from that service; other songs play when they match an
+enabled streaming service and otherwise link to the artist page. Results are
+cached for 15 minutes per query and provider list.
+
 ## Track Mapping and Playlist Import APIs
 
 soundspan also exposes provider mapping and playlist import routes for cross-provider workflows:
@@ -176,9 +196,30 @@ Stream unowned tracks via per-user TIDAL OAuth.
 3. Complete the provider authorization flow
 4. Choose quality and save
 
-Streaming auth is separate from admin download auth.
+Streaming auth is separate from admin download auth, unless an admin shares the download account (see below).
 
 Songs you like from TIDAL appear in your Library with a TIDAL badge while you are signed in. See [Your Library](USAGE_GUIDE.md#your-library).
+
+### Sharing one account with every user
+
+An admin can let every user stream TIDAL through the admin download account instead of linking their own:
+
+1. Connect TIDAL under **Admin** → **Download Services** (see [TIDAL Downloads](#tidal-downloads))
+2. Turn on **Share this account with all users** in the same card
+3. Save
+
+While it is on, every user's TIDAL search, browse, matching, and streaming use that one account, the TIDAL card disappears from users' **Settings** → **Integrations**, and linking a personal account is turned off. Each user's **Playback** → **Streaming Quality** picks the TIDAL quality, up to what the shared subscription allows:
+
+| Streaming Quality   | TIDAL quality         |
+| ------------------- | --------------------- |
+| Original (Lossless) | Max / Hi-Res          |
+| High (320 kbps)     | High (AAC 320 kbps)   |
+| Medium (192 kbps)   | High (AAC 320 kbps)   |
+| Low (128 kbps)      | Low (AAC 96 kbps)     |
+
+TIDAL has no 192 kbps tier, so Medium uses High. The TIDAL card's own quality and **Show on Explore Page** settings are kept but hidden; TIDAL shelves stay on Explore for anyone who had not turned them off. Personal accounts users linked before are kept but not used; turning the setting off goes back to them. Relinking the admin account takes effect on the next request.
+
+TIDAL may allow only one stream at a time per account, so two users playing TIDAL at the same moment can interrupt each other. Sharing an account may also be against TIDAL's terms for your plan.
 
 ### Quality settings
 
@@ -203,12 +244,22 @@ Use TIDAL as a download source for tracks/albums.
 4. Choose download quality and naming template
 5. Save
 
+### Download songs as they play
+
+Turn on **Download songs as they play** in the TIDAL card under **Admin** → **Download Services** to keep a copy of everything people play:
+
+- Every TIDAL song plays from its download. The first time anyone plays a song, soundspan downloads it once into the music library with the admin TIDAL account at the highest quality TIDAL offers for it, and the listener hears those same bytes as they arrive, so playback starts straight away. Nothing plays without ending up in the library.
+- The download finishes even if the listener skips the song, and other people playing the same song meanwhile share it. As soon as it finishes, soundspan adds that file to the library on its own; no library scan is needed.
+- While a song is still downloading, it plays at the download's quality and can only be skipped to parts that have already arrived; jumping further ahead waits for the download to finish. Later plays use the downloaded file at the listener's **Playback** → **Streaming Quality**, the same as any library song.
+- If a download cannot start or fails, the song does not play; try again.
+- Songs are never removed automatically yet. soundspan records when each downloaded song was last played so a cleanup can remove unplayed songs later.
+
 ### Single songs
 
 When a liked TIDAL song's album has no MusicBrainz match, a download job cannot fetch the album. Admins can still download that one song with `Add song to library` in the song's menu in the Library or in Search. The same option replaces `Add album to library` when the library already has the song's matched album but not the song, for example a streaming-only bonus track. The song uses the same quality and naming template as album downloads.
 
 - soundspan downloads these songs one at a time. Up to 25 more can wait in line; when the line is full, try again later. If you run more than one backend instance, each one has its own line.
-- The library scan after each download brings the song in.
+- soundspan adds each downloaded song to the library as soon as it arrives, without a full library scan.
 - If a download fails, the song stays a streaming song. The backend log records the failure and its HTTP status, and the TIDAL sidecar log has the cause. A download that timed out can still finish and arrive after the next library scan; if it does not, choose `Add song to library` again.
 - Songs still waiting when the backend restarts are dropped. A song that was downloading at that moment can still arrive, but it shows up only after the next library scan. Choose `Add song to library` again, or run a library scan.
 

@@ -205,20 +205,15 @@ export async function handleGetAlbums(req: Request, res: Response) {
         if (origin === "remote") {
             where = { location: "REMOTE", id: { in: remoteAlbumIds } };
         } else if (filter === "owned") {
-            // Get all owned album rgMbids (includes liked discovery albums)
-            const ownedAlbumMbids = await prisma.ownedAlbum.findMany({
-                select: { rgMbid: true },
-            });
-            const ownedMbids = ownedAlbumMbids.map((oa) => oa.rgMbid);
-
-            // Albums with LIBRARY location OR rgMbid in OwnedAlbum
+            // Albums with LIBRARY location OR an OwnedAlbum row (includes
+            // liked discovery albums)
             where.OR = [
                 {
                     location: "LIBRARY",
                     tracks: { some: browseTrackWhere },
                 },
                 {
-                    rgMbid: { in: ownedMbids },
+                    ownedBy: { some: {} },
                     location: { in: ["LIBRARY", "DISCOVER"] },
                     tracks: { some: browseTrackWhere },
                 },
@@ -576,16 +571,17 @@ async function resolveAlbumMatchedInLibrary(album: {
 }
 
 async function loadAlbumLibraryState(album: {
+    id: string;
     artistId: string;
-    rgMbid: string;
+    rgMbid: string | null;
     matchedRgMbid: string | null;
 }): Promise<{ owned: boolean; matchedInLibrary: boolean }> {
     const [ownedAlbum, matchedInLibrary] = await Promise.all([
         prisma.ownedAlbum.findUnique({
             where: {
-                artistId_rgMbid: {
+                artistId_albumId: {
                     artistId: album.artistId,
-                    rgMbid: album.rgMbid,
+                    albumId: album.id,
                 },
             },
         }),
@@ -866,7 +862,7 @@ export async function handleDeleteAlbum(
 
     await prisma.$transaction(async (transaction) => {
         await transaction.ownedAlbum.deleteMany({
-            where: { rgMbid: album.rgMbid },
+            where: { albumId: album.id },
         });
         await transaction.album.delete({
             where: { id: album.id },

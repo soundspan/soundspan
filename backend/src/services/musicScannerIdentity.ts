@@ -122,7 +122,7 @@ async function consolidateTemporaryArtist(
     const temporaryArtist = await prisma.artist.findFirst({
         where: {
             normalizedName,
-            mbid: { startsWith: "temp-" },
+            mbid: null,
         },
     });
     if (!temporaryArtist) return null;
@@ -168,7 +168,7 @@ async function createArtist(
             data: {
                 name: artistName,
                 normalizedName: normalizeArtistName(artistName),
-                mbid: artistMbid || `temp-${Date.now()}-${Math.random()}`,
+                mbid: artistMbid || null,
                 enrichmentStatus: "pending",
             },
         });
@@ -302,7 +302,7 @@ async function findUntaggedAlbum(
 
 async function createAlbum(
     input: AlbumResolutionInput,
-    rgMbid: string,
+    rgMbid: string | null,
 ): Promise<ScannerAlbum> {
     return prisma.$transaction(async (transaction) => {
         const album = await transaction.album.create({
@@ -319,7 +319,7 @@ async function createAlbum(
             await transaction.ownedAlbum.create({
                 data: {
                     artistId: input.artistId,
-                    rgMbid,
+                    albumId: album.id,
                     source: "native_scan",
                 },
             });
@@ -339,12 +339,12 @@ export async function resolveScannerAlbum(
         input.albumMbid,
     );
     if (existingAlbum) return { album: existingAlbum, wasMissing: false };
-    const rgMbid = input.albumMbid || `temp-${Date.now()}-${Math.random()}`;
+    const rgMbid = input.albumMbid || null;
     try {
         const album = await createAlbum(input, rgMbid);
         return { album, wasMissing: true };
     } catch (error: unknown) {
-        if (!hasErrorCode(error, "P2002")) throw error;
+        if (!hasErrorCode(error, "P2002") || !rgMbid) throw error;
         const racedAlbum = await prisma.album.findUnique({ where: { rgMbid } });
         if (!racedAlbum) throw error;
         logger.debug(

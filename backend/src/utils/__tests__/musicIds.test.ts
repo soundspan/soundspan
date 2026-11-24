@@ -1,4 +1,9 @@
-import { isRealArtistMbid, rgMbidKind } from "../musicIds";
+import {
+    isRealArtistMbid,
+    musicBrainzIdOrSynthetic,
+    rgMbidKind,
+    rowIdFromSyntheticId,
+} from "../musicIds";
 
 describe("music ID helpers", () => {
     describe("isRealArtistMbid", () => {
@@ -32,6 +37,30 @@ describe("music ID helpers", () => {
             ["temp-remote-album-123", "temp"],
         ] as const)("classifies %s as %s", (rgMbid, expected) => {
             expect(rgMbidKind(rgMbid)).toBe(expected);
+        });
+
+        it.each([null, undefined, ""])(
+            "classifies a missing release-group identity %p as none",
+            (rgMbid) => {
+                expect(rgMbidKind(rgMbid)).toBe("none");
+            },
+        );
+    });
+
+    describe("synthetic ids", () => {
+        it("keeps a MusicBrainz id and synthesizes one from the row id", () => {
+            expect(musicBrainzIdOrSynthetic("album-1", "rg-1")).toBe("rg-1");
+            expect(musicBrainzIdOrSynthetic("album-1", null)).toBe(
+                "temp-album-1",
+            );
+        });
+
+        it("round-trips a synthetic id back to its row id", () => {
+            expect(
+                rowIdFromSyntheticId(musicBrainzIdOrSynthetic("album-1", null)),
+            ).toBe("album-1");
+            expect(rowIdFromSyntheticId("rg-1")).toBeNull();
+            expect(rowIdFromSyntheticId("temp-")).toBeNull();
         });
     });
 });

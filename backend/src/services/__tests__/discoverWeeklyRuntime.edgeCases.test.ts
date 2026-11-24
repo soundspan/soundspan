@@ -235,10 +235,7 @@ describe("discover weekly runtime behavior", () => {
         const { prisma } = setupDiscoverWeeklyMocks();
         (prisma.album.findFirst as jest.Mock).mockResolvedValueOnce(null);
         (prisma.ownedAlbum.findMany as jest.Mock).mockResolvedValueOnce([
-            { rgMbid: "rg-empty-owned" },
-        ]);
-        (prisma.album.findMany as jest.Mock).mockResolvedValueOnce([
-            { title: "" },
+            { album: { title: "" } },
         ]);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires

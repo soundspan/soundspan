@@ -1,7 +1,7 @@
 /** Artist used to seed a Discover Weekly recommendation run. */
 export interface SeedArtist {
     name: string;
-    mbid?: string;
+    mbid?: string | null;
 }
 
 /** Album candidate selected for a Discover Weekly batch. */

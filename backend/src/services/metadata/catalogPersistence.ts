@@ -71,7 +71,7 @@ interface NormalizedReleaseGroup {
 }
 
 interface ExistingAlbum {
-    rgMbid: string;
+    rgMbid: string | null;
     location: AlbumLocation;
     title: string;
     year: number | null;
@@ -95,11 +95,11 @@ export interface FindFreshArtistCatalogReleaseGroupsInput {
 /** Fresh persisted album and skeleton tracks used by discovery reads. */
 export interface FreshCatalogAlbum {
     id: string;
-    rgMbid: string;
+    rgMbid: string | null;
     title: string;
     year: number | null;
     primaryType: string;
-    artist: { id: string; mbid: string; name: string };
+    artist: { id: string; mbid: string | null; name: string };
     tracks: Array<{
         id: string;
         recordingMbid: string | null;
@@ -437,7 +437,9 @@ export async function persistCatalogReleaseGroups(
         },
     });
     const existingByMbid = new Map(
-        existing.map((album) => [album.rgMbid, album]),
+        existing.flatMap((album) =>
+            album.rgMbid ? [[album.rgMbid, album] as const] : [],
+        ),
     );
     const now = new Date();
     await refreshCatalogAlbums(groups, existingByMbid, now);
