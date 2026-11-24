@@ -73,10 +73,7 @@ router.post("/albums/:id/download", async (req, res) => {
             });
             selectedQuality =
                 (settings?.playbackQuality as
-                    | "original"
-                    | "high"
-                    | "medium"
-                    | "low") || "medium";
+                    "original" | "high" | "medium" | "low") || "medium";
         }
 
         // Get album with tracks

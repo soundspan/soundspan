@@ -904,8 +904,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         trackId: delta.trackId,
                     },
                     syncState: (delta.isPlaying ? "playing" : "paused") as
-                        | "playing"
-                        | "paused",
+                        "playing" | "paused",
                 };
                 activeGroupRef.current = next;
                 return next;

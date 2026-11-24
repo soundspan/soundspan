@@ -148,8 +148,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private cleanupStarted = false;
     private cleanupTask: Promise<void> | null = null;
     private providerReachability:
-        | VibeWorkerStatus["providerReachability"]
-        | null = null;
+        VibeWorkerStatus["providerReachability"] | null = null;
     private coverage: VibeEmbeddingCoverage | null = null;
     private statusWriteTask: Promise<void> = Promise.resolve();
     private stopped = false;

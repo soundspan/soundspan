@@ -8,9 +8,7 @@ import type { Prisma } from "@prisma/client";
  * admin would remain; "notFound" means the user row does not exist.
  */
 export type UserDeletionReservationResult =
-    | "reserved"
-    | "lastAdmin"
-    | "notFound";
+    "reserved" | "lastAdmin" | "notFound";
 
 /**
  * Outcome of finalizing a reserved deletion: "deleted" removed the row;

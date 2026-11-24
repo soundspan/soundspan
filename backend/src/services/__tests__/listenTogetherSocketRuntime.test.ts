@@ -107,8 +107,7 @@ describe("listen together socket runtime behavior", () => {
             return mutationLockClient;
         });
         let socialPresenceCallback:
-            | ((event: Record<string, unknown>) => void)
-            | null = null;
+            ((event: Record<string, unknown>) => void) | null = null;
         const unsubscribeSocialPresenceUpdates = jest.fn();
         const subscribeSocialPresenceUpdates = jest.fn(
             (callback: (event: Record<string, unknown>) => void) => {

@@ -66,9 +66,7 @@ export function resolveListenTogetherMembershipPendingState(
 }
 
 export type ListenTogetherReadyReportRecoveryAction =
-    | "retry"
-    | "terminal-retry"
-    | "recover";
+    "retry" | "terminal-retry" | "recover";
 
 /** Select the next ready-report recovery action. */
 export function resolveListenTogetherReadyReportRecoveryAction(input: {

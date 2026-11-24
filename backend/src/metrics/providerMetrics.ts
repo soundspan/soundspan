@@ -5,12 +5,7 @@ export type VibeProviderEndpoint = "space" | "text" | "audio";
 
 /** Closed outcome vocabulary for provider request telemetry. */
 export type VibeProviderOutcome =
-    | "ok"
-    | "timeout"
-    | "auth"
-    | "contract"
-    | "mismatch"
-    | "error";
+    "ok" | "timeout" | "auth" | "contract" | "mismatch" | "error";
 
 /** Vibe provider instruments owned by one Prometheus registry. */
 export interface ProviderMetrics {

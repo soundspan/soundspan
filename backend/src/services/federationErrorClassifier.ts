@@ -7,10 +7,7 @@ import {
 
 /** Stable outbound failure classes exposed by federation admin routes. */
 export type FederationErrorClass =
-    | "unreachable"
-    | "tls"
-    | "unauthorized"
-    | "peer_invalid";
+    "unreachable" | "tls" | "unauthorized" | "peer_invalid";
 
 /** Failure classes persisted by recurring federation health probes. */
 export type FederationHealthErrorClass = Extract<

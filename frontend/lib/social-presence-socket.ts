@@ -4,9 +4,7 @@ import { io, type Socket } from "socket.io-client";
 import { api } from "@/lib/api";
 
 type SocialPresenceUpdateReason =
-    | "heartbeat"
-    | "playback-state"
-    | "playback-state-cleared";
+    "heartbeat" | "playback-state" | "playback-state-cleared";
 
 interface SocialPresenceUpdatedEvent {
     userId: string;

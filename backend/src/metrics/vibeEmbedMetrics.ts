@@ -19,8 +19,7 @@ export type VibeProviderConfigErrorReason = "preprocessing_mismatch";
 
 /** Closed vocabulary compatibility failure vocabulary. */
 export type VibeVocabularySpaceMismatchReason =
-    | "missing_identity"
-    | "space_mismatch";
+    "missing_identity" | "space_mismatch";
 
 /** Worker target-space coverage values exposed by the worker process. */
 export interface VibeEmbeddingCoverage {

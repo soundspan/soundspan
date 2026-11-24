@@ -138,8 +138,7 @@ describe("federation metrics", () => {
     it("keeps a timed-out worker collection single-flight until it settles", async () => {
         jest.useFakeTimers();
         let resolveCollection:
-            | ((snapshots: FederationWorkerMetricSnapshot[]) => void)
-            | undefined;
+            ((snapshots: FederationWorkerMetricSnapshot[]) => void) | undefined;
         const collection = new Promise<FederationWorkerMetricSnapshot[]>(
             (resolve) => {
                 resolveCollection = resolve;
@@ -245,8 +244,7 @@ describe("federation metrics", () => {
     it("keeps a timed-out lease collection single-flight until it settles", async () => {
         jest.useFakeTimers();
         let resolveCollection:
-            | ((snapshots: FederationLeaseMetricSnapshot[]) => void)
-            | undefined;
+            ((snapshots: FederationLeaseMetricSnapshot[]) => void) | undefined;
         const collection = new Promise<FederationLeaseMetricSnapshot[]>(
             (resolve) => {
                 resolveCollection = resolve;
@@ -294,8 +292,7 @@ describe("federation metrics", () => {
     it("serves a late lease result from cache on the next scrape", async () => {
         jest.useFakeTimers();
         let resolveCollection:
-            | ((snapshots: FederationLeaseMetricSnapshot[]) => void)
-            | undefined;
+            ((snapshots: FederationLeaseMetricSnapshot[]) => void) | undefined;
         const collection = new Promise<FederationLeaseMetricSnapshot[]>(
             (resolve) => {
                 resolveCollection = resolve;

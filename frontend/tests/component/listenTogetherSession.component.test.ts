@@ -639,8 +639,7 @@ const providerSocketState = {
     callbacks: null as ListenTogetherSocketCallbacks | null,
     joinGroupCalls: [] as string[],
     joinGroupImplementation: null as
-        | ((groupId: string) => Promise<void>)
-        | null,
+        ((groupId: string) => Promise<void>) | null,
     seekCalls: [] as number[],
     seekStateVersions: [] as Array<number | undefined>,
     reportReadyCalls: 0,

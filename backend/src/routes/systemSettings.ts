@@ -343,8 +343,7 @@ router.post("/", async (req, res) => {
             if (submitted === null) return null;
             return safeDecrypt(
                 ((settings as Record<string, unknown>)[field] as
-                    | string
-                    | null) ?? null,
+                    string | null) ?? null,
             );
         };
 

@@ -123,10 +123,7 @@ export interface YtDownloadStatusSnapshot {
 
 /** Terminal outcome of a server-side download-job watch. */
 export type YtDownloadWatchOutcome =
-    | "completed"
-    | "failed"
-    | "gone"
-    | "timeout";
+    "completed" | "failed" | "gone" | "timeout";
 
 /** Options for watchYouTubeDownloadJobUntilTerminal(). */
 export interface YtDownloadWatchOptions {

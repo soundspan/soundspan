@@ -10,12 +10,7 @@ import { useMemo } from "react";
 interface UseSearchDataProps {
     query: string;
     libraryType?:
-        | "all"
-        | "artists"
-        | "albums"
-        | "tracks"
-        | "audiobooks"
-        | "podcasts";
+        "all" | "artists" | "albums" | "tracks" | "audiobooks" | "podcasts";
     discoverType?: "music" | "podcasts" | "all";
     libraryLimit?: number;
     discoverLimit?: number;

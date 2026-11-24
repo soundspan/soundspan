@@ -15,9 +15,7 @@ import {
 
 /** Outcome of a guarded discovery catalog deletion attempt. */
 export type DiscoveryAlbumCatalogDeleteResult =
-    | "deleted"
-    | "retained"
-    | "absent";
+    "deleted" | "retained" | "absent";
 
 const CLEANUP_ELIGIBLE_STATUSES: readonly DiscoverStatus[] = [
     "ACTIVE",

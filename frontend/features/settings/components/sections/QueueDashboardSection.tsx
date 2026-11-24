@@ -19,12 +19,7 @@ const logger = createFrontendLogger("Settings.QueueDashboardSection");
 export const QUEUE_DASHBOARD_PATH = "/api/admin/queues";
 
 type DashboardStatus =
-    | "idle"
-    | "opening"
-    | "open"
-    | "closing"
-    | "closed"
-    | "error";
+    "idle" | "opening" | "open" | "closing" | "closed" | "error";
 
 const STATUS_TEXT: Record<DashboardStatus, string> = {
     idle: "Access lasts 15 minutes from the moment you open it.",

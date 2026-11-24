@@ -295,10 +295,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     >(
         () =>
             readStorage(STORAGE_KEYS.PLAYBACK_TYPE) as
-                | "track"
-                | "audiobook"
-                | "podcast"
-                | null,
+                "track" | "audiobook" | "podcast" | null,
     );
     const [queue, setQueue] = useState<QueueItem[]>(() =>
         normalizeQueueItems(parseStorageJson(STORAGE_KEYS.QUEUE, [])),

@@ -46,8 +46,7 @@ const PODCAST_GENRE_SEARCH_TERMS = {
 type PodcastGenreId = keyof typeof PODCAST_GENRE_SEARCH_TERMS;
 
 type PodcastGenreIdsResult =
-    | { ok: true; genreIds: PodcastGenreId[] }
-    | { ok: false; error: string };
+    { ok: true; genreIds: PodcastGenreId[] } | { ok: false; error: string };
 
 function isPodcastGenreId(value: string): value is PodcastGenreId {
     return Object.prototype.hasOwnProperty.call(

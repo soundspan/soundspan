@@ -9,10 +9,7 @@ export interface PlaybackAdvanceOriginMarker {
 
 /** Classification applied when a remote consumer selects another track. */
 export type RemoteTrackChangeDecision =
-    | "unchanged"
-    | "media-cleared"
-    | "error-resync"
-    | "fresh-media";
+    "unchanged" | "media-cleared" | "error-resync" | "fresh-media";
 
 /** Single player-wide origin ref shared by control and recovery dispatchers. */
 export const playbackAdvanceOriginRef: {

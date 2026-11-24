@@ -2,8 +2,7 @@ import { Counter, Histogram, type Registry } from "prom-client";
 
 /** Closed outcomes for Soulseek album folder selection. */
 export type SoulseekAlbumFolderOutcome =
-    | "folder_selected"
-    | "per_track_fallback";
+    "folder_selected" | "per_track_fallback";
 
 /** Metrics for bounded Soulseek album folder decisions. */
 export interface SoulseekAlbumMetrics {

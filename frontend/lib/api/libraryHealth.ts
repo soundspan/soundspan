@@ -2,10 +2,7 @@ import { type ApiClientConstructor } from "./core";
 
 /** Metadata-gap drill-down categories served by the dashboard API. */
 export type LibraryHealthGapKind =
-    | "missing-art"
-    | "missing-mbid"
-    | "missing-genres"
-    | "missing-lyrics";
+    "missing-art" | "missing-mbid" | "missing-genres" | "missing-lyrics";
 
 export type LibraryHealthDuplicateTier = "audioHash" | "recordingMbid" | "isrc";
 

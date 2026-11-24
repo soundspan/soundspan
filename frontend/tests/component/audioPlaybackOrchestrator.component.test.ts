@@ -670,9 +670,7 @@ mock.module("@/lib/audio-state-context", {
             },
             setCurrentTrack: (
                 value:
-                    | Track
-                    | null
-                    | ((previous: Track | null) => Track | null),
+                    Track | null | ((previous: Track | null) => Track | null),
             ) => {
                 audioState.currentTrack = applyValue(
                     value,
@@ -698,8 +696,7 @@ mock.module("@/lib/audio-state-context", {
             },
             setPlaybackType: (
                 value:
-                    | PlaybackType
-                    | ((previous: PlaybackType) => PlaybackType),
+                    PlaybackType | ((previous: PlaybackType) => PlaybackType),
             ) => {
                 audioState.playbackType = applyValue(
                     value,
@@ -1933,8 +1930,7 @@ test("natural queue advance preserves autoplay intent across load-before-play or
             (event.fields as Record<string, unknown> | undefined)?.loadId === 2,
     );
     const advanceDecisionFields = advanceDecision?.fields as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
     assert.equal(advanceDecisionFields?.hasAdvancePlayIntent, true);
     assert.equal(advanceDecisionFields?.shouldAutoPlayOnLoad, true);
 });
@@ -1989,8 +1985,7 @@ test("deferred autoplay seeks then reasserts play intent", async () => {
     assert.equal(playbackMachine.state, "PLAYING");
     const [decision] = getServerSignalEvents("player.load_autoplay_decision");
     const decisionFields = decision?.fields as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
     assert.equal(decisionFields?.deferAutoplay, true);
     assert.equal(decisionFields?.shouldAutoPlayOnLoad, true);
     assert.equal(decisionFields?.startTime, 37);
@@ -2147,8 +2142,7 @@ test("native engine startup reaches the client-signal pipeline with neutral tele
     const startupSignals = getServerSignalEvents("player.engine_startup");
     assert.equal(startupSignals.length, 1);
     const startupFields = startupSignals[0]?.fields as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
     assert.ok(startupFields);
     const durationMs = startupFields.durationMs;
     assert.equal(typeof durationMs, "number");

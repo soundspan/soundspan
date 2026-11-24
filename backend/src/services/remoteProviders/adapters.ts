@@ -20,8 +20,7 @@ import type {
 
 /** Remote row materialized for a playlist item. */
 export type RemoteProviderTrackRecord =
-    | UnifiedTrackTidalRecord
-    | UnifiedTrackYtMusicRecord;
+    UnifiedTrackTidalRecord | UnifiedTrackYtMusicRecord;
 
 /** Common stream request accepted by each provider adapter. */
 export interface RemoteProviderStreamInput {

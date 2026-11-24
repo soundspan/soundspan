@@ -31,8 +31,7 @@ class QueueCleanerService {
         | (typeof import("../services/discoverWeekly"))["discoverWeeklyService"]
         | null = null;
     private matchAlbum:
-        | (typeof import("../utils/fuzzyMatch"))["matchAlbum"]
-        | null = null;
+        (typeof import("../utils/fuzzyMatch"))["matchAlbum"] | null = null;
 
     /**
      * Get discoverWeeklyService (lazy-loaded and cached)

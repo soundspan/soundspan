@@ -74,8 +74,7 @@ describe("listenTogetherClusterSync", () => {
         delete process.env.LISTEN_TOGETHER_STATE_SYNC_CHANNEL;
 
         let messageHandler:
-            | ((channel: string, message: string) => void)
-            | null = null;
+            ((channel: string, message: string) => void) | null = null;
         let readyHandler: (() => void) | null = null;
 
         const subClient = {

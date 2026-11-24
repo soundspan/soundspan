@@ -1502,10 +1502,7 @@ router.delete(
     asyncHandler(async (req, res) => {
         try {
             const entityType = req.query.entityType as
-                | "artist"
-                | "track"
-                | "audio"
-                | undefined;
+                "artist" | "track" | "audio" | undefined;
 
             if (
                 entityType &&

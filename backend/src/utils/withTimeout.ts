@@ -5,8 +5,7 @@ const MIN_POST_ABORT_SETTLE_MS = 30_000;
 
 /** Explicit outcome returned by cancellation-aware timeout callers. */
 export type TimeoutResult<T> =
-    | { ok: true; value: T }
-    | { ok: false; timedOut: true };
+    { ok: true; value: T } | { ok: false; timedOut: true };
 
 /** Options selecting the cancellation-aware discriminated timeout contract. */
 export interface TimeoutResultOptions {

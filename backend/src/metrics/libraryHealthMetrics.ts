@@ -2,10 +2,7 @@ import { Counter, type Registry } from "prom-client";
 
 /** Closed Library Health cache panel vocabulary. */
 export type LibraryHealthCachePanel =
-    | "summary"
-    | "storage"
-    | "quality"
-    | "duplicates";
+    "summary" | "storage" | "quality" | "duplicates";
 /** Closed Library Health cache result vocabulary. */
 export type LibraryHealthCacheResult = "hit" | "miss" | "error";
 

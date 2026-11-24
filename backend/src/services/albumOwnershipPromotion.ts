@@ -11,8 +11,7 @@ export const ALBUM_OWNERSHIP_SOURCE_HIERARCHY = {
 } as const;
 
 type AlbumOwnershipPromotionSource =
-    | "native_scan"
-    | typeof DISCOVERY_LIKED_OWNERSHIP_SOURCE;
+    "native_scan" | typeof DISCOVERY_LIKED_OWNERSHIP_SOURCE;
 
 /** Resolves two persisted ownership sources using canonical promotion rules. */
 export function selectPreferredAlbumOwnershipSource(

@@ -578,8 +578,7 @@ describe("worker entrypoint behavior", () => {
         const unhandledRejectionHandler = processOnSpy.mock.calls.find(
             ([event]) => event === "unhandledRejection",
         )?.[1] as
-            | ((reason: unknown, promise: Promise<unknown>) => void)
-            | undefined;
+            ((reason: unknown, promise: Promise<unknown>) => void) | undefined;
         expect(unhandledRejectionHandler).toBeDefined();
 
         unhandledRejectionHandler?.(

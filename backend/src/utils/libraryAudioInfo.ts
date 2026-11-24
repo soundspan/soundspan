@@ -185,8 +185,7 @@ export const pruneAudioInfoCache = (now: number) => {
 
     while (audioInfoCache.size > AUDIO_INFO_CACHE_MAX_ENTRIES) {
         const oldestKey = audioInfoCache.keys().next().value as
-            | string
-            | undefined;
+            string | undefined;
         if (!oldestKey) break;
         audioInfoCache.delete(oldestKey);
     }
