@@ -418,6 +418,25 @@ describe("listenTogetherResolution", () => {
         });
     });
 
+    it("marks TIDAL available for unlinked users while the instance account is shared", async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+        });
+        mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+            ytMusicEnabled: true,
+            tidalEnabled: true,
+            tidalStreamingUseInstanceAccount: true,
+        });
+
+        const profile = await getUserProviderProfile("user-shared");
+        expect(profile).toEqual({
+            userId: "user-shared",
+            hasLocal: true,
+            hasTidal: true,
+            hasYtMusic: true,
+        });
+    });
+
     it("marks youtube unavailable when globally disabled", async () => {
         mockPrisma.userSettings.findUnique.mockResolvedValueOnce({
             tidalOAuthJson: "tidal-token",

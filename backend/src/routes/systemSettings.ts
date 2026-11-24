@@ -122,6 +122,8 @@ const systemSettingsSchema = z.object({
         .enum(["LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"])
         .optional(),
     tidalFileTemplate: z.string().nullable().optional(),
+    // Share the admin TIDAL account for every user's streaming and browse.
+    tidalStreamingUseInstanceAccount: z.boolean().optional(),
 
     // YouTube Music streaming
     ytMusicEnabled: z.boolean().optional(),
@@ -327,6 +329,9 @@ router.post("/", async (req, res) => {
 
         invalidateSystemSettingsCache();
         invalidateUserProviderProfileCache();
+        const { tidalStreamingService } =
+            await import("../services/tidalStreaming");
+        tidalStreamingService.clearAccountModeCache();
 
         // Effective plaintext secret after the no-change/clear semantics
         // above: a non-empty submitted value wins, an empty string falls
@@ -1281,6 +1286,10 @@ router.post("/tidal-auth/token", async (req, res) => {
             userId: tokens.user_id,
             countryCode: tokens.country_code,
         });
+        // A shared streaming session still holds the old account's tokens.
+        const { tidalStreamingService } =
+            await import("../services/tidalStreaming");
+        await tidalStreamingService.resetInstanceSession();
 
         res.json({
             success: true,

@@ -431,6 +431,54 @@ class MusicBrainzService {
         return parseReleaseGroupsWithCredits(releaseGroups);
     }
 
+    /**
+     * Search release groups first released between `sinceDate` and
+     * `untilDate` (inclusive, `YYYY-MM-DD`) credited to any of the given
+     * artist MBIDs. One Lucene query covers every artist so the shared
+     * MusicBrainz rate budget is spent once per lookup. Invalid MBIDs are
+     * dropped; results are cached for twelve hours so new releases surface
+     * the same day.
+     */
+    async searchRecentReleaseGroupsByArtists(
+        artistMbids: readonly string[],
+        sinceDate: string,
+        untilDate: string,
+        limit = 50,
+    ): Promise<MusicBrainzReleaseGroupSearchResult[]> {
+        const validMbids = Array.from(
+            new Set(artistMbids.filter((mbid) => isValidMbid(mbid))),
+        ).sort();
+        if (validMbids.length === 0) return [];
+
+        const cacheKey = `mb:search:recent-rg:${validMbids.join(",")}:${sinceDate}:${untilDate}:${limit}`;
+        const artistClause = validMbids
+            .map((mbid) => `arid:${mbid}`)
+            .join(" OR ");
+        const searchQuery =
+            `(${artistClause}) AND firstreleasedate:[${sinceDate} TO ${untilDate}]` +
+            " AND (primarytype:album OR primarytype:ep OR primarytype:single)";
+
+        const releaseGroups = await this.cachedRequest<unknown>(
+            cacheKey,
+            async () => {
+                const response = await this.client.get("/release-group", {
+                    params: { query: searchQuery, limit, fmt: "json" },
+                });
+                const payload = isPlainObject(response.data)
+                    ? response.data["release-groups"]
+                    : undefined;
+                return Array.isArray(payload)
+                    ? payload.filter(hasReleaseGroupIdentity)
+                    : [];
+            },
+            43200,
+            [],
+        );
+        return Array.isArray(releaseGroups)
+            ? releaseGroups.filter(hasReleaseGroupIdentity)
+            : [];
+    }
+
     async getReleaseGroup(rgMbid: string) {
         const releaseGroupMbid = encodeMbidPathSegment(rgMbid, "release group");
         const cacheKey = `mb:rg:${releaseGroupMbid}`;

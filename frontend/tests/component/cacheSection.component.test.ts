@@ -76,6 +76,7 @@ const settings: SystemSettings = {
     tidalCountryCode: "US",
     tidalQuality: "HIGH",
     tidalFileTemplate: "",
+    tidalStreamingUseInstanceAccount: false,
     musicPath: "/music",
     downloadPath: "/downloads",
     transcodeCacheMaxGb: 10,
