@@ -37,6 +37,7 @@ import {
 } from "./musicScannerIdentity";
 import { bumpSearchCacheVersion } from "./searchCacheVersion";
 import { deduplicateScannerAlbums } from "./scannerAlbumDedup";
+import { safeResolvePath } from "../utils/safeResolvePath";
 
 const scanLogger = logger.child("MusicScannerService");
 const TRACK_IDENTITY_SELECT = {
@@ -193,6 +194,14 @@ interface ScanResult {
 }
 
 /** Scans local audio metadata into the library. */
+const emptyScanResult = (): ScanResult => ({
+    tracksAdded: 0,
+    tracksUpdated: 0,
+    tracksRemoved: 0,
+    errors: [],
+    duration: 0,
+});
+
 export class MusicScannerService {
     private scanQueue = new PQueue({ concurrency: config.scanFileConcurrency });
     private progressCallback?: (progress: ScanProgress) => void;
@@ -465,13 +474,7 @@ export class MusicScannerService {
         const startTime = Date.now();
         this.touchedArtistIds = new Set<string>();
         this.discoveryDownloadIdentities = undefined;
-        const result: ScanResult = {
-            tracksAdded: 0,
-            tracksUpdated: 0,
-            tracksRemoved: 0,
-            errors: [],
-            duration: 0,
-        };
+        const result = emptyScanResult();
 
         logger.debug(`Starting library scan: ${musicPath}`);
 
@@ -522,69 +525,25 @@ export class MusicScannerService {
             await this.scanQueue.onSizeLessThan(config.scanFileConcurrency * 4);
             const scanTask = async (): Promise<void> => {
                 const relativePath = path.relative(musicPath, audioFile);
-                let countedAsExisting: boolean | undefined;
                 try {
                     progress.currentFile = relativePath;
                     this.progressCallback?.(progress);
 
-                    const stats = await fs.promises.stat(audioFile);
-                    const fileModified = stats.mtime;
-
-                    const existingTrack = tracksByPath.get(relativePath);
-
-                    if (existingTrack) {
-                        if (
-                            !isTrackRemoved(existingTrack) &&
-                            !needsDiscBackfill &&
-                            existingTrack.fileModified &&
-                            existingTrack.fileModified >= fileModified
-                        ) {
-                            return;
-                        }
-                        result.tracksUpdated++;
-                        countedAsExisting = true;
-                    } else {
-                        result.tracksAdded++;
-                        countedAsExisting = false;
-                    }
-
-                    // Hash only new or content-changed files (durable track
-                    // identity, #457). Unchanged files reprocessed for the
-                    // disc backfill keep their stored hash untouched.
-                    const needsHash =
-                        !existingTrack ||
-                        isTrackRemoved(existingTrack) ||
-                        !existingTrack.audioHash ||
-                        !existingTrack.fileModified ||
-                        existingTrack.fileModified < fileModified;
-
-                    const removedTrack =
-                        existingTrack && isTrackRemoved(existingTrack);
-                    const contentChangeDetected = Boolean(
-                        existingTrack &&
-                        (removedTrack ||
-                            !existingTrack.fileModified ||
-                            existingTrack.fileModified < fileModified),
-                    );
-                    await this.processAudioFile(
+                    const outcome = await this.scanAudioFile(
                         audioFile,
                         relativePath,
                         musicPath,
-                        needsHash,
-                        existingTrack?.audioHash ?? null,
-                        existingTrack?.albumId ?? null,
-                        existingTrack?.duration ?? null,
-                        contentChangeDetected,
-                        Boolean(removedTrack),
+                        tracksByPath.get(relativePath),
+                        needsDiscBackfill,
                         albumPromotions,
                     );
-                    if (existingTrack)
-                        this.touchedArtistIds.add(existingTrack.album.artistId);
-                    if (!existingTrack) newTrackPaths.add(relativePath);
+                    if (outcome === "updated") result.tracksUpdated++;
+                    if (outcome === "added") {
+                        result.tracksAdded++;
+                        newTrackPaths.add(relativePath);
+                    }
                 } catch (err: unknown) {
                     const existingTrack = tracksByPath.get(relativePath);
-                    if (countedAsExisting === true) result.tracksUpdated -= 1;
-                    if (countedAsExisting === false) result.tracksAdded -= 1;
                     if (existingTrack) {
                         try {
                             await this.markTrackHealthIssue(
@@ -703,18 +662,118 @@ export class MusicScannerService {
             );
         }
 
+        // The unconditional search-cache bump inside also covers dedup merges
+        // when orphan cleanup finds nothing to delete and bumps nothing itself.
+        await this.publishScanChanges();
+
+        return result;
+    }
+
+    /**
+     * Scan only the given files (relative to `musicPath`), e.g. a just-downloaded
+     * song. Missing-track removal and orphan cleanup need a full scan and are
+     * skipped; run it on the scan queue so it never overlaps a full scan.
+     */
+    async scanFiles(
+        musicPath: string,
+        relativePaths: readonly string[],
+    ): Promise<ScanResult> {
+        const startTime = Date.now();
+        this.touchedArtistIds = new Set<string>();
+        this.discoveryDownloadIdentities = undefined;
+        const result = emptyScanResult();
+        const tracksByPath = new Map(
+            (await this.loadTracksByPaths(relativePaths)).map((t) => [
+                t.filePath,
+                t,
+            ]),
+        );
+        const newTrackPaths: string[] = [];
+        const albumPromotions = new Map<string, Promise<void>>();
+        for (const relativePath of relativePaths) {
+            const audioFile = safeResolvePath(musicPath, relativePath);
+            try {
+                if (!audioFile) throw new Error("Path is outside the library");
+                const outcome = await this.scanAudioFile(
+                    audioFile,
+                    relativePath,
+                    musicPath,
+                    tracksByPath.get(relativePath),
+                    false,
+                    albumPromotions,
+                );
+                if (outcome === "updated") result.tracksUpdated++;
+                if (outcome === "added") {
+                    result.tracksAdded++;
+                    newTrackPaths.push(relativePath);
+                }
+            } catch (err: unknown) {
+                const file = audioFile ?? relativePath;
+                result.errors.push({ file, error: toErrorMessage(err) });
+                logger.error(`Error processing ${file}:`, err);
+            }
+        }
+        const revivedTracks = await this.reviveRemovedTracks(newTrackPaths);
+        result.tracksAdded -= revivedTracks;
+        result.tracksUpdated += revivedTracks;
+        if (config.features.federation && newTrackPaths.length > 0) {
+            await this.reconcileFederatedDuplicates(newTrackPaths);
+        }
+        await this.publishScanChanges();
+        result.duration = Date.now() - startTime;
+        return result;
+    }
+
+    /** Refresh counts for touched artists and invalidate cached searches. */
+    private async publishScanChanges(): Promise<void> {
         const touchedArtistIds = [...this.touchedArtistIds].sort();
         if (touchedArtistIds.length > 0) {
             updateArtistCountsInBatches(touchedArtistIds).catch((err) => {
                 logger.error("[Scan] Artist counts update failed:", err);
             });
         }
-
-        // This unconditional bump covers dedup merges even when orphan cleanup
-        // finds nothing to delete and therefore performs no cache bump itself.
         await bumpSearchCacheVersion();
+    }
 
-        return result;
+    /** Add, refresh, or skip (unchanged, unless `forceReread`) one file. */
+    private async scanAudioFile(
+        audioFile: string,
+        relativePath: string,
+        musicPath: string,
+        existingTrack: LocalIdentityTrackRow | undefined,
+        forceReread: boolean,
+        albumPromotions: Map<string, Promise<void>>,
+    ): Promise<"added" | "updated" | "unchanged"> {
+        const fileModified = (await fs.promises.stat(audioFile)).mtime;
+        const removedTrack = Boolean(
+            existingTrack && isTrackRemoved(existingTrack),
+        );
+        const contentChanged =
+            !existingTrack?.fileModified ||
+            existingTrack.fileModified < fileModified;
+        if (existingTrack && !removedTrack && !forceReread && !contentChanged) {
+            return "unchanged";
+        }
+        // Hash only new or changed files (#457); a disc-backfill reread of an
+        // unchanged file keeps its stored hash.
+        await this.processAudioFile(
+            audioFile,
+            relativePath,
+            musicPath,
+            !existingTrack ||
+                removedTrack ||
+                !existingTrack.audioHash ||
+                contentChanged,
+            existingTrack?.audioHash ?? null,
+            existingTrack?.albumId ?? null,
+            existingTrack?.duration ?? null,
+            Boolean(existingTrack && (removedTrack || contentChanged)),
+            removedTrack,
+            albumPromotions,
+        );
+        if (!existingTrack) return "added";
+        this.touchedArtistIds.add(existingTrack.album.artistId);
+        return "updated";
     }
 
     private dedupIdentity(track: {

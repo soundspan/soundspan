@@ -1021,6 +1021,9 @@ class PlaylistImportService {
 
     private async checkTidalAuth(userId: string): Promise<boolean> {
         try {
+            if (await tidalStreamingService.usesInstanceAccount()) {
+                return await tidalStreamingService.ensureInstanceSession();
+            }
             const settings = await prisma.userSettings.findUnique({
                 where: { userId },
                 select: { tidalOAuthJson: true },
