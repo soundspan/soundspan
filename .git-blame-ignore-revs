@@ -17,3 +17,6 @@ e43b7d02534c6787e26af611c7b85877d0924482
 
 # style: settle prettier edge-case drift to the pinned 3.8.2 output
 a90a4b9b0de9c41867137c673d932f38a6be0c32
+
+# chore(deps-dev): move backend and frontend to prettier 3.10.1 (mechanical reformat)
+56f47510abdbcd263ad0922c694f7b715435266d
