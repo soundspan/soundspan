@@ -8,6 +8,46 @@ import type {
 } from "../api";
 import { type ApiClientConstructor, type ApiData } from "./core";
 
+/** Unowned artist on an Explore discovery shelf. */
+export interface ExploreDiscoveryArtist {
+    name: string;
+    mbid?: string;
+    image: string | null;
+    /** Artist from the user's own history that led to this suggestion. */
+    because?: string;
+}
+
+/** Recent release group (MusicBrainz) that is not in the library. */
+export interface ExploreDiscoveryRelease {
+    rgMbid: string;
+    title: string;
+    artistName: string;
+    artistMbid?: string;
+    releaseDate: string;
+    primaryType?: string;
+    coverUrl: string;
+}
+
+/** Globally trending track (Last.fm) that is not in the library. */
+export interface ExploreDiscoveryTrack {
+    type: "track";
+    id: string;
+    name: string;
+    artist: string;
+    image?: string;
+    listeners?: number;
+}
+
+/** Explore discovery shelves of music outside the library. */
+export interface ExploreDiscovery {
+    /** False when the user has no history and only global content is shown. */
+    personalized: boolean;
+    similarArtists: ExploreDiscoveryArtist[];
+    newReleases: ExploreDiscoveryRelease[];
+    trendingTracks: ExploreDiscoveryTrack[];
+    tagShelves: Array<{ tag: string; artists: ExploreDiscoveryArtist[] }>;
+}
+
 /** Add recommendation-domain operations to an API client base class. */
 export function WithRecommendations<TBase extends ApiClientConstructor>(
     Base: TBase,
@@ -18,6 +58,11 @@ export function WithRecommendations<TBase extends ApiClientConstructor>(
             return this.request<{ artists: ApiData[] }>(
                 `/recommendations/for-you?limit=${limit}`,
             );
+        }
+
+        /** Explore shelves of music not in the library, tailored per user. */
+        async getExploreDiscovery() {
+            return this.request<ExploreDiscovery>("/recommendations/explore");
         }
 
         async getSimilarArtists(seedArtistId: string, limit = 20) {

@@ -8,6 +8,8 @@ import {
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { lastFmService } from "../services/lastfm";
+import { getExploreDiscovery } from "../services/discovery/exploreDiscovery";
+import { sendInternalRouteError } from "../utils/routeErrorResponse";
 import { normalizeForMatching, calculateSimilarity } from "../utils/fuzzyMatch";
 import {
     extractPrimaryArtist,
@@ -119,6 +121,36 @@ function scoreTrackCandidate(
         artistScore,
     };
 }
+
+/**
+ * @openapi
+ * /api/recommendations/explore:
+ *   get:
+ *     summary: Get Explore discovery shelves of music not in the library
+ *     description: >
+ *       Similar artists, recent releases (MusicBrainz), globally trending
+ *       tracks, and genre/tag shelves, tailored to the user's plays and likes
+ *       in soundspan using the instance-wide Last.fm key. Users without
+ *       history receive global popular content (`personalized: false`).
+ *     tags: [Recommendations]
+ *     security:
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Discovery shelves; each shelf may be empty
+ *       401:
+ *         description: Not authenticated
+ *       500:
+ *         description: Failed to build discovery shelves
+ */
+router.get("/explore", async (req, res) => {
+    try {
+        res.json(await getExploreDiscovery(req.user!.id));
+    } catch (error) {
+        logger.error("Get explore discovery error:", error);
+        sendInternalRouteError(res, "Failed to get explore discovery");
+    }
+});
 
 /**
  * @openapi

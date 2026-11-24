@@ -54,6 +54,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/discovery/discoveryAlbumLifecycle.ts` | Discovery |
 | `backend/src/services/discovery/discoveryBatchLogger.ts` | Discovery |
 | `backend/src/services/discovery/discoveryRecommendations.ts` | Discovery |
+| `backend/src/services/discovery/exploreDiscovery.ts` | Discovery |
 | `backend/src/services/discovery/discoverySeeding.ts` | Discovery |
 | `backend/src/services/discovery/index.ts` | Discovery |
 | `backend/src/services/discoveryLogger.ts` | Core |
